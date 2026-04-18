@@ -16,9 +16,6 @@
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/Dashboard.png" alt="Throughline — Dashboard" width="860">
-</p>
 ---
 
 ## Table of Contents
@@ -40,21 +37,20 @@
 
 ---
 
-```
-              ________________
-             /                \
-            |   CLAUDE CODE    |  ---> JSONL sessions
-             \________________/                |
-                     ^                         v
-                     |                   _____________
-        "What do I  |                  |             |
-         know about |<---- skill ----->|  Throughline DB  |
-         pgvector?" |                  |  Postgres + |
-                    |                  |  pgvector   |
-                    |                   -------------
-                    |                         ^
-                    |                         |
-                    +----- Streamlit GUI -----+
+```mermaid
+flowchart LR
+    C["Claude Code<br/>sessions"]
+    T["Throughline<br/>Postgres + pgvector"]
+    G["Streamlit GUI"]
+    M["MCP Server"]
+    S["Claude Code Skill"]
+
+    C -- JSONL --> T
+    T -- memory context --> C
+    T --- G
+    T --- M
+    S -- query --> T
+    M -- tools --> S
 ```
 
 ---
@@ -82,11 +78,13 @@ The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash
 
 ## Demo / Screenshots
 
-> Screenshots will be added to `docs/assets/` before the `v1.0` tag.
+<p align="center">
+  <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="860">
+  <br/><em>Dashboard — session counts, token totals, and memory categories</em>
+</p>
 
-- `docs/assets/dashboard.png` — Streamlit dashboard with session counts, token totals, and memory categories
-- `docs/assets/graph.png` — Interactive knowledge graph of entities and relationships
-- `docs/assets/skill.gif` — Claude Code session using the `Throughline` skill to recall prior context
+More screenshots live in [`docs/screenshots/`](docs/screenshots/).
+PRs adding a calendar, knowledge-graph, and semantic-search view are welcome.
 
 ---
 
