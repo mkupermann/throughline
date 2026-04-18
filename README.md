@@ -65,10 +65,12 @@ The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash
 
 `Throughline` closes that loop. It is a local PostgreSQL database that continuously ingests your Claude Code JSONL sessions, extracts structured memory (decisions, patterns, insights, contacts, error solutions), and exposes that memory back to Claude as a queryable skill. Claude writes the sessions; Throughline reads them; you stay in flow.
 
+Anthropic is actively shipping memory features on claude.ai and in the API, and the long-term answer for cross-session Claude Code memory will likely come from there. Throughline is the version I built for my laptop in the meantime — a complement, not a competitor. If an official answer lands that makes this redundant, I will happily retire it.
+
 ## What it does
 
 - **Ingests Claude Code JSONL sessions** into a relational schema you can actually query — deduplicated by SHA-256, with full message history, tool calls, and token counts.
-- **Extracts structured memory chunks** — eight categories (decisions, patterns, insights, error solutions, contacts, preferences, project context, workflows) extracted via Claude itself. No separate API key required on a Max plan.
+- **Extracts structured memory chunks** — eight categories (decisions, patterns, insights, error solutions, contacts, preferences, project context, workflows) extracted via Claude itself. Two backends: the Anthropic API (`ANTHROPIC_API_KEY`) or the Claude Code CLI in headless mode — both documented, both produce the same structured output.
 - **Semantic search** over conversations and memory using pgvector with HNSW indexing. Works with OpenAI embeddings or fully local Ollama (`nomic-embed-text`) — no cloud required.
 - **Temporal knowledge graph** of entities (people, projects, technologies) and their relationships, tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
 - **Streamlit GUI** with 14 pages — dashboard, conversations, memory CRUD, skills, knowledge graph, calendar, semantic search, SQL console, and more.
@@ -574,13 +576,14 @@ See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for every option.
 | [Mem0](https://github.com/mem0ai/mem0) | General LLM memory | Partial (vector DB local, cloud SaaS option) | No | No | No | Free (OSS) / paid (cloud) |
 | [Letta](https://github.com/letta-ai/letta) (MemGPT) | Agent memory framework | Yes | No | No | Limited | Free (OSS) |
 | [Zep](https://github.com/getzep/zep) | Chat memory store | Yes (self-host) or cloud | No | Yes | Limited | Free (OSS) / paid (cloud) |
-| Anthropic Memory tool | Claude desktop/API | No (Anthropic-hosted) | No (Claude.ai chats only, not Code) | No | No | Included with plan |
+| [Anthropic Memory](https://www.anthropic.com) | Claude.ai / API | Anthropic-hosted | Not surfaced for the Claude Code CLI today | — | — | Included |
 | ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | No | No | No | Included with plan |
 | **`Throughline`** | **Claude Code sessions** | **Yes (100%)** | **Yes** | **Yes** | **Yes** | **Free** |
 
-The unique slot `Throughline` fills: **the only tool purpose-built for Claude Code
-JSONL sessions with a closed loop back into the CLI.** Max plan users pay zero
-extra because the extractor calls `claude -p` rather than an API key.
+The unique slot `Throughline` fills: **the only tool purpose-built for Claude
+Code JSONL sessions with a closed loop back into the CLI.** Two extraction
+backends are supported — the Anthropic API and the Claude Code CLI in headless
+mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
 
 ---
 
