@@ -1,0 +1,23 @@
+# Runtime dependencies for claude-memory
+# Use `>=` bounds so consumers can pick up security patches.
+
+# Required — core DB driver (all scripts)
+psycopg2-binary>=2.9.9
+
+# Required — data + GUI stack
+streamlit>=1.32.0
+pandas>=2.0.0
+plotly>=5.18.0
+pyyaml>=6.0
+
+# Required — Streamlit widgets used by gui/app.py
+streamlit-agraph>=0.0.45
+streamlit-calendar>=1.3.0
+
+# Optional — semantic search via OpenAI or local Ollama
+# The scripts fall back gracefully if these are missing. Uncomment to install:
+# openai>=1.30.0
+# ollama>=0.3.0
+
+# Optional — Anthropic SDK (only if you run extract_memory via API instead of `claude -p`)
+# anthropic>=0.40.0

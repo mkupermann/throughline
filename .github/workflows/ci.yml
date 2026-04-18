@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-syntax:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile all Python files
+        run: |
+          set -e
+          for f in scripts/*.py gui/*.py skill/scripts/*.py; do
+            [ -f "$f" ] || continue
+            echo "→ $f"
+            python3 -m py_compile "$f"
+          done
+
+  python-imports:
+    name: Verify required packages are declarable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+  shell-syntax:
+    name: Bash syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on every shell script
+        run: |
+          set -e
+          for f in scripts/*.sh; do
+            [ -f "$f" ] || continue
+            echo "→ $f"
+            bash -n "$f"
+          done
+
+  sql-syntax:
+    name: SQL syntax check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE claude_memory;"
+          psql -h localhost -U postgres -d claude_memory -f sql/schema.sql
+
+  markdown-lint:
+    name: Markdown links and formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"
+          config: |
+            {
+              "default": true,
+              "MD013": false,
+              "MD024": { "siblings_only": true },
+              "MD033": false,
+              "MD041": false
+            }
+        continue-on-error: true

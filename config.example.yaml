@@ -1,0 +1,74 @@
+# Claude Memory — Example Configuration
+# Copy to config.yaml and adjust to your environment.
+# Most scripts fall back to environment variables or sensible defaults.
+
+# --------------------------------------------------------------------
+# Database (PostgreSQL)
+# --------------------------------------------------------------------
+database:
+  name: claude_memory
+  user: ${PGUSER:-$USER}     # defaults to current OS user (trust auth / peer)
+  host: localhost
+  port: 5432
+
+# --------------------------------------------------------------------
+# Ingestion sources
+# --------------------------------------------------------------------
+ingestion:
+  # Where Claude Code stores session JSONL files
+  claude_projects_dir: "~/.claude/projects"
+
+  # Where to search for skills (SKILL.md files)
+  skill_search_paths:
+    - "~/.claude/skills"
+    - "~/Documents/GitHub"
+
+  # Folders/patterns to skip during recursive scans
+  exclude_patterns:
+    - "node_modules"
+    - ".git"
+    - "venv"
+    - ".venv"
+    - "__pycache__"
+    - "dist"
+    - "build"
+    - ".next"
+    - ".cache"
+    - "CloudStorage"     # skip cloud sync mount points
+
+# --------------------------------------------------------------------
+# Embeddings
+# --------------------------------------------------------------------
+embeddings:
+  backend: auto            # auto | openai | ollama
+  model_openai: text-embedding-3-small
+  model_ollama: nomic-embed-text
+  ollama_url: http://localhost:11434
+
+# --------------------------------------------------------------------
+# Memory extraction
+# --------------------------------------------------------------------
+memory:
+  # Path to the `claude` CLI binary (falls back to $PATH lookup if unset)
+  claude_bin: ""           # e.g. "~/.local/bin/claude"
+  model: sonnet
+  max_conversations_per_run: 20
+  min_messages: 5
+  max_transcript_chars: 80000
+
+# --------------------------------------------------------------------
+# Scheduler (launchd / cron)
+# --------------------------------------------------------------------
+scheduler:
+  ingestion_interval_seconds: 3600
+  extraction_hour_utc: 2
+  backup_hour_utc: 3
+  backup_retention_days: 30
+
+# --------------------------------------------------------------------
+# Backup
+# --------------------------------------------------------------------
+backup:
+  # Where pg_dump output is written. Must NOT be inside the git repo.
+  dir: "~/.local/share/claude-memory/backups"
+  pg_bin: "/opt/homebrew/opt/postgresql@16/bin"

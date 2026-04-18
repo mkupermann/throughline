@@ -1,0 +1,50 @@
+# Data, backups, DB dumps
+*.sql.gz
+*.dump
+*.backup
+backups/
+data/
+dumps/
+logs/
+*.log
+
+# User config / secrets
+config.yaml
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+*.egg
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude-specific ingestion sources (never commit personal session data)
+.claude/
+.claude/memory/
+.claude/sessions/
+.claude/projects/
+MEMORY_CONTEXT.md
