@@ -16,6 +16,9 @@
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/Dashboard.png" alt="Throughline — Dashboard" width="860">
+</p>
 ---
 
 ## Table of Contents
