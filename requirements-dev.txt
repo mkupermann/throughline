@@ -1,0 +1,8 @@
+# Development dependencies — not needed for runtime use
+
+pytest>=8.0
+pytest-cov>=5.0
+
+# Optional: linting/formatting
+# black>=24.0
+# ruff>=0.4
