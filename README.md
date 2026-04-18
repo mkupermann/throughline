@@ -244,23 +244,103 @@ example prompts, troubleshooting — lives in [`mcp/README.md`](mcp/README.md).
 ## Screenshots
 
 > Captured from the bundled demo dataset (`examples/demo_data.sql`).
-> All data shown is fictional. Browse every file in [`docs/screenshots/`](docs/screenshots/).
+> All data shown is fictional.
 
-| Dashboard | Calendar | Knowledge Graph |
-|---|---|---|
-| ![Dashboard](docs/screenshots/Dashboard.png) | ![Calendar](docs/screenshots/calendar.png) | ![Knowledge Graph](docs/screenshots/knowledge-graph.png) |
+### Dashboard
 
-| Memory | Global Search | Conversations |
-|---|---|---|
-| ![Memory](docs/screenshots/memory.png) | ![Search](docs/screenshots/search.png) | ![Conversations](docs/screenshots/conversations.png) |
+<p align="center">
+  <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="960">
+</p>
 
-| Skills | Projects | Prompts |
-|---|---|---|
-| ![Skills](docs/screenshots/skills.png) | ![Projects](docs/screenshots/projects.png) | ![Prompts](docs/screenshots/prompts.png) |
+Session counts, token totals, memory category breakdown, recent activity.
 
-| Ingestion | SQL Console | |
-|---|---|---|
-| ![Ingestion](docs/screenshots/ingestion.png) | ![SQL Console](docs/screenshots/sql-console.png) | |
+### Calendar
+
+<p align="center">
+  <img src="docs/screenshots/calendar.png" alt="Calendar" width="960">
+</p>
+
+Conversations, memory, skills, projects, prompts and reflections plotted on a
+shared month / week / day timeline.
+
+### Global Search
+
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="Global Search" width="960">
+</p>
+
+Full-text search across conversations, messages, memory, skills, projects and
+prompts in one box.
+
+### Conversations
+
+<p align="center">
+  <img src="docs/screenshots/conversations.png" alt="Conversations" width="960">
+</p>
+
+Every Claude Code session, filterable by project and model, click-through to
+the full transcript.
+
+### Memory
+
+<p align="center">
+  <img src="docs/screenshots/memory.png" alt="Memory" width="960">
+</p>
+
+Extracted memory chunks as cards — category, confidence, tags, source link.
+
+### Skills
+
+<p align="center">
+  <img src="docs/screenshots/skills.png" alt="Skills" width="960">
+</p>
+
+Registered skills from `~/.claude/skills/` with usage counts and last-used
+timestamps.
+
+### Knowledge Graph
+
+<p align="center">
+  <img src="docs/screenshots/knowledge-graph.png" alt="Knowledge Graph" width="960">
+</p>
+
+Entities and typed relationships extracted from conversations, rendered with
+force-directed layout.
+
+### Projects
+
+<p align="center">
+  <img src="docs/screenshots/projects.png" alt="Projects" width="960">
+</p>
+
+Tracked projects with status, description and context — the rollup across all
+sessions in a given codebase.
+
+### Prompts
+
+<p align="center">
+  <img src="docs/screenshots/prompts.png" alt="Prompts" width="960">
+</p>
+
+Reusable prompt library scanned from `CLAUDE.md` and skill directories.
+
+### Ingestion
+
+<p align="center">
+  <img src="docs/screenshots/ingestion.png" alt="Ingestion" width="960">
+</p>
+
+One-click pipeline runner — session ingest, skill scan, memory extraction,
+title generation, with a live log tail.
+
+### SQL Console
+
+<p align="center">
+  <img src="docs/screenshots/sql-console.png" alt="SQL Console" width="960">
+</p>
+
+Direct SQL access with ready-made snippets — recent conversations, memory by
+category, top projects, messages by role.
 
 ---
 
