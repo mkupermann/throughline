@@ -14,7 +14,7 @@ when you run Throughline against your own `~/.claude/projects/`.
 | pgvector | 0.8.0 (compiled from source against PG 16) |
 | Python | 3.12.x |
 | Ollama | 0.12.x, `nomic-embed-text` (137M params, F16) |
-| Anthropic CLI | current stable `claude` binary (Max plan, headless) |
+| Anthropic CLI | current stable `claude` binary (headless mode) |
 | Disk | internal SSD |
 
 Measurements taken on 2026-04-18 against a warm database of
@@ -143,9 +143,10 @@ and inserts into `memory_chunks`.
 | Total daily extraction time | 2 – 5 min |
 | Sleep between calls (avoid local rate limit) | 2 s |
 
-**Cost:** 0 EUR on a Max plan. The extractor never touches the
-Anthropic API directly — it shells out to the `claude` CLI the user
-already has authenticated.
+**Cost:** depends on which of the two extraction backends is configured.
+The `api` backend bills per token on the Anthropic API. The `cli` backend
+shells out to the user's existing Claude Code CLI and inherits its
+authentication and configured model.
 
 ---
 

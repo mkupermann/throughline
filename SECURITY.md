@@ -50,6 +50,14 @@ Scripts read `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment.
 These must never be committed. `.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 
+### Acceptable use
+
+Use of Claude via the Anthropic API or the Claude Code CLI remains subject to
+Anthropic's [Usage Policy](https://www.anthropic.com/legal/aup). Users are
+responsible for ensuring their own use of Throughline complies with it — for
+example, not feeding the extractor content you would not otherwise be permitted
+to send through Claude.
+
 ### Backups
 
 The backup script writes `pg_dump` output to

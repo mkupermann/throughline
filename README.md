@@ -94,7 +94,7 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 ### Core
 
 - **Session ingestion** — Reads JSONL files from `~/.claude/projects/`, deduplicates by SHA-256 hash, parses messages, tool calls, token counts, and timestamps.
-- **Memory extraction** — Sends conversation windows through Claude Sonnet and stores structured chunks (one of eight categories) with confidence scores and tags.
+- **Memory extraction** — Sends conversation windows through Claude and stores structured chunks (one of eight categories) with confidence scores and tags.
 - **Skill scanning** — Walks `~/.claude/skills/` and project-local `.claude/skills/`, records triggers, descriptions, and usage counts.
 - **Prompt library** — Catalogs reusable prompts from `CLAUDE.md` files and skill directories.
 
@@ -434,7 +434,7 @@ High-level data flow:
 
 1. **JSONL files** land in `~/.claude/projects/` as you use Claude Code.
 2. **Hourly ingest** dedups new files and writes `conversations` + `messages` rows.
-3. **Daily extract** sends message windows to Claude Sonnet, parses the response into `memory_chunks`.
+3. **Daily extract** sends message windows to Claude, parses the response into `memory_chunks`.
 4. **Embeddings generator** computes vectors for chunks and messages; HNSW indexes accelerate cosine queries.
 5. **Reflection pass** merges duplicates, supersedes outdated decisions, logs every action.
 6. **Consumers** (GUI, skill, hooks, CLI) read from the same schema.
@@ -580,10 +580,10 @@ See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for every option.
 | ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | No | No | No | Included with plan |
 | **`Throughline`** | **Claude Code sessions** | **Yes (100%)** | **Yes** | **Yes** | **Yes** | **Free** |
 
-The unique slot `Throughline` fills: **the only tool purpose-built for Claude
-Code JSONL sessions with a closed loop back into the CLI.** Two extraction
-backends are supported — the Anthropic API and the Claude Code CLI in headless
-mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
+The unique slot `Throughline` fills: **one of the few tools purpose-built for
+Claude Code JSONL sessions with a closed loop back into the CLI.** Two
+extraction backends are supported — the Anthropic API and the Claude Code CLI
+in headless mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
 
 ---
 
@@ -612,6 +612,8 @@ embeddings. Full methodology and reproduction steps in
 
 - [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`mcp/`](mcp/)
 - [x] Linux scheduler support via `systemd/` timers — shipped in v0.1.0
+- [ ] Optional PII / secret-redaction pass before extraction (heuristics over
+      file paths, email addresses, API-key-shaped strings)
 - [ ] Windows support (replace launchd with Task Scheduler)
 - [ ] Multi-user support (per-user schemas and auth)
 - [ ] Export to Obsidian, Notion, Logseq
