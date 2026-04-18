@@ -83,8 +83,7 @@ The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash
   <br/><em>Dashboard — session counts, token totals, and memory categories</em>
 </p>
 
-More screenshots live in [`docs/screenshots/`](docs/screenshots/).
-PRs adding a calendar, knowledge-graph, and semantic-search view are welcome.
+See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 
 ---
 
@@ -244,16 +243,24 @@ example prompts, troubleshooting — lives in [`mcp/README.md`](mcp/README.md).
 
 ## Screenshots
 
-> Screenshots live in [`docs/screenshots/`](docs/screenshots/).
-> PRs welcome if yours look better on your setup.
+> Captured from the bundled demo dataset (`examples/demo_data.sql`).
+> All data shown is fictional. Browse every file in [`docs/screenshots/`](docs/screenshots/).
 
 | Dashboard | Calendar | Knowledge Graph |
 |---|---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Calendar](docs/screenshots/calendar.png) | ![Knowledge Graph](docs/screenshots/knowledge-graph.png) |
+| ![Dashboard](docs/screenshots/Dashboard.png) | ![Calendar](docs/screenshots/calendar.png) | ![Knowledge Graph](docs/screenshots/knowledge-graph.png) |
 
-| Memory | Semantic Search | Conversation Detail |
+| Memory | Global Search | Conversations |
 |---|---|---|
-| ![Memory](docs/screenshots/memory.png) | ![Semantic Search](docs/screenshots/semantic-search.png) | ![Conversation Detail](docs/screenshots/conversation-detail.png) |
+| ![Memory](docs/screenshots/memory.png) | ![Search](docs/screenshots/search.png) | ![Conversations](docs/screenshots/conversations.png) |
+
+| Skills | Projects | Prompts |
+|---|---|---|
+| ![Skills](docs/screenshots/skills.png) | ![Projects](docs/screenshots/projects.png) | ![Prompts](docs/screenshots/prompts.png) |
+
+| Ingestion | SQL Console | |
+|---|---|---|
+| ![Ingestion](docs/screenshots/ingestion.png) | ![SQL Console](docs/screenshots/sql-console.png) | |
 
 ---
 
