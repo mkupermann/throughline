@@ -159,6 +159,15 @@ mentioned in chat. Treat the database as confidential.
 
 See `SECURITY.md` for the full threat model and hardening recommendations.
 
+### Does anything scrub secrets before they get sent to Claude for extraction?
+
+Yes. Every transcript runs through a heuristic redaction pass
+(`throughline/pii.py`) before it is sent to Claude. API keys, JWTs, bearer
+tokens, `password=` / `secret=` / `token=` assignments, private-key blocks,
+email addresses, and home-directory usernames are all replaced with short
+`<REDACTED_*>` markers. On by default; disable with
+`THROUGHLINE_REDACT_PII=0` (or `memory.redact_pii: false` in `config.yaml`).
+
 ### Should I encrypt the database?
 
 For a single-user local setup: probably not required if your disk is

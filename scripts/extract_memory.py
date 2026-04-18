@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """
-Memory-Extraction Pipeline via Claude Code CLI (kein API-Key nötig).
-Nutzt `claude -p` headless mode mit dem Max Plan des Users.
+Memory extraction pipeline.
+
+Two backends are supported, picked at runtime:
+
+- The Anthropic API if ``ANTHROPIC_API_KEY`` is set.
+- The Claude Code CLI in headless mode otherwise (``claude -p``), which
+  inherits the user's existing CLI authentication and configured model.
+
+Both produce the same JSON shape. By default the transcript is run through
+``throughline.pii.redact`` before being sent to Claude — set the environment
+variable ``THROUGHLINE_REDACT_PII=0`` to disable.
 """
 
 import json
@@ -13,12 +22,20 @@ from typing import Any
 
 import psycopg2
 
+try:
+    from throughline.pii import count_redactions, redact
+except ImportError:  # running the script without installing the package
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from throughline.pii import count_redactions, redact
+
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+REDACT_PII: bool = os.environ.get("THROUGHLINE_REDACT_PII", "1") != "0"
 
 
 def _connect() -> "psycopg2.extensions.connection":
@@ -172,6 +189,13 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     transcript = build_transcript(rows)
     if len(transcript) < 200:
         return 0
+
+    if REDACT_PII:
+        redacted = redact(transcript)
+        n = count_redactions(transcript, redacted)
+        if n:
+            print(f"    redacted {n} secret/PII match(es) before extraction")
+        transcript = redacted
 
     prompt = PROMPT_TEMPLATE.replace("{TRANSCRIPT}", transcript)
     response = call_claude(prompt)
