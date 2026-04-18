@@ -18,7 +18,7 @@ Optional but recommended:
 
 | Tool | Purpose |
 |---|---|
-| Claude Code CLI | required for memory extraction and title generation (uses your Max Plan; zero extra cost) |
+| Claude Code CLI | one of two memory-extraction backends (the other is the Anthropic API) — inherits your existing CLI authentication and configured model |
 | Ollama | local embeddings (no API key needed) |
 | OpenAI API key | alternative to Ollama for embeddings |
 | Anthropic API key | alternative to Claude CLI for memory extraction |

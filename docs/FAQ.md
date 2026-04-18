@@ -26,12 +26,13 @@ Code's JSONL format.
 Not by default. Everything runs on localhost:
 - PostgreSQL on `localhost:5432`
 - Streamlit on `localhost:8501`
-- Claude CLI (if used for extraction) uses your existing Max Plan
 
-Optional network use:
+Optional network use, opt-in per feature:
 - OpenAI API for embeddings — only if you pick the `openai` backend
-- Anthropic API for memory extraction — only if you use the SDK script
-  instead of the Claude CLI script
+  (default is local Ollama)
+- Memory extraction sends conversation windows to whichever backend you
+  configured — the Anthropic API (`ANTHROPIC_API_KEY`) or the local Claude
+  Code CLI in headless mode
 
 ## Installation
 
