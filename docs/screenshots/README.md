@@ -2,14 +2,19 @@
 
 Screenshots of the GUI are stored here.
 
-## Required screenshots
+## Available screenshots
 
-- [ ] `dashboard.png` — Main dashboard overview (conversation count, memory stats, recent activity feed)
-- [ ] `calendar.png` — Calendar month view showing session activity per day
-- [ ] `memory.png` — Memory chunks card grid with category filter and confidence indicators
-- [ ] `knowledge-graph.png` — Graph visualization of entities and relationships
-- [ ] `semantic-search.png` — Semantic search results with similarity scores
-- [ ] `conversation-detail.png` — Chat view of a full conversation with tool calls expanded
+- [x] `Dashboard.png` — Main dashboard overview
+- [x] `calendar.png` — Calendar month view
+- [x] `search.png` — Global search across all artifacts
+- [x] `conversations.png` — Recorded Claude Code sessions
+- [x] `memory.png` — Memory chunks grid with category filter
+- [x] `skills.png` — Registered skills catalog
+- [x] `knowledge-graph.png` — Entity / relationship graph
+- [x] `projects.png` — Tracked projects
+- [x] `prompts.png` — Reusable prompt library
+- [x] `ingestion.png` — Pipeline runner
+- [x] `sql-console.png` — Direct SQL access
 
 ## How to take screenshots
 
