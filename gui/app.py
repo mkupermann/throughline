@@ -715,10 +715,11 @@ with st.sidebar:
     st.markdown('<div style="height:1.25rem"></div>', unsafe_allow_html=True)
     healthy = db_healthy()
     if healthy:
+        db_label = os.environ.get("PGDATABASE", "claude_memory")
         st.markdown(
-            """<div class="kai-health">
+            f"""<div class="kai-health">
                 <span class="kai-dot kai-dot-ok"></span>
-                <span>PostgreSQL · claude_memory</span>
+                <span>PostgreSQL · {db_label}</span>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -1366,7 +1367,7 @@ elif page == "Calendar":
         """)
         for _, r in df_conv.iterrows():
             # Farbe pro Projekt (hash-basiert)
-            project = r["project_name"] or "unknown"
+            project = r["project_name"] if isinstance(r["project_name"], str) and r["project_name"] else "unknown"
             project_colors = {
                 "notes": "#58A6FF",
                 "claude-memory": "#7EE787",
@@ -1424,8 +1425,8 @@ elif page == "Calendar":
                     "type": "conversation",
                     "entity_id": int(r["id"]),
                     "project": project,
-                    "model": r["model"] or "-",
-                    "messages": int(r["message_count"] or 0),
+                    "model": r["model"] if isinstance(r["model"], str) and r["model"] else "-",
+                    "messages": int(r["message_count"]) if not pd.isna(r["message_count"]) else 0,
                     "duration_min": round(dur_min, 1),
                 },
             })
@@ -1482,8 +1483,8 @@ elif page == "Calendar":
                         "type": "memory",
                         "entity_id": int(r["id"]),
                         "category": r["category"],
-                        "project": r["project_name"] or "-",
-                        "confidence": float(r["confidence"] or 0),
+                        "project": r["project_name"] if isinstance(r["project_name"], str) and r["project_name"] else "-",
+                        "confidence": float(r["confidence"]) if not pd.isna(r["confidence"]) else 0.0,
                     },
                 })
 
@@ -1515,7 +1516,7 @@ elif page == "Calendar":
                 "extendedProps": {
                     "type": "skill",
                     "entity_id": int(r["id"]),
-                    "use_count": int(r["use_count"] or 0),
+                    "use_count": int(r["use_count"]) if not pd.isna(r["use_count"]) else 0,
                     "source": r["src_type"],
                 },
             })
@@ -1570,7 +1571,7 @@ elif page == "Calendar":
                 "extendedProps": {
                     "type": "prompt",
                     "entity_id": int(r["id"]),
-                    "category": r["category"] or "-",
+                    "category": r["category"] if isinstance(r["category"], str) and r["category"] else "-",
                 },
             })
 
@@ -1609,7 +1610,7 @@ elif page == "Calendar":
                         "type": "entity",
                         "entity_id": int(r["id"]),
                         "entity_type": r["entity_type"],
-                        "mentions": int(r["mention_count"] or 0),
+                        "mentions": int(r["mention_count"]) if not pd.isna(r["mention_count"]) else 0,
                     },
                 })
         except Exception:
@@ -1656,10 +1657,11 @@ elif page == "Calendar":
         for _, r in df_ing.iterrows():
             if pd.isna(r["ingested_at"]):
                 continue
-            fname = str(r["file_path"]).split("/")[-1] if r["file_path"] else "-"
+            fname = str(r["file_path"]).split("/")[-1] if isinstance(r["file_path"], str) and r["file_path"] else "-"
+            rec_count = int(r["record_count"]) if not pd.isna(r["record_count"]) else 0
             events.append({
                 "id": f"ing_{r['id']}",
-                "title": f"Ingest: {fname} ({int(r['record_count'] or 0)} rec)",
+                "title": f"Ingest: {fname} ({rec_count} rec)",
                 "start": r["ingested_at"].isoformat(),
                 "allDay": False,
                 "backgroundColor": "#8B949E",
@@ -1773,6 +1775,17 @@ elif page == "Calendar":
     if empty_categories:
         st.warning("No events for selected categories: " + ", ".join(empty_categories)
                    + ". Run the corresponding ingestion/scan scripts on the Ingestion page.")
+
+    def _scrub_nan(obj):
+        if isinstance(obj, float) and pd.isna(obj):
+            return None
+        if isinstance(obj, dict):
+            return {k: _scrub_nan(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_scrub_nan(v) for v in obj]
+        return obj
+
+    events = _scrub_nan(events)
 
     result = sc_calendar(
         events=events,
