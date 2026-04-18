@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Throughline — persistent long-term memory for Claude Code. Local-first PostgreSQL database that ingests your sessions, extracts insights, and gives Claude its own memory across sessions.">
+  <title>Throughline — Memory for Claude Code</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0D1117;
+      --bg-2:      #161B22;
+      --bg-3:      #21262D;
+      --border:    #30363D;
+      --text:      #C9D1D9;
+      --text-muted:#8B949E;
+      --accent:    #58A6FF;
+      --accent-dim:#1F6FEB;
+      --green:     #3FB950;
+      --purple:    #BC8CFF;
+      --orange:    #F78166;
+      --yellow:    #E3B341;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* NAV */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(13, 17, 23, 0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    .nav-brand span { color: var(--accent); }
+    .nav-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* HERO */
+    .hero {
+      padding: 5rem 1.5rem 4rem;
+      text-align: center;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 6vw, 3.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 1.25rem;
+      color: #E6EDF3;
+    }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 2.5rem;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.625rem 1.25rem;
+      border-radius: 6px;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.85; transform: translateY(-1px); text-decoration: none; }
+    .btn-primary {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-secondary {
+      background: var(--bg-3);
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    /* STATS BAR */
+    .stats-bar {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+      margin: 0;
+      padding: 0;
+    }
+    .stat-item {
+      flex: 1;
+      min-width: 140px;
+      padding: 1.25rem 1.5rem;
+      text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      display: block;
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* SECTIONS */
+    section {
+      padding: 4rem 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .section-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #E6EDF3;
+      margin-bottom: 0.5rem;
+    }
+    .section-sub {
+      color: var(--text-muted);
+      margin-bottom: 2.5rem;
+      font-size: 1rem;
+    }
+
+    /* FEATURES GRID */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+    .feature-card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: var(--accent); }
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #E6EDF3;
+      margin-bottom: 0.5rem;
+    }
+    .feature-card p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* CODE BLOCK */
+    .code-section {
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .code-section > div {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 4rem 1.5rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: start;
+    }
+    .code-info h2 { margin-bottom: 0.5rem; }
+    .code-info p { color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; }
+    .code-steps { list-style: none; counter-reset: steps; }
+    .code-steps li {
+      counter-increment: steps;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+    .code-steps li::before {
+      content: counter(steps);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent-dim);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-3);
+    }
+    .code-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .code-dot-red    { background: #FF5F57; }
+    .code-dot-yellow { background: #FFBD2E; }
+    .code-dot-green  { background: #28C840; }
+    .code-block pre {
+      padding: 1.25rem;
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+      line-height: 1.7;
+      color: var(--text);
+      overflow-x: auto;
+    }
+    .code-block pre .cmd  { color: var(--accent); }
+    .code-block pre .cmt  { color: var(--text-muted); }
+    .code-block pre .url  { color: var(--green); }
+
+    /* HOW IT WORKS */
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .flow-step {
+      background: var(--bg-2);
+      padding: 1.5rem;
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .flow-step:last-child { border-right: none; }
+    .flow-step-num {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+    .flow-step h3 {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      color: #E6EDF3;
+      margin-bottom: 0.4rem;
+    }
+    .flow-step p {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* COMPARISON TABLE */
+    .comparison-wrap { overflow-x: auto; }
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    .comparison-table th {
+      background: var(--bg-3);
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .comparison-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .comparison-table tr:last-child td { border-bottom: none; }
+    .comparison-table .highlight td {
+      background: rgba(88, 166, 255, 0.05);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .check { color: var(--green); }
+    .cross { color: var(--text-muted); }
+
+    /* CTA */
+    .cta-section {
+      text-align: center;
+      padding: 5rem 1.5rem;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+    }
+    .cta-section h2 {
+      font-size: clamp(1.5rem, 4vw, 2.25rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #E6EDF3;
+      margin-bottom: 1rem;
+    }
+    .cta-section p {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* FOOTER */
+    footer {
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      text-align: center;
+    }
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
+    .footer-links a { color: var(--text-muted); }
+    .footer-links a:hover { color: var(--text); text-decoration: none; }
+    .footer-copy {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 700px) {
+      .nav-links { display: none; }
+      .code-section > div {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+      .flow-steps { grid-template-columns: 1fr; }
+      .flow-step { border-right: none; border-bottom: 1px solid var(--border); }
+      .flow-step:last-child { border-bottom: none; }
+      .stat-item { border-right: none; border-bottom: 1px solid var(--border); }
+      .stat-item:last-child { border-bottom: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-brand"><span>Throughline</span></div>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#quickstart">Quick Start</a></li>
+    <li><a href="#how-it-works">How it works</a></li>
+    <li><a href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">GitHub</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">Open Source &bull; MIT License &bull; Local-First</div>
+  <h1>Persistent memory<br>for <span class="accent">Claude Code</span></h1>
+  <p>Throughline ingests your Claude Code sessions, extracts decisions and insights, and gives Claude a queryable memory that survives across sessions.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">
+      View on GitHub
+    </a>
+    <a class="btn btn-secondary" href="#quickstart">
+      Quick Start
+    </a>
+  </div>
+</div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-item">
+    <span class="stat-value">14</span>
+    <span class="stat-label">Streamlit Pages</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">8</span>
+    <span class="stat-label">Memory Categories</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">11</span>
+    <span class="stat-label">DB Tables</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">100%</span>
+    <span class="stat-label">Local-First</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">Free</span>
+    <span class="stat-label">MIT License</span>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section-title">Everything Claude Code was missing</div>
+  <div class="section-sub">Six capabilities, one local database, zero recurring costs.</div>
+  <div class="features-grid">
+
+    <div class="feature-card">
+      <span class="feature-icon">&#128190;</span>
+      <h3>JSONL Session Ingestion</h3>
+      <p>Reads every JSONL file from <code>~/.claude/projects/</code>, deduplicates by SHA-256, and stores full message history, tool calls, and token counts in PostgreSQL.</p>
+    </div>
+
+    <div class="feature-card">
+      <span class="feature-icon">&#129504;</span>
+      <h3>AI Memory Extraction</h3>
+      <p>Sends conversation windows through Claude Sonnet and stores typed memory chunks: decisions, patterns, insights, error solutions, contacts, preferences, and workflows. No extra API key on Max plan.</p>
+    </div>
+
+    <div class="feature-card">
+      <span class="feature-icon">&#128269;</span>
+      <h3>Semantic Search</h3>
+      <p>Cosine similarity over 1536-dim OpenAI or 768-dim Ollama embeddings, indexed with HNSW for fast approximate nearest-neighbor lookups. Works fully offline with Ollama.</p>
+    </div>
+
+    <div class="feature-card">
+      <span class="feature-icon">&#127760;</span>
+      <h3>Temporal Knowledge Graph</h3>
+      <p>Entities (people, projects, technologies) and typed relationships tracked across sessions with <code>valid_from</code> / <code>valid_until</code>. Interactive visualization in the GUI.</p>
+    </div>
+
+    <div class="feature-card">
+      <span class="feature-icon">&#128279;</span>
+      <h3>Context Pre-Loader Hook</h3>
+      <p>A <code>SessionStart</code> hook queries the DB for the current project and injects a concise memory summary before Claude's first response — every new session starts informed.</p>
+    </div>
+
+    <div class="feature-card">
+      <span class="feature-icon">&#128261;</span>
+      <h3>Self-Reflecting Memory</h3>
+      <p>A periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every action. Memory stays clean without manual curation.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- QUICK START -->
+<div class="code-section" id="quickstart">
+  <div>
+    <div class="code-info">
+      <h2 class="section-title">Up in one command</h2>
+      <p>Docker Compose brings up PostgreSQL 16 + pgvector + the Streamlit GUI. Your <code>~/.claude</code> directory is mounted read-only so ingestion scripts can see your sessions immediately.</p>
+      <ol class="code-steps">
+        <li>Clone the repo and start all services with Docker Compose.</li>
+        <li>Open the Streamlit GUI in your browser at port 8501.</li>
+        <li>Run the ingest script to populate the database from your existing sessions.</li>
+        <li>Optionally enable Ollama for fully offline local embeddings.</li>
+      </ol>
+    </div>
+    <div style="margin-top: 1.5rem;">
+      <a class="btn btn-primary" href="https://github.com/mkupermann/throughline#quick-start" target="_blank" rel="noopener">Full installation guide</a>
+    </div>
+  </div>
+
+  <div class="code-block">
+    <div class="code-block-header">
+      <div class="code-dot code-dot-red"></div>
+      <div class="code-dot code-dot-yellow"></div>
+      <div class="code-dot code-dot-green"></div>
+    </div>
+    <pre><span class="cmt"># Clone and start all services</span>
+<span class="cmd">git clone</span> https://github.com/mkupermann/throughline.git
+<span class="cmd">cd</span> throughline
+<span class="cmd">docker compose up -d</span>
+
+<span class="cmt"># Open the GUI</span>
+<span class="url">open http://localhost:8501</span>
+
+<span class="cmt"># Ingest your existing Claude sessions</span>
+<span class="cmd">docker compose exec gui</span> \
+  python3 scripts/ingest_sessions.py
+
+<span class="cmt"># Optional: local embeddings via Ollama</span>
+<span class="cmd">docker compose --profile embeddings up -d</span>
+<span class="cmd">docker compose exec ollama</span> \
+  ollama pull nomic-embed-text</pre>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section id="how-it-works">
+  <div class="section-title">How it works</div>
+  <div class="section-sub">A closed loop between Claude Code and your memory database.</div>
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="flow-step-num">Step 01</div>
+      <h3>Write</h3>
+      <p>Claude Code writes JSONL session files to <code>~/.claude/projects/</code> as you work.</p>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">Step 02</div>
+      <h3>Ingest</h3>
+      <p>Hourly launchd job reads new files, deduplicates by hash, and inserts conversations and messages.</p>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">Step 03</div>
+      <h3>Extract</h3>
+      <p>Daily job sends conversation windows to Claude Sonnet; structured memory chunks are stored and embedded.</p>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">Step 04</div>
+      <h3>Reflect</h3>
+      <p>Reflection pass deduplicates, resolves contradictions, and supersedes outdated chunks automatically.</p>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">Step 05</div>
+      <h3>Recall</h3>
+      <p>At session start, relevant memories are injected. The skill answers in-session queries instantly.</p>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON TABLE -->
+<section>
+  <div class="section-title">How it compares</div>
+  <div class="section-sub">The only tool purpose-built for Claude Code JSONL sessions.</div>
+  <div class="comparison-wrap">
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Claude Code sessions</th>
+          <th>Local-first</th>
+          <th>Knowledge graph</th>
+          <th>Self-reflection</th>
+          <th>Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mem0</td>
+          <td class="cross">No</td>
+          <td class="cross">Partial</td>
+          <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td>Free / paid cloud</td>
+        </tr>
+        <tr>
+          <td>Letta (MemGPT)</td>
+          <td class="cross">No</td>
+          <td class="check">Yes</td>
+          <td class="cross">No</td>
+          <td class="cross">Limited</td>
+          <td>Free</td>
+        </tr>
+        <tr>
+          <td>Zep</td>
+          <td class="cross">No</td>
+          <td class="check">Self-host</td>
+          <td class="check">Yes</td>
+          <td class="cross">Limited</td>
+          <td>Free / paid cloud</td>
+        </tr>
+        <tr>
+          <td>Anthropic Memory</td>
+          <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td>Included w/ plan</td>
+        </tr>
+        <tr class="highlight">
+          <td>Throughline</td>
+          <td class="check">Yes</td>
+          <td class="check">100%</td>
+          <td class="check">Yes</td>
+          <td class="check">Yes</td>
+          <td>Free (MIT)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section">
+  <h2>Stop re-explaining yourself to Claude.</h2>
+  <p>Throughline is free, open source, and runs entirely on your machine. No cloud, no subscriptions, no data leaving your system.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">
+      View on GitHub
+    </a>
+    <a class="btn btn-secondary" href="https://github.com/mkupermann/throughline/issues" target="_blank" rel="noopener">
+      Open an Issue
+    </a>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/mkupermann/throughline/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    <a href="https://github.com/mkupermann/throughline/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+    <a href="https://github.com/mkupermann/throughline/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="https://github.com/mkupermann/throughline/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
+    <a href="mailto:michael@kupermann.com">Contact</a>
+  </div>
+  <div class="footer-copy">
+    Throughline is an independent open-source project, not affiliated with Anthropic. &mdash; Michael Kupermann &mdash; michael@kupermann.com
+  </div>
+</footer>
+
+</body>
+</html>

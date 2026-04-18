@@ -1,0 +1,23 @@
+[Unit]
+Description=Throughline - ingest Claude Code sessions into claude_memory
+Documentation=https://github.com/mkupermann/Throughline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust the path below if you cloned Throughline elsewhere.
+# %h expands to the user's home directory, %u to the username.
+WorkingDirectory=%h/.local/share/throughline
+ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/ingest_sessions.py
+Environment="PGDATABASE=claude_memory"
+Environment="PGUSER=%u"
+Environment="PGHOST=localhost"
+Environment="PGPORT=5432"
+# Keep stdout/stderr in the journal; inspect with: journalctl --user -u throughline-ingest.service
+StandardOutput=journal
+StandardError=journal
+Nice=10
+
+[Install]
+WantedBy=default.target

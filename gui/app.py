@@ -491,12 +491,21 @@ def open_in_finder(path: str) -> bool:
 
 @st.cache_resource
 def get_conn():
-    return psycopg2.connect(
-        host=os.environ.get("PGHOST", "localhost"),
-        port=int(os.environ.get("PGPORT", "5432")),
-        dbname=os.environ.get("PGDATABASE", "claude_memory"),
-        user=os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
-    )
+    host = os.environ.get("PGHOST", "localhost")
+    port = int(os.environ.get("PGPORT", "5432"))
+    dbname = os.environ.get("PGDATABASE", "claude_memory")
+    user = os.environ.get("PGUSER", os.environ.get("USER", "postgres"))
+    try:
+        return psycopg2.connect(host=host, port=port, dbname=dbname, user=user)
+    except psycopg2.OperationalError as e:
+        st.error(
+            f"Cannot connect to PostgreSQL at {host}:{port}/{dbname}. "
+            f"Is it running? Try: `docker compose up -d` "
+            f"(or `brew services start postgresql@16`).\n\n"
+            f"Underlying error: {e}"
+        )
+        st.stop()
+        raise
 
 
 def _live_conn():

@@ -1,0 +1,16 @@
+[Unit]
+Description=Throughline - hourly session ingestion
+Documentation=https://github.com/mkupermann/Throughline
+
+[Timer]
+# Fire roughly once an hour, on the hour, after a short initial delay.
+OnBootSec=5min
+OnCalendar=hourly
+# If the machine was off when a run was due, run it as soon as possible.
+Persistent=true
+# Spread load when multiple users run the same timer.
+RandomizedDelaySec=2min
+Unit=throughline-ingest.service
+
+[Install]
+WantedBy=timers.target

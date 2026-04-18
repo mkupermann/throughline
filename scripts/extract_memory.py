@@ -9,14 +9,31 @@ import os
 import subprocess
 import sys
 import time
+from typing import Any
+
 import psycopg2
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 
 def _resolve_claude_bin() -> str:
@@ -30,6 +47,20 @@ def _resolve_claude_bin() -> str:
     from shutil import which
     found = which("claude")
     return found or "claude"
+
+
+def _require_claude_bin() -> str:
+    """Resolve the Claude CLI binary or emit a clear error and exit."""
+    bin_path = _resolve_claude_bin()
+    from shutil import which
+    if which(bin_path) is None and not os.path.isfile(bin_path):
+        sys.stderr.write(
+            "ERROR: Claude CLI not found.\n"
+            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
+            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
+        )
+        raise SystemExit(2)
+    return bin_path
 
 
 CLAUDE_BIN = _resolve_claude_bin()
@@ -70,8 +101,8 @@ Transcript:
 Gib NUR das JSON-Array zurück, nichts anderes."""
 
 
-def build_transcript(messages: list) -> str:
-    parts = []
+def build_transcript(messages: list[tuple[str, str | None]]) -> str:
+    parts: list[str] = []
     for m in messages:
         role = m[0]
         content = m[1] or ""
@@ -86,7 +117,7 @@ def build_transcript(messages: list) -> str:
     return transcript
 
 
-def parse_json_response(text: str) -> list:
+def parse_json_response(text: str) -> list[dict[str, Any]]:
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -127,7 +158,7 @@ def call_claude(prompt: str) -> str:
         return ""
 
 
-def extract_for_conversation(cursor, conv_id: int) -> int:
+def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     cursor.execute("""
         SELECT role::text, content
         FROM messages
@@ -170,12 +201,13 @@ def extract_for_conversation(cursor, conv_id: int) -> int:
     return inserted
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Claude Memory DB — Memory Extraction (via Claude CLI)")
     print("=" * 60)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    _require_claude_bin()
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute(f"""

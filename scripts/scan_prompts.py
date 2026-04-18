@@ -6,20 +6,37 @@ und speichert sie als wiederverwendbare Templates in der prompts-Tabelle.
 
 import os
 import re
+import sys
 import hashlib
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import Json
 
-DB = {
+DB: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
 
-import subprocess
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB['host']}:{DB['port']}/{DB['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 # Typische Pfade für CLAUDE.md (schnelle Scans, KEIN Google Drive rglob)
 HOME = Path.home()
@@ -75,9 +92,9 @@ def find_claude_mds() -> list[Path]:
     return sorted(found)
 
 
-def extract_variables(content: str) -> list:
+def extract_variables(content: str) -> list[str]:
     """Extrahiert Template-Variablen wie {{name}} oder ${name}."""
-    found = set()
+    found: set[str] = set()
     for m in re.findall(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", content):
         found.add(m)
     for m in re.findall(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}", content):
@@ -108,9 +125,9 @@ def project_name_from_path(path: Path) -> str:
     return path.parent.name
 
 
-def parse_skill_frontmatter(content: str) -> dict:
+def parse_skill_frontmatter(content: str) -> dict[str, Any]:
     """Parst YAML-Frontmatter einer SKILL.md."""
-    result = {"name": None, "description": None}
+    result: dict[str, Any] = {"name": None, "description": None}
     if not content.startswith("---"):
         return result
     end = content.find("---", 3)
@@ -126,7 +143,7 @@ def parse_skill_frontmatter(content: str) -> dict:
     return result
 
 
-def ingest_claude_md(cur, filepath: Path, stats: dict) -> bool:
+def ingest_claude_md(cur: Any, filepath: Path, stats: dict[str, int]) -> bool:
     try:
         content = filepath.read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -170,7 +187,7 @@ def ingest_claude_md(cur, filepath: Path, stats: dict) -> bool:
         return False
 
 
-def ingest_skill_prompts(cur, stats: dict):
+def ingest_skill_prompts(cur: Any, stats: dict[str, int]) -> None:
     """Speichert jede SKILL.md als Prompt-Template mit category=skill."""
     if not GLOBAL_SKILLS.exists():
         return
@@ -218,7 +235,7 @@ def ingest_skill_prompts(cur, stats: dict):
             stats["errors"] += 1
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Prompt-Scanner — CLAUDE.md + Skill-Templates")
     print("=" * 60)
@@ -226,10 +243,10 @@ def main():
     claude_mds = find_claude_mds()
     print(f"\nGefunden: {len(claude_mds)} CLAUDE.md Dateien")
 
-    conn = psycopg2.connect(**DB)
+    conn = _connect()
     cur = conn.cursor()
 
-    stats = {"new": 0, "updated": 0, "errors": 0}
+    stats: dict[str, int] = {"new": 0, "updated": 0, "errors": 0}
 
     # CLAUDE.md ingesten
     for fp in claude_mds:

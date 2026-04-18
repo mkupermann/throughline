@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import urllib.request
-from typing import List
+from typing import Any, List
 
 import psycopg2
 import psycopg2.extras
@@ -34,6 +34,21 @@ from generate_embeddings import (  # type: ignore
 )
 
 
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
+
+
 def embed_query(backend: Backend, query: str) -> List[float]:
     vec = backend.embed([query[: backend.max_chars]])[0]
     if len(vec) != backend.dim:
@@ -45,7 +60,7 @@ def vec_literal(vec: List[float]) -> str:
     return "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
 
 
-def run_search(cursor, backend: Backend, query: str, limit: int):
+def run_search(cursor: Any, backend: Backend, query: str, limit: int) -> list[dict[str, Any]]:
     vec = embed_query(backend, query)
     v_lit = vec_literal(vec)
     col = backend.column
@@ -103,7 +118,7 @@ def trunc(s: str, n: int = 280) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("query", help="Suchbegriff")
     ap.add_argument("--backend", choices=["openai", "ollama", "auto"], default="auto")
@@ -112,7 +127,7 @@ def main():
 
     backend = pick_backend(args.backend)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # Sanity: gibt es überhaupt Embeddings mit diesem Modell?

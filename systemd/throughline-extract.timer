@@ -1,0 +1,13 @@
+[Unit]
+Description=Throughline - daily memory extraction at 02:00
+Documentation=https://github.com/mkupermann/Throughline
+
+[Timer]
+# Daily at 02:00 local time.
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=throughline-extract.service
+
+[Install]
+WantedBy=timers.target

@@ -112,6 +112,32 @@ ruff check scripts/ gui/ skill/
 - Link relative (`[foo](docs/foo.md)`) not absolute.
 - Fenced code blocks always specify a language: ` ```bash `, ` ```python `, ` ```sql `.
 
+## Pre-commit hooks
+
+Before your first commit, install the hooks:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+On every commit this runs `ruff --fix`, `ruff-format`, the fast unit tests
+(`pytest -m "not integration"`), and a handful of sanity checks
+(trailing whitespace, merge-conflict markers, accidentally-staged private keys,
+files over 1 MiB). To run all hooks ad hoc:
+
+```bash
+pre-commit run --all-files
+```
+
+Integration tests are **not** part of the pre-commit run — they require a live
+Postgres. Run them with:
+
+```bash
+docker compose up -d postgres
+pytest tests/integration/ -v -m integration
+```
+
 ## Running the CI checks locally
 
 ```bash

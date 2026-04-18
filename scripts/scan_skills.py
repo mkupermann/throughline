@@ -6,18 +6,36 @@ Sucht in: ~/.claude/skills/ (global) und allen .claude/skills/ in Git-Repos.
 
 import os
 import re
+import sys
 import glob
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import Json
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 GLOBAL_SKILLS = Path.home() / ".claude" / "skills"
 # Projekt-Skills via glob
@@ -27,7 +45,7 @@ PROJECT_PATTERNS = [
 ]
 
 
-def parse_skill_md(skill_md_path: Path) -> dict:
+def parse_skill_md(skill_md_path: Path) -> dict[str, Any]:
     """Parst SKILL.md — extrahiert Frontmatter + Description."""
     try:
         content = skill_md_path.read_text(encoding="utf-8")
@@ -65,9 +83,9 @@ def parse_skill_md(skill_md_path: Path) -> dict:
     return result
 
 
-def scan_directory(skills_dir: Path, skill_type: str):
+def scan_directory(skills_dir: Path, skill_type: str) -> list[dict[str, Any]]:
     """Scannt ein Skills-Verzeichnis. Gibt Liste von Skill-Dicts zurück."""
-    skills = []
+    skills: list[dict[str, Any]] = []
     if not skills_dir.exists():
         return skills
 
@@ -93,12 +111,12 @@ def scan_directory(skills_dir: Path, skill_type: str):
     return skills
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Claude Memory DB — Skill Scanner")
     print("=" * 60)
 
-    all_skills = []
+    all_skills: list[dict[str, Any]] = []
 
     # Global
     print(f"\nScanne: {GLOBAL_SKILLS}")
@@ -113,7 +131,7 @@ def main():
 
     print(f"\nGefunden: {len(all_skills)} Skills")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _connect()
     cursor = conn.cursor()
 
     inserted = 0

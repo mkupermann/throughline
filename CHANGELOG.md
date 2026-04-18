@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP server exposing 10 tools for Claude Code integration (search_memory, search_semantic, get_project_context, get_recent_conversations, get_conversation, list_decisions, find_contact, list_entities, get_entity_relations, add_memory)
+- Linux systemd user-level service units and timers
+  (`systemd/throughline-{ingest,extract,backup}.{service,timer}` + install guide in `systemd/README.md`).
+- Schema migrations framework (`sql/migrations/` + `scripts/migrate.py`),
+  with tracking table `applied_migrations` and the current schema captured as `000_baseline.sql`.
+- Demo data loader (`scripts/load_demo.sh`) plus a new `demo` profile in
+  `docker-compose.yml` that starts a throw-away Postgres on port 5433 with schema and demo data pre-loaded.
+- Integration tests in `tests/integration/` (ingest, skill scan, memory query)
+  backed by a per-test fresh-database fixture; runnable locally via `make test-integration`
+  and on CI via the new `integration-tests` job (Postgres service).
+- Pre-commit hooks configuration (`.pre-commit-config.yaml`) wiring up
+  ruff, ruff-format, the fast unit-test subset, and standard sanity checks.
+- `Makefile` targets `test-integration`, `migrate`, and `load-demo`; the
+  default `test` target now runs unit tests only (no DB).
+- `pyproject.toml` — installable via `pip install -e .` (PEP 621 metadata,
+  optional extras: `openai`, `anthropic`, `dev`; configured `ruff` + `black`).
+- Unified CLI: `throughline <command>` or `python -m throughline <command>`
+  with subcommands for ingestion, scanning, extraction, embeddings,
+  semantic search, reflection, GUI launch, hook installation, backup, and
+  version reporting. Each subcommand is a thin wrapper around the
+  corresponding script in `scripts/` so direct execution keeps working.
+- `Makefile` shortcut targets (`make install`, `make test`, `make gui`,
+  `make ingest`, `make scan`, `make extract`, `make docker-up/down/logs`,
+  `make clean`) to match the new CLI.
+- Type hints across all helper scripts (function signatures, return types,
+  common container types) in `scripts/*.py`.
+- Improved error messages for common failure modes: PostgreSQL not
+  reachable (includes the host/port/db and the docker-compose hint),
+  `claude` CLI missing (points at `$CLAUDE_BIN` and the install docs), and
+  "neither OPENAI_API_KEY nor Ollama is available" for the embeddings
+  backend picker.
+
 ## [0.1.0-beta] — 2026-04-18
 
 ### Added

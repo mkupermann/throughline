@@ -1,0 +1,22 @@
+[Unit]
+Description=Throughline - back up the claude_memory database
+Documentation=https://github.com/mkupermann/Throughline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/throughline
+ExecStart=/bin/bash %h/.local/share/throughline/scripts/backup.sh
+Environment="PGDATABASE=claude_memory"
+Environment="PGUSER=%u"
+Environment="PGHOST=localhost"
+Environment="PGPORT=5432"
+# Allow enough time for a full pg_dump on large memories.
+TimeoutStartSec=1h
+StandardOutput=journal
+StandardError=journal
+Nice=19
+
+[Install]
+WantedBy=default.target

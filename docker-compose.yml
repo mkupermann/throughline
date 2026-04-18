@@ -49,8 +49,41 @@ services:
     volumes:
       - ollama_data:/root/.ollama
 
+  # -----------------------------------------------------------------------
+  # Demo profile
+  # -----------------------------------------------------------------------
+  # A second Postgres instance that pre-loads schema.sql plus the bundled
+  # demo dataset from examples/demo_data.sql. Listens on 5433 so it does
+  # not collide with the main `postgres` service above.
+  #
+  # Start with:
+  #   docker compose --profile demo up -d postgres-demo
+  # Connect with:
+  #   psql -h localhost -p 5433 -U throughline -d claude_memory
+  postgres-demo:
+    image: pgvector/pgvector:pg16
+    container_name: throughline-postgres-demo
+    profiles: ["demo"]
+    environment:
+      POSTGRES_DB: claude_memory
+      POSTGRES_USER: throughline
+      POSTGRES_PASSWORD: throughline_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_demo_data:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./examples/demo_data.sql:/docker-entrypoint-initdb.d/02-demo-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U throughline -d claude_memory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres_data:
     name: throughline_postgres_data
+  postgres_demo_data:
+    name: throughline_postgres_demo_data
   ollama_data:
     name: throughline_ollama_data

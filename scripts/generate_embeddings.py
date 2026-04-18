@@ -33,16 +33,31 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import List, Sequence
+from typing import Any, List, Sequence
 
 import psycopg2
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 OPENAI_MODEL = "text-embedding-3-small"
 OPENAI_DIM = 1536
@@ -168,21 +183,21 @@ def pick_backend(choice: str) -> Backend:
         return OpenAIBackend(openai_key)
     if choice == "openai":
         sys.stderr.write(
-            "FEHLER: --backend openai gewählt, aber OPENAI_API_KEY nicht gesetzt.\n"
-            "  Setze: export OPENAI_API_KEY=sk-...\n"
-            "  Oder nutze: --backend ollama (lokal, kostenlos)\n"
+            "ERROR: --backend openai selected, but OPENAI_API_KEY is not set.\n"
+            "  Set: export OPENAI_API_KEY=sk-...\n"
+            "  Or use: --backend ollama (local, free, no key required)\n"
         )
         sys.exit(2)
 
     # Ollama-Pfad
     if not ollama_up():
         sys.stderr.write(
-            "FEHLER: Ollama läuft nicht auf http://localhost:11434\n"
-            "  Start:  brew services start ollama   oder   ollama serve\n"
-            "  Install: brew install ollama\n"
+            "ERROR: Neither OPENAI_API_KEY nor Ollama is available.\n"
+            f"  Ollama is not running on {OLLAMA_URL}.\n"
+            "  Start it with:  brew services start ollama   (or)   ollama serve\n"
+            "  Install with:   brew install ollama\n"
+            "  Or set OPENAI_API_KEY=sk-... and re-run with --backend openai.\n"
         )
-        if choice == "auto":
-            sys.stderr.write("  (Alternativ: export OPENAI_API_KEY=sk-... setzen)\n")
         sys.exit(2)
     if not ollama_has_model(OLLAMA_MODEL):
         print(f"Ollama-Modell '{OLLAMA_MODEL}' fehlt — ziehe es jetzt…")
@@ -198,7 +213,7 @@ def pick_backend(choice: str) -> Backend:
 
 
 # ─── DB helpers ───────────────────────────────────────────────────────────────
-def fetch_pending(cursor, backend: Backend, limit: int | None) -> list:
+def fetch_pending(cursor: Any, backend: Backend, limit: int | None) -> list[tuple[str, int, str | None]]:
     """
     Liefert (source_type, source_id, content) aller Zeilen,
     für die noch KEIN Embedding mit dem gegebenen Modell existiert.
@@ -228,7 +243,7 @@ def fetch_pending(cursor, backend: Backend, limit: int | None) -> list:
     return cursor.fetchall()
 
 
-def upsert_embedding(cursor, backend: Backend, source_type: str, source_id: int, vector: list):
+def upsert_embedding(cursor: Any, backend: Backend, source_type: str, source_id: int, vector: list[float]) -> None:
     vec_literal = "[" + ",".join(f"{v:.7f}" for v in vector) + "]"
     # INSERT … ON CONFLICT auf (source_type, source_id, model)
     sql = f"""
@@ -242,7 +257,7 @@ def upsert_embedding(cursor, backend: Backend, source_type: str, source_id: int,
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--backend", choices=["openai", "ollama", "auto"], default="auto")
     ap.add_argument("--limit", type=int, default=None, help="nur N Einträge verarbeiten (Test)")
@@ -252,7 +267,7 @@ def main():
     backend = pick_backend(args.backend)
     print(f"Backend: {backend.name} / {backend.model} ({backend.dim} dim)")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _connect()
     conn.autocommit = False
     cursor = conn.cursor()
 

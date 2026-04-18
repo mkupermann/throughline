@@ -6,8 +6,34 @@
 [![PostgreSQL 16+](https://img.shields.io/badge/postgresql-16%2B-336791.svg)](https://www.postgresql.org/)
 [![pgvector 0.8+](https://img.shields.io/badge/pgvector-0.8%2B-4169E1.svg)](https://github.com/pgvector/pgvector)
 [![Status: Beta](https://img.shields.io/badge/status-beta-yellow.svg)](#roadmap)
+[![GitHub Stars](https://img.shields.io/github/stars/mkupermann/throughline?style=social)](https://github.com/mkupermann/throughline/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/mkupermann/throughline)](https://github.com/mkupermann/throughline/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
 
 > A local-first, self-reflecting memory database for Claude Code that ingests JSONL sessions, extracts insights, and gives Claude its own memory to query across sessions.
+
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
+</p>
+
+---
+
+## Table of Contents
+
+- [Why this exists](#why-this-exists)
+- [What it does](#what-it-does)
+- [Demo / Screenshots](#demo--screenshots)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Database Schema](#database-schema)
+- [Usage Examples](#usage-examples)
+- [Configuration](#configuration)
+- [Comparison to alternatives](#comparison-to-alternatives)
+- [Performance](#performance)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -34,27 +60,22 @@
 
 Claude Code has no cross-session memory. Every new session starts from scratch.
 
-The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash>/*.jsonl`,
-but nothing aggregates, searches, or surfaces that knowledge the next time you open a
-terminal. Decisions you made last week, the contact you met three projects ago, the
-subtle pattern you discovered at 2 a.m. on Tuesday — all of it lives as flat files
-that nobody reads.
+The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash>/*.jsonl` — but nothing reads those files back. Decisions you made last week, the contact you met three projects ago, the subtle pattern you found at 2 a.m. on Tuesday: all of it sits in flat files that Claude never sees again.
 
-`Throughline` is the missing piece: a local PostgreSQL database that continuously ingests
-your Claude Code sessions, extracts structured memory (decisions, patterns, insights,
-contacts, error solutions), and exposes it back to Claude as a queryable skill. The
-loop is closed — Claude writes, Claude reads, you stay in flow.
+**The cost is invisible but constant.** You re-explain context. You re-discover the same pitfall. You ask Claude to design something it already helped you design, because neither of you remember.
+
+`Throughline` closes that loop. It is a local PostgreSQL database that continuously ingests your Claude Code JSONL sessions, extracts structured memory (decisions, patterns, insights, contacts, error solutions), and exposes that memory back to Claude as a queryable skill. Claude writes the sessions; Throughline reads them; you stay in flow.
 
 ## What it does
 
-- **Ingests Claude Code JSONL sessions** into a relational schema you can actually query.
-- **Extracts structured memory chunks** (decisions, patterns, insights, error solutions) via Claude itself — no separate API key required if you have a Max plan.
-- **Semantic search** over conversations and memory using pgvector (OpenAI or local Ollama embeddings).
-- **Temporal knowledge graph** of entities (people, projects, technologies) and their relationships over time.
-- **Streamlit GUI** with 14 pages — dashboard, CRUD, graph visualization, calendar view, SQL console.
-- **Context pre-loader hook** that injects relevant memories at the start of each new Claude Code session.
-- **Scheduled automation** via launchd (ingest hourly, extract daily, back up daily).
-- **Self-reflecting memory** that deduplicates, detects contradictions, and consolidates related chunks over time.
+- **Ingests Claude Code JSONL sessions** into a relational schema you can actually query — deduplicated by SHA-256, with full message history, tool calls, and token counts.
+- **Extracts structured memory chunks** — eight categories (decisions, patterns, insights, error solutions, contacts, preferences, project context, workflows) extracted via Claude itself. No separate API key required on a Max plan.
+- **Semantic search** over conversations and memory using pgvector with HNSW indexing. Works with OpenAI embeddings or fully local Ollama (`nomic-embed-text`) — no cloud required.
+- **Temporal knowledge graph** of entities (people, projects, technologies) and their relationships, tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
+- **Streamlit GUI** with 14 pages — dashboard, conversations, memory CRUD, skills, knowledge graph, calendar, semantic search, SQL console, and more.
+- **Context pre-loader hook** — a `SessionStart` hook queries the DB for the current project and injects a short, relevant memory summary before Claude's first response in each new session.
+- **Scheduled automation** via launchd (ingest hourly, extract daily at 02:00, back up daily). Linux equivalent via systemd timers or cron.
+- **Self-reflecting memory** — a periodic pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every reflection action for auditability.
 
 ## Demo / Screenshots
 
@@ -151,6 +172,75 @@ streamlit run gui/app.py
 
 The installer is idempotent — running it twice will not break an existing setup.
 
+### Option C — Python package (pip install)
+
+If you just want the CLI and aren't running the Docker stack:
+
+```bash
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+pip install -e .[dev]       # editable install, dev deps included
+
+throughline --help
+python -m throughline ingest
+make help                   # list every Makefile shortcut
+```
+
+Requires Python 3.10+, a reachable PostgreSQL 16 instance with `pgvector`,
+and (for extraction/titles) the `claude` CLI on your `PATH`.
+
+---
+
+## Commands
+
+All subcommands work as either `throughline <cmd>` or `python -m throughline <cmd>`.
+Run `throughline <cmd> --help` for the per-command options.
+
+| Command | Purpose |
+|---|---|
+| `throughline ingest` | Import Claude Code JSONL sessions (`~/.claude/projects/`) |
+| `throughline ingest --windsurf` | Import Windsurf plans (`~/.windsurf/plans/`) |
+| `throughline scan-skills` | Index all `SKILL.md` files (global + project) |
+| `throughline scan-prompts` | Index `CLAUDE.md` files + skill prompt templates |
+| `throughline extract-memory` | Extract structured memory chunks via the Claude CLI |
+| `throughline generate-titles` | Auto-generate titles for untitled conversations |
+| `throughline embed` | Generate vector embeddings (OpenAI or local Ollama) |
+| `throughline search <query>` | Semantic search over messages + memory chunks |
+| `throughline reflect` | Self-reflecting pass (dedup, contradictions, stale, consolidate) |
+| `throughline gui` | Start the Streamlit GUI |
+| `throughline install-hooks` | Install `SessionStart` hooks into `~/.claude/settings.json` |
+| `throughline backup` | One-shot `pg_dump` backup |
+| `throughline version` | Print the installed version |
+
+The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,
+`extract`, `docker-up/down/logs`, `clean`, `migrate`, `load-demo`).
+Run `make help` for the full list.
+
+---
+
+## MCP Integration
+
+Throughline ships a **[Model Context Protocol](https://modelcontextprotocol.io/)
+server** at [`mcp/server.py`](mcp/server.py). Register it once and Claude Code
+(and any other MCP client — Claude Desktop, Cursor, Zed, Continue) can query
+the memory database directly, without going through a skill round-trip or a
+shell command.
+
+```bash
+pip install -r mcp/requirements.txt
+claude mcp add throughline python3 "$(pwd)/mcp/server.py"
+```
+
+Ten tools are exposed: `search_memory`, `search_semantic`,
+`get_project_context`, `get_recent_conversations`, `get_conversation`,
+`list_decisions`, `find_contact`, `list_entities`, `get_entity_relations`,
+and `add_memory`.
+
+Full documentation — installation flags, Claude Desktop `json` snippet,
+example prompts, troubleshooting — lives in [`mcp/README.md`](mcp/README.md).
+
+---
+
 ## Screenshots
 
 > Screenshots live in [`docs/screenshots/`](docs/screenshots/).
@@ -168,49 +258,86 @@ The installer is idempotent — running it twice will not break an existing setu
 
 ## Architecture
 
+### Component Overview
+
 ```mermaid
 flowchart LR
-    subgraph Sources
-        A[Claude Code JSONL sessions]
-        B[~/.claude/skills/]
-        C[CLAUDE.md files]
+    subgraph sources["Data Sources"]
+        S1[Claude Code JSONL]
+        S2[SKILL.md files]
+        S3[CLAUDE.md files]
+        S4[Windsurf plans]
+    end
+    subgraph pipeline["Ingestion Pipeline"]
+        I1[ingest_sessions.py]
+        I2[scan_skills.py]
+        I3[scan_prompts.py]
+        I4[extract_memory.py]
+        I5[extract_entities.py]
+    end
+    subgraph db["claude_memory DB"]
+        T1[(conversations)]
+        T2[(memory_chunks)]
+        T3[(entities + graph)]
+        T4[(embeddings)]
+    end
+    subgraph interfaces["Interfaces"]
+        U1[Streamlit GUI]
+        U2[MCP Server]
+        U3[Claude Code Skill]
+        U4[CLI]
     end
 
-    subgraph Ingestion
-        D[ingest_sessions.py]
-        E[scan_skills.py]
-        F[scan_prompts.py]
-    end
+    S1 --> I1 --> T1
+    S2 --> I2 --> T1
+    S3 --> I3 --> T1
+    S4 --> I1
+    T1 --> I4 --> T2
+    T1 --> I5 --> T3
+    T2 --> I5
 
-    subgraph Database
-        G[(PostgreSQL 16<br/>+ pgvector)]
-    end
+    T1 --> U1
+    T2 --> U1
+    T3 --> U1
+    T4 --> U1
 
-    subgraph Enrichment
-        H[extract_memory.py<br/>Claude Sonnet]
-        I[extract_entities.py]
-        J[generate_embeddings.py<br/>OpenAI / Ollama]
-        K[reflect_memory.py<br/>dedup + contradiction]
-    end
+    T1 --> U2
+    T2 --> U2
+    T3 --> U2
 
-    subgraph Consumers
-        L[Streamlit GUI<br/>14 pages]
-        M[Claude Code Skill<br/>claude-memory]
-        N[Context Pre-loader Hook]
-        O[CLI query tools]
-    end
+    U3 --> U2
+    U4 --> I1
+```
 
-    A --> D --> G
-    B --> E --> G
-    C --> F --> G
-    G --> H --> G
-    G --> I --> G
-    G --> J --> G
-    G --> K --> G
-    G --> L
-    G --> M
-    G --> N
-    G --> O
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Claude as Claude Code
+    participant FS as ~/.claude/projects/
+    participant T as Throughline
+    participant DB as PostgreSQL
+
+    User->>Claude: Start session
+    Claude->>T: SessionStart hook
+    T->>DB: Query relevant memories
+    DB-->>T: Decisions, patterns, contacts
+    T-->>Claude: .claude/MEMORY_CONTEXT.md
+    Claude->>User: Resumes with context
+
+    Note over User,Claude: ... conversation happens ...
+
+    Claude->>FS: Writes JSONL
+    Note over T: launchd job (hourly)
+    T->>FS: Read new JSONL
+    T->>DB: INSERT conversations + messages
+
+    Note over T: Daily 02:00
+    T->>DB: Find new conversations
+    T->>Claude: Extract insights via CLI
+    Claude-->>T: JSON array of chunks
+    T->>DB: INSERT memory_chunks
 ```
 
 High-level data flow:
@@ -369,9 +496,31 @@ extra because the extractor calls `claude -p` rather than an API key.
 
 ---
 
+## Performance
+
+Numbers measured on a MacBook Pro M2 / macOS 15 / PostgreSQL 16 / pgvector 0.8
+against ~100 conversations, ~3,000 messages, ~550 memory chunks, ~260k
+embeddings. Full methodology and reproduction steps in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+| Operation | Wall time |
+|---|---|
+| Ingestion throughput | 10 – 15 sessions/sec · 400 – 800 messages/sec |
+| First-run ingest (~1,200 sessions) | ~80 – 120 s |
+| Ollama embedding (warm, `nomic-embed-text`) | 30 – 60 ms per call |
+| Full re-embed, 10k messages | 6 – 9 min single-threaded |
+| pgvector HNSW cosine, 260k vectors | 15 – 30 ms |
+| Blended hybrid search (HNSW + `pg_trgm`), end-to-end | 50 – 100 ms |
+| Memory extraction via `claude -p` (per conversation) | 6 – 15 s |
+| Daily extraction run (20 conversations) | 2 – 5 min |
+| Storage per conversation (msgs + chunks + embeddings) | 20 – 50 KB |
+
+---
+
 ## Roadmap
 
-- [ ] MCP (Model Context Protocol) server integration — expose memory over MCP
+- [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`mcp/`](mcp/)
+- [x] Linux scheduler support via `systemd/` timers — shipped in v0.1.0
 - [ ] Windows support (replace launchd with Task Scheduler)
 - [ ] Multi-user support (per-user schemas and auth)
 - [ ] Export to Obsidian, Notion, Logseq
@@ -380,7 +529,7 @@ extra because the extractor calls `claude -p` rather than an API key.
 - [ ] First-class support for Cursor, Windsurf, and Cline session formats
 - [ ] Web UI packaging as a single binary (Docker image + systemd unit)
 
-Opened issues: <https://github.com/mkupermann/Throughline/issues>
+Opened issues: <https://github.com/mkupermann/throughline/issues>
 
 ---
 
@@ -410,3 +559,9 @@ Released as an open-source personal AI-assistant stack for Claude Code.
 - [Letta / MemGPT](https://github.com/letta-ai/letta) for the self-editing memory idea
 - [pgvector](https://github.com/pgvector/pgvector) for making vector search in Postgres boring
 - The Streamlit team for making internal tools pleasant to build
+
+---
+
+If Throughline saves you an hour of re-explaining context to Claude, consider giving it a star — it helps others find it.
+
+**[Star on GitHub](https://github.com/mkupermann/throughline)**

@@ -5,21 +5,39 @@ und schreibt sie in die claude_memory DB.
 """
 
 import os
+import sys
 import hashlib
 import re
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import Json
 
-DB = {
+DB: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
 PLANS_DIR = Path.home() / ".windsurf" / "plans"
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB['host']}:{DB['port']}/{DB['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 
 def sha256_file(p: Path) -> str:
@@ -40,7 +58,7 @@ def extract_title(content: str, filename: str) -> str:
     return stem.replace("-", " ").replace("_", " ").title()[:200]
 
 
-def ingest_plan(cursor, filepath: Path) -> bool:
+def ingest_plan(cursor: Any, filepath: Path) -> bool:
     content = filepath.read_text(encoding="utf-8", errors="ignore")
     if len(content) < 50:
         return False
@@ -99,7 +117,7 @@ def ingest_plan(cursor, filepath: Path) -> bool:
     return True
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Windsurf Ingestion — Plans")
     print("=" * 60)
@@ -111,7 +129,7 @@ def main():
     files = list(PLANS_DIR.glob("*.md")) + list(PLANS_DIR.glob("*.txt"))
     print(f"\n{len(files)} Dateien gefunden\n")
 
-    conn = psycopg2.connect(**DB)
+    conn = _connect()
     cur = conn.cursor()
 
     ingested = 0

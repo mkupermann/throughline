@@ -12,10 +12,12 @@ import sys
 import time
 import unicodedata
 import argparse
+from typing import Any
+
 import psycopg2
 import psycopg2.extras
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
@@ -25,6 +27,21 @@ DB_CONFIG = {
     "keepalives_interval": 10,
     "keepalives_count": 5,
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 
 def _resolve_claude_bin() -> str:
@@ -322,7 +339,7 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
     return (entities_inserted, rels_inserted)
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=MAX_CONVERSATIONS_PER_RUN)
     ap.add_argument("--min-messages", type=int, default=MIN_MESSAGES)
@@ -333,7 +350,16 @@ def main():
     print("Claude Memory DB — Entity Extraction (Knowledge Graph)")
     print("=" * 60)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    from shutil import which
+    if which(CLAUDE_BIN) is None and not os.path.isfile(CLAUDE_BIN):
+        sys.stderr.write(
+            "ERROR: Claude CLI not found.\n"
+            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
+            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
+        )
+        raise SystemExit(2)
+
+    conn = _connect()
     cursor = conn.cursor()
 
     if args.conv_id:

@@ -8,14 +8,31 @@ import os
 import subprocess
 import sys
 import time
+from typing import Any
+
 import psycopg2
 
-DB = {
+DB: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB['host']}:{DB['port']}/{DB['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 
 def _resolve_claude_bin() -> str:
@@ -25,6 +42,20 @@ def _resolve_claude_bin() -> str:
     from shutil import which
     found = which("claude")
     return found or "claude"
+
+
+def _require_claude_bin() -> str:
+    """Resolve the Claude CLI binary or emit a clear error and exit."""
+    bin_path = _resolve_claude_bin()
+    from shutil import which
+    if which(bin_path) is None and not os.path.isfile(bin_path):
+        sys.stderr.write(
+            "ERROR: Claude CLI not found.\n"
+            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
+            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
+        )
+        raise SystemExit(2)
+    return bin_path
 
 
 CLAUDE_BIN = _resolve_claude_bin()
@@ -55,7 +86,7 @@ Session-Auszug:
 Gib NUR den Titel zurück, sonst nichts. Keine Anführungszeichen, keine Erklärung."""
 
 
-def build_preview(messages: list) -> str:
+def build_preview(messages: list[tuple[str, str | None]]) -> str:
     """Baut kurzen Transcript-Preview für Titel-Generation."""
     parts = []
     total = 0
@@ -95,12 +126,13 @@ def call_claude(prompt: str) -> str:
         return ""
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Claude Memory — Titel-Generierung")
     print("=" * 60)
 
-    conn = psycopg2.connect(**DB)
+    _require_claude_bin()
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute(f"""

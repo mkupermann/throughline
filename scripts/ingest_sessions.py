@@ -10,10 +10,12 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Any
+
 import psycopg2
 from psycopg2.extras import Json
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
@@ -24,6 +26,21 @@ CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
+
+
 def sha256_file(filepath: Path) -> str:
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
@@ -32,7 +49,7 @@ def sha256_file(filepath: Path) -> str:
     return h.hexdigest()
 
 
-def extract_content(message: dict) -> str:
+def extract_content(message: dict[str, Any]) -> str:
     """Extrahiert lesbaren Text aus message.content (String oder List of Blocks)."""
     content = message.get("content", "")
     if isinstance(content, str):
@@ -55,12 +72,12 @@ def extract_content(message: dict) -> str:
     return str(content)[:2000]
 
 
-def extract_tool_calls(message: dict) -> list:
+def extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     """Extrahiert Tool-Calls aus content blocks."""
     content = message.get("content", [])
     if not isinstance(content, list):
         return []
-    calls = []
+    calls: list[dict[str, Any]] = []
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_use":
             calls.append({
@@ -70,7 +87,7 @@ def extract_tool_calls(message: dict) -> list:
     return calls
 
 
-def map_role(entry: dict) -> str:
+def map_role(entry: dict[str, Any]) -> str:
     """Mappt JSONL type/role auf DB message_role enum."""
     entry_type = entry.get("type", "")
     msg = entry.get("message", {})
@@ -101,9 +118,9 @@ def parse_timestamp(ts_str: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def ingest_file(cursor, filepath: Path, project_path: str):
-    """Ingestiert eine einzelne JSONL-Datei."""
-    entries = []
+def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
+    """Ingestiert eine einzelne JSONL-Datei. Gibt die Anzahl eingefügter Messages zurück."""
+    entries: list[dict[str, Any]] = []
     with open(filepath, "r", encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
@@ -199,16 +216,16 @@ def ingest_file(cursor, filepath: Path, project_path: str):
     return msg_count
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("Claude Memory DB — Session Ingestion")
     print("=" * 60)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _connect()
     cursor = conn.cursor()
 
     # Alle JSONL-Dateien finden
-    jsonl_files = []
+    jsonl_files: list[tuple[Path, str]] = []
     if PROJECTS_DIR.exists():
         for project_dir in PROJECTS_DIR.iterdir():
             if project_dir.is_dir():

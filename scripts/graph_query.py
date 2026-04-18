@@ -16,15 +16,32 @@ import os
 import re
 import sys
 import unicodedata
+from typing import Any
+
 import psycopg2
 import psycopg2.extras
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
 
 
 def canonicalize(name: str) -> str:
@@ -35,7 +52,7 @@ def canonicalize(name: str) -> str:
     return re.sub(r"\s+", " ", no_accent).strip().lower()
 
 
-def resolve_entity(cursor, query: str):
+def resolve_entity(cursor: Any, query: str) -> list[dict[str, Any]]:
     """Sucht Entity nach exaktem canonical oder LIKE-Fallback. Gibt list[(id, name, type, project)] zurück."""
     canon = canonicalize(query)
     cursor.execute("""
@@ -58,7 +75,7 @@ def resolve_entity(cursor, query: str):
     return cursor.fetchall()
 
 
-def cmd_neighbors(cursor, entity_query: str):
+def cmd_neighbors(cursor: Any, entity_query: str) -> None:
     rows = resolve_entity(cursor, entity_query)
     if not rows:
         print(f"Keine Entity gefunden für: {entity_query}")
@@ -105,7 +122,7 @@ def cmd_neighbors(cursor, entity_query: str):
         print("  (keine Verbindungen)")
 
 
-def cmd_path(cursor, from_query: str, to_query: str):
+def cmd_path(cursor: Any, from_query: str, to_query: str) -> None:
     from_rows = resolve_entity(cursor, from_query)
     to_rows = resolve_entity(cursor, to_query)
     if not from_rows:
@@ -160,7 +177,7 @@ def cmd_path(cursor, from_query: str, to_query: str):
             print(f"      ↓ {edge_labels[i]}")
 
 
-def cmd_timeline(cursor, entity_query: str):
+def cmd_timeline(cursor: Any, entity_query: str) -> None:
     rows = resolve_entity(cursor, entity_query)
     if not rows:
         print(f"Keine Entity gefunden für: {entity_query}")
@@ -204,7 +221,7 @@ def cmd_timeline(cursor, entity_query: str):
             print(f"    [{str(r[0])[:16]}] {r[2]} --[{r[1]}]--> {r[3]} (src_conv={r[4]})")
 
 
-def cmd_top(cursor, entity_type: str | None, limit: int = 20):
+def cmd_top(cursor: Any, entity_type: str | None, limit: int = 20) -> None:
     if entity_type:
         cursor.execute("""
             SELECT id, name, entity_type, project_name, mention_count
@@ -228,7 +245,7 @@ def cmd_top(cursor, entity_type: str | None, limit: int = 20):
         print(f"  #{r[0]:<4} {r[2]:<14} {r[4]:>8}  {r[1][:40]:<40} {r[3] or '–'}")
 
 
-def cmd_contradictions(cursor):
+def cmd_contradictions(cursor: Any) -> None:
     """Findet Relationships mit gleichem from+to+type aber widersprüchlichen Attributes oder unterschiedlichen Confidence-Werten."""
     print("\n── Widersprüchliche Beziehungen ──\n")
 
@@ -288,7 +305,7 @@ def cmd_contradictions(cursor):
     print("  (Siehe oben für widersprüchliche Relationships.)")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description="Knowledge Graph Query CLI")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -310,7 +327,7 @@ def main():
 
     args = ap.parse_args()
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = _connect()
     cursor = conn.cursor()
 
     try:

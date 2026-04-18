@@ -1,0 +1,34 @@
+# Pre-commit hooks for Throughline.
+# Install once with: pre-commit install
+# Run manually with: pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # docker-compose uses the YAML anchor `&` syntax Sphinx does not like;
+        # the stock hook is happy with it. Skip generated dumps.
+        exclude: ^sql/schema\.sql$
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest (unit tests, no DB)
+        entry: pytest tests/ -x -q -m "not integration" --ignore=tests/integration
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [commit]

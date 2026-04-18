@@ -1,0 +1,22 @@
+[Unit]
+Description=Throughline - extract memory chunks from conversations
+Documentation=https://github.com/mkupermann/Throughline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/throughline
+ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/extract_memory.py
+Environment="PGDATABASE=claude_memory"
+Environment="PGUSER=%u"
+Environment="PGHOST=localhost"
+Environment="PGPORT=5432"
+# Extraction can invoke Claude CLI or Anthropic API, which may take several minutes.
+TimeoutStartSec=30min
+StandardOutput=journal
+StandardError=journal
+Nice=15
+
+[Install]
+WantedBy=default.target

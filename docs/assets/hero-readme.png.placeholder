@@ -1,0 +1,41 @@
+# hero.png
+
+This placeholder reminds you to rasterize `hero.svg` before shipping to
+platforms that prefer/require PNG (Dev.to cover image, Twitter/X
+summary_large_image, LinkedIn post preview, Open Graph cards).
+
+## Convert
+
+```bash
+# Option A — svgexport (npm, fastest, no headless browser)
+npx svgexport docs/assets/hero.svg docs/assets/hero.png 1200:630
+
+# Option B — rsvg-convert (Homebrew: librsvg)
+rsvg-convert -w 1200 -h 630 docs/assets/hero.svg -o docs/assets/hero.png
+
+# Option C — Inkscape CLI
+inkscape docs/assets/hero.svg --export-type=png \
+  --export-filename=docs/assets/hero.png -w 1200 -h 630
+
+# Option D — Chrome/Chromium headless (best font fidelity)
+chromium --headless --disable-gpu \
+  --screenshot=docs/assets/hero.png --window-size=1200,630 \
+  "file://$PWD/docs/assets/hero.svg"
+```
+
+## Target sizes
+
+| Platform | Size |
+|---|---|
+| Twitter / X card (summary_large_image) | 1200 × 630 |
+| Dev.to cover_image | 1000 × 420 (center-crop from 1200 × 630) |
+| LinkedIn post preview | 1200 × 627 |
+| Open Graph default | 1200 × 630 |
+
+## Notes
+
+- The SVG is self-contained (no external fonts, no CDN).
+- Fonts fall back through a system-UI stack; on any target rasterizer
+  that lacks SF Pro, the output will still read cleanly (Segoe UI on
+  Windows, system sans on Linux).
+- Keep the SVG in source control; regenerate the PNG on demand.

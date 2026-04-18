@@ -41,12 +41,41 @@ import psycopg2.extras
 
 # ---- Konfiguration ----------------------------------------------------------
 
-DB_CONFIG = {
+DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
 }
+
+
+def _connect() -> "psycopg2.extensions.connection":
+    """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
+    try:
+        return psycopg2.connect(**DB_CONFIG)
+    except psycopg2.OperationalError as e:
+        sys.stderr.write(
+            f"ERROR: Cannot connect to PostgreSQL at "
+            f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}.\n"
+            f"  Is it running? Try: docker compose up -d\n"
+            f"  Or: brew services start postgresql@16\n"
+            f"  Underlying error: {e}\n"
+        )
+        raise SystemExit(2) from e
+
+
+def _require_claude_bin() -> str:
+    """Resolve the Claude CLI binary or emit a clear error and exit."""
+    bin_path = _resolve_claude_bin()
+    from shutil import which
+    if which(bin_path) is None and not os.path.isfile(bin_path):
+        sys.stderr.write(
+            "ERROR: Claude CLI not found.\n"
+            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
+            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
+        )
+        raise SystemExit(2)
+    return bin_path
 
 
 def _resolve_claude_bin() -> str:
@@ -601,7 +630,7 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
 
 # ---- Main -------------------------------------------------------------------
 
-def print_report(stats_by_mode: dict):
+def print_report(stats_by_mode: dict[str, dict[str, Any]]) -> None:
     print("\n" + "=" * 60)
     print("REFLECTION REPORT")
     print("=" * 60)
@@ -611,7 +640,7 @@ def print_report(stats_by_mode: dict):
             print(f"  {k:20} {v}")
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser(description="Self-Reflecting Memory Engine")
     p.add_argument("--mode", choices=["dedup", "contradictions", "stale", "consolidate"],
                    help="Einzelnen Modus ausfuehren (default: alle)")
@@ -623,7 +652,8 @@ def main():
                    help="Keine Writes, nur Analyse + Log")
     args = p.parse_args()
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    _require_claude_bin()
+    conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     print("Self-Reflecting Memory Engine")
