@@ -44,6 +44,20 @@ Treat the `claude_memory` database as confidential by default. Do not commit
 database dumps, do not share backups, do not upload to cloud storage without
 encryption.
 
+### PII / secret redaction before extraction
+
+Before each conversation transcript is sent to Claude for memory extraction,
+it runs through a heuristic redaction pass in [`throughline/pii.py`](throughline/pii.py).
+The pass replaces recognisable Anthropic / OpenAI / GitHub / AWS / Google /
+Slack / Stripe API-key shapes, JWTs, `Authorization: Bearer` headers, explicit
+`password=` / `secret=` / `token=` assignments, private-key blocks, email
+addresses, and home-directory usernames in file paths.
+
+Conservative by design — we prefer leaking an uncommon secret shape to
+destroying legitimate memory content. Override with the environment variable
+`THROUGHLINE_REDACT_PII=0` if you are processing synthetic data and want the
+raw transcript to reach Claude.
+
 ### API keys
 
 Scripts read `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment.

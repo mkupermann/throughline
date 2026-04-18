@@ -17,6 +17,12 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
+try:
+    from throughline.pii import count_redactions, redact
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from throughline.pii import count_redactions, redact
+
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "claude_memory"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
@@ -27,6 +33,8 @@ DB_CONFIG: dict[str, Any] = {
     "keepalives_interval": 10,
     "keepalives_count": 5,
 }
+
+REDACT_PII: bool = os.environ.get("THROUGHLINE_REDACT_PII", "1") != "0"
 
 
 def _connect() -> "psycopg2.extensions.connection":
@@ -264,6 +272,13 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
     transcript = build_transcript(rows)
     if len(transcript) < 200:
         return (0, 0)
+
+    if REDACT_PII:
+        redacted = redact(transcript)
+        n = count_redactions(transcript, redacted)
+        if n:
+            print(f"    redacted {n} secret/PII match(es) before entity extraction")
+        transcript = redacted
 
     prompt = PROMPT_TEMPLATE.replace("{TRANSCRIPT}", transcript)
     response = call_claude(prompt)

@@ -612,8 +612,9 @@ embeddings. Full methodology and reproduction steps in
 
 - [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`mcp/`](mcp/)
 - [x] Linux scheduler support via `systemd/` timers — shipped in v0.1.0
-- [ ] Optional PII / secret-redaction pass before extraction (heuristics over
-      file paths, email addresses, API-key-shaped strings)
+- [x] PII / secret-redaction pass before extraction (API keys, tokens,
+      emails, home-directory paths); default on, see
+      [`throughline/pii.py`](throughline/pii.py)
 - [ ] Windows support (replace launchd with Task Scheduler)
 - [ ] Multi-user support (per-user schemas and auth)
 - [ ] Export to Obsidian, Notion, Logseq

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PII / secret redaction** in `throughline/pii.py` that runs automatically
+  before each transcript is sent to Claude for memory and entity extraction.
+  Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe
+  API-key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=`
+  assignments, private-key blocks, email addresses, and home-directory
+  usernames. Default on. Disable with `THROUGHLINE_REDACT_PII=0` or
+  `memory.redact_pii: false`. 18 unit tests in `tests/test_pii.py`.
 - MCP server exposing 10 tools for Claude Code integration (search_memory, search_semantic, get_project_context, get_recent_conversations, get_conversation, list_decisions, find_contact, list_entities, get_entity_relations, add_memory)
 - Linux systemd user-level service units and timers
   (`systemd/throughline-{ingest,extract,backup}.{service,timer}` + install guide in `systemd/README.md`).

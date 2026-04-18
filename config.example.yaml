@@ -56,6 +56,12 @@ memory:
   min_messages: 5
   max_transcript_chars: 80000
 
+  # Redact API keys, tokens, email addresses, and home-directory paths from
+  # each conversation transcript *before* it is sent to Claude for extraction.
+  # Heuristic, regex-based — conservative patterns, see throughline/pii.py.
+  # Also exposed as the environment variable THROUGHLINE_REDACT_PII=0/1.
+  redact_pii: true
+
 # --------------------------------------------------------------------
 # Scheduler (launchd / cron)
 # --------------------------------------------------------------------
