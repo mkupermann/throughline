@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: throughline-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: claude_memory
+      POSTGRES_USER: throughline
+      POSTGRES_PASSWORD: throughline_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U throughline -d claude_memory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: throughline-gui
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: claude_memory
+      PGUSER: throughline
+      PGPASSWORD: throughline_dev_password
+    ports:
+      - "8501:8501"
+    volumes:
+      - ~/.claude:/claude-host:ro
+    command: streamlit run gui/app.py --server.headless=true --server.port=8501 --server.address=0.0.0.0
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: throughline-ollama
+    restart: unless-stopped
+    profiles: ["embeddings"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  postgres_data:
+    name: throughline_postgres_data
+  ollama_data:
+    name: throughline_ollama_data

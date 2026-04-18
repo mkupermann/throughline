@@ -92,28 +92,77 @@ loop is closed — Claude writes, Claude reads, you stay in flow.
 
 ---
 
-## Quick Start (5 minutes)
+## Quick Start
+
+### Option A — Docker (one command, any platform)
 
 ```bash
-# 1. Clone
-git clone https://github.com/mkupermann/Throughline.git
-cd Throughline
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+docker compose up -d
+# open http://localhost:8501
+```
 
-# 2. Install (PostgreSQL 16 + pgvector, Python deps, launchd jobs)
+That brings up Postgres 16 + pgvector + the Streamlit GUI. The schema
+is auto-deployed on first boot. Your `~/.claude` directory is mounted
+read-only into the container so the ingestion scripts can see your
+sessions.
+
+Ingest your existing Claude Code sessions:
+
+```bash
+docker compose exec gui python3 scripts/ingest_sessions.py
+docker compose exec gui python3 scripts/scan_skills.py
+```
+
+Optional: enable local embeddings via Ollama (no API key needed):
+
+```bash
+docker compose --profile embeddings up -d
+docker compose exec ollama ollama pull nomic-embed-text
+docker compose exec gui python3 scripts/generate_embeddings.py --backend ollama
+```
+
+### Option B — Native macOS (full integration)
+
+Use this path if you want the launchd scheduler, AppleScript hooks for
+Mail/Calendar, and the context pre-loader installed in your real
+`~/.claude/settings.json`:
+
+```bash
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+
+# Installs PostgreSQL 16 + pgvector via Homebrew, creates DB,
+# deploys schema, installs launchd jobs
 ./scripts/install.sh
 
-# 3. Ingest your existing Claude Code sessions
+# Ingest
 python3 scripts/ingest_sessions.py
+python3 scripts/scan_skills.py
 
-# 4. (Optional) Extract memory chunks via Claude
+# Optional — extract memory chunks via Claude CLI
 python3 scripts/extract_memory.py
 
-# 5. Start the GUI
+# Start the GUI
 streamlit run gui/app.py
 # open http://localhost:8501
 ```
 
 The installer is idempotent — running it twice will not break an existing setup.
+
+## Screenshots
+
+> Screenshots live in [`docs/screenshots/`](docs/screenshots/).
+> PRs welcome if yours look better on your setup.
+
+| Dashboard | Calendar | Knowledge Graph |
+|---|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Calendar](docs/screenshots/calendar.png) | ![Knowledge Graph](docs/screenshots/knowledge-graph.png) |
+
+| Memory | Semantic Search | Conversation Detail |
+|---|---|---|
+| ![Memory](docs/screenshots/memory.png) | ![Semantic Search](docs/screenshots/semantic-search.png) | ![Conversation Detail](docs/screenshots/conversation-detail.png) |
 
 ---
 
