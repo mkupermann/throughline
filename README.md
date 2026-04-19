@@ -9,11 +9,17 @@
 [![GitHub Stars](https://img.shields.io/github/stars/mkupermann/throughline?style=social)](https://github.com/mkupermann/throughline/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/mkupermann/throughline)](https://github.com/mkupermann/throughline/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
+[![Live Demo](https://img.shields.io/badge/live%20demo-kupermann.com%2Fmemory%2F-b8532e.svg)](https://kupermann.com/memory/)
 
 > A local-first, self-reflecting memory database for Claude Code that ingests JSONL sessions, extracts insights, and gives Claude its own memory to query across sessions.
 
 <p align="center">
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
+</p>
+
+<p align="center">
+  <b>Try it live</b> at <a href="https://kupermann.com/memory/"><code>kupermann.com/memory/</code></a>
+  · More context at <a href="https://kupermann.com/en/"><code>kupermann.com</code></a>
 </p>
 
 ---
@@ -659,3 +665,10 @@ Released as an open-source personal AI-assistant stack for Claude Code.
 If Throughline saves you an hour of re-explaining context to Claude, consider giving it a star — it helps others find it.
 
 **[Star on GitHub](https://github.com/mkupermann/throughline)**
+
+---
+
+<p align="center">
+  Built by <a href="https://kupermann.com/en/">Michael Kupermann</a>
+  — also running live at <a href="https://kupermann.com/memory/">kupermann.com/memory/</a>
+</p>
