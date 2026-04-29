@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Preload audit row.** `scripts/context_preload.py` now writes a
+  `memory_reflections` row with `reflection_type='preload'` whenever the
+  SessionStart hook fires. The row records the chunk IDs that were injected
+  into `MEMORY_CONTEXT.md` and the project name, so users (and the agent
+  itself) can answer "what did I see at session start today?".
+- **Two MCP tools** for visibility into the audit log:
+  - `memory.recent_reflections(limit, types)` — recent rows from the
+    `memory_reflections` audit log, optionally filtered by reflection_type.
+  - `memory.preload_summary()` — the most recent `'preload'` audit row,
+    so the agent can reason about what context it was given.
+- **`THROUGHLINE_PROJECT_SCOPE_STRICT` env var.** When set, the MCP server
+  refuses the `project=""` cross-project opt-out — every call must specify
+  a project name. Enforces data isolation between client engagements at
+  policy level rather than convention.
+- **GUI-side PII redaction.** The Streamlit conversation viewer now pipes
+  raw message bodies through `throughline.pii.redact` before rendering, so
+  secrets that scrolled past in a Bash output stay out of the UI. Toggle in
+  the sidebar (`Redact secrets in views`); default ON.
+- **`evals/` harness** (scaffolded). 30-question starter set
+  (`evals/questions.jsonl`) + a runner (`evals/run_eval.py`) that asks
+  Claude each question with vs without retrieved memory, scores answers by
+  human-authored substring match, and writes a Markdown report. Method
+  documented in `evals/README.md`. Not yet run — the framework is in place,
+  the numbers are TBD.
+- **GHCR release workflow** (`.github/workflows/release.yml`). On every
+  version tag, builds a multi-arch Docker image and pushes it to
+  `ghcr.io/mkupermann/throughline:{version}`, so users can run the GUI
+  with `docker run -p 8501:8501 ghcr.io/mkupermann/throughline:v0.2.1`
+  without needing a local clone.
+
 ## [0.2.0] — 2026-04-29
 
 ### Added

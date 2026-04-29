@@ -68,6 +68,31 @@ def _trim_dict(d: dict) -> dict:
     return {k: v for k, v in d.items() if not k.startswith("embedding_")}
 
 
+def _strict_scope() -> bool:
+    """Read THROUGHLINE_PROJECT_SCOPE_STRICT at call-time so admins can flip
+    it without restarting the MCP server (it's checked per request)."""
+    return os.environ.get("THROUGHLINE_PROJECT_SCOPE_STRICT", "").lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_project(project: str | None) -> str | None:
+    """Apply project-scoping rules and the strict-mode policy guard.
+
+    - None  → fall back to basename($CLAUDE_PROJECT_DIR), or None if unset.
+    - ""    → opt out (None). Refused if STRICT mode is enabled.
+    - other → returned as-is.
+    """
+    if project is None:
+        return default_project()
+    if project == "":
+        if _strict_scope():
+            raise ValueError(
+                "THROUGHLINE_PROJECT_SCOPE_STRICT is enabled — pass an explicit "
+                "project name; cross-project search is disabled by policy."
+            )
+        return None
+    return project
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 @mcp.tool()
 def search(
@@ -85,10 +110,7 @@ def search(
                  basename if set; pass an empty string "" to search all projects.
         limit:  Max rows (default 20).
     """
-    if project is None:
-        project = default_project()
-    elif project == "":
-        project = None
+    project = _resolve_project(project)
     scope_set = set(scope or ["memory", "messages"])
 
     conn = connect()
@@ -127,10 +149,7 @@ def recall_entity(
         relation_types: Optional whitelist of relation_type values
                         (e.g. ["depends_on","decided"]).
     """
-    if project is None:
-        project = default_project()
-    elif project == "":
-        project = None
+    project = _resolve_project(project)
     hops = max(1, min(int(hops), 3))
 
     conn = connect()
@@ -258,10 +277,7 @@ def write(
         raise ValueError("content is required")
     if category not in ALLOWED_CATEGORIES:
         raise ValueError(f"category must be one of {sorted(ALLOWED_CATEGORIES)}")
-    if project is None:
-        project = default_project()
-    elif project == "":
-        project = None
+    project = _resolve_project(project)
     confidence = max(0.0, min(float(confidence), 1.0))
     tags = list(tags or [])
 
@@ -366,6 +382,96 @@ def list_projects() -> list[str]:
         conn.close()
     _log("memory.list_projects", n=len(projects))
     return projects
+
+
+@mcp.tool()
+def recent_reflections(
+    limit: int = 20,
+    types: list[str] | None = None,
+) -> list[dict]:
+    """Recent rows from memory_reflections (the audit log).
+
+    Lets the agent reason about what the reflection engine and the SessionStart
+    preload have been doing. Filter by reflection_type to focus on a class of
+    actions.
+
+    Args:
+        limit: Max rows (default 20, max 200).
+        types: Optional whitelist of reflection_type values, e.g.
+               ["preload","forget","mcp_supersede","dedup","contradiction",
+                "stale","consolidate","forget_entity"].
+    """
+    limit = max(1, min(int(limit), 200))
+    conn = connect()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if types:
+                cur.execute(
+                    """
+                    SELECT id, reflection_type, affected_chunks, action_taken,
+                           reasoning, confidence, created_at
+                    FROM memory_reflections
+                    WHERE reflection_type = ANY(%s)
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (list(types), limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, reflection_type, affected_chunks, action_taken,
+                           reasoning, confidence, created_at
+                    FROM memory_reflections
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
+                d["confidence"] = float(d["confidence"]) if d.get("confidence") is not None else None
+                rows.append(d)
+    finally:
+        conn.close()
+    _log("memory.recent_reflections", limit=limit, types=types, rows=len(rows))
+    return rows
+
+
+@mcp.tool()
+def preload_summary() -> dict:
+    """Return the most recent SessionStart preload audit row.
+
+    Lets the agent answer 'what memory chunks were injected at the start of
+    this session?'. Returns {} if the preload hook has never run, or if it
+    has run but the audit row was never written (older versions).
+    """
+    conn = connect()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, reflection_type, affected_chunks, action_taken,
+                       reasoning, confidence, created_at
+                FROM memory_reflections
+                WHERE reflection_type = 'preload'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        _log("memory.preload_summary", found=False)
+        return {}
+    d = dict(row)
+    d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
+    d["confidence"] = float(d["confidence"]) if d.get("confidence") is not None else None
+    _log("memory.preload_summary", found=True, chunks=len(d.get("affected_chunks") or []))
+    return d
 
 
 def main() -> None:

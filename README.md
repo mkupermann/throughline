@@ -110,7 +110,10 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 - **Temporal knowledge graph** — Entities, relationships, and mentions tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
 - **Self-reflecting memory** — Periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every reflection for auditability.
 - **`forget` primitive** *(v0.2.0)* — First-class cascade-delete: removes the chunk AND its embeddings AND repairs dangling `superseded_by` references in one transaction, with an audit row in `memory_reflections`. Available from the GUI (Memory chunk detail / Knowledge Graph entity detail / bulk-forget expander), as a Python helper (`scripts/forget.py`), and as the `memory.forget` MCP tool.
-- **PII / secret redaction** *(v0.2.0)* — `throughline/pii.py` runs automatically before each transcript is sent to Claude for memory and entity extraction. Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=` assignments, private-key blocks, email addresses, and home-directory usernames. Default on; disable with `THROUGHLINE_REDACT_PII=0`.
+- **PII / secret redaction** *(v0.2.0)* — runs at two distinct layers, so secrets are scrubbed both before they leave the machine and before they reach a screen:
+  - **Server-side, pre-extraction.** `throughline/pii.py` runs over each transcript before it is sent to Claude for memory or entity extraction. Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=` assignments, private-key blocks, email addresses, and home-directory usernames. Default on; disable with `THROUGHLINE_REDACT_PII=0`.
+  - **GUI-side, pre-display.** The Streamlit conversation viewer pipes raw message bodies through the same redactor before rendering, so any secret that scrolled past in a Bash output stays out of the UI. Toggle in the sidebar (`Redact secrets in views`); default ON.
+  - **Strict project isolation.** Set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` on the MCP server to refuse the `project=""` cross-project opt-out — every call must specify a project, enforcing data isolation between client engagements at policy level rather than convention.
 - **Context pre-loader hook** — `SessionStart` hook queries the DB for the current project and injects a short memory summary into the first system message.
 - **Scheduled automation** — macOS `launchd` plists for hourly ingest, daily extract, and daily backup. Linux users can wire the same scripts into systemd timers (units shipped under `systemd/`).
 
@@ -238,7 +241,7 @@ Claude Code (and any other MCP client — Claude Desktop, Cursor, Zed,
 Continue) can read and write the memory database directly, across sessions,
 without going through a skill round-trip or a shell command.
 
-Six tools are exposed:
+Eight tools are exposed:
 
 | Tool | What it does |
 |---|---|
@@ -248,6 +251,8 @@ Six tools are exposed:
 | `memory.supersede` | Mark an old chunk superseded by a new one; logs an audit row in `memory_reflections`. |
 | `memory.forget` | Cascade-delete chunks + their embeddings; logs an audit row. |
 | `memory.list_projects` | Distinct project names known to memory. |
+| `memory.recent_reflections` | Recent rows from the `memory_reflections` audit log — what the reflection engine and the preload hook have done. |
+| `memory.preload_summary` | The most recent SessionStart preload audit row: which chunks the hook injected for this project, and when. |
 
 Every tool with a `project` parameter defaults to the basename of
 `$CLAUDE_PROJECT_DIR` so a session in one project cannot accidentally

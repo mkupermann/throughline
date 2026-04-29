@@ -221,6 +221,25 @@ def main() -> int:
         md = render_markdown(project_name, project_dir, chunks, contacts)
         out_file = write_output(project_dir, md)
         print(f"[context_preload] wrote {out_file} ({len(chunks)} chunks, {len(contacts)} contacts) for project='{project_name}'")
+
+        # Audit trail: record what was injected so the user (and the agent
+        # via memory.preload_summary) can answer "what did the SessionStart
+        # hook show me at HH:MM today?".
+        try:
+            chunk_ids = [int(r["id"]) for r in chunks] + [int(r["id"]) for r in contacts]
+            if chunk_ids:
+                cur.execute(
+                    """
+                    INSERT INTO memory_reflections
+                        (reflection_type, affected_chunks, action_taken, reasoning, confidence)
+                    VALUES ('preload', %s, 'session_start', %s, 1.0)
+                    """,
+                    (chunk_ids, f"SessionStart preload for project={project_name!r} ({len(chunks)} chunks + {len(contacts)} contacts)"),
+                )
+                conn.commit()
+        except Exception as audit_err:
+            # Audit failure is non-fatal — preload already succeeded.
+            print(f"[context_preload] audit insert failed (non-fatal): {audit_err}", file=sys.stderr)
     except Exception as e:
         print(f"[context_preload] Fehler: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
