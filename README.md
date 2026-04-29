@@ -1,4 +1,4 @@
-# Throughline — Persistent long-term memory for Claude Code
+# Throughline — Persistent longterm memory for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
