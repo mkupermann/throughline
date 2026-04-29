@@ -116,8 +116,9 @@ def test_trigram_search_on_content(db_connection):
 
         cur.execute(
             "SELECT content FROM memory_chunks "
-            "WHERE content %% 'streamlit' "
-            "ORDER BY similarity(content, 'streamlit') DESC"
+            "WHERE content %% %s "
+            "ORDER BY similarity(content, %s) DESC",
+            ("streamlit", "streamlit"),
         )
         hits = [r[0] for r in cur.fetchall()]
         assert any("streamlit dashboard" in h.lower() for h in hits)
