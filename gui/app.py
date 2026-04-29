@@ -58,6 +58,38 @@ def _maybe_redact(text: str | None) -> str:
         return _pii_redact(text)
     return text
 
+
+# ── Demo mode (read-only deploys) ─────────────────────────────────────────────
+# When THROUGHLINE_DEMO_MODE=1 (or true/yes/on), every button that mutates the
+# database or spawns a pipeline subprocess against the host filesystem renders
+# as a disabled stand-in with a tooltip explaining why. The seeded demo dataset
+# on a public host (e.g. kupermann.com/memory/) stays intact, and visitors can
+# still see what each button would do without being able to break the seed.
+DEMO_MODE = os.environ.get("THROUGHLINE_DEMO_MODE", "").lower() in ("1", "true", "yes", "on")
+
+
+def _demo_disabled_button(
+    label: str,
+    *,
+    key: str | None = None,
+    use_container_width: bool = True,
+    reason: str = (
+        "Disabled in demo mode. This button would mutate the database or "
+        "spawn a pipeline subprocess. Run Throughline locally (see README) "
+        "to use it."
+    ),
+) -> bool:
+    """Render a disabled stand-in for a real button. Always returns False."""
+    st.button(
+        label,
+        key=key,
+        disabled=True,
+        use_container_width=use_container_width,
+        help=reason,
+    )
+    return False
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
@@ -885,6 +917,21 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    if DEMO_MODE:
+        st.markdown(
+            f"""<div style="margin: 8px 0 14px 0; padding: 8px 12px;
+                background: rgba(184, 83, 46, 0.12);
+                border: 1px solid rgba(184, 83, 46, 0.35);
+                border-radius: 6px; font-size: 11px; color: {TEXT_MUTED};
+                line-height: 1.45;">
+                <b style="color:{TEXT};">Demo mode</b> — buttons that would
+                mutate the database or run pipeline scripts are disabled.
+                Run Throughline locally (see <a href="https://github.com/mkupermann/throughline"
+                style="color:{ACCENT};">README</a>) to use them.
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
     if detail_type:
         if st.button("Back to overview", use_container_width=True):
             go_back()
@@ -1089,7 +1136,10 @@ elif detail_type == "memory":
                 unsafe_allow_html=True,
             )
         with head_r:
-            if st.button(
+            if DEMO_MODE:
+                _demo_disabled_button("Forget", key=f"del_m_{mc_id}",
+                    reason="Disabled in demo mode — would cascade-delete the chunk + its embeddings.")
+            elif st.button(
                 "Forget",
                 key=f"del_m_{mc_id}",
                 use_container_width=True,
@@ -1286,7 +1336,10 @@ elif detail_type == "entity":
                 unsafe_allow_html=True,
             )
         with head_r:
-            if st.button(
+            if DEMO_MODE:
+                _demo_disabled_button("Forget", key=f"del_e_{ent_id}",
+                    reason="Disabled in demo mode — would cascade-delete the entity + its mentions + relationships.")
+            elif st.button(
                 "Forget",
                 key=f"del_e_{ent_id}",
                 use_container_width=True,
@@ -2296,7 +2349,9 @@ elif page == "Semantic":
                 unsafe_allow_html=True,
             )
         with btn_col:
-            if st.button("Refresh embeddings", use_container_width=True):
+            if DEMO_MODE:
+                _demo_disabled_button("Refresh embeddings", key="refresh_embeddings_demo")
+            elif st.button("Refresh embeddings", use_container_width=True):
                 with st.spinner("Generating embeddings..."):
                     p = subprocess.run(
                         ["python3",
@@ -2507,37 +2562,45 @@ elif page == "Memory":
                 st.rerun()
 
     with st.expander("Forget chunks (cascade-delete with audit)"):
-        with st.form("bulk_forget_mc"):
-            forget_ids_raw = st.text_input(
-                "Chunk IDs",
-                placeholder="e.g. 1234, 1287, 1290 — comma- or space-separated",
-                help="Cascade-deletes each chunk and its embeddings. Logs a row in memory_reflections.",
+        if DEMO_MODE:
+            st.info(
+                "Disabled in demo mode. Locally, this expander cascade-deletes "
+                "memory chunks and their embeddings, with a mandatory reason "
+                "logged in `memory_reflections`. Run Throughline on your own "
+                "machine to use it."
             )
-            forget_reason = st.text_input(
-                "Reason (required)",
-                placeholder="Why are these being forgotten? (audit trail)",
-            )
-            if st.form_submit_button("Forget selected", type="primary"):
-                ids: list[int] = []
-                for tok in forget_ids_raw.replace(",", " ").split():
-                    try:
-                        ids.append(int(tok))
-                    except ValueError:
-                        pass
-                if not ids:
-                    st.toast("No valid IDs.", icon="⚠️")
-                elif not forget_reason.strip():
-                    st.toast("Reason is required.", icon="⚠️")
-                else:
-                    try:
-                        res = forget_chunks(_live_conn(), ids, reason=forget_reason.strip())
-                        st.toast(
-                            f"Forgotten {res['chunks']} chunk(s), "
-                            f"{res['embeddings']} embedding(s) — audit #{res['reflection_id']}"
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.toast(f"Error: {e}", icon="⚠️")
+        else:
+            with st.form("bulk_forget_mc"):
+                forget_ids_raw = st.text_input(
+                    "Chunk IDs",
+                    placeholder="e.g. 1234, 1287, 1290 — comma- or space-separated",
+                    help="Cascade-deletes each chunk and its embeddings. Logs a row in memory_reflections.",
+                )
+                forget_reason = st.text_input(
+                    "Reason (required)",
+                    placeholder="Why are these being forgotten? (audit trail)",
+                )
+                if st.form_submit_button("Forget selected", type="primary"):
+                    ids: list[int] = []
+                    for tok in forget_ids_raw.replace(",", " ").split():
+                        try:
+                            ids.append(int(tok))
+                        except ValueError:
+                            pass
+                    if not ids:
+                        st.toast("No valid IDs.", icon="⚠️")
+                    elif not forget_reason.strip():
+                        st.toast("Reason is required.", icon="⚠️")
+                    else:
+                        try:
+                            res = forget_chunks(_live_conn(), ids, reason=forget_reason.strip())
+                            st.toast(
+                                f"Forgotten {res['chunks']} chunk(s), "
+                                f"{res['embeddings']} embedding(s) — audit #{res['reflection_id']}"
+                            )
+                            st.rerun()
+                        except Exception as e:
+                            st.toast(f"Error: {e}", icon="⚠️")
 
     with st.spinner("Loading memory..."):
         df = q(
@@ -2655,7 +2718,9 @@ elif page == "Memory Health":
     with rc3:
         dry_run = st.checkbox("Dry run", value=False)
 
-    if st.button("Run reflection now", type="primary"):
+    if DEMO_MODE:
+        _demo_disabled_button("Run reflection now", key="run_reflection_demo", use_container_width=False)
+    elif st.button("Run reflection now", type="primary"):
         args = [sys.executable, SCRIPT, "--limit", str(limit_choice)]
         if mode_choice != "all":
             args += ["--mode", mode_choice]
@@ -2824,7 +2889,9 @@ elif page == "Knowledge Graph":
             f'{int(unprocessed.iloc[0]["c"])} conversations pending extraction (≥3 messages)</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Start entity extractor", type="primary"):
+        if DEMO_MODE:
+            _demo_disabled_button("Start entity extractor", key="start_entity_extractor_demo", use_container_width=False)
+        elif st.button("Start entity extractor", type="primary"):
             subprocess.Popen(
                 [sys.executable, str(SCRIPTS_ROOT / "extract_entities.py")],
                 stdout=open("/tmp/extract_entities.log", "w"), stderr=subprocess.STDOUT,
@@ -3421,7 +3488,9 @@ elif page == "Ingestion":
                 <div style="font-size:12px;color:{TEXT_MUTED};margin-bottom:14px;">Import JSONL sessions from ~/.claude/projects/</div>""",
                 unsafe_allow_html=True,
             )
-            if st.button("Run session ingestion", key="ing_sess", use_container_width=True, type="primary"):
+            if DEMO_MODE:
+                _demo_disabled_button("Run session ingestion", key="ing_sess")
+            elif st.button("Run session ingestion", key="ing_sess", use_container_width=True, type="primary"):
                 with st.spinner("Ingesting sessions..."):
                     r = subprocess.run(
                         ["python3", str(SCRIPTS_DIR / "ingest_sessions.py")],
@@ -3438,7 +3507,9 @@ elif page == "Ingestion":
                 <div style="font-size:12px;color:{TEXT_MUTED};margin-bottom:14px;">Scan SKILL.md files for metadata</div>""",
                 unsafe_allow_html=True,
             )
-            if st.button("Run skill scanner", key="ing_sk", use_container_width=True, type="primary"):
+            if DEMO_MODE:
+                _demo_disabled_button("Run skill scanner", key="ing_sk")
+            elif st.button("Run skill scanner", key="ing_sk", use_container_width=True, type="primary"):
                 with st.spinner("Scanning skills..."):
                     r = subprocess.run(
                         ["python3", str(SCRIPTS_DIR / "scan_skills.py")],
@@ -3461,7 +3532,9 @@ elif page == "Ingestion":
                 <div style="font-size:12px;color:{TEXT_MUTED};margin-bottom:14px;">{pending} conversations pending (≥5 msgs)</div>""",
                 unsafe_allow_html=True,
             )
-            if st.button("Run memory extraction", key="ing_mem", use_container_width=True, type="primary"):
+            if DEMO_MODE:
+                _demo_disabled_button("Run memory extraction", key="ing_mem")
+            elif st.button("Run memory extraction", key="ing_mem", use_container_width=True, type="primary"):
                 subprocess.Popen(
                     ["python3", str(SCRIPTS_DIR / "extract_memory.py")],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -3477,7 +3550,9 @@ elif page == "Ingestion":
                 <div style="font-size:12px;color:{TEXT_MUTED};margin-bottom:14px;">Generate titles via Claude CLI (~10s/conv)</div>""",
                 unsafe_allow_html=True,
             )
-            if st.button("Run title generation", key="ing_title", use_container_width=True, type="primary"):
+            if DEMO_MODE:
+                _demo_disabled_button("Run title generation", key="ing_title")
+            elif st.button("Run title generation", key="ing_title", use_container_width=True, type="primary"):
                 subprocess.Popen(
                     ["python3", str(SCRIPTS_DIR / "generate_titles.py")],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
