@@ -81,8 +81,12 @@ def count_embeddings(conn) -> int:
         return int(cur.fetchone()[0])
 
 
-def semantic_search(conn, query: str, limit: int = 20) -> list:
-    """Returns list of dicts: source_type, source_id, content, category, project_name, distance."""
+def semantic_search(conn, query: str, limit: int = 20, project: str | None = None) -> list:
+    """Returns list of dicts: source_type, source_id, content, category, project_name, distance.
+
+    When project is given, results are restricted at the SQL layer to that
+    project_name (memory_chunks.project_name and conversations.project_name).
+    """
     import psycopg2.extras
 
     b = get_backend()
@@ -93,6 +97,8 @@ def semantic_search(conn, query: str, limit: int = 20) -> list:
         return []
     lit = vec_literal(vec)
     col = b.column
+    mc_proj = "AND mc.project_name = %s" if project else ""
+    ms_proj = "AND c.project_name = %s" if project else ""
     sql = f"""
         WITH mc AS (
             SELECT 'memory_chunk'::text AS source_type,
@@ -107,6 +113,7 @@ def semantic_search(conn, query: str, limit: int = 20) -> list:
             JOIN memory_chunks mc ON mc.id = e.source_id
             WHERE e.source_type = 'memory_chunk'
               AND e.model = %s AND e.{col} IS NOT NULL
+              {mc_proj}
         ),
         ms AS (
             SELECT 'message'::text AS source_type,
@@ -122,6 +129,7 @@ def semantic_search(conn, query: str, limit: int = 20) -> list:
             JOIN conversations c ON c.id = m.conversation_id
             WHERE e.source_type = 'message'
               AND e.model = %s AND e.{col} IS NOT NULL
+              {ms_proj}
         )
         SELECT * FROM (
             SELECT * FROM mc
@@ -131,8 +139,15 @@ def semantic_search(conn, query: str, limit: int = 20) -> list:
         ORDER BY distance ASC
         LIMIT %s
     """
+    params: list = [lit, b.model]
+    if project:
+        params.append(project)
+    params += [lit, b.model]
+    if project:
+        params.append(project)
+    params.append(limit)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, (lit, b.model, lit, b.model, limit))
+        cur.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
 
