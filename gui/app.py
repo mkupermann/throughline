@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Memory — Premium Streamlit GUI."""
+"""Throughline — Persistent long-term memory for Claude Code (Streamlit GUI)."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _maybe_redact(text: str | None) -> str:
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Claude Memory",
+    page_title="Throughline",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -877,7 +877,7 @@ with st.sidebar:
         <div class="kai-brand">
           <div class="kai-brand-mark">C</div>
           <div class="kai-brand-text">
-            <div class="kai-brand-title">Claude Memory</div>
+            <div class="kai-brand-title">Throughline</div>
             <div class="kai-brand-sub">Knowledge Base</div>
           </div>
         </div>
