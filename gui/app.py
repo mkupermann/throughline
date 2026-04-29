@@ -3271,13 +3271,22 @@ elif page == "Scheduler":
     TASKS_YAML = Path.home() / "Library/Application Support/Claude/scheduler/config/tasks.yaml"
     LOGS_DIR = Path.home() / "Library/Application Support/Claude/scheduler/logs"
 
-    try:
-        with open(TASKS_YAML) as f:
-            tasks_cfg = yaml.safe_load(f)
-        tasks = tasks_cfg.get("tasks", [])
-    except Exception as e:
-        st.error(f"tasks.yaml could not be read: {e}")
-        tasks = []
+    tasks: list = []
+    if not TASKS_YAML.exists():
+        st.info(
+            f"Scheduler not configured. The launchd-backed claude-scheduler skill "
+            f"reads `{TASKS_YAML}` to register recurring tasks; that file does "
+            f"not exist on this machine yet, which is fine if you have not "
+            f"installed the skill. To enable scheduling, install the skill or "
+            f"create the file with `tasks: []` and add entries through this page."
+        )
+    else:
+        try:
+            with open(TASKS_YAML) as f:
+                tasks_cfg = yaml.safe_load(f) or {}
+            tasks = tasks_cfg.get("tasks", []) or []
+        except (yaml.YAMLError, OSError, PermissionError) as e:
+            st.error(f"tasks.yaml could not be read: {e}")
 
     try:
         result = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5)
@@ -3367,6 +3376,7 @@ elif page == "Scheduler":
                         for t in tasks:
                             if t.get("name") == name:
                                 t["enabled"] = False
+                        TASKS_YAML.parent.mkdir(parents=True, exist_ok=True)
                         with open(TASKS_YAML, "w") as f:
                             yaml.safe_dump({"tasks": tasks}, f, allow_unicode=True)
                         st.rerun()
@@ -3375,6 +3385,7 @@ elif page == "Scheduler":
                         for t in tasks:
                             if t.get("name") == name:
                                 t["enabled"] = True
+                        TASKS_YAML.parent.mkdir(parents=True, exist_ok=True)
                         with open(TASKS_YAML, "w") as f:
                             yaml.safe_dump({"tasks": tasks}, f, allow_unicode=True)
                         st.rerun()
