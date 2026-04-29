@@ -152,9 +152,17 @@ Three routes, pick whichever feels fastest:
 
 - **GUI → Knowledge Graph**, filter entity type `person`
 
-### I want to export my memory to Markdown
+### I want to export my memory
 
-There is no built-in export yet. A one-liner that works today:
+Built-in exports (added in v0.2.0): every list view in the GUI ships
+**CSV / Excel / PDF** download buttons above the table — Conversations,
+Memory, Memory Health (top-accessed + reflections + supersede/merge),
+Skills, Knowledge Graph entities, Projects, Prompts, every Search and
+Semantic Search scope. CSV is always available; Excel needs `openpyxl`,
+PDF needs `reportlab` (`pip install openpyxl reportlab`).
+
+For Markdown specifically, or for ad-hoc shell-piping, the SQL fallback
+still works:
 
 ```bash
 psql -d claude_memory -t -A -F"|" -c "
@@ -164,8 +172,7 @@ psql -d claude_memory -t -A -F"|" -c "
 " > memory_export.txt
 ```
 
-For structured Markdown you can pipe through a small formatter or ask
-Claude in a session:
+Then pipe through a formatter or ask Claude in a session:
 
 ```
 Read memory_export.txt and write docs/memory.md grouped by category.
@@ -184,9 +191,14 @@ python3 scripts/reflect_memory.py --mode stale
 python3 scripts/reflect_memory.py --mode consolidate
 ```
 
-Deleting a chunk entirely: **GUI → Memory → open chunk → Delete**. The
-row is hard-deleted — use the reflection log if you need to recover the
-action.
+**Forgetting** a chunk: **GUI → Memory → open chunk → Forget** (or
+**Memory page → Forget chunks expander** for bulk). This cascades
+through the embeddings, repairs any dangling `superseded_by`
+references, and writes an audit row to `memory_reflections` with the
+supplied reason — so you can prove what was removed and why. Same
+primitive is exposed as the `memory.forget(ids, reason)` MCP tool for
+agent-driven cleanup. (Pre-v0.2.0 had a plain `Delete` button that
+left embeddings behind; if you upgraded, use Forget instead.)
 
 ## Using the Claude Code skill
 
