@@ -114,11 +114,19 @@ def test_trigram_search_on_content(db_connection):
         _insert_chunk(cur, "Postgres is our system of record.", "decision")
         db_connection.commit()
 
+        # Rank all rows by trigram similarity; the streamlit-dashboard row
+        # should rank first. This avoids depending on pg_trgm.similarity_threshold
+        # (default 0.3) which is too strict for a short keyword vs long sentences.
         cur.execute(
-            "SELECT content FROM memory_chunks "
-            "WHERE content %% %s "
-            "ORDER BY similarity(content, %s) DESC",
-            ("streamlit", "streamlit"),
+            "SELECT content, similarity(content, %s) AS sim "
+            "FROM memory_chunks "
+            "ORDER BY sim DESC",
+            ("streamlit",),
         )
-        hits = [r[0] for r in cur.fetchall()]
-        assert any("streamlit dashboard" in h.lower() for h in hits)
+        hits = cur.fetchall()
+        assert hits, "expected at least one row"
+        top_content, top_sim = hits[0]
+        assert "streamlit dashboard" in top_content.lower(), (
+            f"top hit was {top_content!r} with sim={top_sim}"
+        )
+        assert top_sim > 0, f"top similarity should be >0, got {top_sim}"
