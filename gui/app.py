@@ -36,6 +36,28 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from forget import forget_chunks, forget_entity  # noqa: E402
 
+# ── PII redaction for the GUI display surface ─────────────────────────────────
+# throughline.pii.redact also runs server-side before extraction (default-on).
+# In the GUI we additionally redact the *displayed* raw message bodies, since
+# a Streamlit viewer would otherwise show any tokens that scrolled past in a
+# Bash output. Toggle in the sidebar; default ON.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    from throughline.pii import redact as _pii_redact  # noqa: E402
+except Exception:
+    _pii_redact = None  # package not installed in editable mode — toggle disabled
+
+
+def _maybe_redact(text: str | None) -> str:
+    """Apply pii.redact() to *text* iff the sidebar toggle is on AND the
+    package is importable. Falls through unchanged otherwise."""
+    if not text or _pii_redact is None:
+        return text or ""
+    if st.session_state.get("gui_redact_secrets", True):
+        return _pii_redact(text)
+    return text
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
@@ -890,6 +912,26 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
+    # PII redaction toggle for the displayed message bodies. Default ON.
+    # Distinct from THROUGHLINE_REDACT_PII (server-side, runs before
+    # extraction) — this one redacts what the *viewer* sees in raw messages.
+    if _pii_redact is None:
+        st.caption(
+            "Display redaction unavailable — install the project (`pip install -e .`) "
+            "to enable secret-redaction in raw message views."
+        )
+    else:
+        st.checkbox(
+            "Redact secrets in views",
+            value=st.session_state.get("gui_redact_secrets", True),
+            key="gui_redact_secrets",
+            help=(
+                "Apply throughline.pii.redact to raw message bodies before display. "
+                "Independent of the server-side redaction that runs before "
+                "memory/entity extraction (THROUGHLINE_REDACT_PII)."
+            ),
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DETAIL VIEWS
@@ -1016,7 +1058,7 @@ if detail_type == "conversation":
         )
         for _, m in msgs.iterrows():
             role = m["role"]
-            content = m["content"] or ""
+            content = _maybe_redact(m["content"] or "")
             if role == "user":
                 with st.chat_message("user"):
                     st.markdown(content if len(content) <= 5000 else content[:5000] + "\n\n*[truncated]*")
