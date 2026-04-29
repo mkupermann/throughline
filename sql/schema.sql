@@ -2,8 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict k4iGve5kCwmnia3ytjVw6sdgeU63VI4SURze5YbfBckUP6PSjM4FpxGp5j4N8xU
-
 -- Dumped from database version 16.13 (Homebrew)
 -- Dumped by pg_dump version 16.13 (Homebrew)
 
@@ -1028,6 +1026,4 @@ ALTER TABLE ONLY public.relationships
 --
 -- PostgreSQL database dump complete
 --
-
-\unrestrict k4iGve5kCwmnia3ytjVw6sdgeU63VI4SURze5YbfBckUP6PSjM4FpxGp5j4N8xU
 
