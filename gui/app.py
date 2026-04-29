@@ -30,6 +30,10 @@ except Exception:
 _DEFAULT_PROJECT_ROOT = Path(_GUI_DIR).resolve().parent
 PROJECT_ROOT = Path(os.environ.get("CLAUDE_MEMORY_ROOT", str(_DEFAULT_PROJECT_ROOT))).resolve()
 SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from forget import forget_chunks, forget_entity  # noqa: E402
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
@@ -889,9 +893,22 @@ elif detail_type == "memory":
                 unsafe_allow_html=True,
             )
         with head_r:
-            if st.button("Delete", key=f"del_m_{mc_id}", use_container_width=True):
-                dml("DELETE FROM memory_chunks WHERE id = %s", (mc_id,))
-                go_back()
+            if st.button(
+                "Forget",
+                key=f"del_m_{mc_id}",
+                use_container_width=True,
+                help="Cascade-delete this chunk and its embeddings, with audit row in memory_reflections.",
+            ):
+                try:
+                    res = forget_chunks(_live_conn(), [mc_id], reason="GUI memory detail forget")
+                    st.toast(
+                        f"Forgotten — {res['chunks']} chunk(s), "
+                        f"{res['embeddings']} embedding(s) — audit #{res['reflection_id']}"
+                    )
+                except Exception as e:
+                    st.toast(f"Error: {e}", icon="⚠️")
+                else:
+                    go_back()
 
         st.markdown('<hr/>', unsafe_allow_html=True)
 
@@ -1073,9 +1090,22 @@ elif detail_type == "entity":
                 unsafe_allow_html=True,
             )
         with head_r:
-            if st.button("Delete", key=f"del_e_{ent_id}", use_container_width=True):
-                dml("DELETE FROM entities WHERE id = %s", (ent_id,))
-                go_back()
+            if st.button(
+                "Forget",
+                key=f"del_e_{ent_id}",
+                use_container_width=True,
+                help="Cascade-delete this entity, its mentions and relationships, with audit row in memory_reflections.",
+            ):
+                try:
+                    res = forget_entity(_live_conn(), ent_id, reason="GUI entity detail forget")
+                    st.toast(
+                        f"Forgotten — {res['mentions']} mention(s), "
+                        f"{res['relationships']} rel(s) — audit #{res['reflection_id']}"
+                    )
+                except Exception as e:
+                    st.toast(f"Error: {e}", icon="⚠️")
+                else:
+                    go_back()
 
         st.markdown('<hr/>', unsafe_allow_html=True)
 
@@ -2234,6 +2264,39 @@ elif page == "Memory":
                 )
                 st.toast(msg)
                 st.rerun()
+
+    with st.expander("Forget chunks (cascade-delete with audit)"):
+        with st.form("bulk_forget_mc"):
+            forget_ids_raw = st.text_input(
+                "Chunk IDs",
+                placeholder="e.g. 1234, 1287, 1290 — comma- or space-separated",
+                help="Cascade-deletes each chunk and its embeddings. Logs a row in memory_reflections.",
+            )
+            forget_reason = st.text_input(
+                "Reason (required)",
+                placeholder="Why are these being forgotten? (audit trail)",
+            )
+            if st.form_submit_button("Forget selected", type="primary"):
+                ids: list[int] = []
+                for tok in forget_ids_raw.replace(",", " ").split():
+                    try:
+                        ids.append(int(tok))
+                    except ValueError:
+                        pass
+                if not ids:
+                    st.toast("No valid IDs.", icon="⚠️")
+                elif not forget_reason.strip():
+                    st.toast("Reason is required.", icon="⚠️")
+                else:
+                    try:
+                        res = forget_chunks(_live_conn(), ids, reason=forget_reason.strip())
+                        st.toast(
+                            f"Forgotten {res['chunks']} chunk(s), "
+                            f"{res['embeddings']} embedding(s) — audit #{res['reflection_id']}"
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.toast(f"Error: {e}", icon="⚠️")
 
     with st.spinner("Loading memory..."):
         df = q(
