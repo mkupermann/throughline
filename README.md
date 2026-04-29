@@ -11,7 +11,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
 [![Live Demo](https://img.shields.io/badge/live%20demo-kupermann.com%2Fmemory%2F-b8532e.svg)](https://kupermann.com/memory/)
 
-> A local-first, self-reflecting memory database for Claude Code that ingests JSONL sessions, extracts insights, and gives Claude its own memory to query across sessions.
+> Claude Code starts every new session as a blank page. Throughline keeps the thread — your decisions, contacts and gotchas carry over across sessions, all on your own machine.
 
 <p align="center">
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
@@ -26,6 +26,7 @@
 
 ## Table of Contents
 
+- [What you actually get](#what-you-actually-get)
 - [Why this exists](#why-this-exists)
 - [What it does](#what-it-does)
 - [Demo / Screenshots](#demo--screenshots)
@@ -61,28 +62,35 @@ flowchart LR
 
 ---
 
+## What you actually get
+
+Three things, in plain English. The technical sections below earn the right to exist by mapping back to one of these.
+
+**Your context survives the night.** Open Claude Code on Monday morning and the first message Claude sees already contains the decisions, contacts and gotchas from last week. You stop re-explaining "we picked Postgres over Mongo because…" every time. The agent picks up roughly where you left off, even though it has no memory of its own.
+
+**The agent remembers what it told you.** Ask "what did we decide about HNSW tuning back in March?" and Claude searches every transcript it ever wrote, not its training data. You get the actual quote, with a date and a project name attached, instead of a confident-sounding guess. The same memory layer is exposed to the agent over MCP, so when it picks up a new decision, it can write that back without you copy-pasting into a notes file.
+
+**Your sessions stay on your laptop.** No cloud account, no vendor login, no mystery telemetry. Postgres runs on your machine. API keys, tokens and home-directory paths get redacted in two places — once before transcripts leave for Claude, and again before the GUI shows them on screen — so even an over-the-shoulder reader can't grab one. If you do client work and want a hard wall between engagements, set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` and the agent literally can't search across projects.
+
+If you skipped the bullets above and want one sentence: **Claude forgets every Monday. Throughline is what makes it stop forgetting, without sending your sessions anywhere.**
+
+The rest of this README is for people who want to know how. If you only wanted the benefits, you can stop here and run `docker compose up -d` from [Quick Start](#quick-start).
+
+---
+
 ## Why this exists
 
-Claude Code has no cross-session memory. Every new session starts from scratch.
+I noticed I was re-explaining the same context to Claude every Monday morning. The pgvector vs Milvus decision from a fortnight ago. The contact I met on the rail-operator project. The subtle pattern I found at 2 a.m. on Tuesday and was sure I would remember. All of it sat in JSONL files under `~/.claude/projects/<hash>/*.jsonl` that Claude itself never read again.
 
-The CLI stores each conversation as a JSONL file under `~/.claude/projects/<hash>/*.jsonl` — but nothing reads those files back. Decisions you made last week, the contact you met three projects ago, the subtle pattern you found at 2 a.m. on Tuesday: all of it sits in flat files that Claude never sees again.
+The cost is invisible but it adds up. You re-explain context. You re-discover the same pitfall. You ask Claude to design something it already helped you design, because neither of you remember.
 
-**The cost is invisible but constant.** You re-explain context. You re-discover the same pitfall. You ask Claude to design something it already helped you design, because neither of you remember.
+`Throughline` closes that loop. It is a local PostgreSQL database that continuously ingests your Claude Code JSONL sessions, pulls out the structured stuff worth keeping (decisions, patterns, insights, contacts, error solutions), and feeds that back to Claude as a queryable skill plus an MCP server. Claude writes the sessions; Throughline reads them; you stay in flow.
 
-`Throughline` closes that loop. It is a local PostgreSQL database that continuously ingests your Claude Code JSONL sessions, extracts structured memory (decisions, patterns, insights, contacts, error solutions), and exposes that memory back to Claude as a queryable skill. Claude writes the sessions; Throughline reads them; you stay in flow.
-
-Anthropic is actively shipping memory features on claude.ai and in the API, and the long-term answer for cross-session Claude Code memory will likely come from there. Throughline is the version I built for my laptop in the meantime — a complement, not a competitor. If an official answer lands that makes this redundant, I will happily retire it.
+Anthropic is actively shipping memory features on claude.ai and in the API. The long-term answer for cross-session Claude Code memory will likely come from there, and that is the right place for it. Throughline is the version I built for my laptop in the meantime — a complement, not a competitor. If an official answer lands that makes this redundant, I will happily retire it.
 
 ## What it does
 
-- **Ingests Claude Code JSONL sessions** into a relational schema you can actually query — deduplicated by SHA-256, with full message history, tool calls, and token counts.
-- **Extracts structured memory chunks** — eight categories (decisions, patterns, insights, error solutions, contacts, preferences, project context, workflows) extracted via Claude itself. Two backends: the Anthropic API (`ANTHROPIC_API_KEY`) or the Claude Code CLI in headless mode — both documented, both produce the same structured output.
-- **Semantic search** over conversations and memory using pgvector with HNSW indexing. Works with OpenAI embeddings or fully local Ollama (`nomic-embed-text`) — no cloud required.
-- **Temporal knowledge graph** of entities (people, projects, technologies) and their relationships, tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
-- **Streamlit GUI** with 14 pages — dashboard, conversations, memory CRUD, skills, knowledge graph, calendar, semantic search, SQL console, and more.
-- **Context pre-loader hook** — a `SessionStart` hook queries the DB for the current project and injects a short, relevant memory summary before Claude's first response in each new session.
-- **Scheduled automation** via launchd (ingest hourly, extract daily at 02:00, back up daily). Linux equivalent via systemd timers or cron.
-- **Self-reflecting memory** — a periodic pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every reflection action for auditability.
+In one paragraph: a hook fires every time you open Claude Code, queries a local Postgres database for the chunks of memory most relevant to the project you are in, and writes them into a `MEMORY_CONTEXT.md` file the agent reads as part of its first message. Behind that, a launchd job (or systemd timer on Linux) re-ingests new JSONL sessions every hour, and a daily extraction pass runs the messages through Claude to pull out structured memory chunks — eight categories the project has settled on after a year of use. A separate process generates pgvector embeddings (OpenAI or local Ollama, your choice) so semantic search beats keyword search on long-tail questions. Everything is queryable from a Streamlit GUI or directly over MCP. The full feature list is in [Features](#features) below.
 
 ## Demo / Screenshots
 
@@ -108,7 +116,7 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 
 - **Semantic search** — Cosine similarity over 1536-dim OpenAI or 768-dim Ollama (`nomic-embed-text`) embeddings indexed with HNSW.
 - **Temporal knowledge graph** — Entities, relationships, and mentions tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
-- **Self-reflecting memory** — Periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every reflection for auditability.
+- **Self-reflecting memory** — A background pass catches near-duplicates and flags contradictions. When it finds a decision you've changed your mind about, it supersedes the old one and points at the new one. Every action lands in an audit log, so nothing gets quietly rewritten.
 - **`forget` primitive** *(v0.2.0)* — First-class cascade-delete: removes the chunk AND its embeddings AND repairs dangling `superseded_by` references in one transaction, with an audit row in `memory_reflections`. Available from the GUI (Memory chunk detail / Knowledge Graph entity detail / bulk-forget expander), as a Python helper (`scripts/forget.py`), and as the `memory.forget` MCP tool.
 - **PII / secret redaction** *(v0.2.0)* — runs at two distinct layers, so secrets are scrubbed both before they leave the machine and before they reach a screen:
   - **Server-side, pre-extraction.** `throughline/pii.py` runs over each transcript before it is sent to Claude for memory or entity extraction. Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=` assignments, private-key blocks, email addresses, and home-directory usernames. Default on; disable with `THROUGHLINE_REDACT_PII=0`.
@@ -687,7 +695,7 @@ Released as an open-source personal AI-assistant stack for Claude Code.
 
 ---
 
-If Throughline saves you an hour of re-explaining context to Claude, consider giving it a star — it helps others find it.
+If Throughline saves you the hour you would otherwise spend re-explaining last week's context to Claude, drop a star on the repo. It helps the next person find it.
 
 **[Star on GitHub](https://github.com/mkupermann/throughline)**
 
