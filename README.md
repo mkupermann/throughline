@@ -109,15 +109,19 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 - **Semantic search** — Cosine similarity over 1536-dim OpenAI or 768-dim Ollama (`nomic-embed-text`) embeddings indexed with HNSW.
 - **Temporal knowledge graph** — Entities, relationships, and mentions tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
 - **Self-reflecting memory** — Periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every reflection for auditability.
+- **`forget` primitive** *(v0.2.0)* — First-class cascade-delete: removes the chunk AND its embeddings AND repairs dangling `superseded_by` references in one transaction, with an audit row in `memory_reflections`. Available from the GUI (Memory chunk detail / Knowledge Graph entity detail / bulk-forget expander), as a Python helper (`scripts/forget.py`), and as the `memory.forget` MCP tool.
+- **PII / secret redaction** *(v0.2.0)* — `throughline/pii.py` runs automatically before each transcript is sent to Claude for memory and entity extraction. Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=` assignments, private-key blocks, email addresses, and home-directory usernames. Default on; disable with `THROUGHLINE_REDACT_PII=0`.
 - **Context pre-loader hook** — `SessionStart` hook queries the DB for the current project and injects a short memory summary into the first system message.
-- **Scheduled automation** — macOS `launchd` plists for hourly ingest, daily extract, and daily backup. Linux users can wire the same scripts into cron or systemd timers.
+- **Scheduled automation** — macOS `launchd` plists for hourly ingest, daily extract, and daily backup. Linux users can wire the same scripts into systemd timers (units shipped under `systemd/`).
 
 ### UI
 
 - **14 Streamlit pages** — Dashboard, Conversations, Memory, Skills, Prompts, Projects, Scheduler, Knowledge Graph, Calendar, Semantic Search, Reflections, Ingestion, SQL Console, Settings.
 - **Knowledge graph visualization** — Interactive network via `streamlit-agraph`, filterable by entity type and project.
+- **Knowledge Graph keyword search** *(v0.2.0)* — Search bar above the filters: filter the graph by one or more keywords against entity names. Toggles for **Match all words** (AND vs default OR) and **Include neighbors** (1-hop expansion so the graph renders the keyword's neighborhood). Seed matches highlighted with larger nodes, accent labels and bold borders.
+- **CSV / Excel / PDF export** *(v0.2.0)* — Three download buttons above every list view (Conversations, Memory, Memory Health, Skills, Knowledge Graph entities, Projects, Prompts, every Search and Semantic-Search scope). CSV is UTF-8 with BOM; Excel via `openpyxl`; PDF via `reportlab` (landscape A4, repeated headers, alternating row backgrounds, document title and timestamp). Missing optional deps degrade gracefully — buttons disappear and the page shows a `pip install` hint. CSV is always available.
 - **Calendar view** — Sessions plotted on a month grid, click a day to drill down.
-- **SQL console** — Free-form SQL for power users, with query history and CSV export.
+- **SQL console** — Free-form SQL for power users.
 
 ---
 
@@ -229,23 +233,39 @@ Run `make help` for the full list.
 ## MCP Integration
 
 Throughline ships a **[Model Context Protocol](https://modelcontextprotocol.io/)
-server** at [`mcp/server.py`](mcp/server.py). Register it once and Claude Code
-(and any other MCP client — Claude Desktop, Cursor, Zed, Continue) can query
-the memory database directly, without going through a skill round-trip or a
-shell command.
+server** as the [`memory_mcp/`](memory_mcp/) package. Register it once and
+Claude Code (and any other MCP client — Claude Desktop, Cursor, Zed,
+Continue) can read and write the memory database directly, across sessions,
+without going through a skill round-trip or a shell command.
+
+Six tools are exposed:
+
+| Tool | What it does |
+|---|---|
+| `memory.search` | Vector search across memory chunks and conversation messages. |
+| `memory.recall_entity` | Knowledge-graph BFS up to 3 hops from a named entity, with optional `relation_types` whitelist. |
+| `memory.write` | Append a new memory chunk (`source_type='mcp_write'`). |
+| `memory.supersede` | Mark an old chunk superseded by a new one; logs an audit row in `memory_reflections`. |
+| `memory.forget` | Cascade-delete chunks + their embeddings; logs an audit row. |
+| `memory.list_projects` | Distinct project names known to memory. |
+
+Every tool with a `project` parameter defaults to the basename of
+`$CLAUDE_PROJECT_DIR` so a session in one project cannot accidentally
+recall memory from another. Pass `project=""` to opt out and search across
+projects.
+
+Install and register:
 
 ```bash
-pip install -r mcp/requirements.txt
-claude mcp add throughline python3 "$(pwd)/mcp/server.py"
+pip install -e .
+# Then add to ~/.claude.json (or via `claude mcp add`):
+claude mcp add throughline python3 -m memory_mcp.server
 ```
 
-Ten tools are exposed: `search_memory`, `search_semantic`,
-`get_project_context`, `get_recent_conversations`, `get_conversation`,
-`list_decisions`, `find_contact`, `list_entities`, `get_entity_relations`,
-and `add_memory`.
-
-Full documentation — installation flags, Claude Desktop `json` snippet,
-example prompts, troubleshooting — lives in [`mcp/README.md`](mcp/README.md).
+The DB connection honours libpq env vars: `PGHOST`, `PGPORT`, `PGDATABASE`,
+`PGUSER`, `PGPASSWORD`. See [`memory_mcp/README.md`](memory_mcp/README.md)
+for the full Claude Desktop / Cursor JSON snippet, troubleshooting, and a
+verification command.
 
 ---
 
