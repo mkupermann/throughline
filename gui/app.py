@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -651,6 +652,159 @@ def plotly_dark_layout(fig: go.Figure, height: int = 300) -> go.Figure:
         showlegend=False,
     )
     return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPORT (CSV / Excel / PDF)
+# ══════════════════════════════════════════════════════════════════════════════
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def _df_to_excel_bytes(df: pd.DataFrame, sheet_name: str = "data") -> bytes | None:
+    try:
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as w:
+            safe = sheet_name[:31] if sheet_name else "data"
+            df.to_excel(w, sheet_name=safe, index=False)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _df_to_pdf_bytes(df: pd.DataFrame, title: str = "Export") -> bytes | None:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+        )
+    except Exception:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=10 * mm, rightMargin=10 * mm,
+        topMargin=12 * mm, bottomMargin=12 * mm,
+        title=title,
+    )
+    styles = getSampleStyleSheet()
+    cell_style = styles["BodyText"]
+    cell_style.fontSize = 7
+    cell_style.leading = 9
+
+    def _cell(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        s = str(v)
+        if len(s) > 220:
+            s = s[:217] + "..."
+        return Paragraph(
+            s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+            cell_style,
+        )
+
+    headers = [str(c) for c in df.columns]
+    data = [headers] + [[_cell(v) for v in row] for row in df.itertuples(index=False)]
+
+    avail = landscape(A4)[0] - 20 * mm
+    n_cols = max(1, len(headers))
+    col_w = [avail / n_cols] * n_cols
+
+    tbl = Table(data, colWidths=col_w, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, 0),  colors.HexColor("#161B22")),
+        ("TEXTCOLOR",    (0, 0), (-1, 0),  colors.HexColor("#C9D1D9")),
+        ("FONTNAME",     (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 0), (-1, -1), 7),
+        ("ALIGN",        (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+        ("GRID",         (0, 0), (-1, -1), 0.25, colors.HexColor("#30363D")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#F6F8FA")]),
+    ]))
+
+    title_style = styles["Heading2"]
+    title_style.fontSize = 12
+    elements = [
+        Paragraph(title, title_style),
+        Paragraph(
+            f"<font size=8 color='#6E7681'>"
+            f"{len(df)} rows · exported {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            f"</font>",
+            styles["BodyText"],
+        ),
+        Spacer(1, 6),
+        tbl,
+    ]
+    doc.build(elements)
+    return buf.getvalue()
+
+
+def render_export_buttons(
+    df: pd.DataFrame,
+    key_prefix: str,
+    filename_base: str,
+    title: str | None = None,
+) -> None:
+    """Render CSV / Excel / PDF download buttons for `df`.
+
+    Excel needs `openpyxl`; PDF needs `reportlab`. Missing deps degrade gracefully
+    — those buttons just disappear with a small caption hint.
+    """
+    if df is None or df.empty:
+        return
+
+    pretty = title or filename_base.replace("_", " ").title()
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_base = "".join(c if c.isalnum() or c in "-_" else "_" for c in filename_base)
+
+    csv_bytes = _df_to_csv_bytes(df)
+    xlsx_bytes = _df_to_excel_bytes(df, sheet_name=safe_base[:31] or "data")
+    pdf_bytes = _df_to_pdf_bytes(df, title=pretty)
+
+    available = 1 + (1 if xlsx_bytes else 0) + (1 if pdf_bytes else 0)
+    cols = st.columns([1] * available + [max(1, 8 - available)])
+    i = 0
+    cols[i].download_button(
+        label="Export CSV",
+        data=csv_bytes,
+        file_name=f"{safe_base}_{ts}.csv",
+        mime="text/csv",
+        key=f"{key_prefix}_csv",
+        use_container_width=True,
+    )
+    i += 1
+    if xlsx_bytes:
+        cols[i].download_button(
+            label="Export Excel",
+            data=xlsx_bytes,
+            file_name=f"{safe_base}_{ts}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{key_prefix}_xlsx",
+            use_container_width=True,
+        )
+        i += 1
+    if pdf_bytes:
+        cols[i].download_button(
+            label="Export PDF",
+            data=pdf_bytes,
+            file_name=f"{safe_base}_{ts}.pdf",
+            mime="application/pdf",
+            key=f"{key_prefix}_pdf",
+            use_container_width=True,
+        )
+
+    missing = []
+    if not xlsx_bytes:
+        missing.append("openpyxl (Excel)")
+    if not pdf_bytes:
+        missing.append("reportlab (PDF)")
+    if missing:
+        cols[-1].caption("Install: pip install " + " ".join(m.split()[0] for m in missing))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1891,6 +2045,11 @@ elif page == "Search":
             if not df_c.empty:
                 total_hits += len(df_c)
                 with st.expander(f"Conversations · {len(df_c)}", expanded=True):
+                    render_export_buttons(
+                        df_c, key_prefix="srch_conv_x",
+                        filename_base=f"search_conversations_{search_term}",
+                        title=f"Search · Conversations · {search_term}",
+                    )
                     sel_c = st.dataframe(
                         df_c, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -1917,6 +2076,11 @@ elif page == "Search":
             if not df_m.empty:
                 total_hits += len(df_m)
                 with st.expander(f"Messages · {len(df_m)}", expanded=True):
+                    render_export_buttons(
+                        df_m, key_prefix="srch_msg_x",
+                        filename_base=f"search_messages_{search_term}",
+                        title=f"Search · Messages · {search_term}",
+                    )
                     sel_m = st.dataframe(
                         df_m, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -1945,6 +2109,11 @@ elif page == "Search":
                 with st.expander(f"Memory · {len(df_mc)}", expanded=True):
                     df_mc_disp = df_mc.copy()
                     df_mc_disp["tags"] = df_mc_disp["tags"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+                    render_export_buttons(
+                        df_mc_disp, key_prefix="srch_mc_x",
+                        filename_base=f"search_memory_{search_term}",
+                        title=f"Search · Memory · {search_term}",
+                    )
                     sel_mc = st.dataframe(
                         df_mc_disp, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -1963,6 +2132,11 @@ elif page == "Search":
             if not df_sk.empty:
                 total_hits += len(df_sk)
                 with st.expander(f"Skills · {len(df_sk)}", expanded=True):
+                    render_export_buttons(
+                        df_sk, key_prefix="srch_sk_x",
+                        filename_base=f"search_skills_{search_term}",
+                        title=f"Search · Skills · {search_term}",
+                    )
                     sel_sk = st.dataframe(
                         df_sk, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -1981,6 +2155,11 @@ elif page == "Search":
             if not df_pr.empty:
                 total_hits += len(df_pr)
                 with st.expander(f"Projects · {len(df_pr)}", expanded=True):
+                    render_export_buttons(
+                        df_pr, key_prefix="srch_pr_x",
+                        filename_base=f"search_projects_{search_term}",
+                        title=f"Search · Projects · {search_term}",
+                    )
                     sel_pr = st.dataframe(
                         df_pr, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -2001,6 +2180,11 @@ elif page == "Search":
                 with st.expander(f"Prompts · {len(df_pt)}", expanded=True):
                     df_pt_disp = df_pt.copy()
                     df_pt_disp["tags"] = df_pt_disp["tags"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+                    render_export_buttons(
+                        df_pt_disp, key_prefix="srch_pt_x",
+                        filename_base=f"search_prompts_{search_term}",
+                        title=f"Search · Prompts · {search_term}",
+                    )
                     sel_pt = st.dataframe(
                         df_pt_disp, use_container_width=True, hide_index=True,
                         on_select="rerun", selection_mode="single-row",
@@ -2089,6 +2273,11 @@ elif page == "Semantic":
                             "similarity": f"{1 - float(r['distance']):.3f}",
                             "content": (r["content"] or "")[:200],
                         } for r in mems])
+                        render_export_buttons(
+                            df, key_prefix="sem_mems_x",
+                            filename_base=f"semantic_memory_{sem_q}",
+                            title=f"Semantic · Memory · {sem_q}",
+                        )
                         sel_m = st.dataframe(
                             df, use_container_width=True, hide_index=True,
                             on_select="rerun", selection_mode="single-row",
@@ -2116,6 +2305,11 @@ elif page == "Semantic":
                             "similarity": f"{1 - float(r['distance']):.3f}",
                             "content": (r["content"] or "")[:200],
                         } for r in msgs])
+                        render_export_buttons(
+                            df, key_prefix="sem_msgs_x",
+                            filename_base=f"semantic_messages_{sem_q}",
+                            title=f"Semantic · Messages · {sem_q}",
+                        )
                         sel_x = st.dataframe(
                             df, use_container_width=True, hide_index=True,
                             on_select="rerun", selection_mode="single-row",
@@ -2172,6 +2366,11 @@ elif page == "Conversations":
         st.markdown(
             f'<div class="kai-section-label">{len(df)} conversations · click a row to open</div>',
             unsafe_allow_html=True,
+        )
+        render_export_buttons(
+            df, key_prefix="conv_list",
+            filename_base="conversations",
+            title="Conversations",
         )
         sel = st.dataframe(
             df, use_container_width=True, hide_index=True, height=620,
@@ -2250,6 +2449,15 @@ elif page == "Memory":
     if df.empty:
         st.info("No memory chunks match.")
     else:
+        export_df = df.copy()
+        export_df["tags"] = export_df["tags"].apply(
+            lambda x: ", ".join(x) if isinstance(x, list) else (x or "")
+        )
+        render_export_buttons(
+            export_df, key_prefix="memory_list",
+            filename_base="memory_chunks",
+            title="Memory chunks",
+        )
         cols = st.columns(2)
         for i, (_, row) in enumerate(df.iterrows()):
             col = cols[i % 2]
@@ -2310,6 +2518,11 @@ elif page == "Memory Health":
     if hot.empty:
         st.info("No access tracks yet — query.py search updates these counters.")
     else:
+        render_export_buttons(
+            hot, key_prefix="mh_hot",
+            filename_base="memory_top_accessed",
+            title="Memory — Top accessed chunks",
+        )
         sel_h = st.dataframe(
             hot, use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row",
@@ -2386,9 +2599,15 @@ elif page == "Memory Health":
         refl_disp["affected_chunks"] = refl_disp["affected_chunks"].apply(
             lambda x: ",".join(str(i) for i in x) if isinstance(x, list) else ""
         )
+        refl_export = refl_disp[["id", "reflection_type", "action_taken", "n_chunks",
+                                 "affected_chunks", "confidence", "created_at", "reasoning"]]
+        render_export_buttons(
+            refl_export, key_prefix="mh_refl",
+            filename_base="memory_reflections",
+            title="Memory — Reflections",
+        )
         st.dataframe(
-            refl_disp[["id", "reflection_type", "action_taken", "n_chunks",
-                       "affected_chunks", "confidence", "created_at", "reasoning"]],
+            refl_export,
             use_container_width=True, hide_index=True,
             column_config={
                 "id":              st.column_config.NumberColumn("ID", width="small"),
@@ -2420,6 +2639,11 @@ elif page == "Memory Health":
         links_disp["merged_from"] = links_disp["merged_from"].apply(
             lambda x: ",".join(str(i) for i in x) if isinstance(x, list) and x else ""
         )
+        render_export_buttons(
+            links_disp, key_prefix="mh_links",
+            filename_base="memory_supersede_merge_links",
+            title="Memory — Supersede / Merge links",
+        )
         st.dataframe(links_disp, use_container_width=True, hide_index=True)
 
 elif page == "Skills":
@@ -2435,6 +2659,12 @@ elif page == "Skills":
         st.markdown(
             f'<div class="kai-section-label">{len(df)} skills</div>',
             unsafe_allow_html=True,
+        )
+        skills_export = df[["id", "name", "description", "use_count", "last_used", "version"]].copy()
+        render_export_buttons(
+            skills_export, key_prefix="skills_list",
+            filename_base="skills",
+            title="Skills",
         )
         cols = st.columns(3)
         for i, (_, row) in enumerate(df.iterrows()):
@@ -2496,6 +2726,31 @@ elif page == "Knowledge Graph":
             )
             st.toast("Running in background. Log: /tmp/extract_entities.log")
 
+    st.markdown('<div class="kai-section-label">Search</div>', unsafe_allow_html=True)
+    sc1, sc2, sc3 = st.columns([6, 2, 2])
+    with sc1:
+        kw_query = st.text_input(
+            "Keyword(s)",
+            placeholder="e.g. pgvector, Michael, VSE NET — comma- or space-separated",
+            key="kg_kw_query",
+            label_visibility="collapsed",
+            help="Filters the graph to entities whose name matches any keyword, plus their direct neighbors.",
+        )
+    with sc2:
+        kw_match_all = st.checkbox(
+            "Match all words",
+            value=False,
+            key="kg_kw_all",
+            help="Require every word to appear in the entity name (AND). Default: any match (OR).",
+        )
+    with sc3:
+        kw_include_neighbors = st.checkbox(
+            "Include neighbors",
+            value=True,
+            key="kg_kw_neighbors",
+            help="Also include entities directly connected to a match.",
+        )
+
     st.markdown('<div class="kai-section-label">Filters</div>', unsafe_allow_html=True)
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
@@ -2507,7 +2762,7 @@ elif page == "Knowledge Graph":
     with col_f3:
         min_mentions = st.slider("Min. mentions", 1, 20, 1)
     with col_f4:
-        max_nodes = st.slider("Max. nodes", 10, 200, 60)
+        max_nodes = st.slider("Max. nodes", 10, 400, 60)
 
     where = ["mention_count >= %s"]
     params_list = [min_mentions]
@@ -2517,15 +2772,63 @@ elif page == "Knowledge Graph":
     if sel_proj != "All":
         where.append("project_name = %s")
         params_list.append(sel_proj)
-    where_sql = "WHERE " + " AND ".join(where)
 
-    with st.spinner("Loading entities..."):
-        ents_df = q(f"""
-            SELECT id, name, entity_type, project_name, mention_count, confidence, attributes,
-                   COALESCE(last_seen, first_seen) AS sort_date
-            FROM entities {where_sql}
-            ORDER BY sort_date DESC NULLS LAST, mention_count DESC LIMIT %s
-        """, params_list + [max_nodes])
+    kw_terms: list[str] = []
+    seed_ids: list[int] = []
+    neighbor_ids: list[int] = []
+
+    if kw_query and kw_query.strip():
+        raw = [t.strip() for t in kw_query.replace(",", " ").split() if t.strip()]
+        kw_terms = list(dict.fromkeys(raw))
+
+    if kw_terms:
+        joiner = " AND " if kw_match_all else " OR "
+        kw_clause = "(" + joiner.join(["name ILIKE %s"] * len(kw_terms)) + ")"
+        kw_params = [f"%{t}%" for t in kw_terms]
+        seeds_df = q(
+            f"SELECT id FROM entities WHERE {kw_clause}",
+            kw_params,
+        )
+        seed_ids = [int(x) for x in seeds_df["id"].tolist()] if not seeds_df.empty else []
+
+        if seed_ids and kw_include_neighbors:
+            ids_tuple = f"({seed_ids[0]})" if len(seed_ids) == 1 else str(tuple(seed_ids))
+            nbr_df = q(f"""
+                SELECT to_entity AS id FROM relationships WHERE from_entity IN {ids_tuple}
+                UNION
+                SELECT from_entity AS id FROM relationships WHERE to_entity IN {ids_tuple}
+            """)
+            neighbor_ids = [int(x) for x in nbr_df["id"].tolist()] if not nbr_df.empty else []
+
+        graph_ids = sorted(set(seed_ids) | set(neighbor_ids))
+        if not graph_ids:
+            st.warning(f"No entities match {kw_terms!r}.")
+            ents_df = pd.DataFrame()
+        else:
+            ids_tuple = f"({graph_ids[0]})" if len(graph_ids) == 1 else str(tuple(graph_ids))
+            where.append(f"id IN {ids_tuple}")
+            where_sql = "WHERE " + " AND ".join(where)
+            with st.spinner(f"Loading {len(graph_ids)} matched entities..."):
+                ents_df = q(f"""
+                    SELECT id, name, entity_type, project_name, mention_count, confidence, attributes,
+                           COALESCE(last_seen, first_seen) AS sort_date
+                    FROM entities {where_sql}
+                    ORDER BY sort_date DESC NULLS LAST, mention_count DESC LIMIT %s
+                """, params_list + [max_nodes])
+            st.caption(
+                f"Search · {len(seed_ids)} match"
+                f"{'es' if len(seed_ids) != 1 else ''} for {kw_terms} "
+                f"+ {len(neighbor_ids)} neighbor{'s' if len(neighbor_ids) != 1 else ''}"
+            )
+    else:
+        where_sql = "WHERE " + " AND ".join(where)
+        with st.spinner("Loading entities..."):
+            ents_df = q(f"""
+                SELECT id, name, entity_type, project_name, mention_count, confidence, attributes,
+                       COALESCE(last_seen, first_seen) AS sort_date
+                FROM entities {where_sql}
+                ORDER BY sort_date DESC NULLS LAST, mention_count DESC LIMIT %s
+            """, params_list + [max_nodes])
 
     if ents_df.empty:
         st.info("No entities match these filters. Run the entity extractor to populate.")
@@ -2556,20 +2859,39 @@ elif page == "Knowledge Graph":
             with layout_col3:
                 label_size = st.slider("Label font size", 10, 24, 14, 1, key="kg_label_size")
 
+            seed_set = set(seed_ids) if kw_terms else set()
             nodes = []
             for _, e in ents_df.iterrows():
+                eid = int(e["id"])
+                is_seed = eid in seed_set
                 # Größere Basis-Size für bessere Lesbarkeit
                 size = min(20 + int(e["mention_count"]) * 4, 70)
+                if is_seed:
+                    size = min(size + 12, 90)
                 color = ENTITY_COLORS.get(e["entity_type"], TEXT_MUTED)
                 label = e["name"][:30] + ("..." if len(e["name"]) > 30 else "")
+                title_extra = "\n[search match]" if is_seed else ""
                 nodes.append(Node(
-                    id=str(int(e["id"])),
+                    id=str(eid),
                     label=label,
                     size=size,
                     color=color,
-                    title=f"{e['name']}\nType: {e['entity_type']}\nProject: {e['project_name'] or '—'}\nMentions: {e['mention_count']}",
+                    title=(
+                        f"{e['name']}\nType: {e['entity_type']}\n"
+                        f"Project: {e['project_name'] or '—'}\n"
+                        f"Mentions: {e['mention_count']}{title_extra}"
+                    ),
                     shape="dot",
-                    font={"size": label_size, "color": TEXT, "face": "Inter, sans-serif", "strokeWidth": 3, "strokeColor": BG},
+                    borderWidth=4 if is_seed else 1,
+                    borderWidthSelected=5 if is_seed else 2,
+                    font={
+                        "size": label_size + (2 if is_seed else 0),
+                        "color": ACCENT if is_seed else TEXT,
+                        "face": "Inter, sans-serif",
+                        "strokeWidth": 3,
+                        "strokeColor": BG,
+                        "bold": is_seed,
+                    },
                 ))
 
             edges = []
@@ -2649,6 +2971,11 @@ elif page == "Knowledge Graph":
             unsafe_allow_html=True,
         )
         display_df = ents_df[["id", "entity_type", "name", "project_name", "mention_count", "confidence"]].copy()
+        render_export_buttons(
+            display_df, key_prefix="kg_entities",
+            filename_base="knowledge_graph_entities",
+            title="Knowledge Graph — Entities",
+        )
         sel = st.dataframe(
             display_df, use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row",
@@ -2696,6 +3023,11 @@ elif page == "Projects":
         st.markdown(
             f'<div class="kai-section-label">{len(df)} projects</div>',
             unsafe_allow_html=True,
+        )
+        render_export_buttons(
+            df, key_prefix="projects_list",
+            filename_base="projects",
+            title="Projects",
         )
         cols = st.columns(2)
         for i, (_, row) in enumerate(df.iterrows()):
@@ -2787,6 +3119,15 @@ elif page == "Prompts":
         st.markdown(
             f'<div class="kai-section-label">{len(df)} prompts</div>',
             unsafe_allow_html=True,
+        )
+        prompts_export = df.copy()
+        prompts_export["tags"] = prompts_export["tags"].apply(
+            lambda x: ", ".join(x) if isinstance(x, list) else (x or "")
+        )
+        render_export_buttons(
+            prompts_export, key_prefix="prompts_list",
+            filename_base="prompts",
+            title="Prompts",
         )
         cols = st.columns(2)
         for i, (_, row) in enumerate(df.iterrows()):
