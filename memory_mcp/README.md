@@ -14,10 +14,21 @@ its own long-term memory across sessions.
 | `memory.supersede(old_id, new_id, reason)` | Mark a chunk as superseded; logs `memory_reflections.reflection_type='mcp_supersede'`. |
 | `memory.forget(ids, reason)` | Cascade-delete chunks + their embeddings; logs `memory_reflections.reflection_type='forget'`. |
 | `memory.list_projects()` | Distinct `project_name` values in `memory_chunks`. |
+| `memory.recent_reflections(limit, types)` | Recent rows from the `memory_reflections` audit log — what the reflection engine and the preload hook have been doing. |
+| `memory.preload_summary()` | The most recent SessionStart preload row: which chunks the hook injected at the start of this session, and when. |
 
 Every tool with a `project` parameter defaults to the basename of
 `$CLAUDE_PROJECT_DIR` if it is set. Pass `project=""` to opt out and search
 across projects.
+
+### Strict project isolation
+
+Set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` in the server env to refuse the
+`project=""` opt-out across the board. Calls that try to widen scope raise
+`ValueError("THROUGHLINE_PROJECT_SCOPE_STRICT is enabled — pass an explicit
+project name; cross-project search is disabled by policy.")`. Use this in
+multi-tenant or multi-client setups where data isolation is a hard
+requirement, not a per-call convention.
 
 ## Run
 
