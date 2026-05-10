@@ -1483,6 +1483,31 @@ elif page == "Dashboard":
     c3.metric("Memory chunks", f"{int(r['mem']):,}")
     c4.metric("Skills",        f"{int(r['sk']):,}")
 
+    # ── Memory Health card ────────────────────────────────────────────────
+    # Sourced from throughline.status.collect_status so the same payload
+    # backs the CLI subcommand, the memory.stats MCP tool, and this card.
+    # Avoids three drifting copies of "what does healthy memory look like?".
+    try:
+        from throughline.status import collect_status as _collect_status
+        _health = _collect_status(conn=_live_conn())
+    except Exception:
+        _health = None
+
+    if _health and _health.get("db_reachable"):
+        st.markdown("<div style='height:1.0rem;'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="kai-section-label">Memory health</div>',
+                    unsafe_allow_html=True)
+        h1, h2, h3, h4 = st.columns(4)
+        h1.metric("Embedding coverage",
+                  f"{_health.get('embedding_coverage_pct', 0.0):.1f}%")
+        h2.metric("Projects", f"{_health.get('projects_count', 0):,}")
+        h3.metric("Contradictions",
+                  f"{_health.get('contradictions_outstanding', 0):,}")
+        last_refl = _health.get("last_reflection_at") or "—"
+        if last_refl != "—":
+            last_refl = fmt_dt(last_refl, compact=True)
+        h4.metric("Last reflection", last_refl)
+
     st.markdown("<div style='height:1.5rem;'></div>", unsafe_allow_html=True)
 
     left, right = st.columns([3, 2])
