@@ -32,14 +32,40 @@ ground truth a human authored, not a second LLM's opinion.
 python evals/run_eval.py --questions evals/questions.jsonl --report evals/last_run.md
 ```
 
-Required:
+Required for a real run:
 - A populated `claude_memory` DB.
 - An OpenAI or Ollama embedding backend (for `memory.search`).
 - Either `ANTHROPIC_API_KEY` (uses the SDK) or the `claude` CLI on `$PATH`
   (used in headless `claude -p` mode). The runner auto-detects.
 
-`--dry-run` prints what would be asked without calling any LLM. Use it once
-to confirm your question set parses cleanly.
+### Smoke modes (no DB, no API key)
+
+Two flags let the harness be exercised on a fresh clone or a CI runner
+that has neither Postgres nor an API key. They are mutually exclusive.
+
+`--dry-run` parses the question file, skips retrieval entirely, and exits
+0. Use it to confirm your question set is syntactically valid before
+spending tokens.
+
+```bash
+python evals/run_eval.py --dry-run
+```
+
+`--offline-stub` runs the full pipeline (retrieval glue, grader, report
+writer) with a deterministic pretend-LLM that always emits the first
+expected substring in the with-memory condition and "I do not know" in
+the cold condition. By design it lands at **30/30 with-memory** vs
+**0/30 cold** — the goal is not to measure quality but to prove the
+plumbing is intact. The CI `eval-smoke` job runs this on every PR so the
+harness can't silently rot between releases.
+
+```bash
+python evals/run_eval.py --offline-stub --report /tmp/smoke.md
+```
+
+If the DB is unreachable, retrieval gracefully returns `[]` and the
+harness keeps going (it logs the backend error to stderr). That is by
+design: smoke tests should not fail on missing infrastructure.
 
 ## Question format
 

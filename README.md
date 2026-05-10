@@ -133,6 +133,7 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 - **CSV / Excel / PDF export** *(v0.2.0)* — Three download buttons above every list view (Conversations, Memory, Memory Health, Skills, Knowledge Graph entities, Projects, Prompts, every Search and Semantic-Search scope). CSV is UTF-8 with BOM; Excel via `openpyxl`; PDF via `reportlab` (landscape A4, repeated headers, alternating row backgrounds, document title and timestamp). Missing optional deps degrade gracefully — buttons disappear and the page shows a `pip install` hint. CSV is always available.
 - **Calendar view** — Sessions plotted on a month grid, click a day to drill down.
 - **SQL console** — Free-form SQL for power users.
+- **Memory Health card** *(unreleased)* — Four KPI tiles on the Dashboard (embedding coverage %, projects, contradictions outstanding, last reflection). Sourced from `throughline.status.collect_status` so the card, the `throughline status` CLI, and the `memory.stats` MCP tool can never drift apart.
 
 ---
 
@@ -233,6 +234,7 @@ Run `throughline <cmd> --help` for the per-command options.
 | `throughline gui` | Start the Streamlit GUI |
 | `throughline install-hooks` | Install `SessionStart` hooks into `~/.claude/settings.json` |
 | `throughline backup` | One-shot `pg_dump` backup |
+| `throughline status` | DB health snapshot (table counts, embedding coverage, last extraction/reflection). Add `--json` for a machine-readable payload. |
 | `throughline version` | Print the installed version |
 
 The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,
@@ -249,7 +251,7 @@ Claude Code (and any other MCP client — Claude Desktop, Cursor, Zed,
 Continue) can read and write the memory database directly, across sessions,
 without going through a skill round-trip or a shell command.
 
-Eight tools are exposed:
+Nine tools are exposed:
 
 | Tool | What it does |
 |---|---|
@@ -261,6 +263,7 @@ Eight tools are exposed:
 | `memory.list_projects` | Distinct project names known to memory. |
 | `memory.recent_reflections` | Recent rows from the `memory_reflections` audit log — what the reflection engine and the preload hook have done. |
 | `memory.preload_summary` | The most recent SessionStart preload audit row: which chunks the hook injected for this project, and when. |
+| `memory.stats` | Aggregate health snapshot — same payload as `throughline status --json`: table counts, embedding coverage, contradictions outstanding, last extraction/reflection timestamps. Lets the agent decide whether to query or first run a reflection pass. |
 
 Every tool with a `project` parameter defaults to the basename of
 `$CLAUDE_PROJECT_DIR` so a session in one project cannot accidentally
