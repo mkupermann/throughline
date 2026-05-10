@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`throughline backfill-projects` subcommand.** Populates the `projects`
+  table from distinct `project_name` values observed in `memory_chunks`
+  (and optionally `conversations`). Closes the gap where a fresh-ingested
+  DB referenced dozens of projects in chunks/conversations but the GUI
+  Projects page was empty because that table was only ever written by the
+  manual "New project" form. Idempotent (`ON CONFLICT (name) DO NOTHING`)
+  — re-running never clobbers manually-curated descriptions, contacts,
+  decisions or status. `--dry-run` previews; `--include-conversations`
+  widens the source net.
 - **`throughline status` subcommand.** Health snapshot of the memory DB:
   reachability, schema version (best-effort), table row counts,
   memory-chunk totals + by category, embedding coverage %, last-extraction

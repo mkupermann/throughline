@@ -199,6 +199,16 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_projects(args: argparse.Namespace) -> int:
+    """Insert one projects row for each project_name observed in memory."""
+    passthrough: list[str] = []
+    if args.include_conversations:
+        passthrough.append("--include-conversations")
+    if args.dry_run:
+        passthrough.append("--dry-run")
+    return _call_script_main("backfill_projects", passthrough)
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Print a health snapshot of the memory DB.
 
@@ -370,6 +380,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the installed Throughline version and exit.",
     )
     p.set_defaults(func=cmd_version)
+
+    # backfill-projects
+    p = sub.add_parser(
+        "backfill-projects",
+        help="Populate the projects table from observed project_name values.",
+        description=(
+            "For each distinct project_name found in memory_chunks (and "
+            "optionally conversations), insert a row into the projects "
+            "table. Existing rows are never modified — manually-curated "
+            "descriptions, contacts, decisions are safe. Idempotent: "
+            "re-running adds only the genuinely new names."
+        ),
+    )
+    p.add_argument("--include-conversations", action="store_true",
+                   help="Also pull project_names from the conversations table.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Preview what would be inserted; do not write.")
+    p.set_defaults(func=cmd_backfill_projects)
 
     # status
     p = sub.add_parser(
