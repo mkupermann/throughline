@@ -235,6 +235,7 @@ Run `throughline <cmd> --help` for the per-command options.
 | `throughline install-hooks` | Install `SessionStart` hooks into `~/.claude/settings.json` |
 | `throughline backup` | One-shot `pg_dump` backup |
 | `throughline status` | DB health snapshot (table counts, embedding coverage, last extraction/reflection). Add `--json` for a machine-readable payload. |
+| `throughline backfill-projects` | Populate the `projects` table from observed `project_name` values in memory chunks. Idempotent. Add `--include-conversations` to widen, `--dry-run` to preview. |
 | `throughline version` | Print the installed version |
 
 The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,
