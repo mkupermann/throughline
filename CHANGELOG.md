@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`throughline status` subcommand.** Health snapshot of the memory DB:
+  reachability, schema version (best-effort), table row counts,
+  memory-chunk totals + by category, embedding coverage %, last-extraction
+  / last-reflection timestamps, contradictions outstanding, project
+  count. Plain text by default; `--json [--pretty]` for machine consumers
+  (Docker healthcheck, monitoring scrapes, fresh-clone smoke). When the DB
+  is unreachable the JSON payload still parses, with `db_reachable=false`.
+- **`memory.stats` MCP tool.** Exposes the same payload as
+  `throughline status --json` over MCP, so an agent can ask "what's
+  actually in memory?" before a long retrieval session or a reflection
+  pass. One helper (`throughline.status.collect_status`) backs the CLI,
+  the MCP tool, and the GUI Memory Health card — three surfaces, one
+  source of truth.
+- **GUI Memory Health card.** Four KPI tiles below the existing Dashboard
+  metric row (embedding coverage, projects, contradictions outstanding,
+  last reflection). Hides itself silently if the DB is unreachable, so
+  intermittent-DB demo deploys keep working.
+- **Eval harness — `--offline-stub` and DB-free `--dry-run`.**
+  `--dry-run` no longer needs a DB or API key — it parses the questions
+  and exits 0. New `--offline-stub` runs the harness end-to-end with a
+  deterministic pretend-LLM (always 30/30 with-memory vs 0/30 cold), so
+  CI can prove the grader, retrieval glue, and report writer are intact
+  without spending tokens. Real eval runs use neither flag and call
+  Claude as before.
+- **CI `eval-smoke` job** (`.github/workflows/ci.yml`). Runs
+  `throughline status --json` against an unreachable Postgres and asserts
+  the payload still parses, then runs both eval modes and asserts the
+  Markdown report has the headline line. Catches the regression class
+  where the harness or status payload starts requiring a live DB or API
+  key — the failure mode that breaks fresh forks.
 - **Preload audit row.** `scripts/context_preload.py` now writes a
   `memory_reflections` row with `reflection_type='preload'` whenever the
   SessionStart hook fires. The row records the chunk IDs that were injected
