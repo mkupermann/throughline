@@ -124,6 +124,7 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
   - **Strict project isolation.** Set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` on the MCP server to refuse the `project=""` cross-project opt-out — every call must specify a project, enforcing data isolation between client engagements at policy level rather than convention.
 - **Context pre-loader hook** — `SessionStart` hook queries the DB for the current project and injects a short memory summary into the first system message.
 - **Scheduled automation** — macOS `launchd` plists for hourly ingest, daily extract, and daily backup. Linux users can wire the same scripts into systemd timers (units shipped under `systemd/`).
+- **Project-name fidelity** *(unreleased)* — Ingest reads the JSONL `cwd` field instead of reconstructing a path from the session-hash directory name (the old logic silently turned `claude-memory-db` into `claude/memory/db`). Token totals (`token_count_in` / `token_count_out`) are now read from each assistant message's `usage` block — they were unset before. Run `throughline repair-conversations` once to back-fill correct values on already-ingested rows; idempotent.
 
 ### UI
 
@@ -134,6 +135,9 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 - **Calendar view** — Sessions plotted on a month grid, click a day to drill down.
 - **SQL console** — Free-form SQL for power users.
 - **Memory Health card** *(unreleased)* — Four KPI tiles on the Dashboard (embedding coverage %, projects, contradictions outstanding, last reflection). Sourced from `throughline.status.collect_status` so the card, the `throughline status` CLI, and the `memory.stats` MCP tool can never drift apart.
+- **Projects page — sort, list, synthesised descriptions** *(unreleased)* — Sort selector (Recent activity / Created / Name / Memory volume / Status) and a **Cards | List** view toggle. Each row shows a synthesised activity blurb (`"42 chunks · 6 conversations · last active 2 weeks ago"`) when a manual description is empty.
+- **Project detail — seven tabs** *(unreleased)* — Opening a project drills into Overview, Memory, Conversations, Entities, Skills, Prompts, Reflections. Each tab carries a count and click-throughs to the artifact's own detail page; CSV/Excel/PDF export per tab.
+- **Compact token counts** *(unreleased)* — Token totals on the Conversation detail page render as `1.2 M` / `5.70 B` instead of raw 10-digit numbers.
 
 ---
 
