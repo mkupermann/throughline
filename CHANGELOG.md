@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`scripts/ingest_sessions.py` no longer mangles project paths.** It
+  now reads the JSONL `cwd` field (recorded by Claude Code on every
+  message) instead of reconstructing a path by replacing every `-` in
+  the session-hash directory name with `/`. The hash-replace approach
+  silently destroyed project names that contained a hyphen
+  (`claude-memory-db` → `claude/memory/db`). The hash-derived path is
+  retained as a fallback for older JSONL files that pre-date the
+  `cwd` field.
+- **`conversations.token_count_in` / `token_count_out` are now
+  populated by ingest.** The original ingest never set these columns;
+  every conversation showed 0 / 0 even on long-lived sessions that had
+  burned millions of tokens. The new ingest reads each assistant
+  message's `usage` block (`input_tokens` + `cache_creation_input_tokens`
+  + `cache_read_input_tokens` for input total, `output_tokens` for
+  output total) and aggregates per session.
+- **Per-message `messages.token_count` is now populated** with the same
+  per-turn total, so message-level filtering and GUI tooltips can use
+  it.
+- **GUI: token counts ≥ 10,000 render compactly.** New `fmt_count`
+  helper turns 1,200,000 into `1.2 M` and 5,700,000,000 into `5.70 B`.
+  Below 10,000 the comma-grouped integer remains for readability.
+  Applied to the Conversation detail Tokens-in / Tokens-out tiles.
+- **`scripts/repair_conversations.py` (and `throughline
+  repair-conversations`)** — one-shot repair for already-ingested rows.
+  Reads each JSONL file referenced via `ingestion_log`, groups by
+  `sessionId` (so subagent JSONLs aggregate into the parent
+  conversation rather than overwriting it), re-derives `project_path`
+  from `cwd`, and recomputes token totals. Idempotent (no-op on the
+  second run); `--dry-run` previews; `--limit N` caps for smoke runs.
+  On a real install: 3,146 conversations repaired in 6 seconds; the
+  `claude-memory-db` Conversations tab went from 0 to 2,287 rows; 4.8 B
+  input tokens / 20.9 M output tokens recovered across 2,844 conversations.
+- **Schema migration `001_widen_conversation_token_counts.sql`.**
+  `conversations.token_count_in` / `token_count_out` are now `bigint`
+  (were `integer`); long-lived sessions easily exceed 2 billion when
+  cache-creation and cache-read tokens are summed in.
 - **Project detail tabs now find conversations / skills / prompts whose
   paths contain a hyphenated repo name.** Root cause:
   `scripts/ingest_sessions.py` derives `conversations.project_path` from
