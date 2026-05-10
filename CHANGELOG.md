@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Project detail tabs now find conversations / skills / prompts whose
+  paths contain a hyphenated repo name.** Root cause:
+  `scripts/ingest_sessions.py` derives `conversations.project_path` from
+  Claude Code's session-hash by replacing every `-` with `/`, so a real
+  repo `claude-memory-db` ends up stored as `…/claude/memory/db/…` and
+  the literal string never appears anywhere in the table. The Project
+  detail tabs now match against both the literal project name AND its
+  hyphens-to-slashes variant on `project_path` / `path` / `source_path`,
+  so `claude-memory-db` now lists the 2,000+ conversations it actually
+  has instead of zero. The underlying ingest bug is tracked separately;
+  this UI logic is forwards-compatible with a future repair.
+
 ### Added
 
 - **GUI Project detail page — related-artifact tabs.** Opening a project
