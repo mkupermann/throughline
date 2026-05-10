@@ -359,7 +359,9 @@ force-directed layout.
 </p>
 
 Tracked projects with status, description and context — the rollup across all
-sessions in a given codebase.
+sessions in a given codebase. Opening a project drills into seven tabs —
+Overview, Memory, Conversations, Entities, Skills, Prompts, Reflections —
+each click-through to the underlying artifact's own detail page.
 
 ### Prompts
 

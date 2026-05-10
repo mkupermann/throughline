@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GUI Project detail page — related-artifact tabs.** Opening a project
+  now shows seven tabs: Overview (the existing edit form), Memory,
+  Conversations, Entities, Skills, Prompts, Reflections. Each tab is
+  scoped to the project's `name` — memory chunks / conversations /
+  entities by `project_name`, skills/prompts by path-component match
+  (`…/{name}/.claude/skills/…`), reflections by joining
+  `memory_reflections.affected_chunks` to chunks belonging to the
+  project. Each row is click-through to the artifact's own detail page,
+  with CSV/Excel/PDF export available per tab. Closes the gap where
+  "open this project" only let you edit a record but said nothing about
+  what was inside it.
 - **GUI Projects page — sort, list view, synthesised descriptions.** The
   page now has a Sort selector (Recent activity / Created / Name /
   Memory volume / Status) and a Cards|List view toggle. Each row joins

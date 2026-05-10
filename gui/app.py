@@ -1241,10 +1241,11 @@ elif detail_type == "project":
         st.error("Project not found.")
     else:
         r = pr.iloc[0]
-        breadcrumbs("Projects", r["name"])
+        pr_name = r["name"]
+        breadcrumbs("Projects", pr_name)
         head_l, head_r = st.columns([8, 1])
         with head_l:
-            st.markdown(f"<h1>{r['name']}</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h1>{pr_name}</h1>", unsafe_allow_html=True)
             sc = STATUS_COLORS.get(str(r["status"]), ACCENT)
             st.markdown(
                 f'<div style="margin-top:0.5rem;">{badge(str(r["status"]), sc)}</div>',
@@ -1257,29 +1258,289 @@ elif detail_type == "project":
 
         st.markdown('<hr/>', unsafe_allow_html=True)
 
-        STATUS_OPTS = ["active", "paused", "completed", "archived"]
-        with st.form(f"edit_pr_{pr_id}"):
-            ename = st.text_input("Name", value=r["name"])
-            edesc = st.text_area("Description", value=r["description"] or "", height=90)
-            estatus = st.selectbox(
-                "Status", STATUS_OPTS,
-                index=STATUS_OPTS.index(str(r["status"])) if str(r["status"]) in STATUS_OPTS else 0,
-            )
-            contacts_val = r["contacts"] if isinstance(r["contacts"], (dict, list)) else []
-            econtacts = st.text_area("Contacts (JSON)", value=json.dumps(contacts_val, indent=2), height=140)
-            decisions_val = r["decisions"] if isinstance(r["decisions"], (dict, list)) else []
-            edecisions = st.text_area("Decisions (JSON)", value=json.dumps(decisions_val, indent=2), height=140)
-            if st.form_submit_button("Save changes", type="primary"):
-                try:
-                    cj = json.loads(econtacts)
-                    dj = json.loads(edecisions)
-                    msg = dml(
-                        "UPDATE projects SET name=%s, description=%s, status=%s, contacts=%s, decisions=%s WHERE id=%s",
-                        (ename, edesc, estatus, json.dumps(cj), json.dumps(dj), pr_id),
-                    )
-                    st.toast(msg)
-                except json.JSONDecodeError as e:
-                    st.error(f"JSON error: {e}")
+        # ── Per-project artifact counts (one round-trip; used for tab labels) ──
+        # Skills/prompts use ILIKE on path/source_path because there is no
+        # foreign key — the link is "this artifact's filesystem path contains
+        # the project's name as a directory component". A loose match is OK
+        # here: false positives stay surfaced in the tab and the user can
+        # judge; false negatives would silently hide data.
+        counts_df = q(
+            """
+            SELECT
+                (SELECT count(*) FROM memory_chunks   WHERE project_name = %(name)s)                       AS chunks,
+                (SELECT count(*) FROM conversations   WHERE project_name = %(name)s)                       AS convs,
+                (SELECT count(*) FROM entities        WHERE project_name = %(name)s)                       AS entities,
+                (SELECT count(*) FROM skills          WHERE path        ILIKE '%%/' || %(name)s || '/%%'
+                                                       OR path        ILIKE '%%/' || %(name)s)             AS skills,
+                (SELECT count(*) FROM prompts         WHERE source_path ILIKE '%%/' || %(name)s || '/%%'
+                                                       OR source_path ILIKE '%%/' || %(name)s)             AS prompts,
+                (SELECT count(*) FROM memory_reflections r
+                 WHERE EXISTS (
+                     SELECT 1 FROM unnest(r.affected_chunks) ac
+                     JOIN memory_chunks mc ON mc.id = ac
+                     WHERE mc.project_name = %(name)s
+                 ))                                                                                        AS reflections
+            """,
+            {"name": pr_name},
+        )
+        c = counts_df.iloc[0]
+        n_chunks = int(c["chunks"])
+        n_convs = int(c["convs"])
+        n_ents = int(c["entities"])
+        n_skills = int(c["skills"])
+        n_prompts = int(c["prompts"])
+        n_refl = int(c["reflections"])
+
+        tab_overview, tab_mem, tab_conv, tab_ent, tab_sk, tab_pr, tab_refl = st.tabs([
+            "Overview",
+            f"Memory ({n_chunks})",
+            f"Conversations ({n_convs})",
+            f"Entities ({n_ents})",
+            f"Skills ({n_skills})",
+            f"Prompts ({n_prompts})",
+            f"Reflections ({n_refl})",
+        ])
+
+        with tab_overview:
+            STATUS_OPTS = ["active", "paused", "completed", "archived"]
+            with st.form(f"edit_pr_{pr_id}"):
+                ename = st.text_input("Name", value=pr_name)
+                edesc = st.text_area("Description", value=r["description"] or "", height=90)
+                estatus = st.selectbox(
+                    "Status", STATUS_OPTS,
+                    index=STATUS_OPTS.index(str(r["status"])) if str(r["status"]) in STATUS_OPTS else 0,
+                )
+                contacts_val = r["contacts"] if isinstance(r["contacts"], (dict, list)) else []
+                econtacts = st.text_area("Contacts (JSON)", value=json.dumps(contacts_val, indent=2), height=140)
+                decisions_val = r["decisions"] if isinstance(r["decisions"], (dict, list)) else []
+                edecisions = st.text_area("Decisions (JSON)", value=json.dumps(decisions_val, indent=2), height=140)
+                if st.form_submit_button("Save changes", type="primary"):
+                    try:
+                        cj = json.loads(econtacts)
+                        dj = json.loads(edecisions)
+                        msg = dml(
+                            "UPDATE projects SET name=%s, description=%s, status=%s, contacts=%s, decisions=%s WHERE id=%s",
+                            (ename, edesc, estatus, json.dumps(cj), json.dumps(dj), pr_id),
+                        )
+                        st.toast(msg)
+                    except json.JSONDecodeError as e:
+                        st.error(f"JSON error: {e}")
+
+        with tab_mem:
+            if n_chunks == 0:
+                st.info("No memory chunks reference this project.")
+            else:
+                df_mem = q(
+                    """
+                    SELECT id, category::text AS category, content, confidence, created_at
+                    FROM memory_chunks
+                    WHERE project_name = %s
+                    ORDER BY created_at DESC NULLS LAST
+                    LIMIT 500
+                    """,
+                    (pr_name,),
+                )
+                render_export_buttons(
+                    df_mem, key_prefix=f"proj_{pr_id}_mem",
+                    filename_base=f"{pr_name}_memory",
+                    title=f"Memory chunks · {pr_name}",
+                )
+                sel = st.dataframe(
+                    df_mem, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "id":         st.column_config.NumberColumn("ID", width="small"),
+                        "category":   st.column_config.TextColumn("Category", width="small"),
+                        "content":    st.column_config.TextColumn("Content", width="large"),
+                        "confidence": st.column_config.NumberColumn("Conf", format="%.2f", width="small"),
+                        "created_at": st.column_config.DatetimeColumn("Created", width="small"),
+                    },
+                    key=f"df_proj_{pr_id}_mem",
+                )
+                if sel.selection and sel.selection.rows:
+                    go_to_detail("memory_chunk", int(df_mem.iloc[sel.selection.rows[0]]["id"]))
+                if n_chunks > 500:
+                    st.caption(f"Showing newest 500 of {n_chunks:,}.")
+
+        with tab_conv:
+            if n_convs == 0:
+                st.info("No conversations recorded for this project. "
+                        "(`project_name` on conversations is set at ingest time — "
+                        "older sessions may be stored under a different basename.)")
+            else:
+                df_conv = q(
+                    """
+                    SELECT id, summary, model, started_at, message_count
+                    FROM conversations
+                    WHERE project_name = %s
+                    ORDER BY started_at DESC NULLS LAST
+                    LIMIT 500
+                    """,
+                    (pr_name,),
+                )
+                render_export_buttons(
+                    df_conv, key_prefix=f"proj_{pr_id}_conv",
+                    filename_base=f"{pr_name}_conversations",
+                    title=f"Conversations · {pr_name}",
+                )
+                sel = st.dataframe(
+                    df_conv, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "id":            st.column_config.NumberColumn("ID", width="small"),
+                        "summary":       st.column_config.TextColumn("Summary", width="large"),
+                        "model":         st.column_config.TextColumn("Model", width="small"),
+                        "started_at":    st.column_config.DatetimeColumn("Started", width="small"),
+                        "message_count": st.column_config.NumberColumn("Messages", width="small"),
+                    },
+                    key=f"df_proj_{pr_id}_conv",
+                )
+                if sel.selection and sel.selection.rows:
+                    go_to_detail("conversation", int(df_conv.iloc[sel.selection.rows[0]]["id"]))
+                if n_convs > 500:
+                    st.caption(f"Showing newest 500 of {n_convs:,}.")
+
+        with tab_ent:
+            if n_ents == 0:
+                st.info("No knowledge-graph entities tagged with this project.")
+            else:
+                df_ent = q(
+                    """
+                    SELECT id, entity_type, name, mention_count, confidence
+                    FROM entities
+                    WHERE project_name = %s
+                    ORDER BY mention_count DESC NULLS LAST, name
+                    LIMIT 500
+                    """,
+                    (pr_name,),
+                )
+                render_export_buttons(
+                    df_ent, key_prefix=f"proj_{pr_id}_ent",
+                    filename_base=f"{pr_name}_entities",
+                    title=f"Entities · {pr_name}",
+                )
+                sel = st.dataframe(
+                    df_ent, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "id":            st.column_config.NumberColumn("ID", width="small"),
+                        "entity_type":   st.column_config.TextColumn("Type", width="small"),
+                        "name":          st.column_config.TextColumn("Name", width="large"),
+                        "mention_count": st.column_config.NumberColumn("Mentions", width="small"),
+                        "confidence":    st.column_config.NumberColumn("Conf", format="%.2f", width="small"),
+                    },
+                    key=f"df_proj_{pr_id}_ent",
+                )
+                if sel.selection and sel.selection.rows:
+                    go_to_detail("entity", int(df_ent.iloc[sel.selection.rows[0]]["id"]))
+
+        with tab_sk:
+            if n_skills == 0:
+                st.info("No skills found whose path contains this project name. "
+                        "(Match is by directory component, e.g. `…/{name}/.claude/skills/…`.)")
+            else:
+                df_sk = q(
+                    """
+                    SELECT id, name, version, description, use_count, last_used, path
+                    FROM skills
+                    WHERE path ILIKE '%/' || %s || '/%' OR path ILIKE '%/' || %s
+                    ORDER BY use_count DESC NULLS LAST, name
+                    LIMIT 500
+                    """,
+                    (pr_name, pr_name),
+                )
+                render_export_buttons(
+                    df_sk, key_prefix=f"proj_{pr_id}_sk",
+                    filename_base=f"{pr_name}_skills",
+                    title=f"Skills · {pr_name}",
+                )
+                sel = st.dataframe(
+                    df_sk, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "id":          st.column_config.NumberColumn("ID", width="small"),
+                        "name":        st.column_config.TextColumn("Name", width="medium"),
+                        "version":     st.column_config.TextColumn("Ver", width="small"),
+                        "description": st.column_config.TextColumn("Description", width="large"),
+                        "use_count":   st.column_config.NumberColumn("Uses", width="small"),
+                        "last_used":   st.column_config.DatetimeColumn("Last used", width="small"),
+                        "path":        st.column_config.TextColumn("Path", width="medium"),
+                    },
+                    key=f"df_proj_{pr_id}_sk",
+                )
+                if sel.selection and sel.selection.rows:
+                    go_to_detail("skill", int(df_sk.iloc[sel.selection.rows[0]]["id"]))
+
+        with tab_pr:
+            if n_prompts == 0:
+                st.info("No prompts found whose source path contains this project name.")
+            else:
+                df_pr = q(
+                    """
+                    SELECT id, name, category, content, usage_count, source_path
+                    FROM prompts
+                    WHERE source_path ILIKE '%/' || %s || '/%' OR source_path ILIKE '%/' || %s
+                    ORDER BY usage_count DESC NULLS LAST, name
+                    LIMIT 500
+                    """,
+                    (pr_name, pr_name),
+                )
+                render_export_buttons(
+                    df_pr, key_prefix=f"proj_{pr_id}_pr",
+                    filename_base=f"{pr_name}_prompts",
+                    title=f"Prompts · {pr_name}",
+                )
+                sel = st.dataframe(
+                    df_pr, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    column_config={
+                        "id":          st.column_config.NumberColumn("ID", width="small"),
+                        "name":        st.column_config.TextColumn("Name", width="medium"),
+                        "category":    st.column_config.TextColumn("Category", width="small"),
+                        "content":     st.column_config.TextColumn("Content", width="large"),
+                        "usage_count": st.column_config.NumberColumn("Uses", width="small"),
+                        "source_path": st.column_config.TextColumn("Path", width="medium"),
+                    },
+                    key=f"df_proj_{pr_id}_pr",
+                )
+                if sel.selection and sel.selection.rows:
+                    go_to_detail("prompt", int(df_pr.iloc[sel.selection.rows[0]]["id"]))
+
+        with tab_refl:
+            if n_refl == 0:
+                st.info("No reflection events have touched this project's chunks.")
+            else:
+                df_refl = q(
+                    """
+                    SELECT DISTINCT r.id, r.reflection_type, r.action_taken,
+                           r.reasoning, r.confidence, r.created_at
+                    FROM memory_reflections r
+                    JOIN unnest(r.affected_chunks) AS ac ON TRUE
+                    JOIN memory_chunks mc ON mc.id = ac
+                    WHERE mc.project_name = %s
+                    ORDER BY r.created_at DESC
+                    LIMIT 500
+                    """,
+                    (pr_name,),
+                )
+                render_export_buttons(
+                    df_refl, key_prefix=f"proj_{pr_id}_refl",
+                    filename_base=f"{pr_name}_reflections",
+                    title=f"Reflections · {pr_name}",
+                )
+                st.dataframe(
+                    df_refl, use_container_width=True, hide_index=True,
+                    column_config={
+                        "id":              st.column_config.NumberColumn("ID", width="small"),
+                        "reflection_type": st.column_config.TextColumn("Type", width="small"),
+                        "action_taken":    st.column_config.TextColumn("Action", width="small"),
+                        "reasoning":       st.column_config.TextColumn("Reasoning", width="large"),
+                        "confidence":      st.column_config.NumberColumn("Conf", format="%.2f", width="small"),
+                        "created_at":      st.column_config.DatetimeColumn("When", width="small"),
+                    },
+                )
+                if n_refl > 500:
+                    st.caption(f"Showing newest 500 of {n_refl:,}.")
 
 elif detail_type == "prompt":
     p_id = int(detail_id)
