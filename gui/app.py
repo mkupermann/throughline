@@ -1259,29 +1259,48 @@ elif detail_type == "project":
         st.markdown('<hr/>', unsafe_allow_html=True)
 
         # ── Per-project artifact counts (one round-trip; used for tab labels) ──
-        # Skills/prompts use ILIKE on path/source_path because there is no
-        # foreign key — the link is "this artifact's filesystem path contains
-        # the project's name as a directory component". A loose match is OK
-        # here: false positives stay surfaced in the tab and the user can
-        # judge; false negatives would silently hide data.
+        # Conversations / skills / prompts are matched against project_path /
+        # path / source_path with TWO patterns: the literal project name and
+        # the hyphens-to-slashes variant. The variant exists because
+        # `scripts/ingest_sessions.py` derives project_path from Claude Code's
+        # session-hash by replacing every '-' with '/', so a real repo like
+        # `claude-memory-db` ends up stored as `.../claude/memory/db/...`.
+        # The literal-name match handles correctly-stored data; the variant
+        # match catches the hyphen-mangled rows. Both run as one ILIKE OR.
+        # See `scripts/ingest_sessions.py:255` — the underlying bug is being
+        # tracked separately; this UI logic is forwards-compatible.
+        name_var = pr_name.replace("-", "/")
         counts_df = q(
             """
             SELECT
-                (SELECT count(*) FROM memory_chunks   WHERE project_name = %(name)s)                       AS chunks,
-                (SELECT count(*) FROM conversations   WHERE project_name = %(name)s)                       AS convs,
-                (SELECT count(*) FROM entities        WHERE project_name = %(name)s)                       AS entities,
-                (SELECT count(*) FROM skills          WHERE path        ILIKE '%%/' || %(name)s || '/%%'
-                                                       OR path        ILIKE '%%/' || %(name)s)             AS skills,
-                (SELECT count(*) FROM prompts         WHERE source_path ILIKE '%%/' || %(name)s || '/%%'
-                                                       OR source_path ILIKE '%%/' || %(name)s)             AS prompts,
+                (SELECT count(*) FROM memory_chunks
+                    WHERE project_name = %(name)s)                                   AS chunks,
+                (SELECT count(*) FROM conversations
+                    WHERE project_name = %(name)s
+                       OR project_path ILIKE '%%/' || %(name)s || '/%%'
+                       OR project_path ILIKE '%%/' || %(name)s
+                       OR project_path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR project_path ILIKE '%%/' || %(var)s)                       AS convs,
+                (SELECT count(*) FROM entities
+                    WHERE project_name = %(name)s)                                   AS entities,
+                (SELECT count(*) FROM skills
+                    WHERE path ILIKE '%%/' || %(name)s || '/%%'
+                       OR path ILIKE '%%/' || %(name)s
+                       OR path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR path ILIKE '%%/' || %(var)s)                               AS skills,
+                (SELECT count(*) FROM prompts
+                    WHERE source_path ILIKE '%%/' || %(name)s || '/%%'
+                       OR source_path ILIKE '%%/' || %(name)s
+                       OR source_path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR source_path ILIKE '%%/' || %(var)s)                        AS prompts,
                 (SELECT count(*) FROM memory_reflections r
                  WHERE EXISTS (
                      SELECT 1 FROM unnest(r.affected_chunks) ac
                      JOIN memory_chunks mc ON mc.id = ac
                      WHERE mc.project_name = %(name)s
-                 ))                                                                                        AS reflections
+                 ))                                                                  AS reflections
             """,
-            {"name": pr_name},
+            {"name": pr_name, "var": name_var},
         )
         c = counts_df.iloc[0]
         n_chunks = int(c["chunks"])
@@ -1365,18 +1384,24 @@ elif detail_type == "project":
         with tab_conv:
             if n_convs == 0:
                 st.info("No conversations recorded for this project. "
-                        "(`project_name` on conversations is set at ingest time — "
-                        "older sessions may be stored under a different basename.)")
+                        "Conversations are matched on `project_path`; if your "
+                        "repo's name contains hyphens that have been mangled "
+                        "to slashes by the ingest pipeline, check the JSONL "
+                        "files for the real `cwd` value.")
             else:
                 df_conv = q(
                     """
-                    SELECT id, summary, model, started_at, message_count
+                    SELECT id, summary, model, started_at, message_count, project_path
                     FROM conversations
-                    WHERE project_name = %s
+                    WHERE project_name = %(name)s
+                       OR project_path ILIKE '%%/' || %(name)s || '/%%'
+                       OR project_path ILIKE '%%/' || %(name)s
+                       OR project_path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR project_path ILIKE '%%/' || %(var)s
                     ORDER BY started_at DESC NULLS LAST
                     LIMIT 500
                     """,
-                    (pr_name,),
+                    {"name": pr_name, "var": name_var},
                 )
                 render_export_buttons(
                     df_conv, key_prefix=f"proj_{pr_id}_conv",
@@ -1392,6 +1417,7 @@ elif detail_type == "project":
                         "model":         st.column_config.TextColumn("Model", width="small"),
                         "started_at":    st.column_config.DatetimeColumn("Started", width="small"),
                         "message_count": st.column_config.NumberColumn("Messages", width="small"),
+                        "project_path":  st.column_config.TextColumn("Path", width="medium"),
                     },
                     key=f"df_proj_{pr_id}_conv",
                 )
@@ -1436,18 +1462,22 @@ elif detail_type == "project":
 
         with tab_sk:
             if n_skills == 0:
-                st.info("No skills found whose path contains this project name. "
-                        "(Match is by directory component, e.g. `…/{name}/.claude/skills/…`.)")
+                st.info("No project-local skills found. Match is by directory "
+                        "component (`…/<name>/.claude/skills/…`); skills under "
+                        "`~/.claude/skills/` are global and shown on the Skills page.")
             else:
                 df_sk = q(
                     """
                     SELECT id, name, version, description, use_count, last_used, path
                     FROM skills
-                    WHERE path ILIKE '%/' || %s || '/%' OR path ILIKE '%/' || %s
+                    WHERE path ILIKE '%%/' || %(name)s || '/%%'
+                       OR path ILIKE '%%/' || %(name)s
+                       OR path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR path ILIKE '%%/' || %(var)s
                     ORDER BY use_count DESC NULLS LAST, name
                     LIMIT 500
                     """,
-                    (pr_name, pr_name),
+                    {"name": pr_name, "var": name_var},
                 )
                 render_export_buttons(
                     df_sk, key_prefix=f"proj_{pr_id}_sk",
@@ -1473,17 +1503,22 @@ elif detail_type == "project":
 
         with tab_pr:
             if n_prompts == 0:
-                st.info("No prompts found whose source path contains this project name.")
+                st.info("No prompts found whose source path contains this project name. "
+                        "`prompts.source_path` typically points at a project's "
+                        "`CLAUDE.md`; if your repo doesn't have one, none will be linked.")
             else:
                 df_pr = q(
                     """
                     SELECT id, name, category, content, usage_count, source_path
                     FROM prompts
-                    WHERE source_path ILIKE '%/' || %s || '/%' OR source_path ILIKE '%/' || %s
+                    WHERE source_path ILIKE '%%/' || %(name)s || '/%%'
+                       OR source_path ILIKE '%%/' || %(name)s
+                       OR source_path ILIKE '%%/' || %(var)s  || '/%%'
+                       OR source_path ILIKE '%%/' || %(var)s
                     ORDER BY usage_count DESC NULLS LAST, name
                     LIMIT 500
                     """,
-                    (pr_name, pr_name),
+                    {"name": pr_name, "var": name_var},
                 )
                 render_export_buttons(
                     df_pr, key_prefix=f"proj_{pr_id}_pr",
