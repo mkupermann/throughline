@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import pytest
 
+# The ``mcp`` SDK is not a hard dependency of the project — only the MCP
+# server entry point needs it. Skip these tests when it isn't installed,
+# so the unit-tests CI job (which installs only requirements.txt +
+# requirements-dev.txt) stays green.
+pytest.importorskip("mcp")
+
 
 def test_memory_stats_tool_is_registered():
     from memory_mcp import server
