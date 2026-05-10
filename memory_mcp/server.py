@@ -474,6 +474,34 @@ def preload_summary() -> dict:
     return d
 
 
+@mcp.tool()
+def stats() -> dict:
+    """Aggregate health snapshot of the memory DB.
+
+    Returns the same payload as ``throughline status --json``:
+    table row counts, memory chunks total + by category, embedding
+    coverage percent, last-extraction / last-reflection timestamps,
+    outstanding contradictions, and project count. Use this before a
+    long retrieval session to know what's actually in memory, or before
+    a reflection pass to see if there's a backlog.
+    """
+    from throughline.status import collect_status
+    conn = connect()
+    try:
+        payload = collect_status(conn=conn)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    _log(
+        "memory.stats",
+        chunks=payload.get("chunks_total", 0),
+        coverage=payload.get("embedding_coverage_pct", 0.0),
+    )
+    return payload
+
+
 def main() -> None:
     mcp.run()
 

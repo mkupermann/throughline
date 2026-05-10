@@ -131,6 +131,41 @@ jobs:
           psql -h localhost -U postgres -c "CREATE DATABASE claude_memory;"
           psql -h localhost -U postgres -d claude_memory -f sql/schema.sql
 
+  eval-smoke:
+    name: Eval harness + status (no DB, no API)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+      - name: throughline status --json (DB-unreachable, must still parse)
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "1"
+          PGUSER: nobody
+          PGCONNECT_TIMEOUT: "1"
+        run: |
+          set -e
+          python3 -m throughline status --json --pretty | tee /tmp/status.json
+          python3 -c "import json,sys; d=json.load(open('/tmp/status.json'));\
+            assert d['db_reachable'] is False, d;\
+            assert 'table_row_counts' in d;\
+            assert 'chunks_by_category' in d;\
+            print('status payload shape OK')"
+      - name: evals --dry-run (parses 30 questions, no DB, no LLM)
+        run: python3 evals/run_eval.py --dry-run
+      - name: evals --offline-stub (deterministic, no DB, no LLM)
+        run: |
+          python3 evals/run_eval.py --offline-stub --report /tmp/eval_smoke.md
+          test -s /tmp/eval_smoke.md
+          grep -q "with-memory recall" /tmp/eval_smoke.md
+
   markdown-lint:
     name: Markdown links and formatting
     runs-on: ubuntu-latest

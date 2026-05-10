@@ -478,7 +478,7 @@ High-level data flow:
 5. **Reflection pass** merges duplicates, supersedes outdated decisions, logs every action.
 6. **Consumers** (GUI, skill, hooks, CLI) read from the same schema.
 
-A full deep-dive lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+A full deep-dive lives in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -501,7 +501,7 @@ Eleven tables, three enum types, one view, and HNSW + GIN + trigram indexes.
 | `memory_reflections` | Audit log of dedup, consolidation, and contradiction events |
 | `ingestion_log` | SHA-256 hashes of every ingested file (dedup) |
 
-Full DDL in [`sql/schema.sql`](sql/schema.sql). Conceptual model in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Full DDL in [`sql/schema.sql`](sql/schema.sql). Conceptual model in [`docs/architecture.md`](docs/architecture.md).
 
 ### Memory categories
 
@@ -649,7 +649,7 @@ embeddings. Full methodology and reproduction steps in
 
 ## Roadmap
 
-- [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`mcp/`](mcp/)
+- [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`memory_mcp/`](memory_mcp/)
 - [x] Linux scheduler support via `systemd/` timers — shipped in v0.1.0
 - [x] PII / secret-redaction pass before extraction (API keys, tokens,
       emails, home-directory paths); default on, see

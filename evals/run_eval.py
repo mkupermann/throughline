@@ -54,15 +54,21 @@ for sub in ("scripts", "gui", str(_REPO)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-try:
-    from memory_mcp.server import search as memory_search  # type: ignore
-except Exception as e:
-    print(
-        f"[eval] could not import memory_mcp.server.search ({e}). "
-        "Run `pip install -e .` from the repo root and try again.",
-        file=sys.stderr,
-    )
-    raise
+# memory_search is imported lazily inside retrieve(): the harness must be
+# usable in --dry-run / --offline-stub modes on a CI runner that has no DB,
+# no Postgres client, and no `mcp` SDK installed. Importing at module level
+# fights every one of those.
+memory_search = None  # type: ignore[assignment]
+
+
+def _load_memory_search():
+    """Import memory_mcp.server.search only when really needed."""
+    global memory_search
+    if memory_search is not None:
+        return memory_search
+    from memory_mcp.server import search as _search  # type: ignore
+    memory_search = _search
+    return memory_search
 
 
 @dataclass
@@ -118,13 +124,31 @@ def call_claude(prompt: str, *, model: str = "sonnet") -> str:
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
 def retrieve(query: str, *, project: str | None, top_k: int) -> list[dict]:
-    """Call memory.search the same way the MCP server does at runtime."""
-    return memory_search(
-        query=query,
-        scope=["memory", "messages"],
-        project=project if project else "",
-        limit=top_k,
-    )
+    """Call memory.search the same way the MCP server does at runtime.
+
+    Best-effort: returns ``[]`` if memory_mcp / Postgres / pgvector are
+    unavailable, so ``--offline-stub`` and ``--dry-run`` callers can keep
+    going. The retrieval *failure* is interesting in CI smoke tests
+    (proves the runner doesn't crash), and a real eval run would notice
+    immediately because every question would miss.
+    """
+    try:
+        search_fn = _load_memory_search()
+    except Exception as e:
+        print(f"[eval] retrieval skipped — memory_search unavailable: {e}",
+              file=sys.stderr)
+        return []
+    try:
+        return search_fn(
+            query=query,
+            scope=["memory", "messages"],
+            project=project if project else "",
+            limit=top_k,
+        )
+    except Exception as e:
+        print(f"[eval] retrieval skipped — backend error: {e}",
+              file=sys.stderr)
+        return []
 
 
 def format_context(rows: list[dict]) -> str:
@@ -173,8 +197,23 @@ def load_questions(path: Path) -> list[Question]:
     return out
 
 
-def run_one(q: Question, *, top_k: int, dry_run: bool) -> tuple[Result, Result]:
-    rows = retrieve(q.question, project=q.scope_project, top_k=top_k)
+def _stub_answer(q: Question, *, with_memory: bool) -> str:
+    """Deterministic offline pretend-LLM.
+
+    The with-memory condition emits the first expected_substring (so
+    grade() hits) — pretending memory let it answer. The cold condition
+    emits a fixed "I do not know" so it misses. Lets CI prove that the
+    grader, retrieval glue, and reporting all work without network.
+    """
+    if with_memory and q.expected_substrings:
+        return f"[offline-stub] {q.expected_substrings[0]}"
+    return "[offline-stub] I do not know."
+
+
+def run_one(q: Question, *, top_k: int, dry_run: bool, offline_stub: bool) -> tuple[Result, Result]:
+    rows: list[dict] = []
+    if not dry_run:
+        rows = retrieve(q.question, project=q.scope_project, top_k=top_k)
     retrieved_ids = [int(r["source_id"]) for r in rows if r.get("source_id") is not None]
     ctx = format_context(rows)
 
@@ -190,14 +229,18 @@ def run_one(q: Question, *, top_k: int, dry_run: bool) -> tuple[Result, Result]:
     )
 
     if dry_run:
-        print(f"[{q.id}] would retrieve {len(rows)} chunks; would prompt twice.")
+        print(f"[{q.id}] would retrieve top-{top_k}; would prompt twice (dry-run).")
         return (
             Result(qid=q.id, condition="with-memory", answer="(dry-run)", retrieved_ids=retrieved_ids),
             Result(qid=q.id, condition="cold", answer="(dry-run)"),
         )
 
-    with_ans = call_claude(with_prompt)
-    cold_ans = call_claude(cold_prompt)
+    if offline_stub:
+        with_ans = _stub_answer(q, with_memory=True)
+        cold_ans = _stub_answer(q, with_memory=False)
+    else:
+        with_ans = call_claude(with_prompt)
+        cold_ans = call_claude(cold_prompt)
 
     with_hit, with_match = grade(with_ans, q.expected_substrings)
     cold_hit, cold_match = grade(cold_ans, q.expected_substrings)
@@ -251,19 +294,40 @@ def main() -> int:
     ap.add_argument("--report", type=Path, default=_HERE / "last_run.md")
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument("--dry-run", action="store_true",
-                    help="Retrieve only — do not call any LLM.")
+                    help=("Parse questions, do not retrieve, do not call any "
+                          "LLM. Exits 0 if the file parses. Safe in CI "
+                          "without DB or API keys."))
+    ap.add_argument("--offline-stub", action="store_true",
+                    help=("Use a deterministic pretend-LLM that always emits "
+                          "the first expected substring in the with-memory "
+                          "condition and 'I do not know.' in the cold "
+                          "condition. Smoke-tests the harness end-to-end "
+                          "without spending tokens or needing API keys."))
     args = ap.parse_args()
+
+    if args.dry_run and args.offline_stub:
+        print("[eval] --dry-run and --offline-stub are mutually exclusive.",
+              file=sys.stderr)
+        return 2
 
     qs = load_questions(args.questions)
     if not qs:
         print(f"[eval] no questions loaded from {args.questions}", file=sys.stderr)
         return 2
 
-    print(f"[eval] {len(qs)} question(s); top-k={args.top_k}; dry_run={args.dry_run}")
+    print(
+        f"[eval] {len(qs)} question(s); top-k={args.top_k}; "
+        f"dry_run={args.dry_run}; offline_stub={args.offline_stub}"
+    )
     pairs: list[tuple[Result, Result]] = []
     for q in qs:
         try:
-            pair = run_one(q, top_k=args.top_k, dry_run=args.dry_run)
+            pair = run_one(
+                q,
+                top_k=args.top_k,
+                dry_run=args.dry_run,
+                offline_stub=args.offline_stub,
+            )
         except Exception as e:
             print(f"[eval] {q.id}: failed — {e}", file=sys.stderr)
             pair = (
@@ -275,9 +339,11 @@ def main() -> int:
         if not args.dry_run:
             print(f"  {q.id}: with={'✓' if w.hit else '✗'}  cold={'✓' if c.hit else '✗'}")
 
-    if not args.dry_run:
-        write_report(args.report, qs, pairs)
-        print(f"[eval] wrote {args.report}")
+    if args.dry_run:
+        return 0
+
+    write_report(args.report, qs, pairs)
+    print(f"[eval] wrote {args.report}")
 
     return 0
 

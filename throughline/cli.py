@@ -15,19 +15,18 @@ Run ``throughline --help`` for the full list of commands.
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from throughline import __version__
 from throughline.config import repo_root
 
-
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
 # --------------------------------------------------------------------------- #
+
 
 def _ensure_scripts_on_path() -> Path:
     """Add ``<repo>/scripts`` to ``sys.path`` so scripts are importable.
@@ -100,6 +99,7 @@ def _run_shell_script(script_name: str, args: list[str]) -> int:
 # --------------------------------------------------------------------------- #
 # Subcommand handlers                                                         #
 # --------------------------------------------------------------------------- #
+
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Ingest Claude Code JSONL sessions (or Windsurf plans with --windsurf)."""
@@ -177,8 +177,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         return subprocess.call(cmd)
     except FileNotFoundError:
         print(
-            "ERROR: `streamlit` not installed. Install with: "
-            "pip install -e . (core deps include Streamlit).",
+            "ERROR: `streamlit` not installed. Install with: " "pip install -e . (core deps include Streamlit).",
             file=sys.stderr,
         )
         return 2
@@ -200,9 +199,30 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print a health snapshot of the memory DB.
+
+    Plain text by default; ``--json`` emits a JSON object on stdout.
+    Exit code is 0 if the DB was reachable, 2 if not — except in
+    ``--json`` mode, where exit is always 0 so machine consumers can
+    parse the payload (which carries ``db_reachable`` itself).
+    """
+    import json
+
+    from throughline.status import collect_status, format_human
+
+    payload = collect_status()
+    if args.json:
+        print(json.dumps(payload, indent=2 if args.pretty else None, sort_keys=True))
+        return 0
+    print(format_human(payload))
+    return 0 if payload.get("db_reachable") else 2
+
+
 # --------------------------------------------------------------------------- #
 # Parser construction                                                         #
 # --------------------------------------------------------------------------- #
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -279,12 +299,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Use --backend=ollama for a fully local setup."
         ),
     )
-    p.add_argument("--backend", choices=["openai", "ollama", "auto"], default="auto",
-                   help="Embeddings backend. Default: auto (OpenAI if key set, else Ollama).")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Only process N pending entries (useful for smoke tests).")
-    p.add_argument("--only", choices=["memory_chunk", "message", "both"], default=None,
-                   help="Restrict to a single source type.")
+    p.add_argument(
+        "--backend",
+        choices=["openai", "ollama", "auto"],
+        default="auto",
+        help="Embeddings backend. Default: auto (OpenAI if key set, else Ollama).",
+    )
+    p.add_argument("--limit", type=int, default=None, help="Only process N pending entries (useful for smoke tests).")
+    p.add_argument(
+        "--only", choices=["memory_chunk", "message", "both"], default=None, help="Restrict to a single source type."
+    )
     p.set_defaults(func=cmd_embed)
 
     # search
@@ -294,8 +318,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Cosine-distance search via pgvector. Requires prior `throughline embed`.",
     )
     p.add_argument("query", help="Free-form search string.")
-    p.add_argument("--backend", choices=["openai", "ollama", "auto"], default="auto",
-                   help="Embeddings backend. Must match how embeddings were generated.")
+    p.add_argument(
+        "--backend",
+        choices=["openai", "ollama", "auto"],
+        default="auto",
+        help="Embeddings backend. Must match how embeddings were generated.",
+    )
     p.add_argument("--limit", type=int, default=None, help="Max number of results to return.")
     p.set_defaults(func=cmd_search)
 
@@ -304,12 +332,14 @@ def build_parser() -> argparse.ArgumentParser:
         "reflect",
         help="Run the self-reflecting memory engine (dedup / contradictions / stale / consolidate).",
     )
-    p.add_argument("--mode", choices=["dedup", "contradictions", "stale", "consolidate"],
-                   default=None, help="Run a single mode instead of all four.")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Don't write any changes to the database.")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Cap on pair-comparisons per mode.")
+    p.add_argument(
+        "--mode",
+        choices=["dedup", "contradictions", "stale", "consolidate"],
+        default=None,
+        help="Run a single mode instead of all four.",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Don't write any changes to the database.")
+    p.add_argument("--limit", type=int, default=None, help="Cap on pair-comparisons per mode.")
     p.set_defaults(func=cmd_reflect)
 
     # gui
@@ -317,8 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
         "gui",
         help="Start the Streamlit GUI (requires `streamlit` on PATH).",
     )
-    p.add_argument("--port", type=int, default=None,
-                   help="Port for the Streamlit server (default: 8501).")
+    p.add_argument("--port", type=int, default=None, help="Port for the Streamlit server (default: 8501).")
     p.set_defaults(func=cmd_gui)
 
     # install-hooks
@@ -341,6 +370,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the installed Throughline version and exit.",
     )
     p.set_defaults(func=cmd_version)
+
+    # status
+    p = sub.add_parser(
+        "status",
+        help="Health snapshot of the memory DB (table counts, embedding coverage, …).",
+        description=(
+            "Reports DB reachability, schema version, table row counts, "
+            "memory-chunk totals by category, embedding coverage, and the "
+            "timestamps of the most recent extraction and reflection runs. "
+            "Use --json for a machine-readable payload."
+        ),
+    )
+    p.add_argument("--json", action="store_true", help="Emit a JSON object on stdout instead of human text.")
+    p.add_argument("--pretty", action="store_true", help="With --json, indent the output (default: single line).")
+    p.set_defaults(func=cmd_status)
 
     return parser
 
