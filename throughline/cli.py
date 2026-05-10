@@ -209,6 +209,16 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
     return _call_script_main("backfill_projects", passthrough)
 
 
+def cmd_repair_conversations(args: argparse.Namespace) -> int:
+    """Re-read JSONL files and repair conversations.project_path / token counts."""
+    passthrough: list[str] = []
+    if args.dry_run:
+        passthrough.append("--dry-run")
+    if args.limit is not None:
+        passthrough += ["--limit", str(args.limit)]
+    return _call_script_main("repair_conversations", passthrough)
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Print a health snapshot of the memory DB.
 
@@ -398,6 +408,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true",
                    help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
+
+    # repair-conversations
+    p = sub.add_parser(
+        "repair-conversations",
+        help="Re-read JSONL files; fix project_path + token counts on existing rows.",
+        description=(
+            "Repairs two ingest bugs in existing conversations rows: "
+            "(1) project_path was hyphen-mangled (claude-memory-db → "
+            "claude/memory/db); (2) token_count_in / token_count_out were "
+            "never populated. Reads each file referenced via ingestion_log "
+            "and updates the matching row. Idempotent."
+        ),
+    )
+    p.add_argument("--dry-run", action="store_true",
+                   help="Preview changes; do not write.")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Cap on number of files processed.")
+    p.set_defaults(func=cmd_repair_conversations)
 
     # status
     p = sub.add_parser(
