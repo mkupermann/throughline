@@ -118,8 +118,29 @@ def parse_timestamp(ts_str: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _first_cwd(entries: list[dict[str, Any]]) -> str | None:
+    """Return the first non-empty ``cwd`` field across all entries.
+
+    Claude Code records the user's working directory on most entries.
+    Reading it directly is correct; the historical alternative —
+    reconstructing a path from the on-disk session-hash directory name
+    by replacing every ``-`` with ``/`` — silently mangles any project
+    whose name contains a hyphen (``claude-memory-db`` → ``claude/memory/db``).
+    """
+    for e in entries:
+        cwd = e.get("cwd")
+        if isinstance(cwd, str) and cwd.strip():
+            return cwd
+    return None
+
+
 def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
-    """Ingestiert eine einzelne JSONL-Datei. Gibt die Anzahl eingefügter Messages zurück."""
+    """Ingestiert eine einzelne JSONL-Datei. Gibt die Anzahl eingefügter Messages zurück.
+
+    The ``project_path`` arg is now a *fallback*: if any JSONL entry
+    carries a real ``cwd`` we prefer that. The fallback is still useful
+    for older JSONL files that pre-date the cwd field.
+    """
     entries: list[dict[str, Any]] = []
     with open(filepath, "r", encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
@@ -140,6 +161,11 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
     if not msg_entries:
         return 0
 
+    # Prefer the JSONL-recorded cwd over the hash-derived fallback.
+    real_cwd = _first_cwd(entries)
+    if real_cwd:
+        project_path = real_cwd
+
     # Session-Metadaten aus erstem Eintrag
     first = msg_entries[0]
     session_id = first.get("sessionId")
@@ -159,17 +185,28 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
             model = m["model"]
             break
 
+    # Pre-aggregate token usage so the conversations row carries totals on
+    # the way in. The Anthropic usage shape on assistant messages is
+    #   {input_tokens, output_tokens, cache_creation_input_tokens,
+    #    cache_read_input_tokens, …}
+    # The historically stored "token_count_in" maps to the sum of all input
+    # categories (raw + cache-creation + cache-read), since each is a real
+    # cost-incurring input read; "token_count_out" is just output_tokens.
+    conv_tokens_in, conv_tokens_out = _sum_usage(msg_entries)
+
     # Conversation einfügen
     try:
         cursor.execute("""
             INSERT INTO conversations (session_id, project_path, model, entrypoint, git_branch,
-                                       started_at, ended_at, message_count, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                       started_at, ended_at, message_count,
+                                       token_count_in, token_count_out, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (session_id) DO NOTHING
             RETURNING id
         """, (
             session_id, project_path, model, entrypoint, git_branch,
-            started_at, ended_at, len(msg_entries), Json({})
+            started_at, ended_at, len(msg_entries),
+            conv_tokens_in, conv_tokens_out, Json({})
         ))
         result = cursor.fetchone()
         if result is None:
@@ -195,18 +232,22 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
         parent_uuid = entry.get("parentUuid")
         is_sidechain = entry.get("isSidechain", False)
         msg_model = msg.get("model")
+        # Per-message token total: assistant messages carry usage; user
+        # messages don't. Storing total (in+out) so a single column reads
+        # as "tokens this turn cost".
+        msg_token_count = _per_message_total(msg)
 
         try:
             cursor.execute("""
                 INSERT INTO messages (conversation_id, uuid, parent_uuid, role, content,
                                      content_blocks, tool_calls, tool_name, is_sidechain,
-                                     model, created_at, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                     model, token_count, created_at, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 conv_id, uuid_val, parent_uuid, role, content,
                 Json(msg.get("content")) if isinstance(msg.get("content"), list) else None,
                 Json(tool_calls) if tool_calls else None,
-                tool_name, is_sidechain, msg_model, ts, Json({})
+                tool_name, is_sidechain, msg_model, msg_token_count, ts, Json({})
             ))
             msg_count += 1
         except Exception as e:
@@ -214,6 +255,39 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
             continue
 
     return msg_count
+
+
+def _per_message_total(message: dict[str, Any]) -> int | None:
+    """Per-message tokens total. None when no usage is present."""
+    u = message.get("usage")
+    if not isinstance(u, dict):
+        return None
+    return (
+        int(u.get("input_tokens") or 0)
+        + int(u.get("cache_creation_input_tokens") or 0)
+        + int(u.get("cache_read_input_tokens") or 0)
+        + int(u.get("output_tokens") or 0)
+    ) or None
+
+
+def _sum_usage(entries: list[dict[str, Any]]) -> tuple[int, int]:
+    """Sum input vs output tokens across all assistant messages in entries."""
+    in_total = 0
+    out_total = 0
+    for e in entries:
+        m = e.get("message")
+        if not isinstance(m, dict):
+            continue
+        u = m.get("usage")
+        if not isinstance(u, dict):
+            continue
+        in_total += (
+            int(u.get("input_tokens") or 0)
+            + int(u.get("cache_creation_input_tokens") or 0)
+            + int(u.get("cache_read_input_tokens") or 0)
+        )
+        out_total += int(u.get("output_tokens") or 0)
+    return in_total, out_total
 
 
 def main() -> None:

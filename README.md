@@ -236,6 +236,7 @@ Run `throughline <cmd> --help` for the per-command options.
 | `throughline backup` | One-shot `pg_dump` backup |
 | `throughline status` | DB health snapshot (table counts, embedding coverage, last extraction/reflection). Add `--json` for a machine-readable payload. |
 | `throughline backfill-projects` | Populate the `projects` table from observed `project_name` values in memory chunks. Idempotent. Add `--include-conversations` to widen, `--dry-run` to preview. |
+| `throughline repair-conversations` | Re-read JSONL files and repair existing `conversations` rows: `project_path` (was hyphen-mangled by older ingest) and `token_count_in` / `token_count_out` (were never populated). Idempotent. |
 | `throughline version` | Print the installed version |
 
 The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,

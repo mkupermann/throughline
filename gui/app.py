@@ -660,6 +660,32 @@ def fmt_dt(x, compact: bool = False) -> str:
         return "—"
 
 
+def fmt_count(x) -> str:
+    """Humanise a count: 0 → '0', 1234 → '1,234', 1.3M / 4.2K / 5.7B.
+
+    Used wherever the raw integer is too noisy (token totals on the
+    Conversation detail page hit the billions on long-lived sessions).
+    Threshold for compaction is 10,000 — below that the comma-grouped
+    integer is still readable.
+    """
+    if x is None:
+        return "—"
+    try:
+        if isinstance(x, float) and pd.isna(x):
+            return "—"
+        n = int(x)
+    except Exception:
+        return "—"
+    abs_n = abs(n)
+    if abs_n < 10_000:
+        return f"{n:,}"
+    if abs_n < 1_000_000:
+        return f"{n/1_000:.1f} K"
+    if abs_n < 1_000_000_000:
+        return f"{n/1_000_000:.1f} M"
+    return f"{n/1_000_000_000:.2f} B"
+
+
 def badge(text: str, color: str = ACCENT) -> str:
     return (f'<span style="display:inline-block;padding:2px 8px;border-radius:99px;'
             f'font-size:10.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;'
@@ -1018,9 +1044,9 @@ if detail_type == "conversation":
         st.markdown('<hr/>', unsafe_allow_html=True)
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Messages", int(c["message_count"] or 0))
-        m2.metric("Tokens in", int(c["token_count_in"] or 0))
-        m3.metric("Tokens out", int(c["token_count_out"] or 0))
+        m1.metric("Messages", fmt_count(c["message_count"]))
+        m2.metric("Tokens in", fmt_count(c["token_count_in"]))
+        m3.metric("Tokens out", fmt_count(c["token_count_out"]))
         m4.metric("Started", fmt_dt(c["started_at"]))
 
         with st.expander("Edit title"):
