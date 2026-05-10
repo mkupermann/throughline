@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GUI Projects page — sort, list view, synthesised descriptions.** The
+  page now has a Sort selector (Recent activity / Created / Name /
+  Memory volume / Status) and a Cards|List view toggle. Each row joins
+  live activity stats from `memory_chunks` + `conversations` so projects
+  with empty `description` fields render a synthesised blurb (e.g.
+  *"42 chunks · 6 conversations · last active 2 weeks ago"*) instead of
+  a static "No description". Sorting by Recent activity makes the page
+  useful immediately after `throughline backfill-projects`, when every
+  curated row has the same `created_at`.
 - **`throughline backfill-projects` subcommand.** Populates the `projects`
   table from distinct `project_name` values observed in `memory_chunks`
   (and optionally `conversations`). Closes the gap where a fresh-ingested
