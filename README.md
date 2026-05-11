@@ -1,4 +1,4 @@
-# Throughline — Persistent longterm memory for Claude Code
+# Throughline — Persistent longterm memory for your local AI tools
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -11,7 +11,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
 [![Live Demo](https://img.shields.io/badge/live%20demo-kupermann.com%2Fmemory%2F-b8532e.svg)](https://kupermann.com/memory/)
 
-> Claude Code starts every new session as a blank page. Throughline keeps the thread — your decisions, contacts and gotchas carry over across sessions, all on your own machine.
+> Claude Code, Codex, Hermes, Continue, Windsurf — they all start every new session as a blank page. Throughline keeps the thread across all of them: one searchable memory of your decisions, contacts and gotchas, on your own machine, regardless of which tool you happened to use that day.
 
 <p align="center">
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
@@ -46,18 +46,28 @@
 
 ```mermaid
 flowchart LR
-    C["Claude Code<br/>sessions"]
+    subgraph Sources ["local AI tools (extensible)"]
+        C["Claude Code"]
+        X["OpenAI<br/>Codex CLI"]
+        H["Hermes<br/>Agent"]
+        N["Continue.dev"]
+        W["Windsurf"]
+    end
     T["Throughline<br/>Postgres + pgvector"]
     G["Streamlit GUI"]
     M["MCP Server"]
     S["Claude Code Skill"]
 
-    C -- JSONL --> T
-    T -- memory context --> C
+    C -- "JSONL" --> T
+    X -- "rollout JSONL" --> T
+    H -- "session JSON" --> T
+    N -- "session JSON" --> T
+    W -- "plans MD" --> T
+    T -- "memory context" --> C
     T --- G
     T --- M
-    S -- query --> T
-    M -- tools --> S
+    S -- "query" --> T
+    M -- "tools" --> S
 ```
 
 ---
@@ -66,13 +76,13 @@ flowchart LR
 
 Three things, in plain English. The technical sections below earn the right to exist by mapping back to one of these.
 
-**Your context survives the night.** Open Claude Code on Monday morning and the first message Claude sees already contains the decisions, contacts and gotchas from last week. You stop re-explaining "we picked Postgres over Mongo because…" every time. The agent picks up roughly where you left off, even though it has no memory of its own.
+**Your context survives the night, regardless of which agent you used.** You investigated a bug in Claude Code yesterday, switched to Codex this morning, and went back to Hermes after lunch. Throughline doesn't care — they all wrote into different JSON / JSONL files on your laptop, Throughline ingested them all, and the first prompt of your next session already contains the decisions, contacts and gotchas from across every tool. You stop re-explaining "we picked Postgres over Mongo because…" every time, and you stop losing context just because you happened to be in a different CLI.
 
-**The agent remembers what it told you.** Ask "what did we decide about HNSW tuning back in March?" and Claude searches every transcript it ever wrote, not its training data. You get the actual quote, with a date and a project name attached, instead of a confident-sounding guess. The same memory layer is exposed to the agent over MCP, so when it picks up a new decision, it can write that back without you copy-pasting into a notes file.
+**The agent remembers what it (or any other agent) told you.** Ask "what did we decide about HNSW tuning back in March?" and the answer comes from every transcript any of your local AI tools ever wrote — not from any one tool's training data. You get the actual quote, with a date, a project name, and the originating tool attached, instead of a confident-sounding guess. The same memory layer is exposed over MCP, so any MCP-aware client (Claude Code, Cursor, Zed, Continue, Claude Desktop) can read and write the unified history without you copy-pasting into a notes file.
 
-**Your sessions stay on your laptop.** No cloud account, no vendor login, no mystery telemetry. Postgres runs on your machine. API keys, tokens and home-directory paths get redacted in two places — once before transcripts leave for Claude, and again before the GUI shows them on screen — so even an over-the-shoulder reader can't grab one. If you do client work and want a hard wall between engagements, set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` and the agent literally can't search across projects.
+**Your sessions stay on your laptop.** No cloud account, no vendor login, no mystery telemetry. Postgres runs on your machine. API keys, tokens and home-directory paths get redacted in two places — once before transcripts leave for memory extraction, and again before the GUI shows them on screen — so even an over-the-shoulder reader can't grab one. If you do client work and want a hard wall between engagements, set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` and the agent literally can't search across projects.
 
-If you skipped the bullets above and want one sentence: **Claude forgets every Monday. Throughline is what makes it stop forgetting, without sending your sessions anywhere.**
+If you skipped the bullets above and want one sentence: **Every local AI tool forgets between sessions. Throughline makes the lot of them stop forgetting, without sending your sessions anywhere.**
 
 The rest of this README is for people who want to know how. If you only wanted the benefits, you can stop here and run `docker compose up -d` from [Quick Start](#quick-start).
 
@@ -80,17 +90,17 @@ The rest of this README is for people who want to know how. If you only wanted t
 
 ## Why this exists
 
-I noticed I was re-explaining the same context to Claude every Monday morning. The pgvector vs Milvus decision from a fortnight ago. The contact I met on the rail-operator project. The subtle pattern I found at 2 a.m. on Tuesday and was sure I would remember. All of it sat in JSONL files under `~/.claude/projects/<hash>/*.jsonl` that Claude itself never read again.
+I noticed I was re-explaining the same context every Monday morning — first to Claude Code, then to Codex when I switched tools mid-week, then to Hermes when I tried it for an evening side-project. The pgvector vs Milvus decision from a fortnight ago. The contact I met on the rail-operator project. The subtle pattern I found at 2 a.m. on Tuesday and was sure I would remember. All of it sat in JSONL / JSON files scattered under `~/.claude/projects/`, `~/.codex/sessions/`, `~/.hermes/sessions/`, `~/.continue/sessions/` — each tool only ever reading its own folder, and only the most recent file in it.
 
-The cost is invisible but it adds up. You re-explain context. You re-discover the same pitfall. You ask Claude to design something it already helped you design, because neither of you remember.
+The cost is invisible but it adds up. You re-explain context. You re-discover the same pitfall. You ask one of your agents to design something a different one already helped you design two weeks ago, because none of them remember and they don't see each other's notes.
 
-`Throughline` closes that loop. It is a local PostgreSQL database that continuously ingests your Claude Code JSONL sessions, pulls out the structured stuff worth keeping (decisions, patterns, insights, contacts, error solutions), and feeds that back to Claude as a queryable skill plus an MCP server. Claude writes the sessions; Throughline reads them; you stay in flow.
+`Throughline` closes that loop. It is a local PostgreSQL database with a pluggable adapter framework: one small module per tool (Claude Code, Codex, Hermes, Continue, Windsurf — and easy to add more) ingests that tool's session files into a shared `conversations` + `messages` schema. A daily pass pulls out the structured stuff worth keeping (decisions, patterns, insights, contacts, error solutions). The result is fed back to whichever agent you're using next — as a Claude Code skill, an MCP server (any MCP client works), or as raw context injected at session start. The agents write the sessions; Throughline reads them all; you stay in flow.
 
-Anthropic is actively shipping memory features on claude.ai and in the API. The long-term answer for cross-session Claude Code memory will likely come from there, and that is the right place for it. Throughline is the version I built for my laptop in the meantime — a complement, not a competitor. If an official answer lands that makes this redundant, I will happily retire it.
+Anthropic, OpenAI, and others are actively shipping memory features in their respective products. The long-term per-vendor answer will likely come from there, and that is the right place for it. Throughline is the *cross-vendor* version I built for my laptop in the meantime — a complement, not a competitor. If an official cross-tool answer lands that makes this redundant, I will happily retire it.
 
 ## What it does
 
-In one paragraph: a hook fires every time you open Claude Code, queries a local Postgres database for the chunks of memory most relevant to the project you are in, and writes them into a `MEMORY_CONTEXT.md` file the agent reads as part of its first message. Behind that, a launchd job (or systemd timer on Linux) re-ingests new JSONL sessions every hour, and a daily extraction pass runs the messages through Claude to pull out structured memory chunks — eight categories the project has settled on after a year of use. A separate process generates pgvector embeddings (OpenAI or local Ollama, your choice) so semantic search beats keyword search on long-tail questions. Everything is queryable from a Streamlit GUI or directly over MCP. The full feature list is in [Features](#features) below.
+In one paragraph: a hook fires every time you open Claude Code, queries a local Postgres database for the chunks of memory most relevant to the project you are in, and writes them into a `MEMORY_CONTEXT.md` file the agent reads as part of its first message. Behind that, a launchd job (or systemd timer on Linux) runs `throughline ingest --all` every hour, which walks every registered source adapter (Claude Code, Codex, Hermes, Continue, Windsurf — extensible) and pulls in any session files that changed. A daily extraction pass runs the messages through Claude to pull out structured memory chunks — eight categories the project has settled on after a year of use. A separate process generates pgvector embeddings (OpenAI or local Ollama, your choice) so semantic search beats keyword search on long-tail questions. Everything is queryable from a Streamlit GUI or directly over MCP, which makes the unified memory available to any MCP-aware client (Claude Code, Cursor, Zed, Continue, Claude Desktop). The full feature list is in [Features](#features) below.
 
 ## Demo / Screenshots
 
@@ -107,7 +117,7 @@ See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
 
 ### Core
 
-- **Session ingestion** — Reads JSONL files from `~/.claude/projects/`, deduplicates by SHA-256 hash, parses messages, tool calls, token counts, and timestamps.
+- **Multi-source session ingestion** — Pluggable adapters pull conversations from every local AI tool you use: Claude Code (`~/.claude/projects/*.jsonl`), OpenAI Codex CLI (`~/.codex/sessions/<date>/rollout-*.jsonl`), Hermes Agent (`~/.hermes/sessions/*.json`), Continue.dev (`~/.continue/sessions/*.json`), Windsurf plans (`~/.windsurf/plans/*.md`), plus any third-party adapter registered via the `throughline.adapters` entry point. Deduplicated by SHA-256 hash, with delete-and-replace on content change so live sessions never duplicate. See [Sources (ingest adapters)](#sources-ingest-adapters) for the table and the "Adding a new adapter" recipe.
 - **Memory extraction** — Sends conversation windows through Claude and stores structured chunks (one of eight categories) with confidence scores and tags.
 - **Skill scanning** — Walks `~/.claude/skills/` and project-local `.claude/skills/`, records triggers, descriptions, and usage counts.
 - **Prompt library** — Catalogs reusable prompts from `CLAUDE.md` files and skill directories.
@@ -169,14 +179,17 @@ docker compose up -d
 
 That brings up Postgres 16 + pgvector + the Streamlit GUI. The schema
 is auto-deployed on first boot. Your `~/.claude` directory is mounted
-read-only into the container so the ingestion scripts can see your
-sessions.
+read-only into the container so the ingestion adapters can see your
+sessions. (Mount other source directories — `~/.codex`, `~/.hermes`,
+`~/.continue`, `~/.windsurf` — by adding them to `docker-compose.yml`
+the same way; Throughline auto-detects what's present.)
 
-Ingest your existing Claude Code sessions:
+Ingest from every source you have on this machine:
 
 ```bash
-docker compose exec gui python3 scripts/ingest_sessions.py
-docker compose exec gui python3 scripts/scan_skills.py
+docker compose exec gui throughline ingest --list-sources   # what will be ingested
+docker compose exec gui throughline ingest --all            # run every present adapter
+docker compose exec gui throughline scan-skills             # also index Claude Code skills
 ```
 
 Optional: enable local embeddings via Ollama (no API key needed):
@@ -407,8 +420,8 @@ prompts in one box.
   <img src="docs/screenshots/conversations.png" alt="Conversations" width="960">
 </p>
 
-Every Claude Code session, filterable by project and model, click-through to
-the full transcript.
+Every ingested session — from any registered source adapter — filterable by
+project, model, and tool, with click-through to the full transcript.
 
 ### Memory
 
@@ -481,14 +494,17 @@ category, top projects, messages by role.
 
 ```mermaid
 flowchart LR
-    subgraph sources["Data Sources"]
+    subgraph sources["Data Sources (pluggable adapters)"]
         S1[Claude Code JSONL]
+        S1b[Codex rollout JSONL]
+        S1c[Hermes session JSON]
+        S1d[Continue.dev JSON]
+        S4[Windsurf plans MD]
         S2[SKILL.md files]
         S3[CLAUDE.md files]
-        S4[Windsurf plans]
     end
     subgraph pipeline["Ingestion Pipeline"]
-        I1[ingest_sessions.py]
+        I1[throughline ingest --all]
         I2[scan_skills.py]
         I3[scan_prompts.py]
         I4[extract_memory.py]
@@ -508,9 +524,12 @@ flowchart LR
     end
 
     S1 --> I1 --> T1
+    S1b --> I1
+    S1c --> I1
+    S1d --> I1
+    S4 --> I1
     S2 --> I2 --> T1
     S3 --> I3 --> T1
-    S4 --> I1
     T1 --> I4 --> T2
     T1 --> I5 --> T3
     T2 --> I5
@@ -561,8 +580,12 @@ sequenceDiagram
 
 High-level data flow:
 
-1. **JSONL files** land in `~/.claude/projects/` as you use Claude Code.
-2. **Hourly ingest** dedups new files and writes `conversations` + `messages` rows.
+1. **Session files** land in each tool's own directory as you use it
+   (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.hermes/sessions/`,
+   `~/.continue/sessions/`, `~/.windsurf/plans/`, …).
+2. **Hourly ingest** (`throughline ingest --all`) walks every present adapter,
+   dedups new files by SHA-256, and writes `conversations` + `messages` rows
+   into the shared schema. Each row carries the originating tool in `entrypoint`.
 3. **Daily extract** sends message windows to Claude, parses the response into `memory_chunks`.
 4. **Embeddings generator** computes vectors for chunks and messages; HNSW indexes accelerate cosine queries.
 5. **Reflection pass** merges duplicates, supersedes outdated decisions, logs every action.
@@ -578,10 +601,10 @@ Eleven tables, three enum types, one view, and HNSW + GIN + trigram indexes.
 
 | Table | Purpose |
 |---|---|
-| `conversations` | One row per Claude Code session (JSONL file) |
+| `conversations` | One row per ingested session, from any source adapter (Claude Code, Codex, Hermes, Continue, Windsurf, …). The `entrypoint` column records which tool produced it. |
 | `messages` | Individual messages with role, content, tool calls, timestamps |
 | `memory_chunks` | Extracted insights, categorized, with confidence and tags |
-| `skills` | Metadata for every Claude Code skill the scanner found |
+| `skills` | Metadata for every Claude Code skill the scanner found (skills are still a Claude-Code-specific concept) |
 | `prompts` | Reusable prompt templates from `CLAUDE.md` and skill dirs |
 | `projects` | Project context with contacts and decisions as JSONB |
 | `entities` | Named entities (people, projects, technologies) |
@@ -700,19 +723,22 @@ See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for every option.
 
 ## Comparison to alternatives
 
-| Tool | Scope | Local-first | Auto-ingests Claude Code | Knowledge graph | Self-reflection | Price |
+| Tool | Scope | Local-first | Auto-ingests from local AI tools | Knowledge graph | Self-reflection | Price |
 |---|---|---|---|---|---|---|
-| [Mem0](https://github.com/mem0ai/mem0) | General LLM memory | Partial (vector DB local, cloud SaaS option) | No | No | No | Free (OSS) / paid (cloud) |
-| [Letta](https://github.com/letta-ai/letta) (MemGPT) | Agent memory framework | Yes | No | No | Limited | Free (OSS) |
-| [Zep](https://github.com/getzep/zep) | Chat memory store | Yes (self-host) or cloud | No | Yes | Limited | Free (OSS) / paid (cloud) |
-| [Anthropic Memory](https://www.anthropic.com) | Claude.ai / API | Anthropic-hosted | Not surfaced for the Claude Code CLI today | — | — | Included |
-| ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | No | No | No | Included with plan |
-| **`Throughline`** | **Claude Code sessions** | **Yes (100%)** | **Yes** | **Yes** | **Yes** | **Free** |
+| [Mem0](https://github.com/mem0ai/mem0) | General LLM memory | Partial (vector DB local, cloud SaaS option) | No (app-level SDK) | No | No | Free (OSS) / paid (cloud) |
+| [Letta](https://github.com/letta-ai/letta) (MemGPT) | Agent memory framework | Yes | No (you build the agent) | No | Limited | Free (OSS) |
+| [Zep](https://github.com/getzep/zep) | Chat memory store | Yes (self-host) or cloud | No (you push events) | Yes | Limited | Free (OSS) / paid (cloud) |
+| [Anthropic Memory](https://www.anthropic.com) | Claude.ai / API | Anthropic-hosted | Claude only, not the CLI | — | — | Included |
+| ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | ChatGPT only | No | No | Included with plan |
+| **`Throughline`** | **Cross-tool: Claude Code, Codex, Hermes, Continue, Windsurf (extensible)** | **Yes (100%)** | **Yes — every registered adapter, idempotent** | **Yes** | **Yes** | **Free** |
 
-The unique slot `Throughline` fills: **one of the few tools purpose-built for
-Claude Code JSONL sessions with a closed loop back into the CLI.** Two
-extraction backends are supported — the Anthropic API and the Claude Code CLI
-in headless mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
+The unique slot `Throughline` fills: **the only local-first memory layer that
+auto-ingests session files from multiple local AI tools and exposes the
+unified history back to any of them**, either as a Claude Code skill, an MCP
+server (works with Claude Code, Cursor, Zed, Continue, Claude Desktop), or
+raw context injected at session start. Two extraction backends are supported
+for memory chunking — the Anthropic API and the Claude Code CLI in headless
+mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
 
 ---
 
@@ -773,7 +799,7 @@ MIT — see [`LICENSE`](LICENSE).
 
 ## Authors
 
-Released as an open-source personal AI-assistant stack for Claude Code.
+Released as an open-source, cross-tool memory layer for local AI assistants.
 
 ## Inspired by
 
