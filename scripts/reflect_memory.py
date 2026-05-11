@@ -24,6 +24,9 @@ Aufruf:
 """
 
 from __future__ import annotations
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import argparse
 import json

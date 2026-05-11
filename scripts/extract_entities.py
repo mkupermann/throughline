@@ -3,6 +3,9 @@
 Entity-Extraction Pipeline via Claude Code CLI.
 Analysiert Conversations und extrahiert Entities + Relationships als Knowledge Graph.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import json
 import os

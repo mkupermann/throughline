@@ -3,6 +3,9 @@
 Generiert prägnante Titel für alle Conversations die noch keinen haben.
 Nutzt Claude CLI (kein separater API-Key nötig).
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import os
 import subprocess

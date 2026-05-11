@@ -1,13 +1,36 @@
-.PHONY: install test test-integration migrate load-demo gui ingest scan extract docker-up docker-down docker-logs clean help
+.PHONY: install venv test test-integration migrate load-demo gui ingest scan extract docker-up docker-down docker-logs clean help
+
+# Resolve a Python 3.10+ interpreter for venv bootstrap (override with `make PYTHON=…`).
+PYTHON ?= $(shell command -v python3.12 || command -v python3.11 || command -v python3.10 || command -v python3)
+VENV   ?= .venv
+VPY    := $(VENV)/bin/python
+VPIP   := $(VENV)/bin/pip
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install the package and dev dependencies (editable)
-	pip install -e .[dev]
+$(VPY):
+	@if [ -z "$(PYTHON)" ]; then \
+	  echo "No python3 interpreter found. Install Python 3.10+ first."; exit 1; \
+	fi
+	@ver=$$("$(PYTHON)" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))'); \
+	major=$${ver%%.*}; minor=$${ver##*.}; \
+	if [ "$$major" -lt 3 ] || { [ "$$major" = 3 ] && [ "$$minor" -lt 10 ]; }; then \
+	  echo "Python $$ver is too old (need >= 3.10). Set PYTHON=/path/to/python3.10+ and retry."; exit 1; \
+	fi
+	"$(PYTHON)" -m venv $(VENV)
+	$(VPIP) install --upgrade pip
 
-test:  ## Run the unit test suite (no database required)
-	pytest tests/ -v -m "not integration" --ignore=tests/integration
+venv: $(VPY)  ## Create the project virtualenv (.venv) using a Python >= 3.10
+
+install: $(VPY)  ## Create venv and install the package + dev dependencies (editable)
+	$(VPIP) install -e '.[dev]'
+	@echo
+	@echo "Virtualenv ready at $(VENV)/. Activate with: source $(VENV)/bin/activate"
+	@echo "Scripts under scripts/ auto-bootstrap to $(VENV) — running them with system python3 also works."
+
+test: $(VPY)  ## Run the unit test suite (no database required)
+	$(VPY) -m pytest tests/ -v -m "not integration" --ignore=tests/integration
 
 test-integration:  ## Run integration tests against a Postgres service
 	@echo "Bringing up postgres via docker-compose..."
@@ -17,7 +40,7 @@ test-integration:  ## Run integration tests against a Postgres service
 	    docker compose exec -T postgres pg_isready -U throughline -d claude_memory > /dev/null 2>&1 && break || sleep 1; \
 	done
 	PGHOST=localhost PGPORT=5432 PGUSER=throughline PGPASSWORD=throughline_dev_password \
-	    PGADMINDB=postgres pytest tests/integration/ -v -m integration
+	    PGADMINDB=postgres $(VPY) -m pytest tests/integration/ -v -m integration
 
 migrate:  ## Apply pending SQL migrations from sql/migrations/
 	python3 scripts/migrate.py

@@ -9,6 +9,9 @@ Commands:
   top-entities [--type TYPE]  Top nach mention_count
   contradictions              Findet widersprüchliche Beziehungen
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import argparse
 import json

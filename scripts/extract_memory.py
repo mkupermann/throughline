@@ -12,6 +12,9 @@ Both produce the same JSON shape. By default the transcript is run through
 ``throughline.pii.redact`` before being sent to Claude — set the environment
 variable ``THROUGHLINE_REDACT_PII=0`` to disable.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import json
 import os

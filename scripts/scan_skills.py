@@ -3,6 +3,9 @@
 Scannt alle Claude Code Skills und speichert Metadaten in die DB.
 Sucht in: ~/.claude/skills/ (global) und allen .claude/skills/ in Git-Repos.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import os
 import re
