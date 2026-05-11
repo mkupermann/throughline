@@ -304,6 +304,35 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if report.fails == 0 else 1
 
 
+def cmd_conflicts(args: argparse.Namespace) -> int:
+    """Detect cross-tool memory conflicts.
+
+    Three detection strategies run by default; ``--kind`` (repeatable)
+    narrows. Exit codes:
+        0  no conflicts found (or --json mode)
+        1  one or more conflicts surfaced
+        2  DB unreachable in non-JSON mode (matches `status`)
+    """
+    import json
+
+    from throughline.conflicts import find_conflicts, format_human as conflicts_format
+
+    kinds = args.kind if getattr(args, "kind", None) else None
+    report = find_conflicts(
+        project=args.project,
+        kinds=kinds,
+        since_days=args.since_days,
+        min_similarity=args.min_similarity,
+    )
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2 if args.pretty else None, sort_keys=True, default=str))
+        return 0
+    print(conflicts_format(report))
+    if not report.db_reachable:
+        return 2
+    return 0 if not report.conflicts else 1
+
+
 # --------------------------------------------------------------------------- #
 # Parser construction                                                         #
 # --------------------------------------------------------------------------- #
@@ -556,6 +585,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict to one or more categories (repeatable). Default: run all.",
     )
     p.set_defaults(func=cmd_doctor)
+
+    # conflicts
+    p = sub.add_parser(
+        "conflicts",
+        help="Detect cross-tool memory conflicts (supersession, semantic, stale drift).",
+        description=(
+            "Surfaces cases where the same project's memory was touched by "
+            "two different AI CLIs in contradictory ways. Three detection "
+            "strategies run by default: (1) chunks explicitly superseded "
+            "across tool boundaries, (2) semantic near-duplicates from "
+            "different tools where the newer side contains contradiction "
+            "markers, (3) stale chunks from one tool while another tool "
+            "has newer chunks for the same project. Read-only; uses "
+            "existing schema (memory_chunks, embeddings, conversations)."
+        ),
+    )
+    p.add_argument("--project", default=None, help="Restrict to a single project_name.")
+    p.add_argument(
+        "--kind",
+        action="append",
+        choices=["supersession", "semantic", "stale_drift"],
+        help="Restrict to one or more detection strategies (repeatable). Default: run all three.",
+    )
+    p.add_argument(
+        "--since-days",
+        type=int,
+        default=30,
+        help="Stale-drift cutoff in days (default 30; chunks older than this with 0 accesses qualify).",
+    )
+    p.add_argument(
+        "--min-similarity",
+        type=float,
+        default=0.85,
+        help="Semantic cosine similarity threshold for cross-tool duplicates (default 0.85).",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a JSON object on stdout.")
+    p.add_argument("--pretty", action="store_true", help="With --json, indent the output.")
+    p.set_defaults(func=cmd_conflicts)
 
     return parser
 
