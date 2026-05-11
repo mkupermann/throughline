@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "throughline"
 version = "0.3.0"
-description = "Persistent long-term memory for Claude Code"
+description = "One memory layer for every local AI CLI — auto-ingests sessions from Claude Code, Codex, Hermes, Continue, Cline and Windsurf into a single searchable Postgres+pgvector store."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
