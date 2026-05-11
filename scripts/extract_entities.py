@@ -69,6 +69,10 @@ MODEL = "sonnet"
 MAX_CONVERSATIONS_PER_RUN = 100
 MIN_MESSAGES = 3
 MAX_TRANSCRIPT_CHARS = 40000
+# Per-message cap. Mirrors scripts/extract_memory.py: raised from 2,000 → 8,000
+# so long structured assistant turns (multi-axis plans, ranked reviews,
+# cross-tool recommendation lists) survive intact through entity extraction.
+MAX_MESSAGE_CHARS = 8000
 SLEEP_BETWEEN_CALLS = 1.5
 TIMEOUT_PER_CALL = 180
 
@@ -125,14 +129,23 @@ def canonicalize(name: str) -> str:
 
 
 def build_transcript(messages: list) -> str:
+    """Render a transcript for entity extraction.
+
+    Per-message cap raised from 2,000 → 8,000 chars (kept consistent with
+    ``scripts/extract_memory.py``). The previous 2 KB cap silently
+    beheaded long structured plans / reviews / cross-tool recommendation
+    lists — entities mentioned only past the 2 KB mark never landed in
+    the entity table. The transcript-level ``MAX_TRANSCRIPT_CHARS`` cap
+    still guards runaway prompt size.
+    """
     parts = []
     for m in messages:
         role = m[0]
         content = m[1] or ""
         if role == "tool_result":
             continue
-        if len(content) > 2000:
-            content = content[:2000] + "...[gekürzt]"
+        if len(content) > MAX_MESSAGE_CHARS:
+            content = content[:MAX_MESSAGE_CHARS] + "...[gekürzt]"
         parts.append(f"[{role.upper()}]\n{content}\n")
     transcript = "\n".join(parts)
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
