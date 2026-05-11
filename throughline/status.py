@@ -79,6 +79,11 @@ class StatusPayload:
     last_reflection_at: str | None = None
     contradictions_outstanding: int = 0
     projects_count: int = 0
+    # Drift-audit summary fields (populated from the most-recent
+    # memory_reflections row with reflection_type='audit').
+    last_audit_at: str | None = None
+    last_audit_sampled: int = 0
+    last_audit_drifted: int = 0
     version: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -95,6 +100,9 @@ class StatusPayload:
             "last_reflection_at": self.last_reflection_at,
             "contradictions_outstanding": self.contradictions_outstanding,
             "projects_count": self.projects_count,
+            "last_audit_at": self.last_audit_at,
+            "last_audit_sampled": self.last_audit_sampled,
+            "last_audit_drifted": self.last_audit_drifted,
             "version": self.version,
         }
 
@@ -145,6 +153,25 @@ def _safe_count(cur, table: str) -> int:
         return int(row[0]) if row else 0
     except Exception:
         return 0
+
+
+def _parse_drift_count(reasoning: str | None, action: str | None) -> int:
+    """Extract the integer drift count from an audit-row reasoning string.
+
+    The auditor writes reasoning of the form
+    ``"Sampled N chunks, mean recall X, threshold Y, M drifted."`` —
+    pull M out via regex. Falls back to 0 when the format is missing
+    OR when ``action_taken='no_drift_detected'``, which is the
+    canonical zero-drift state.
+    """
+    import re
+
+    if action == "no_drift_detected":
+        return 0
+    if not reasoning:
+        return 0
+    m = re.search(r"(\d+)\s+drift(?:ed)?\b", reasoning)
+    return int(m.group(1)) if m else 0
 
 
 def _schema_version(cur) -> str | None:
@@ -251,6 +278,33 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                 )
                 row = cur.fetchone()
                 payload.projects_count = int(row[0]) if row else 0
+            except Exception:
+                pass
+
+            # Drift audit — most recent row with reflection_type='audit'.
+            # ``affected_chunks`` is the sampled-id list, length = sampled.
+            # ``action_taken`` distinguishes drift-flagged runs from clean ones.
+            # ``reasoning`` carries the parseable counts ("… N drifted.").
+            try:
+                cur.execute(
+                    """
+                    SELECT created_at, action_taken,
+                           COALESCE(array_length(affected_chunks, 1), 0) AS sampled,
+                           reasoning
+                    FROM public.memory_reflections
+                    WHERE reflection_type = 'audit'
+                    ORDER BY created_at DESC NULLS LAST
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+                if row:
+                    when, action, sampled, reasoning = row
+                    payload.last_audit_at = when.isoformat() if when else None
+                    payload.last_audit_sampled = int(sampled or 0)
+                    # Parse the drift count out of the reasoning string the
+                    # auditor writes; falls back to 0 if the format ever drifts.
+                    payload.last_audit_drifted = _parse_drift_count(reasoning, action)
             except Exception:
                 pass
 

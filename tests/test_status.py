@@ -27,8 +27,43 @@ REQUIRED_KEYS = {
     "last_reflection_at",
     "contradictions_outstanding",
     "projects_count",
+    "last_audit_at",
+    "last_audit_sampled",
+    "last_audit_drifted",
     "version",
 }
+
+
+# ── Drift-count parser ──────────────────────────────────────────────────────
+class TestParseDriftCount:
+    """Pin the auditor's reasoning-string → drift-count contract.
+
+    ``status.collect_status()`` derives ``last_audit_drifted`` by regex-
+    parsing the ``reasoning`` text the auditor writes. Both surfaces are
+    in this repo, so the contract should be stable — a test guarantees it.
+    """
+
+    def test_zero_when_action_is_no_drift(self):
+        from throughline.status import _parse_drift_count
+        assert _parse_drift_count("Sampled 20 chunks, mean recall 0.99, threshold 0.3, 0 drifted.",
+                                  "no_drift_detected") == 0
+
+    def test_pulls_count_for_flagged_runs(self):
+        from throughline.status import _parse_drift_count
+        assert _parse_drift_count(
+            "Sampled 20 chunks, mean recall 0.62, threshold 0.3, 4 drifted.",
+            "flagged_drift",
+        ) == 4
+
+    def test_zero_when_reasoning_missing(self):
+        from throughline.status import _parse_drift_count
+        assert _parse_drift_count(None, "flagged_drift") == 0
+        assert _parse_drift_count("", "flagged_drift") == 0
+
+    def test_zero_when_format_drifts(self):
+        # Future writers might drop the integer — that's fine, just don't crash.
+        from throughline.status import _parse_drift_count
+        assert _parse_drift_count("Audit complete.", "flagged_drift") == 0
 
 
 # ── Fakes ────────────────────────────────────────────────────────────────────

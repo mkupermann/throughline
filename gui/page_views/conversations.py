@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gui.pages import app_ns
+from gui.page_views import app_ns
 
 
 def render() -> None:

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Throughline — persistent long-term memory for Claude Code. Local-first PostgreSQL database that ingests your sessions, extracts insights, and gives Claude its own memory across sessions.">
-  <title>Throughline — Memory for Claude Code</title>
+  <meta name="description" content="Throughline — one memory across every local AI CLI on your laptop. Ingests sessions from Claude Code, Codex, Hermes, Continue, Windsurf, and Cline into one local Postgres + pgvector store, extracts decisions and contacts, and exposes them via Streamlit, MCP, and a Claude Code skill.">
+  <title>Throughline — One memory · every AI CLI on your laptop</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -438,8 +438,8 @@
 <!-- HERO -->
 <div class="hero">
   <div class="hero-badge">Open Source &bull; MIT License &bull; Local-First</div>
-  <h1>Persistent memory<br>for <span class="accent">Claude Code</span></h1>
-  <p>Throughline ingests your Claude Code sessions, extracts decisions and insights, and gives Claude a queryable memory that survives across sessions.</p>
+  <h1>One memory.<br><span class="accent">Every AI CLI</span> on your laptop.</h1>
+  <p>Claude Code, Codex, Hermes, Continue, Windsurf, Cline — they all start every new session as a blank page. Throughline keeps the thread across all of them: one searchable memory of your decisions, contacts and gotchas, on your own machine.</p>
   <div class="hero-actions">
     <a class="btn btn-primary" href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">
       View on GitHub
@@ -450,8 +450,19 @@
   </div>
 </div>
 
+<!-- ANIMATED HERO (concept B — "Ingest → Read") -->
+<div style="max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 3rem;">
+  <img src="hero-concept-B-ingest.svg"
+       alt="Three CLIs write their own JSONL files · Throughline ingests them · Next session pulls a unified context block"
+       style="width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border);">
+</div>
+
 <!-- STATS BAR -->
 <div class="stats-bar">
+  <div class="stat-item">
+    <span class="stat-value">6</span>
+    <span class="stat-label">AI CLIs supported</span>
+  </div>
   <div class="stat-item">
     <span class="stat-value">14</span>
     <span class="stat-label">Streamlit Pages</span>
@@ -459,10 +470,6 @@
   <div class="stat-item">
     <span class="stat-value">8</span>
     <span class="stat-label">Memory Categories</span>
-  </div>
-  <div class="stat-item">
-    <span class="stat-value">11</span>
-    <span class="stat-label">DB Tables</span>
   </div>
   <div class="stat-item">
     <span class="stat-value">100%</span>
@@ -476,47 +483,50 @@
 
 <!-- FEATURES -->
 <section id="features">
-  <div class="section-title">Everything Claude Code was missing</div>
-  <div class="section-sub">Six capabilities, one local database, zero recurring costs.</div>
+  <div class="section-title">Cross-tool memory, built once</div>
+  <div class="section-sub">One pluggable adapter per AI CLI · one local database · zero recurring costs.</div>
   <div class="features-grid">
 
     <div class="feature-card">
-      <span class="feature-icon">&#128190;</span>
-      <h3>JSONL Session Ingestion</h3>
-      <p>Reads every JSONL file from <code>~/.claude/projects/</code>, deduplicates by SHA-256, and stores full message history, tool calls, and token counts in PostgreSQL.</p>
+      <h3>Six source adapters</h3>
+      <p>Pluggable framework — one small module per local AI tool, dedup by SHA-256, idempotent re-ingest. Today: <strong>Claude Code</strong> (<code>~/.claude/projects/*.jsonl</code>), <strong>OpenAI Codex CLI</strong> (<code>~/.codex/sessions/*.jsonl</code>), <strong>Hermes Agent</strong> (<code>~/.hermes/state.db</code> + <code>sessions/</code>), <strong>Continue.dev</strong> (<code>~/.continue/sessions/*.json</code>), <strong>Windsurf</strong> (<code>~/.windsurf/plans/*.md</code>), <strong>Cline</strong> (VS Code per-task dirs).</p>
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#129504;</span>
-      <h3>AI Memory Extraction</h3>
-      <p>Sends conversation windows through Claude and stores typed memory chunks: decisions, patterns, insights, error solutions, contacts, preferences, and workflows. Two backends: the Anthropic API or the Claude Code CLI in headless mode.</p>
+      <h3>Memory extraction</h3>
+      <p>Conversation windows are sent through Claude (or a local Ollama model) and stored as typed memory chunks across eight categories — decisions, patterns, insights, error solutions, contacts, preferences, workflows, project context. PII redaction runs server-side <em>and</em> before display.</p>
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128269;</span>
-      <h3>Semantic Search</h3>
-      <p>Cosine similarity over 1536-dim OpenAI or 768-dim Ollama embeddings, indexed with HNSW for fast approximate nearest-neighbor lookups. Works fully offline with Ollama.</p>
+      <h3>Semantic search</h3>
+      <p>Cosine similarity over 1536-dim OpenAI or 768-dim Ollama embeddings, indexed with HNSW for fast approximate nearest-neighbor lookups. Works fully offline with Ollama; pgvector lives inside the same Postgres.</p>
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#127760;</span>
-      <h3>Temporal Knowledge Graph</h3>
-      <p>Entities (people, projects, technologies) and typed relationships tracked across sessions with <code>valid_from</code> / <code>valid_until</code>. Interactive visualization in the GUI.</p>
+      <h3>Temporal knowledge graph</h3>
+      <p>Entities (people, projects, technologies) and typed relationships tracked across sessions with <code>valid_from</code> / <code>valid_until</code>. Time-travel queries answer "what did I believe about X on date Y?" — across every tool that wrote into the store.</p>
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128279;</span>
-      <h3>Context Pre-Loader Hook</h3>
-      <p>A <code>SessionStart</code> hook queries the DB for the current project and injects a concise memory summary before Claude's first response — every new session starts informed.</p>
+      <h3>Read APIs for every agent</h3>
+      <p>Three consumer surfaces, one source of truth: a <strong>Streamlit GUI</strong> (14 pages, live demo at this URL), an <strong>MCP server</strong> with eight stdio tools (works with any MCP client — Claude Code, Cursor, Zed, Continue, Claude Desktop), and a <strong>Claude Code skill</strong> that injects context at session start.</p>
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128261;</span>
-      <h3>Self-Reflecting Memory</h3>
-      <p>A periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every action. Memory stays clean without manual curation.</p>
+      <h3>Self-reflecting memory</h3>
+      <p>A periodic reflection pass merges near-duplicates, flags contradictions, supersedes outdated decisions, and logs every action. New: a <code>throughline audit</code> drift detector catches LLM-extracted chunks that have drifted from their source conversation, so the memory stays trustworthy without manual curation.</p>
     </div>
 
   </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture" style="padding-top: 0;">
+  <div class="section-title">Architecture, at a glance</div>
+  <div class="section-sub">Six sources on the left feed one local core; three consumer surfaces on the right read it.</div>
+  <img src="../assets/architecture.svg"
+       alt="Throughline architecture — six AI CLIs feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and a Claude Code skill"
+       style="width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border);">
 </section>
 
 <!-- QUICK START -->
@@ -524,12 +534,12 @@
   <div>
     <div class="code-info">
       <h2 class="section-title">Up in one command</h2>
-      <p>Docker Compose brings up PostgreSQL 16 + pgvector + the Streamlit GUI. Your <code>~/.claude</code> directory is mounted read-only so ingestion scripts can see your sessions immediately.</p>
+      <p>Docker Compose brings up PostgreSQL 16 + pgvector + the Streamlit GUI. Every supported AI CLI's data directory (<code>~/.claude</code>, <code>~/.codex</code>, <code>~/.hermes</code>, <code>~/.continue</code>, <code>~/.windsurf</code>) is auto-discovered read-only, so ingestion picks up whichever ones you actually use.</p>
       <ol class="code-steps">
         <li>Clone the repo and start all services with Docker Compose.</li>
         <li>Open the Streamlit GUI in your browser at port 8501.</li>
-        <li>Run the ingest script to populate the database from your existing sessions.</li>
-        <li>Optionally enable Ollama for fully offline local embeddings.</li>
+        <li>Run <code>throughline ingest</code> — every adapter that finds its data directory contributes sessions.</li>
+        <li>Optionally enable Ollama for fully offline embeddings and extraction.</li>
       </ol>
     </div>
     <div style="margin-top: 1.5rem;">
@@ -551,9 +561,13 @@
 <span class="cmt"># Open the GUI</span>
 <span class="url">open http://localhost:8501</span>
 
-<span class="cmt"># Ingest your existing Claude sessions</span>
+<span class="cmt"># Ingest from every AI CLI you actually use</span>
 <span class="cmd">docker compose exec gui</span> \
-  python3 scripts/ingest_sessions.py
+  throughline ingest --all
+
+<span class="cmt"># …or pick one source</span>
+<span class="cmd">throughline ingest</span> --source hermes
+<span class="cmd">throughline ingest</span> --source codex
 
 <span class="cmt"># Optional: local embeddings via Ollama</span>
 <span class="cmd">docker compose --profile embeddings up -d</span>
@@ -565,32 +579,32 @@
 <!-- HOW IT WORKS -->
 <section id="how-it-works">
   <div class="section-title">How it works</div>
-  <div class="section-sub">A closed loop between Claude Code and your memory database.</div>
+  <div class="section-sub">A closed loop between every AI CLI on your laptop and one local memory database.</div>
   <div class="flow-steps">
     <div class="flow-step">
       <div class="flow-step-num">Step 01</div>
       <h3>Write</h3>
-      <p>Claude Code writes JSONL session files to <code>~/.claude/projects/</code> as you work.</p>
+      <p>Each AI CLI writes its own session files — JSONL, SQLite, or JSON — into its own home directory as you work. No two tools share a format.</p>
     </div>
     <div class="flow-step">
       <div class="flow-step-num">Step 02</div>
       <h3>Ingest</h3>
-      <p>Hourly launchd job reads new files, deduplicates by hash, and inserts conversations and messages.</p>
+      <p>An hourly launchd / systemd job walks every registered adapter, deduplicates by SHA-256, and inserts a unified <code>conversations</code> + <code>messages</code> schema regardless of source.</p>
     </div>
     <div class="flow-step">
       <div class="flow-step-num">Step 03</div>
       <h3>Extract</h3>
-      <p>Daily job sends conversation windows to Claude; structured memory chunks are stored and embedded.</p>
+      <p>A daily pass sends conversation windows through Claude (or local Ollama) and stores typed memory chunks. Pre-extraction PII redaction is on by default.</p>
     </div>
     <div class="flow-step">
       <div class="flow-step-num">Step 04</div>
       <h3>Reflect</h3>
-      <p>Reflection pass deduplicates, resolves contradictions, and supersedes outdated chunks automatically.</p>
+      <p>Reflection deduplicates, resolves contradictions, supersedes outdated chunks, and audits for drift. Every action lands in an audit log.</p>
     </div>
     <div class="flow-step">
       <div class="flow-step-num">Step 05</div>
       <h3>Recall</h3>
-      <p>At session start, relevant memories are injected. The skill answers in-session queries instantly.</p>
+      <p>At session start, relevant memories are injected via a Claude Code skill, or read live over MCP by any agent — Claude Code, Cursor, Zed, Continue, Claude Desktop.</p>
     </div>
   </div>
 </section>
@@ -598,13 +612,13 @@
 <!-- COMPARISON TABLE -->
 <section>
   <div class="section-title">How it compares</div>
-  <div class="section-sub">The only tool purpose-built for Claude Code JSONL sessions.</div>
+  <div class="section-sub">The only memory layer that ingests <em>every</em> local AI CLI you actually use, not just one.</div>
   <div class="comparison-wrap">
     <table class="comparison-table">
       <thead>
         <tr>
           <th>Tool</th>
-          <th>Claude Code sessions</th>
+          <th>Cross-tool ingest</th>
           <th>Local-first</th>
           <th>Knowledge graph</th>
           <th>Self-reflection</th>
@@ -614,7 +628,7 @@
       <tbody>
         <tr>
           <td>Mem0</td>
-          <td class="cross">No</td>
+          <td class="cross">No (SDK-only)</td>
           <td class="cross">Partial</td>
           <td class="cross">No</td>
           <td class="cross">No</td>
@@ -622,7 +636,7 @@
         </tr>
         <tr>
           <td>Letta (MemGPT)</td>
-          <td class="cross">No</td>
+          <td class="cross">No (per-agent)</td>
           <td class="check">Yes</td>
           <td class="cross">No</td>
           <td class="cross">Limited</td>
@@ -630,15 +644,23 @@
         </tr>
         <tr>
           <td>Zep</td>
-          <td class="cross">No</td>
+          <td class="cross">No (SDK-only)</td>
           <td class="check">Self-host</td>
           <td class="check">Yes</td>
           <td class="cross">Limited</td>
           <td>Free / paid cloud</td>
         </tr>
         <tr>
-          <td>Anthropic Memory</td>
+          <td>Anthropic memory</td>
+          <td class="cross">Claude only</td>
           <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td class="cross">No</td>
+          <td>Included w/ plan</td>
+        </tr>
+        <tr>
+          <td>Cursor memory</td>
+          <td class="cross">Cursor only</td>
           <td class="cross">No</td>
           <td class="cross">No</td>
           <td class="cross">No</td>
@@ -646,10 +668,10 @@
         </tr>
         <tr class="highlight">
           <td>Throughline</td>
-          <td class="check">Yes</td>
+          <td class="check">6 CLIs (extensible)</td>
           <td class="check">100%</td>
-          <td class="check">Yes</td>
-          <td class="check">Yes</td>
+          <td class="check">Yes (temporal)</td>
+          <td class="check">Yes (incl. drift audit)</td>
           <td>Free (MIT)</td>
         </tr>
       </tbody>
@@ -659,8 +681,8 @@
 
 <!-- CTA -->
 <div class="cta-section">
-  <h2>Stop re-explaining yourself to Claude.</h2>
-  <p>Throughline is free, open source, and runs entirely on your machine. No cloud, no subscriptions, no data leaving your system.</p>
+  <h2>Stop re-explaining yourself — to any of your agents.</h2>
+  <p>Throughline is free, open source, and runs entirely on your machine. No cloud, no subscriptions, no data leaving your system. Pick whichever AI CLI you feel like today — the memory follows.</p>
   <div class="hero-actions">
     <a class="btn btn-primary" href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">
       View on GitHub
@@ -682,7 +704,7 @@
     <a href="mailto:michael@kupermann.com">Contact</a>
   </div>
   <div class="footer-copy">
-    Throughline is an independent open-source project, not affiliated with Anthropic. &mdash; Michael Kupermann &mdash; michael@kupermann.com
+    Throughline is an independent open-source project — not affiliated with Anthropic, OpenAI, Microsoft, Continue.dev, Windsurf, or the Hermes / Cline projects. &mdash; Michael Kupermann &mdash; michael@kupermann.com
   </div>
 </footer>
 
