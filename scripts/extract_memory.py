@@ -88,10 +88,29 @@ MODEL = "sonnet"
 MAX_CONVERSATIONS_PER_RUN = 20
 MIN_MESSAGES = 5
 MAX_TRANSCRIPT_CHARS = 80000
+# Cap per-message content shown to the extractor. The previous 1,000-char
+# cap silently beheaded any long assistant message — multi-axis plans,
+# ranked recommendation lists, deep reviews. Anything above ~6 KB used to
+# disappear with a "[gekürzt]" marker. The transcript-level
+# MAX_TRANSCRIPT_CHARS cap (80,000) already protects against runaway
+# prompt growth, so the per-message cap only needs to be wide enough that
+# a single richly-structured assistant turn survives intact.
+MAX_MESSAGE_CHARS = 8000
+# Chunks per conversation. A 300-message session that includes a multi-axis
+# plan (e.g. 4 axes × 5 bullets, plus an 8-PR sequence) needs more than 10
+# slots if the structure is to be preserved instead of collapsed into a
+# generic "project_context" blurb.
+MAX_CHUNKS_PER_CONVERSATION = 25
 SLEEP_BETWEEN_CALLS = 2.0
-TIMEOUT_PER_CALL = 120
+# Raised from 120 → 300 s. With MAX_MESSAGE_CHARS at 8,000 the transcript
+# can carry richer multi-paragraph assistant turns, which gives the model
+# more to read and more to emit (now up to 25 chunks vs 10). The previous
+# 2-minute cap was tight for 200+ message sessions; observed timeouts on
+# conv #10 (297 msgs) and #46 (210 msgs) zeroed their chunks because the
+# clear-before-reextract is committed even when the LLM call gives up.
+TIMEOUT_PER_CALL = 300
 
-PROMPT_TEMPLATE = """Du analysierst eine Claude Code Entwickler-Session und extrahierst verwertbare Erkenntnisse als strukturiertes JSON.
+PROMPT_TEMPLATE = """Du analysierst eine Entwickler-Session (Claude Code, Codex, Hermes, Continue, Windsurf, Cline) und extrahierst verwertbare Erkenntnisse als strukturiertes JSON.
 
 Extrahiere NUR non-obvious Informationen die in FUTURE Sessions nützlich sind:
 - decision: Architekturentscheidungen ("Wir nutzen pgvector statt Milvus weil...")
@@ -103,9 +122,17 @@ Extrahiere NUR non-obvious Informationen die in FUTURE Sessions nützlich sind:
 - project_context: Projektwissen ("Project Alpha Summer Release Q2/2026")
 - workflow: Abläufe ("launchd-Job: install-schedule.sh install")
 
-Ignoriere: Triviales, normales Code-Schreiben, allgemeine Fragen, Smalltalk.
+WICHTIG — Strukturierte Inhalte erhalten, NICHT zusammenfassen:
+Wenn die Session strukturierte Pläne, geordnete Empfehlungslisten oder Mehr-Achsen-
+Frameworks enthält (z.B. "Axis A/B/C/D", "Tier 1/2/3", "Free wins / Tier 1 / Tier 2",
+"PR 1/8, PR 2/8, …", numerierte Roadmaps, Review-Berichte mit Scores), dann
+PRO RANKEDEM ITEM bzw. PRO ACHSE EIN EIGENER CHUNK — nicht alles in eine einzige
+"insight"-Zeile zusammenfassen. Erhalte: die ursprüngliche Reihenfolge, ggf. Zeit-
+oder Aufwandsschätzungen ("~2 hr"), die Begründung in 1-2 Sätzen, und tagge
+einheitlich mit dem Framework-Namen (z.B. tags=["throughline-review","axis-A",
+"stunning"]) damit verwandte Chunks später wieder zusammengeführt werden können.
 
-Output: REINES JSON-Array (keine Markdown-Fences, kein Erklärtext), max 10 Chunks.
+Output: REINES JSON-Array (keine Markdown-Fences, kein Erklärtext), max {MAX_CHUNKS} Chunks.
 
 Format:
 [
@@ -128,8 +155,8 @@ def build_transcript(messages: list[tuple[str, str | None]]) -> str:
         content = m[1] or ""
         if role == "tool_result":
             continue
-        if len(content) > 1000:
-            content = content[:1000] + "...[gekürzt]"
+        if len(content) > MAX_MESSAGE_CHARS:
+            content = content[:MAX_MESSAGE_CHARS] + "...[gekürzt]"
         parts.append(f"[{role.upper()}]\n{content}\n")
     transcript = "\n".join(parts)
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
@@ -200,12 +227,20 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
             print(f"    redacted {n} secret/PII match(es) before extraction")
         transcript = redacted
 
-    prompt = PROMPT_TEMPLATE.replace("{TRANSCRIPT}", transcript)
+    prompt = (
+        PROMPT_TEMPLATE
+        .replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
+        .replace("{TRANSCRIPT}", transcript)
+    )
     response = call_claude(prompt)
     if not response:
         return 0
 
     chunks = parse_json_response(response)
+    # Cap defensively in case the model ignores the prompt — extra chunks are
+    # truncated rather than rejected, so we never silently drop a session.
+    if len(chunks) > MAX_CHUNKS_PER_CONVERSATION:
+        chunks = chunks[:MAX_CHUNKS_PER_CONVERSATION]
     inserted = 0
     for chunk in chunks:
         try:
@@ -228,7 +263,66 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     return inserted
 
 
+def _parse_id_list(raw: str) -> list[int]:
+    """Parse a comma-separated id list like '10,15,47' into [10,15,47]."""
+    out: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            raise SystemExit(f"--force-conversations: '{part}' is not an integer")
+    return out
+
+
+def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
+    """Delete previous chunks for the given conversations and re-extract.
+
+    Returns ``(deleted, inserted, errors)``. Each conversation is processed
+    in its own transaction at the caller's commit() boundary, so a failure
+    on one ID doesn't roll back the others.
+    """
+    deleted_total = 0
+    inserted_total = 0
+    errors = 0
+    for cid in conv_ids:
+        cursor.execute(
+            "DELETE FROM memory_chunks "
+            "WHERE source_type='conversation' AND source_id=%s "
+            "RETURNING id",
+            (cid,),
+        )
+        deleted = len(cursor.fetchall())
+        deleted_total += deleted
+        print(f"  #{cid} re-extract (cleared {deleted} old chunk(s))", end=" ", flush=True)
+        try:
+            n = extract_for_conversation(cursor, cid)
+            inserted_total += n
+            print(f"→ {n} Chunks")
+        except Exception as e:
+            errors += 1
+            print(f"✗ {e}")
+            raise
+    return deleted_total, inserted_total, errors
+
+
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Extract memory chunks from ingested conversations."
+    )
+    parser.add_argument(
+        "--force-conversations",
+        metavar="IDS",
+        help="Comma-separated conversation IDs to re-extract. Deletes their "
+             "existing memory_chunks and runs extraction again with the "
+             "current prompt and limits. Use this after changing the "
+             "extractor to refresh affected rows.",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Claude Memory DB — Memory Extraction (via Claude CLI)")
     print("=" * 60)
@@ -236,6 +330,23 @@ def main() -> None:
     _require_claude_bin()
     conn = _connect()
     cursor = conn.cursor()
+
+    if args.force_conversations:
+        conv_ids = _parse_id_list(args.force_conversations)
+        print(f"\nForce-re-extracting {len(conv_ids)} conversation(s): {conv_ids}\n")
+        try:
+            deleted, inserted, errors = _force_reextract(cursor, conv_ids)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        print(f"\n{'=' * 60}")
+        print(f"Re-extracted: {len(conv_ids)} | Old chunks cleared: {deleted} | "
+              f"New chunks: {inserted} | Errors: {errors}")
+        print(f"{'=' * 60}")
+        cursor.close()
+        conn.close()
+        return
 
     cursor.execute(f"""
         SELECT c.id, c.project_name, c.message_count

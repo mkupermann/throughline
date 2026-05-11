@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Concept B — "Ingest → Read"
+  This is the 10-second loop Hermes proposed verbatim:
+  three tools write JSONL files (sliding in from the left), Throughline
+  ingests them (files slide into the core box), and the next session's
+  first prompt pulls them back out as context (text-block appears on the
+  right). 4 phases over 8 seconds, loops.
+  Pure SVG <animate>, no JS, no GIF.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500"
+     role="img" aria-label="Throughline — three CLIs write, Throughline ingests, next session reads">
+  <title>Throughline — Concept B — Ingest then Read</title>
+
+  <defs>
+    <linearGradient id="bgB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#0D1117"/>
+      <stop offset="100%" stop-color="#0A0E14"/>
+    </linearGradient>
+    <pattern id="gridB" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1F2630"/>
+    </pattern>
+    <filter id="softB" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="500" fill="url(#bgB)"/>
+  <rect width="1200" height="500" fill="url(#gridB)" opacity="0.5"/>
+
+  <!-- Title banner stays visible across the loop -->
+  <g font-family="-apple-system, BlinkMacSystemFont, system-ui, sans-serif">
+    <text x="600" y="60" text-anchor="middle" font-size="44" font-weight="700"
+          fill="#C9D1D9" letter-spacing="-1">
+      Three CLIs · One memory.
+    </text>
+    <text x="600" y="92" text-anchor="middle" font-size="16" fill="#8B949E">
+      Each tool writes its own JSONL · Throughline reads them all · Next session has the thread.
+    </text>
+  </g>
+
+  <!-- Stage labels along the bottom (visual flow) -->
+  <g font-family="ui-monospace, monospace" font-size="12" fill="#6E7681" letter-spacing="3">
+    <text x="180"  y="430" text-anchor="middle">WRITE</text>
+    <text x="600"  y="430" text-anchor="middle">INGEST</text>
+    <text x="1020" y="430" text-anchor="middle">READ</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- Phase 1 (t=0..2s): three JSONL files slide IN from the left -->
+  <!-- Phase 2 (t=2..4s): they slide RIGHT into the Throughline core -->
+  <!-- Phase 3 (t=4..6s): a context block emerges on the right -->
+  <!-- Phase 4 (t=6..8s): everything fades out and the loop restarts -->
+  <!-- ============================================================== -->
+
+  <!-- Phase 1 + 2: Three JSONL files -->
+  <g font-family="ui-monospace, monospace" font-size="12">
+    <!-- File 1: Claude Code -->
+    <g>
+      <rect x="60" y="180" width="220" height="38" rx="6"
+            fill="#161B22" stroke="#30363D" stroke-width="1" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 1; 1; 0.2; 0"
+                 keyTimes="0; 0.10; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        <animate attributeName="x"
+                 values="60; 60; 480; 480; 60"
+                 keyTimes="0; 0.30; 0.50; 0.55; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        <animate attributeName="y"
+                 values="180; 180; 220; 220; 180"
+                 keyTimes="0; 0.30; 0.50; 0.55; 1"
+                 dur="8s" repeatCount="indefinite"/>
+      </rect>
+      <text x="78" y="204" fill="#58A6FF" opacity="0">
+        <animate attributeName="opacity" values="0; 1; 1; 0; 0" keyTimes="0; 0.10; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        ~/.claude/projects/*.jsonl
+      </text>
+    </g>
+
+    <!-- File 2: Codex -->
+    <g>
+      <rect x="60" y="230" width="220" height="38" rx="6"
+            fill="#161B22" stroke="#30363D" stroke-width="1" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0.3; 1; 1; 0.2; 0"
+                 keyTimes="0; 0.05; 0.13; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        <animate attributeName="x"
+                 values="60; 60; 480; 480; 60"
+                 keyTimes="0; 0.30; 0.50; 0.55; 1"
+                 dur="8s" repeatCount="indefinite"/>
+      </rect>
+      <text x="78" y="254" fill="#58A6FF" opacity="0">
+        <animate attributeName="opacity" values="0; 1; 1; 0; 0" keyTimes="0; 0.13; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        ~/.codex/sessions/*.jsonl
+      </text>
+    </g>
+
+    <!-- File 3: Hermes -->
+    <g>
+      <rect x="60" y="280" width="220" height="38" rx="6"
+            fill="#161B22" stroke="#30363D" stroke-width="1" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 1; 1; 0.2; 0"
+                 keyTimes="0; 0.10; 0.18; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        <animate attributeName="x"
+                 values="60; 60; 480; 480; 60"
+                 keyTimes="0; 0.30; 0.50; 0.55; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        <animate attributeName="y"
+                 values="280; 280; 240; 240; 280"
+                 keyTimes="0; 0.30; 0.50; 0.55; 1"
+                 dur="8s" repeatCount="indefinite"/>
+      </rect>
+      <text x="78" y="304" fill="#58A6FF" opacity="0">
+        <animate attributeName="opacity" values="0; 1; 1; 0; 0" keyTimes="0; 0.18; 0.30; 0.50; 1"
+                 dur="8s" repeatCount="indefinite"/>
+        ~/.hermes/state.db
+      </text>
+    </g>
+  </g>
+
+  <!-- Throughline core box (always visible mid-stage) -->
+  <g transform="translate(460 160)" filter="url(#softB)">
+    <rect width="280" height="180" rx="14" fill="#161B22" stroke="#30363D" stroke-width="1.5">
+      <animate attributeName="stroke" values="#30363D; #58A6FF; #58A6FF; #30363D"
+               keyTimes="0; 0.40; 0.50; 0.60" dur="8s" repeatCount="indefinite"/>
+    </rect>
+    <text x="140" y="48" text-anchor="middle"
+          font-family="-apple-system, BlinkMacSystemFont, system-ui, sans-serif"
+          font-size="22" font-weight="700" fill="#C9D1D9">Throughline</text>
+    <text x="140" y="72" text-anchor="middle"
+          font-family="ui-monospace, monospace" font-size="12" fill="#8B949E">
+      Postgres + pgvector
+    </text>
+    <!-- pulse on ingest -->
+    <circle cx="140" cy="125" r="6" fill="#58A6FF" opacity="0">
+      <animate attributeName="r" values="6; 18; 6" keyTimes="0; 0.50; 1" dur="8s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0; 0.8; 0" keyTimes="0; 0.50; 1" dur="8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="140" cy="125" r="6" fill="#7EE787"/>
+  </g>
+
+  <!-- Phase 3: Context block emerges on the right -->
+  <g transform="translate(820 170)">
+    <rect width="320" height="180" rx="10" fill="#0A0E14" stroke="#30363D" stroke-width="1" opacity="0">
+      <animate attributeName="opacity" values="0; 0; 0; 0.95; 0.95; 0"
+               keyTimes="0; 0.40; 0.55; 0.62; 0.85; 1" dur="8s" repeatCount="indefinite"/>
+    </rect>
+    <g font-family="ui-monospace, monospace" font-size="12" fill="#7EE787" opacity="0">
+      <animate attributeName="opacity" values="0; 0; 0; 1; 1; 0"
+               keyTimes="0; 0.40; 0.58; 0.65; 0.85; 1" dur="8s" repeatCount="indefinite"/>
+      <text x="20" y="35">## Memory · this project</text>
+      <text x="20" y="58" fill="#C9D1D9">pgvector chosen over Milvus —</text>
+      <text x="20" y="76" fill="#C9D1D9">simpler ops, in Postgres already.</text>
+      <text x="20" y="100" fill="#C9D1D9">contact: Jane, infra team.</text>
+      <text x="20" y="118" fill="#C9D1D9">avoid: `set -e` re-enabling</text>
+      <text x="20" y="132" fill="#C9D1D9">inside dispatched scripts.</text>
+      <text x="20" y="158" fill="#6E7681">— ingested from 3 CLIs · 2 days</text>
+    </g>
+  </g>
+
+  <!-- Footer -->
+  <g font-family="ui-monospace, monospace" font-size="12" fill="#6E7681">
+    <text x="64" y="465">Local · No cloud round-trip · MIT</text>
+    <text x="1136" y="465" text-anchor="end">github.com/mkupermann/throughline</text>
+  </g>
+</svg>
