@@ -1,4 +1,4 @@
-# Throughline — Persistent longterm memory for your local AI tools
+# Throughline — one memory, every AI CLI on your laptop
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -11,7 +11,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
 [![Live Demo](https://img.shields.io/badge/live%20demo-kupermann.com%2Fmemory%2F-b8532e.svg)](https://kupermann.com/memory/)
 
-> Claude Code, Codex, Hermes, Continue, Windsurf — they all start every new session as a blank page. Throughline keeps the thread across all of them: one searchable memory of your decisions, contacts and gotchas, on your own machine, regardless of which tool you happened to use that day.
+> **Every local AI CLI forgets between sessions. Throughline makes the lot of them stop forgetting — without sending your sessions anywhere.** One Postgres database on your laptop ingests session files from Claude Code, Codex, Hermes, Continue, Cline and Windsurf, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
 
 <p align="center">
   <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
