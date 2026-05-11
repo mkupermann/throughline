@@ -730,7 +730,7 @@ See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for every option.
 | [Zep](https://github.com/getzep/zep) | Chat memory store | Yes (self-host) or cloud | No (you push events) | Yes | Limited | Free (OSS) / paid (cloud) |
 | [Anthropic Memory](https://www.anthropic.com) | Claude.ai / API | Anthropic-hosted | Claude only, not the CLI | — | — | Included |
 | ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | ChatGPT only | No | No | Included with plan |
-| **`Throughline`** | **Cross-tool: Claude Code, Codex, Hermes, Continue, Windsurf (extensible)** | **Yes (100%)** | **Yes — every registered adapter, idempotent** | **Yes** | **Yes** | **Free** |
+| **`Throughline`** | **Cross-tool: Claude Code, Codex, Hermes, Continue, Cline, Windsurf (extensible)** | **Yes (100%)** | **Yes — every registered adapter, idempotent** | **Yes** | **Yes** | **Free** |
 
 The unique slot `Throughline` fills: **the only local-first memory layer that
 auto-ingests session files from multiple local AI tools and exposes the
@@ -739,6 +739,15 @@ server (works with Claude Code, Cursor, Zed, Continue, Claude Desktop), or
 raw context injected at session start. Two extraction backends are supported
 for memory chunking — the Anthropic API and the Claude Code CLI in headless
 mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
+
+**Why not just pick one of the alternatives above?** The short version:
+Mem0 / Letta / Zep are agent-framework SDKs you call from your own code —
+they don't ingest off-the-shelf CLI session files because that's not their
+job. Anthropic's and OpenAI's memory features are vendor-scoped by design.
+IDE memory (Cursor, Continue) is scoped to that IDE. None of them solve
+the *cross-tool* case where the same project is touched by Claude Code on
+Monday and Codex on Friday. That's the slot Throughline fills, and the
+full argument is in [`docs/why-cross-tool.md`](docs/why-cross-tool.md).
 
 ---
 
