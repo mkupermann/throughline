@@ -278,6 +278,32 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0 if payload.get("db_reachable") else 2
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Run install-time diagnostics across Python, Postgres, adapters, embeddings, schedule.
+
+    Exit codes:
+        0  no failing checks (warnings allowed)
+        1  one or more FAIL checks
+        2  reserved for fatal-startup errors (never raised here)
+
+    With ``--json`` the report is emitted as a JSON object on stdout and
+    the exit code is always 0 so machine consumers (CI, health endpoints)
+    can parse the payload — the ``summary.fail`` field tells them whether
+    anything is wrong.
+    """
+    import json
+
+    from throughline.doctor import run_doctor, format_human as doctor_format
+
+    cats = args.category if getattr(args, "category", None) else None
+    report = run_doctor(categories=cats)
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
+        return 0
+    print(doctor_format(report, color=not args.no_color))
+    return 0 if report.fails == 0 else 1
+
+
 # --------------------------------------------------------------------------- #
 # Parser construction                                                         #
 # --------------------------------------------------------------------------- #
@@ -504,6 +530,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="Emit a JSON object on stdout instead of human text.")
     p.add_argument("--pretty", action="store_true", help="With --json, indent the output (default: single line).")
     p.set_defaults(func=cmd_status)
+
+    # doctor
+    p = sub.add_parser(
+        "doctor",
+        help="Run install diagnostics: Python, Postgres+pgvector, adapters, embeddings, schedule.",
+        description=(
+            "Diagnoses install / runtime issues across five categories: "
+            "python (interpreter + required packages), postgres "
+            "(reachability + pgvector + schema), adapters (which AI tool "
+            "home directories exist), embeddings (OpenAI key or Ollama "
+            "reachable), schedule (launchd plists on macOS / systemd "
+            "timers on Linux). Read-only: never writes, mutates, or "
+            "installs anything. Exit 0 if no FAIL checks (warnings allowed); "
+            "exit 1 otherwise. Use --json for a machine-readable payload."
+        ),
+    )
+    p.add_argument("--json", action="store_true", help="Emit a JSON object on stdout instead of human text.")
+    p.add_argument("--pretty", action="store_true", help="With --json, indent the output.")
+    p.add_argument("--no-color", action="store_true", help="Disable ANSI colors in human output.")
+    p.add_argument(
+        "--category",
+        action="append",
+        choices=["python", "postgres", "adapters", "embeddings", "schedule"],
+        help="Restrict to one or more categories (repeatable). Default: run all.",
+    )
+    p.set_defaults(func=cmd_doctor)
 
     return parser
 
