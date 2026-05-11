@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from gui.pages import app_ns
+
 
 def render() -> None:
-    from gui.app import TEXT, dml, page_header, q, st
+    app = app_ns()
+    st = app.st
+    q = app.q
+    dml = app.dml
+    page_header = app.page_header
+    TEXT = app.TEXT
 
     page_header("SQL console", "Direct SQL access — no undo")
 

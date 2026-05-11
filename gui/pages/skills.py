@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
+from gui.pages import app_ns
+
 
 def render() -> None:
-    # Imports are local to keep page modules cheap to load and to avoid
-    # any startup-order coupling between app.py and the page modules.
-    from gui.app import (
-        BORDER_MUTED,
-        TEXT,
-        TEXT_FAINT,
-        TEXT_MUTED,
-        fmt_dt,
-        go_to_detail,
-        page_header,
-        q,
-        render_export_buttons,
-        st,
-    )
+    # Pull helpers off the running main script (see gui/pages/__init__.py
+    # for why this avoids StreamlitDuplicateElementId).
+    app = app_ns()
+    st = app.st
+    q = app.q
+    page_header = app.page_header
+    render_export_buttons = app.render_export_buttons
+    fmt_dt = app.fmt_dt
+    go_to_detail = app.go_to_detail
+    TEXT = app.TEXT
+    TEXT_MUTED = app.TEXT_MUTED
+    TEXT_FAINT = app.TEXT_FAINT
+    BORDER_MUTED = app.BORDER_MUTED
 
     page_header("Skills", "Registered skills available in your environment")
     with st.spinner("Loading skills..."):
