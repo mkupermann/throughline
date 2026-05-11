@@ -197,13 +197,25 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
             is_refresh = cur.fetchone() is not None
 
             try:
-                conv = adapter.parse(fp)
-                if conv is None or not conv.messages:
+                parsed = adapter.parse(fp)
+                # Normalise to a list so the code below handles both
+                # one-conversation-per-file (Claude Code JSONL, Hermes
+                # JSON, Codex rollout) and many-conversations-per-file
+                # (Hermes state.db SQLite) uniformly.
+                if parsed is None:
                     summary.skipped += 1
                     conn.rollback()
                     continue
-                conv_id = _upsert_conversation(cur, conv)
-                written = _replace_messages(cur, conv_id, conv)
+                convs = parsed if isinstance(parsed, list) else [parsed]
+                convs = [c for c in convs if c and c.messages]
+                if not convs:
+                    summary.skipped += 1
+                    conn.rollback()
+                    continue
+                written = 0
+                for conv in convs:
+                    conv_id = _upsert_conversation(cur, conv)
+                    written += _replace_messages(cur, conv_id, conv)
                 cur.execute(
                     "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
                     "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

@@ -25,6 +25,7 @@ _BUILTIN_PATHS: tuple[str, ...] = (
     "throughline.adapters.hermes:HermesAdapter",
     "throughline.adapters.codex:CodexAdapter",
     "throughline.adapters.continue_dev:ContinueDevAdapter",
+    "throughline.adapters.cline:ClineAdapter",
 )
 
 
