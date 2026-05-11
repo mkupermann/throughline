@@ -120,8 +120,19 @@ class Adapter(ABC):
         """Yield candidate conversation files. May be empty."""
 
     @abstractmethod
-    def parse(self, path: Path) -> NormalisedConversation | None:
-        """Parse a single discovered file. Return None if it should be skipped."""
+    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+        """Parse a single discovered file.
+
+        Returns:
+          - a single ``NormalisedConversation`` (the common case: one
+            file = one conversation, e.g. Claude Code JSONL).
+          - a ``list[NormalisedConversation]`` when one source file
+            carries multiple conversations (e.g. a SQLite ``state.db``
+            with N session rows). The writer will upsert each
+            independently and use a per-conversation row replace for
+            messages, so growing files don't accumulate duplicates.
+          - ``None`` to skip the file entirely.
+        """
 
     # Helpers shared by most adapters.
 

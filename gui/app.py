@@ -2808,67 +2808,8 @@ elif page == "Semantic":
                             go_to_detail("conversation", int(df.iloc[sel_x.selection.rows[0]]["conv_id"]))
 
 elif page == "Conversations":
-    page_header("Conversations", "All recorded Claude Code sessions")
-
-    with st.spinner("Loading filters..."):
-        projs = q("SELECT DISTINCT project_name FROM conversations WHERE project_name IS NOT NULL ORDER BY project_name")
-        mods = q("SELECT DISTINCT model FROM conversations WHERE model IS NOT NULL ORDER BY model")
-
-    fcol1, fcol2, fcol3 = st.columns([2, 2, 3])
-    with fcol1:
-        proj_values = projs["project_name"].dropna().tolist() if "project_name" in projs.columns else []
-        sel_p = st.selectbox("Project", ["All"] + proj_values)
-    with fcol2:
-        model_values = mods["model"].dropna().tolist() if "model" in mods.columns else []
-        sel_m = st.selectbox("Model", ["All"] + model_values)
-    with fcol3:
-        search = st.text_input("Search in messages", placeholder="Full-text search...")
-
-    w, params_list = [], []
-    if sel_p != "All":
-        w.append("c.project_name = %s"); params_list.append(sel_p)
-    if sel_m != "All":
-        w.append("c.model = %s"); params_list.append(sel_m)
-    if search:
-        w.append("c.id IN (SELECT DISTINCT conversation_id FROM messages WHERE content ILIKE %s)")
-        params_list.append(f"%{search}%")
-    where = ("WHERE " + " AND ".join(w)) if w else ""
-
-    with st.spinner("Querying conversations..."):
-        df = q(
-            f"SELECT c.id, c.summary AS title, c.project_name AS project, c.model, "
-            f"c.started_at, c.message_count AS messages FROM conversations c "
-            f"{where} ORDER BY c.started_at DESC LIMIT 500",
-            params_list or None,
-        )
-
-    if df.empty:
-        st.info("No conversations match.")
-    else:
-        st.markdown(
-            f'<div class="kai-section-label">{len(df)} conversations · click a row to open</div>',
-            unsafe_allow_html=True,
-        )
-        render_export_buttons(
-            df, key_prefix="conv_list",
-            filename_base="conversations",
-            title="Conversations",
-        )
-        sel = st.dataframe(
-            df, use_container_width=True, hide_index=True, height=620,
-            on_select="rerun", selection_mode="single-row",
-            column_config={
-                "id":         st.column_config.NumberColumn("ID", width="small"),
-                "title":      st.column_config.TextColumn("Title", width="large"),
-                "project":    st.column_config.TextColumn("Project", width="medium"),
-                "model":      st.column_config.TextColumn("Model", width="small"),
-                "started_at": st.column_config.DatetimeColumn("Started", width="small"),
-                "messages":   st.column_config.NumberColumn("Msgs", width="small"),
-            },
-            key="df_conv",
-        )
-        if sel.selection and sel.selection.rows:
-            go_to_detail("conversation", int(df.iloc[sel.selection.rows[0]]["id"]))
+    from gui.pages.conversations import render as _render_conversations
+    _render_conversations()
 
 elif page == "Memory":
     page_header("Memory", "Extracted decisions, patterns, insights and context")
@@ -3172,46 +3113,11 @@ elif page == "Memory Health":
         st.dataframe(links_disp, use_container_width=True, hide_index=True)
 
 elif page == "Skills":
-    page_header("Skills", "Registered skills available in your environment")
-    with st.spinner("Loading skills..."):
-        df = q("""SELECT id, name, description, use_count, last_used, version,
-                         COALESCE(file_modified, last_used, created_at) AS sort_date
-                  FROM skills
-                  ORDER BY sort_date DESC NULLS LAST, use_count DESC NULLS LAST, name""")
-    if df.empty:
-        st.info("No skills. Run the skill scanner from the Ingestion page.")
-    else:
-        st.markdown(
-            f'<div class="kai-section-label">{len(df)} skills</div>',
-            unsafe_allow_html=True,
-        )
-        skills_export = df[["id", "name", "description", "use_count", "last_used", "version"]].copy()
-        render_export_buttons(
-            skills_export, key_prefix="skills_list",
-            filename_base="skills",
-            title="Skills",
-        )
-        cols = st.columns(3)
-        for i, (_, row) in enumerate(df.iterrows()):
-            col = cols[i % 3]
-            with col:
-                desc = (row["description"] or "No description")
-                desc_short = desc[:160] + ("..." if len(desc) > 160 else "")
-                uc = int(row["use_count"] or 0)
-                last = fmt_dt(row["last_used"], compact=True) if row["last_used"] else "never"
-                st.markdown(
-                    f"""<div class="kai-list-card" style="min-height:180px;display:flex;flex-direction:column;">
-                        <div style="font-size:14px;font-weight:600;color:{TEXT};margin-bottom:6px;letter-spacing:-0.01em;">{row['name']}</div>
-                        <div style="font-size:12.5px;color:{TEXT_MUTED};line-height:1.5;flex:1;margin-bottom:12px;">{desc_short}</div>
-                        <div style="display:flex;justify-content:space-between;font-size:11px;color:{TEXT_FAINT};border-top:1px solid {BORDER_MUTED};padding-top:10px;">
-                            <span>used {uc}×</span>
-                            <span>{last}</span>
-                        </div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
-                if st.button("Open", key=f"sk_open_{row['id']}"):
-                    go_to_detail("skill", int(row["id"]))
+    # Page body extracted to gui/pages/skills.py — see gui/pages/__init__.py
+    # for the migration recipe. The remaining `elif page == …` bodies
+    # below will be ported following the same pattern.
+    from gui.pages.skills import render as _render_skills
+    _render_skills()
 
 elif page == "Knowledge Graph":
     page_header("Knowledge Graph", "Entities, relationships and mentions extracted from conversations")
@@ -4026,54 +3932,5 @@ elif page == "Ingestion":
         st.dataframe(log, use_container_width=True, hide_index=True)
 
 elif page == "SQL":
-    page_header("SQL console", "Direct SQL access — no undo")
-
-    st.markdown('<div class="kai-section-label">Query</div>', unsafe_allow_html=True)
-    sql = st.text_area(
-        "sql",
-        height=180,
-        placeholder="SELECT * FROM conversations ORDER BY started_at DESC LIMIT 10;",
-        label_visibility="collapsed",
-        key="sql_editor",
-    )
-
-    bcol1, bcol2, _ = st.columns([1, 1, 6])
-    run_clicked = bcol1.button("Run", type="primary", use_container_width=True)
-    clear_clicked = bcol2.button("Clear", use_container_width=True)
-    if clear_clicked:
-        st.rerun()
-
-    if run_clicked:
-        if not sql.strip():
-            st.error("Enter SQL.")
-        else:
-            upper = sql.strip().upper()
-            is_read = upper.startswith("SELECT") or upper.startswith("WITH") or upper.startswith("EXPLAIN")
-            if is_read:
-                try:
-                    with st.spinner("Running query..."):
-                        df = q(sql)
-                    st.success(f"{len(df)} rows")
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                except Exception as e:
-                    st.error(str(e))
-            else:
-                st.info(dml(sql))
-
-    st.markdown('<hr/>', unsafe_allow_html=True)
-    st.markdown('<div class="kai-section-label">Snippets</div>', unsafe_allow_html=True)
-    sn_cols = st.columns(2)
-    snippets = [
-        ("Recent conversations", "SELECT * FROM conversations ORDER BY started_at DESC LIMIT 20;"),
-        ("Memory by category",   "SELECT category::text, count(*) FROM memory_chunks GROUP BY category ORDER BY count DESC;"),
-        ("Top projects",         "SELECT project_name, count(*) AS sessions FROM conversations GROUP BY project_name ORDER BY sessions DESC LIMIT 20;"),
-        ("Messages by role",     "SELECT role::text, count(*) FROM messages GROUP BY role;"),
-    ]
-    for i, (label, sq) in enumerate(snippets):
-        with sn_cols[i % 2]:
-            with st.container(border=True):
-                st.markdown(
-                    f'<div style="font-size:12px;font-weight:600;color:{TEXT};margin-bottom:6px;">{label}</div>',
-                    unsafe_allow_html=True,
-                )
-                st.code(sq, language="sql")
+    from gui.pages.sql import render as _render_sql
+    _render_sql()

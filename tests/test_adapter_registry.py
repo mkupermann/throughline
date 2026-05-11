@@ -8,10 +8,10 @@ from throughline.adapters import Adapter, all_adapters, get_adapter
 def test_registry_returns_builtin_adapters():
     adapters = all_adapters()
     names = {a.name for a in adapters}
-    # The 5 ship-now adapters. Asserting their names so a typo or
+    # The 6 ship-now adapters. Asserting their names so a typo or
     # accidental rename breaks the test rather than silently dropping a
     # source on someone's machine.
-    assert {"claude_code", "windsurf", "hermes", "codex", "continue"} <= names
+    assert {"claude_code", "windsurf", "hermes", "codex", "continue", "cline"} <= names
 
 
 def test_every_registered_adapter_subclasses_base():

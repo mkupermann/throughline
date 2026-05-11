@@ -1,8 +1,29 @@
-"""Hermes Agent (~/.hermes/sessions/) adapter."""
+"""Hermes Agent adapter.
+
+Reads from two sources, in this order of authority:
+
+1. ``~/.hermes/state.db`` — the SQLite database Hermes writes to in real
+   time. Schema: ``sessions(id, source, model, title, started_at,
+   message_count, …)`` and ``messages(session_id, role, content,
+   timestamp, tool_calls, reasoning_*, finish_reason, …)``. Richer than
+   the JSON exports — a single Hermes session may have 28 messages here
+   while only 6 appear in the exported JSON file. The DB is treated as
+   a single "file" by the writer, but ``parse()`` returns N
+   conversations (one per session row).
+2. ``~/.hermes/sessions/session_*.json`` — exported session snapshots.
+   Kept so users who have JSON exports but not state.db still get
+   ingested, and so the archival format stays a supported source.
+
+UUID derivation is identical for both paths (``uuid5`` over
+``hermes:<session_id>``), so the same session in both places resolves to
+the same ``conversations.session_id`` and upserts cleanly. The DB is
+discovered first, so it wins on conflicts.
+"""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,17 +84,197 @@ def _normalise_content(content: Any) -> tuple[str, Any]:
     return ("" if content is None else str(content)[:2000]), None
 
 
+def _parse_state_db(path: Path) -> list[NormalisedConversation]:
+    """Pull every session row out of Hermes's state.db SQLite file.
+
+    Returns an empty list on schema mismatch or read errors so a stale
+    Hermes install never crashes the ingest pipeline. Each returned
+    NormalisedConversation has the same uuid5-derived session_id as the
+    matching ``sessions/session_<id>.json`` file would, so DB ingestion
+    upserts cleanly on top of (or under) the JSON path.
+    """
+    out: list[NormalisedConversation] = []
+    # ``immutable=1`` opens read-only and won't lock or modify the file
+    # even while Hermes is writing. ``mode=ro`` plus ``immutable`` is
+    # the canonical "snapshot read" combo.
+    try:
+        conn = sqlite3.connect(
+            f"file:{path}?mode=ro&immutable=1", uri=True
+        )
+    except sqlite3.Error:
+        return out
+    conn.row_factory = sqlite3.Row
+    try:
+        # Probe the schema cheaply — if either table is missing, the
+        # state.db is from a Hermes version we don't understand and we
+        # bail rather than emit garbage.
+        names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "sessions" not in names or "messages" not in names:
+            return out
+
+        sessions = list(
+            conn.execute(
+                "SELECT id, source, model, title, started_at, ended_at, "
+                "       system_prompt, message_count, "
+                "       input_tokens, output_tokens, "
+                "       actual_cost_usd, estimated_cost_usd "
+                "FROM sessions"
+            )
+        )
+
+        for s in sessions:
+            sid = s["id"]
+            if not sid:
+                continue
+            started = _from_unix(s["started_at"])
+            ended = _from_unix(s["ended_at"]) or started
+
+            msgs = list(
+                conn.execute(
+                    "SELECT role, content, tool_call_id, tool_calls, tool_name, "
+                    "       timestamp, token_count, finish_reason, "
+                    "       reasoning, reasoning_content, reasoning_details "
+                    "FROM messages WHERE session_id = ? ORDER BY id ASC",
+                    (sid,),
+                )
+            )
+
+            norm: list[NormalisedMessage] = []
+            for idx, m in enumerate(msgs):
+                role = _ROLE_MAP.get((m["role"] or "").lower())
+                if role is None:
+                    continue
+                content = m["content"] or ""
+                # tool_calls is stored as a JSON string blob.
+                tool_calls_raw = m["tool_calls"]
+                tool_calls: list[dict] | None = None
+                if tool_calls_raw:
+                    try:
+                        parsed = json.loads(tool_calls_raw)
+                        if isinstance(parsed, list):
+                            tool_calls = [
+                                {
+                                    "tool_name": (
+                                        (c.get("function") or {}).get("name")
+                                        if isinstance(c, dict) else None
+                                    ),
+                                    "input": (
+                                        (c.get("function") or {}).get("arguments")
+                                        if isinstance(c, dict) else None
+                                    ),
+                                }
+                                for c in parsed
+                            ]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                meta = {
+                    k: m[k]
+                    for k in (
+                        "finish_reason",
+                        "reasoning",
+                        "reasoning_content",
+                        "reasoning_details",
+                        "tool_call_id",
+                    )
+                    if m[k] is not None
+                }
+                norm.append(
+                    NormalisedMessage(
+                        role=role,
+                        content=content,
+                        tool_calls=tool_calls,
+                        tool_name=m["tool_name"] or (
+                            tool_calls[0]["tool_name"] if tool_calls else None
+                        ),
+                        created_at=_from_unix(m["timestamp"]) or started,
+                        model=s["model"] if role == "assistant" else None,
+                        token_count=m["token_count"],
+                        uuid=str(uuid.uuid5(_NS, f"hermes:{sid}:msg:{idx}")),
+                        metadata=meta,
+                    )
+                )
+            if not norm:
+                continue
+
+            out.append(
+                NormalisedConversation(
+                    session_id=str(uuid.uuid5(_NS, f"hermes:{sid}")),
+                    project_path="hermes",
+                    model=s["model"],
+                    entrypoint=s["source"] or "hermes",
+                    started_at=started,
+                    ended_at=ended,
+                    messages=norm,
+                    summary=s["title"],
+                    token_count_in=s["input_tokens"] or None,
+                    token_count_out=s["output_tokens"] or None,
+                    metadata={
+                        "source": "hermes",
+                        "origin": "state.db",
+                        "hermes_session_id": sid,
+                        "system_prompt_chars": len(s["system_prompt"] or ""),
+                        "actual_cost_usd": s["actual_cost_usd"],
+                        "estimated_cost_usd": s["estimated_cost_usd"],
+                    },
+                )
+            )
+    except sqlite3.Error:
+        # Any read error → return what we have (possibly empty). Don't
+        # raise; the JSON export path may still have data.
+        pass
+    finally:
+        conn.close()
+    return out
+
+
+def _from_unix(value: Any) -> datetime | None:
+    """Convert a Hermes Unix timestamp (float seconds) to UTC datetime."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
 class HermesAdapter(Adapter):
     name = "hermes"
     label = "Hermes Agent"
+    # Reported home — the most user-visible directory. ``discover`` walks
+    # the parent ``~/.hermes/`` for both state.db and sessions/.
     home = Path("~/.hermes/sessions").expanduser()
 
-    def discover(self) -> Iterable[Path]:
-        if not self.home.exists():
-            return []
-        return sorted(self.home.glob("session_*.json"))
+    @property
+    def _hermes_root(self) -> Path:
+        return Path("~/.hermes").expanduser()
 
-    def parse(self, path: Path) -> NormalisedConversation | None:
+    def is_present(self) -> bool:
+        # Present if either source exists — state.db OR a sessions dir.
+        root = self._hermes_root
+        return (root / "state.db").exists() or (root / "sessions").exists()
+
+    def discover(self) -> Iterable[Path]:
+        out: list[Path] = []
+        db = self._hermes_root / "state.db"
+        if db.exists():
+            out.append(db)
+        sessions = self._hermes_root / "sessions"
+        if sessions.exists():
+            out.extend(sorted(sessions.glob("session_*.json")))
+        return out
+
+    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+        # state.db path: emit one conversation per session row.
+        if path.name == "state.db":
+            convs = _parse_state_db(path)
+            return convs if convs else None
+
+        # JSON export path (unchanged from v0.3.0 behaviour).
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
