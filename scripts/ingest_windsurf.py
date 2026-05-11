@@ -3,6 +3,9 @@
 Windsurf-Ingestion: Liest Windsurf-Pläne (~/.windsurf/plans/*.md) als Conversations
 und schreibt sie in die claude_memory DB.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import os
 import sys

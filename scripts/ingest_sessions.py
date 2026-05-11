@@ -3,6 +3,9 @@
 Session-Ingestion für claude_memory DB.
 Liest Claude Code JSONL-Sessions und speichert sie in PostgreSQL.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import json
 import hashlib
@@ -355,6 +358,29 @@ def main() -> None:
     print(f"  Übersprungen: {skipped}")
     print(f"  Fehler:      {errors}")
     print(f"{'=' * 60}")
+
+    # Auto-materialise the projects table from observed project_names so the
+    # GUI's Projects page is not empty on first run. Idempotent (ON CONFLICT
+    # DO NOTHING in insert_missing), never touches existing rows. Only runs
+    # when this invocation actually wrote something — re-runs that ingest 0
+    # new sessions don't need to re-scan.
+    if ingested > 0:
+        try:
+            from backfill_projects import (
+                collect_observed_names,
+                existing_project_names,
+                insert_missing,
+            )
+            observed = collect_observed_names(conn, include_conversations=True)
+            existing = existing_project_names(conn)
+            to_insert = [n for n in observed if n not in existing]
+            if to_insert:
+                insert_missing(conn, to_insert)
+                print(f"  Projects:    materialised {len(to_insert)} new row(s) "
+                      f"({len(existing) + len(to_insert)} total).")
+        except Exception as exc:
+            # Backfill is a nice-to-have; ingestion itself succeeded.
+            print(f"  Projects:    backfill skipped ({exc.__class__.__name__})")
 
     cursor.close()
     conn.close()

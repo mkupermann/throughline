@@ -222,12 +222,18 @@ If you just want the CLI and aren't running the Docker stack:
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
-pip install -e .[dev]       # editable install, dev deps included
+make install                # creates .venv (Python >=3.10) and installs deps
 
-throughline --help
-python -m throughline ingest
+.venv/bin/throughline --help
+.venv/bin/python -m throughline ingest
 make help                   # list every Makefile shortcut
 ```
+
+`make install` auto-creates a project-local `.venv/` so the system Python is
+never polluted. Once it exists, every script in `scripts/` automatically
+re-execs itself under the venv interpreter — so even an old habit like
+`python3 scripts/ingest_sessions.py` keeps working without manually
+activating the venv. To opt out, delete `.venv/`.
 
 Requires Python 3.10+, a reachable PostgreSQL 16 instance with `pgvector`,
 and (for extraction/titles) the `claude` CLI on your `PATH`.
@@ -241,8 +247,10 @@ Run `throughline <cmd> --help` for the per-command options.
 
 | Command | Purpose |
 |---|---|
-| `throughline ingest` | Import Claude Code JSONL sessions (`~/.claude/projects/`) |
-| `throughline ingest --windsurf` | Import Windsurf plans (`~/.windsurf/plans/`) |
+| `throughline ingest` | Import from the default source (Claude Code, `~/.claude/projects/`) |
+| `throughline ingest --source NAME` | Run a specific adapter — e.g. `claude_code`, `hermes`, `codex`, `continue`, `windsurf` |
+| `throughline ingest --all` | Run every adapter whose data directory is present on this machine |
+| `throughline ingest --list-sources` | Print the registered adapters and whether each one's data dir exists |
 | `throughline scan-skills` | Index all `SKILL.md` files (global + project) |
 | `throughline scan-prompts` | Index `CLAUDE.md` files + skill prompt templates |
 | `throughline extract-memory` | Extract structured memory chunks via the Claude CLI |
@@ -261,6 +269,62 @@ Run `throughline <cmd> --help` for the per-command options.
 The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,
 `extract`, `docker-up/down/logs`, `clean`, `migrate`, `load-demo`).
 Run `make help` for the full list.
+
+---
+
+## Sources (ingest adapters)
+
+Throughline pulls conversations from any local AI tool you use, not just
+Claude Code. Each tool is a small adapter under
+[`throughline/adapters/`](throughline/adapters/) that knows how to find and
+parse that tool's session files; a shared writer handles DB upserts,
+idempotency, and project bucketing.
+
+| Adapter | Tool | Default data directory |
+|---|---|---|
+| `claude_code` | Claude Code | `~/.claude/projects/<slug>/*.jsonl` |
+| `hermes` | [Hermes Agent](https://github.com/) | `~/.hermes/sessions/*.json` |
+| `codex` | OpenAI Codex CLI | `~/.codex/sessions/<YYYY-MM-DD>/rollout-*.jsonl` |
+| `continue` | [Continue.dev](https://continue.dev) | `~/.continue/sessions/*.json` |
+| `windsurf` | [Windsurf](https://codeium.com/windsurf) | `~/.windsurf/plans/*.md` |
+
+Run `throughline ingest --list-sources` to see which are present on the
+current machine, and `throughline ingest --all` to import everything that
+is. Adapters are idempotent — re-running is a no-op when source files
+haven't changed; when they have, the writer re-syncs the conversation's
+messages so duplicates never accumulate.
+
+### Adding a new adapter
+
+Three steps:
+
+1. **Create the module** under `throughline/adapters/<your_tool>.py`,
+   subclass `Adapter`, and implement `discover()` + `parse(path)`:
+
+   ```python
+   from throughline.adapters import Adapter, NormalisedConversation, NormalisedMessage
+
+   class MyToolAdapter(Adapter):
+       name = "my_tool"
+       label = "My Tool"
+       home = Path("~/.mytool/sessions").expanduser()
+
+       def discover(self): ...           # yield Path objects
+       def parse(self, path): ...        # return NormalisedConversation
+   ```
+
+2. **Register it** in `throughline/adapters/registry.py`
+   (`_BUILTIN_PATHS`) — or ship your adapter as a separate pip package
+   with a `throughline.adapters` entry point so it auto-loads.
+
+3. **Add a test** under `tests/test_adapter_<your_tool>.py` covering at
+   least: parsing a minimal session, deterministic `session_id`,
+   returns-None on empty input, and one alternate-shape variant of the
+   source's schema.
+
+The shared writer in `throughline/adapters/writer.py` handles everything
+else — DB connection, `ingestion_log` idempotency, project backfill, and
+delete-and-replace on content change. You never write SQL in an adapter.
 
 ---
 

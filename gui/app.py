@@ -2674,11 +2674,17 @@ elif page == "Semantic":
     page_header("Semantic search", "Vector similarity across memory chunks and messages (pgvector cosine distance)")
 
     if semantic_helper is None or not semantic_helper.backend_available():
-        st.error(
-            "Semantic backend unavailable. Set OPENAI_API_KEY or run Ollama "
-            "(`brew services start ollama`, then `ollama pull nomic-embed-text`). "
-            "Then generate embeddings: `python3 scripts/generate_embeddings.py --backend ollama`."
+        reason = ""
+        if semantic_helper is not None and hasattr(semantic_helper, "last_reason"):
+            reason = semantic_helper.last_reason() or ""
+        msg = "Semantic backend unavailable."
+        if reason:
+            msg += f"\n\n**Reason:** {reason}"
+        msg += (
+            "\n\nOnce the backend is reachable, generate embeddings with: "
+            "`.venv/bin/throughline embed --backend auto`."
         )
+        st.error(msg)
     else:
         conn = get_conn()
         n_emb = semantic_helper.count_embeddings(conn)
@@ -2810,9 +2816,11 @@ elif page == "Conversations":
 
     fcol1, fcol2, fcol3 = st.columns([2, 2, 3])
     with fcol1:
-        sel_p = st.selectbox("Project", ["All"] + projs["project_name"].dropna().tolist())
+        proj_values = projs["project_name"].dropna().tolist() if "project_name" in projs.columns else []
+        sel_p = st.selectbox("Project", ["All"] + proj_values)
     with fcol2:
-        sel_m = st.selectbox("Model", ["All"] + mods["model"].dropna().tolist())
+        model_values = mods["model"].dropna().tolist() if "model" in mods.columns else []
+        sel_m = st.selectbox("Model", ["All"] + model_values)
     with fcol3:
         search = st.text_input("Search in messages", placeholder="Full-text search...")
 
@@ -3705,7 +3713,8 @@ elif page == "Prompts":
         )
     with cat_col:
         cats_df = q("SELECT DISTINCT category FROM prompts WHERE category IS NOT NULL ORDER BY category")
-        cat_filter = st.selectbox("Category", ["All"] + cats_df["category"].dropna().tolist())
+        cat_values = cats_df["category"].dropna().tolist() if "category" in cats_df.columns else []
+        cat_filter = st.selectbox("Category", ["All"] + cat_values)
     with search_col:
         search_text = st.text_input("Search name/content", placeholder="...")
 

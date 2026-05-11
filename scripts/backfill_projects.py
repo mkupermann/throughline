@@ -31,6 +31,9 @@ Exit code: 0 on success (including dry-run), 2 on a usage error, 1 on
 DB failure.
 """
 from __future__ import annotations
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import argparse
 import os

@@ -3,6 +3,9 @@
 Scannt CLAUDE.md-Dateien aus allen Projekten sowie Skill-Prompts
 und speichert sie als wiederverwendbare Templates in der prompts-Tabelle.
 """
+from _bootstrap import use_venv  # noqa: E402
+use_venv()
+
 
 import os
 import re

@@ -102,10 +102,49 @@ def _run_shell_script(script_name: str, args: list[str]) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """Ingest Claude Code JSONL sessions (or Windsurf plans with --windsurf)."""
-    if args.windsurf:
-        return _call_script_main("ingest_windsurf")
-    return _call_script_main("ingest_sessions")
+    """Ingest conversations from one or more local AI sources.
+
+    Source selection precedence:
+      1. ``--list-sources``  → print and exit.
+      2. ``--all``           → run every adapter whose data directory exists.
+      3. ``--source NAME``   → run that adapter only.
+      4. Legacy ``--windsurf`` / ``--hermes`` flags → equivalent to
+         ``--source windsurf`` / ``--source hermes``.
+      5. Default              → run the Claude Code adapter.
+    """
+    from throughline.adapters import all_adapters, get_adapter
+    from throughline.adapters.writer import run_adapter, run_many
+
+    if args.list_sources:
+        print(f"{'NAME':<14} {'PRESENT':<8} HOME")
+        print("-" * 70)
+        for a in all_adapters():
+            present = "yes" if a.is_present() else "no"
+            print(f"{a.name:<14} {present:<8} {a.home}")
+        return 0
+
+    if args.all:
+        results = run_many([a for a in all_adapters() if a.is_present()])
+        return 0 if all(r.errors == 0 for r in results) else 1
+
+    name = args.source
+    if not name:
+        if args.windsurf:
+            name = "windsurf"
+        elif args.hermes:
+            name = "hermes"
+        else:
+            name = "claude_code"
+
+    adapter = get_adapter(name)
+    if adapter is None:
+        sys.stderr.write(
+            f"Unknown source: {name!r}. Run `throughline ingest --list-sources` "
+            f"to see the available adapters.\n"
+        )
+        return 2
+    summary = run_adapter(adapter)
+    return 0 if summary.errors == 0 else 1
 
 
 def cmd_scan_skills(args: argparse.Namespace) -> int:
@@ -267,17 +306,41 @@ def build_parser() -> argparse.ArgumentParser:
     # ingest
     p = sub.add_parser(
         "ingest",
-        help="Ingest Claude Code JSONL sessions into the database.",
+        help="Ingest conversations from local AI tools (Claude Code, Hermes, Codex, …).",
         description=(
-            "Reads JSONL files from ~/.claude/projects/ and inserts "
-            "conversations + messages into PostgreSQL. Use --windsurf to "
-            "instead ingest Windsurf plans from ~/.windsurf/plans/."
+            "Pulls conversations from any registered source adapter into the "
+            "shared `conversations` + `messages` tables. Defaults to the "
+            "Claude Code adapter (~/.claude/projects/). Use --source to pick "
+            "another, --all to run every adapter whose data directory exists, "
+            "or --list-sources to see what's registered on this machine."
         ),
     )
-    p.add_argument(
+    src = p.add_mutually_exclusive_group()
+    src.add_argument(
+        "--source",
+        metavar="NAME",
+        help="Run a single adapter by name (e.g. claude_code, hermes, codex, continue).",
+    )
+    src.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every adapter whose data directory exists on this machine.",
+    )
+    src.add_argument(
+        "--list-sources",
+        action="store_true",
+        help="Print the available source adapters and whether each is present, then exit.",
+    )
+    # Legacy compatibility aliases — equivalent to --source <name>.
+    src.add_argument(
         "--windsurf",
         action="store_true",
-        help="Ingest Windsurf plans (~/.windsurf/plans/*.md) instead of Claude Code sessions.",
+        help="Deprecated alias for --source windsurf.",
+    )
+    src.add_argument(
+        "--hermes",
+        action="store_true",
+        help="Deprecated alias for --source hermes.",
     )
     p.set_defaults(func=cmd_ingest)
 

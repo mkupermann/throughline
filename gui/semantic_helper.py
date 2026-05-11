@@ -28,20 +28,63 @@ from generate_embeddings import (  # type: ignore
 
 
 _BACKEND: Optional[Backend] = None
+_LAST_REASON: str = ""
+
+
+def _probe_or_reason(preferred: str) -> Optional[str]:
+    """Return a human-readable reason the backend is unusable, or None if OK.
+
+    Fails fast — never triggers a model pull or any long-running network call,
+    so calling this from a Streamlit page does not freeze the UI.
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if preferred == "openai":
+        if not openai_key:
+            return "OPENAI_API_KEY not set."
+        return None  # OpenAI key present, defer real init to pick_backend()
+    if preferred == "auto" and openai_key:
+        return None  # OpenAI path will succeed
+    # Ollama path
+    if not ollama_up():
+        return (
+            "Ollama is not running on http://localhost:11434. "
+            "Start it with `brew services start ollama` or `ollama serve`."
+        )
+    if not ollama_has_model(OLLAMA_MODEL):
+        return (
+            f"Ollama model `{OLLAMA_MODEL}` is not pulled yet. "
+            f"Run `ollama pull {OLLAMA_MODEL}` and reload this page."
+        )
+    return None
 
 
 def get_backend(preferred: str = "auto") -> Optional[Backend]:
-    """Lazy-init backend, fails soft (returns None if unavailable)."""
-    global _BACKEND
+    """Lazy-init backend, fails soft (returns None if unavailable).
+
+    Does a cheap probe first so missing-model / missing-key states never
+    trigger a multi-minute auto-pull from inside the Streamlit request cycle.
+    """
+    global _BACKEND, _LAST_REASON
     if _BACKEND is not None:
         return _BACKEND
+    reason = _probe_or_reason(preferred)
+    if reason is not None:
+        _LAST_REASON = reason
+        return None
     try:
         _BACKEND = pick_backend(preferred)
         return _BACKEND
     except SystemExit:
+        _LAST_REASON = "Backend initialisation aborted (see server log)."
         return None
-    except Exception:
+    except Exception as exc:
+        _LAST_REASON = f"Backend initialisation failed: {exc}"
         return None
+
+
+def last_reason() -> str:
+    """Reason the most recent get_backend() call returned None, or '' if OK."""
+    return _LAST_REASON
 
 
 def backend_available() -> bool:
