@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from gui.pages import app_ns
+
 
 def render() -> None:
-    from gui.app import (
-        go_to_detail,
-        page_header,
-        q,
-        render_export_buttons,
-        st,
-    )
+    app = app_ns()
+    st = app.st
+    q = app.q
+    page_header = app.page_header
+    render_export_buttons = app.render_export_buttons
+    go_to_detail = app.go_to_detail
 
-    page_header("Conversations", "Every ingested session — filterable by project, model, and tool")
+    page_header(
+        "Conversations",
+        "Every ingested session — filterable by project, model, and tool",
+    )
 
     with st.spinner("Loading filters..."):
         projs = q(
