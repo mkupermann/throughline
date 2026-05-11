@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from gui.pages import app_ns
+from gui.page_views import app_ns
 
 
 def render() -> None:
-    # Pull helpers off the running main script (see gui/pages/__init__.py
+    # Pull helpers off the running main script (see gui/page_views/__init__.py
     # for why this avoids StreamlitDuplicateElementId).
     app = app_ns()
     st = app.st

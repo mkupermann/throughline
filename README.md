@@ -1,16 +1,5 @@
 # Throughline — one memory, every AI CLI on your laptop
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![PostgreSQL 16+](https://img.shields.io/badge/postgresql-16%2B-336791.svg)](https://www.postgresql.org/)
-[![pgvector 0.8+](https://img.shields.io/badge/pgvector-0.8%2B-4169E1.svg)](https://github.com/pgvector/pgvector)
-[![Status: Beta](https://img.shields.io/badge/status-beta-yellow.svg)](#roadmap)
-[![GitHub Stars](https://img.shields.io/github/stars/mkupermann/throughline?style=social)](https://github.com/mkupermann/throughline/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/mkupermann/throughline)](https://github.com/mkupermann/throughline/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/mkupermann/throughline)](https://github.com/mkupermann/throughline/commits/main)
-[![Live Demo](https://img.shields.io/badge/live%20demo-kupermann.com%2Fmemory%2F-b8532e.svg)](https://kupermann.com/memory/)
-
 > **Every local AI CLI forgets between sessions. Throughline makes the lot of them stop forgetting — without sending your sessions anywhere.** One Postgres database on your laptop ingests session files from Claude Code, Codex, Hermes, Continue, Cline and Windsurf, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
 
 <p align="center">
@@ -18,13 +7,52 @@
 </p>
 
 <p align="center">
-  <b>Try it live</b> at <a href="https://kupermann.com/memory/"><code>kupermann.com/memory/</code></a>
-  · More context at <a href="https://kupermann.com/en/"><code>kupermann.com</code></a>
+  <a href="https://kupermann.com/memory/"><b>Try the live demo →</b></a>
+  &nbsp;·&nbsp;
+  <a href="#quick-start"><b>Quick start (Docker, 1 cmd)</b></a>
+  &nbsp;·&nbsp;
+  <a href="#what-you-actually-get"><b>Why this exists</b></a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/postgresql-16%2B-336791.svg" alt="PostgreSQL 16+"></a>
+  <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/pgvector-0.8%2B-4169E1.svg" alt="pgvector 0.8+"></a>
+  <a href="#roadmap"><img src="https://img.shields.io/badge/status-beta-yellow.svg" alt="Beta"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+  <a href="https://github.com/mkupermann/throughline/stargazers"><img src="https://img.shields.io/github/stars/mkupermann/throughline?style=social" alt="GitHub Stars"></a>
 </p>
 
 ---
 
-## Table of Contents
+<table align="center">
+  <tr>
+    <td align="center" width="33%">
+      <h3>Survives every session</h3>
+      You investigated a bug in Claude Code yesterday, switched to Codex this morning, and went back to Hermes after lunch. Throughline ingested all three — your next session already has the decisions, contacts and gotchas.
+    </td>
+    <td align="center" width="33%">
+      <h3>Searchable, not just stored</h3>
+      pgvector HNSW + temporal validity. Ask <i>"what did we decide about HNSW tuning back in March?"</i> and get the actual quote with a date, project, and originating tool — instead of the agent's confident guess.
+    </td>
+    <td align="center" width="33%">
+      <h3>Stays on your laptop</h3>
+      Postgres runs locally. Two-layer PII redaction, optional Ollama-only path for fully air-gapped extraction. No telemetry, no cloud round-trip, MIT licensed.
+    </td>
+  </tr>
+</table>
+
+---
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="Throughline architecture — six AI CLIs feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and the Claude Code skill" width="980">
+</p>
+
+---
+
+<details>
+  <summary><b>Table of Contents</b></summary>
 
 - [What you actually get](#what-you-actually-get)
 - [Why this exists](#why-this-exists)
@@ -42,33 +70,7 @@
 - [Contributing](#contributing)
 - [License](#license)
 
----
-
-```mermaid
-flowchart LR
-    subgraph Sources ["local AI tools (extensible)"]
-        C["Claude Code"]
-        X["OpenAI<br/>Codex CLI"]
-        H["Hermes<br/>Agent"]
-        N["Continue.dev"]
-        W["Windsurf"]
-    end
-    T["Throughline<br/>Postgres + pgvector"]
-    G["Streamlit GUI"]
-    M["MCP Server"]
-    S["Claude Code Skill"]
-
-    C -- "JSONL" --> T
-    X -- "rollout JSONL" --> T
-    H -- "session JSON" --> T
-    N -- "session JSON" --> T
-    W -- "plans MD" --> T
-    T -- "memory context" --> C
-    T --- G
-    T --- M
-    S -- "query" --> T
-    M -- "tools" --> S
-```
+</details>
 
 ---
 
