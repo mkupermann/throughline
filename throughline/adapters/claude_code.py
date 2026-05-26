@@ -17,6 +17,36 @@ from typing import Any, Iterable
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
+# Sessions whose first user message starts with this marker are headless
+# `claude -p ...` calls issued by scripts/generate_titles.py. Each such call is
+# itself logged as a Claude Code session, then re-ingested here — producing
+# hundreds of indistinguishable "Session-Titel-Generator" rows. Skip them at
+# the adapter boundary so they never enter the DB.
+_TITLE_GENERATOR_MARKER = (
+    "Du bekommst einen Auszug aus einer Claude Code Session. "
+    "Generiere einen prägnanten deutschen Titel"
+)
+
+
+def _is_title_generator_session(entries: list[dict[str, Any]]) -> bool:
+    for e in entries:
+        msg = e.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        text: str | None = None
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text")
+                    break
+        if text and text.lstrip().startswith(_TITLE_GENERATOR_MARKER):
+            return True
+        return False
+    return False
+
 
 def _load_legacy() -> Any:
     """Import scripts/ingest_sessions.py as a module without running its main()."""
@@ -68,6 +98,9 @@ class ClaudeCodeAdapter(Adapter):
 
         msg_entries = [e for e in entries if isinstance(e.get("message"), dict)]
         if not msg_entries:
+            return None
+
+        if _is_title_generator_session(msg_entries):
             return None
 
         # cwd from the JSONL is the authoritative project_path.
