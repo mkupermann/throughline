@@ -90,3 +90,55 @@ class TestRepoRoot:
         root = config.repo_root()
         assert (root / "scripts").is_dir()
         assert (root / "pyproject.toml").is_file()
+
+
+class TestLoadDotenv:
+    def test_sets_vars_from_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("TL_TEST_KEY", raising=False)
+        env = tmp_path / ".env"
+        env.write_text("TL_TEST_KEY=hello\n")
+        applied = config.load_dotenv(env)
+        assert applied == {"TL_TEST_KEY": "hello"}
+        assert os.environ["TL_TEST_KEY"] == "hello"
+
+    def test_does_not_override_existing_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TL_TEST_KEY", "from-shell")
+        env = tmp_path / ".env"
+        env.write_text("TL_TEST_KEY=from-file\n")
+        applied = config.load_dotenv(env)
+        # Existing environment wins; the file value is not applied.
+        assert "TL_TEST_KEY" not in applied
+        assert os.environ["TL_TEST_KEY"] == "from-shell"
+
+    def test_override_true_replaces_existing(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TL_TEST_KEY", "from-shell")
+        env = tmp_path / ".env"
+        env.write_text("TL_TEST_KEY=from-file\n")
+        config.load_dotenv(env, override=True)
+        assert os.environ["TL_TEST_KEY"] == "from-file"
+
+    def test_ignores_comments_blanks_and_strips_export_and_quotes(self, monkeypatch, tmp_path):
+        for k in ("TL_A", "TL_B", "TL_C"):
+            monkeypatch.delenv(k, raising=False)
+        env = tmp_path / ".env"
+        env.write_text(
+            "# a comment\n"
+            "\n"
+            "export TL_A=plain\n"
+            'TL_B="quoted value"\n'
+            "TL_C='has=equals'\n"
+        )
+        applied = config.load_dotenv(env)
+        assert applied == {"TL_A": "plain", "TL_B": "quoted value", "TL_C": "has=equals"}
+
+    def test_missing_file_is_noop(self, tmp_path):
+        applied = config.load_dotenv(tmp_path / "does-not-exist.env")
+        assert applied == {}
+
+    def test_defaults_to_repo_root_dotenv(self, monkeypatch):
+        # With no path given it must resolve <repo_root>/.env. We only assert
+        # it runs without error and returns a dict (the repo ships a .env in
+        # dev; CI may not — both are acceptable).
+        monkeypatch.delenv("TL_TEST_KEY", raising=False)
+        applied = config.load_dotenv()
+        assert isinstance(applied, dict)
