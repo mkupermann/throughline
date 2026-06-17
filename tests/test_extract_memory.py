@@ -172,3 +172,33 @@ class TestOllamaBackendSelection:
     def test_choose_explicit_claude_requires_claude(self):
         assert em.choose_backend("claude", ollama_available=True, claude_available=True) == "claude"
         assert em.choose_backend("claude", ollama_available=True, claude_available=False) is None
+
+
+class TestResolveChunkProject:
+    def test_binds_to_conversation_project_and_keeps_model_guess_as_tag(self):
+        # The chunk is filed under the conversation's project (consistent and
+        # findable), and the model's free-text guess is preserved as a tag so
+        # no signal is lost.
+        project, tags = em.resolve_chunk_project("VSE", "vse-billing-migration", ["mssql"])
+        assert project == "VSE"
+        assert "vse-billing-migration" in tags
+        assert "mssql" in tags
+
+    def test_no_duplicate_tag_when_guess_equals_conversation(self):
+        project, tags = em.resolve_chunk_project("VSE", "VSE", [])
+        assert project == "VSE"
+        assert tags == []
+
+    def test_no_duplicate_tag_when_guess_already_present(self):
+        project, tags = em.resolve_chunk_project("VSE", "vse-billing-migration", ["vse-billing-migration"])
+        assert tags.count("vse-billing-migration") == 1
+
+    def test_falls_back_to_model_project_when_conversation_unknown(self):
+        project, tags = em.resolve_chunk_project(None, "some-project", ["a"])
+        assert project == "some-project"
+        assert tags == ["a"]
+
+    def test_none_model_guess_is_fine(self):
+        project, tags = em.resolve_chunk_project("VSE", None, ["a"])
+        assert project == "VSE"
+        assert tags == ["a"]
