@@ -139,6 +139,93 @@ class TestClaudeCodeAdapter:
         assert conv is not None
         assert conv.session_id == real_sid
 
+    def test_skips_title_generator_echo_sessions(self, tmp_path):
+        # Each headless `claude -p` call issued by scripts/generate_titles.py
+        # gets logged as its own Claude Code session. Without this filter the
+        # ingest re-imports them, producing hundreds of duplicate
+        # "Session-Titel-Generator" rows. The adapter must drop them.
+        sid = str(uuid.uuid4())
+        ts = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc).isoformat()
+        path = tmp_path / f"{sid}.jsonl"
+        prompt = (
+            "Du bekommst einen Auszug aus einer Claude Code Session. "
+            "Generiere einen prägnanten deutschen Titel (max 60 Zeichen) ..."
+        )
+        _write_jsonl(
+            path,
+            [
+                {
+                    "type": "user",
+                    "uuid": str(uuid.uuid4()),
+                    "isSidechain": False,
+                    "message": {"role": "user", "content": prompt},
+                    "timestamp": ts,
+                    "sessionId": sid,
+                    "cwd": "/repo/throughline",
+                },
+                {
+                    "type": "assistant",
+                    "uuid": str(uuid.uuid4()),
+                    "isSidechain": False,
+                    "message": {
+                        "role": "assistant",
+                        "model": "claude-sonnet-4-6",
+                        "content": [{"type": "text", "text": "Some title"}],
+                    },
+                    "timestamp": ts,
+                    "sessionId": sid,
+                },
+            ],
+        )
+
+        a = ClaudeCodeAdapter()
+        assert a.parse(path) is None
+
+    def test_does_not_skip_session_that_merely_mentions_generator(self, tmp_path):
+        # Only the *first* user message starting with the marker triggers the
+        # skip — sessions that quote the prompt later (e.g. debugging
+        # generate_titles.py) must still be ingested.
+        sid = str(uuid.uuid4())
+        ts = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc).isoformat()
+        path = tmp_path / f"{sid}.jsonl"
+        _write_jsonl(
+            path,
+            [
+                {
+                    "type": "user",
+                    "uuid": str(uuid.uuid4()),
+                    "isSidechain": False,
+                    "message": {
+                        "role": "user",
+                        "content": "Schau dir bitte scripts/generate_titles.py an.",
+                    },
+                    "timestamp": ts,
+                    "sessionId": sid,
+                    "cwd": "/repo/throughline",
+                },
+                {
+                    "type": "user",
+                    "uuid": str(uuid.uuid4()),
+                    "isSidechain": False,
+                    "message": {
+                        "role": "user",
+                        "content": (
+                            "Du bekommst einen Auszug aus einer Claude Code "
+                            "Session. Generiere einen prägnanten deutschen "
+                            "Titel — das ist der Prompt aus dem Script."
+                        ),
+                    },
+                    "timestamp": ts,
+                    "sessionId": sid,
+                },
+            ],
+        )
+
+        a = ClaudeCodeAdapter()
+        conv = a.parse(path)
+        assert conv is not None
+        assert conv.session_id == sid
+
     def test_discover_walks_per_project_subdirs(self, tmp_path, monkeypatch):
         # Claude Code stores ~/.claude/projects/<slug>/*.jsonl; the adapter
         # must enumerate sub-dirs, not flat-glob the root.
