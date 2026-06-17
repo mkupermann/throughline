@@ -302,6 +302,25 @@ def generate(prompt: str, backend: str, ollama_model: str | None = None) -> str:
     return call_claude(prompt)
 
 
+def resolve_chunk_project(conv_project: str | None, model_project: str | None,
+                          tags: list) -> tuple[str | None, list]:
+    """Decide a chunk's project_name and tags.
+
+    The chunk is filed under the *conversation's* project so all memory from
+    one session stays under a single, predictable name (the same one the
+    conversation shows under). The model's free-text project guess — useful
+    but inconsistent across runs — is preserved as a tag rather than driving
+    the project_name. Falls back to the model's guess only when the
+    conversation has no project.
+    """
+    tags = list(tags or [])
+    if conv_project:
+        if model_project and model_project != conv_project and model_project not in tags:
+            tags.append(model_project)
+        return conv_project, tags
+    return (model_project or None), tags
+
+
 def extract_for_conversation(cursor: Any, conv_id: int, backend: str = "claude",
                              ollama_model: str | None = None) -> int:
     cursor.execute("""
@@ -313,6 +332,10 @@ def extract_for_conversation(cursor: Any, conv_id: int, backend: str = "claude",
     rows = cursor.fetchall()
     if not rows:
         return 0
+
+    cursor.execute("SELECT project_name FROM conversations WHERE id = %s", (conv_id,))
+    prow = cursor.fetchone()
+    conv_project = prow[0] if prow else None
 
     transcript = build_transcript(rows)
     if len(transcript) < 200:
@@ -344,9 +367,8 @@ def extract_for_conversation(cursor: Any, conv_id: int, backend: str = "claude",
         try:
             content = chunk.get("content", "").strip()
             category = chunk.get("category", "insight")
-            tags = chunk.get("tags", [])
             confidence = float(chunk.get("confidence", 0.8))
-            project = chunk.get("project") or None
+            project, tags = resolve_chunk_project(conv_project, chunk.get("project"), chunk.get("tags", []))
             if not content or category not in ["decision", "pattern", "insight", "preference", "contact", "error_solution", "project_context", "workflow"]:
                 continue
             cursor.execute("""
