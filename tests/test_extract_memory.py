@@ -135,3 +135,40 @@ class TestExtractorContract:
     def test_parse_id_list_rejects_non_int(self):
         with pytest.raises(SystemExit):
             em._parse_id_list("1,abc,3")
+
+
+class TestOllamaBackendSelection:
+    def test_pick_excludes_embedding_models(self):
+        names = ["nomic-embed-text:latest", "qwen3.6:27b"]
+        assert em.pick_ollama_chat_model(names) == "qwen3.6:27b"
+
+    def test_pick_prefers_explicit_when_present(self):
+        names = ["nomic-embed-text:latest", "qwen3.6:27b", "llama3.1:8b"]
+        assert em.pick_ollama_chat_model(names, preferred="llama3.1:8b") == "llama3.1:8b"
+
+    def test_pick_explicit_absent_falls_back_to_chat(self):
+        names = ["nomic-embed-text:latest", "qwen3.6:27b"]
+        assert em.pick_ollama_chat_model(names, preferred="not-pulled") == "qwen3.6:27b"
+
+    def test_pick_none_when_only_embeddings(self):
+        assert em.pick_ollama_chat_model(["nomic-embed-text:latest"]) is None
+
+    def test_pick_none_when_empty(self):
+        assert em.pick_ollama_chat_model([]) is None
+
+    def test_choose_auto_prefers_ollama(self):
+        assert em.choose_backend("auto", ollama_available=True, claude_available=True) == "ollama"
+
+    def test_choose_auto_falls_back_to_claude(self):
+        assert em.choose_backend("auto", ollama_available=False, claude_available=True) == "claude"
+
+    def test_choose_auto_none_when_nothing(self):
+        assert em.choose_backend("auto", ollama_available=False, claude_available=False) is None
+
+    def test_choose_explicit_ollama_requires_ollama(self):
+        assert em.choose_backend("ollama", ollama_available=True, claude_available=False) == "ollama"
+        assert em.choose_backend("ollama", ollama_available=False, claude_available=True) is None
+
+    def test_choose_explicit_claude_requires_claude(self):
+        assert em.choose_backend("claude", ollama_available=True, claude_available=True) == "claude"
+        assert em.choose_backend("claude", ollama_available=True, claude_available=False) is None

@@ -18,9 +18,12 @@ use_venv()
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from typing import Any
 
 import psycopg2
@@ -83,8 +86,18 @@ def _require_claude_bin() -> str:
     return bin_path
 
 
+def _claude_present() -> bool:
+    """True if the Claude CLI binary can be found (without exiting)."""
+    from shutil import which
+    b = _resolve_claude_bin()
+    return which(b) is not None or os.path.isfile(b)
+
+
 CLAUDE_BIN = _resolve_claude_bin()
 MODEL = "sonnet"
+TIMEOUT_OLLAMA = 600  # local 27B model on an 80k-char transcript is slow
+EMBED_HINTS = ("embed", "nomic", "bge", "minilm", "gte", "mxbai")
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 MAX_CONVERSATIONS_PER_RUN = 20
 MIN_MESSAGES = 5
 MAX_TRANSCRIPT_CHARS = 80000
@@ -205,7 +218,92 @@ def call_claude(prompt: str) -> str:
         return ""
 
 
-def extract_for_conversation(cursor: Any, conv_id: int) -> int:
+# ─── Ollama backend (local, nothing leaves the machine) ─────────────────────
+def ollama_url() -> str:
+    raw = os.environ.get("OLLAMA_HOST") or os.environ.get("OLLAMA_URL") or "http://localhost:11434"
+    return raw.rstrip("/")
+
+
+def ollama_up() -> bool:
+    try:
+        with urllib.request.urlopen(f"{ollama_url()}/api/tags", timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def ollama_list_models() -> list[str]:
+    try:
+        with urllib.request.urlopen(f"{ollama_url()}/api/tags", timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+    except Exception:
+        return []
+
+
+def pick_ollama_chat_model(model_names: list[str], preferred: str | None = None) -> str | None:
+    """Pick a chat-capable Ollama model.
+
+    Honours ``preferred`` if it is pulled (exact or tag-prefix match), else the
+    first model that is not an embedding model. ``None`` if nothing fits.
+    """
+    names = [n for n in (model_names or []) if n]
+    if preferred:
+        for n in names:
+            if n == preferred or n.startswith(preferred):
+                return n
+    chat = [n for n in names if not any(h in n.lower() for h in EMBED_HINTS)]
+    return chat[0] if chat else None
+
+
+def _ollama_generate(body: dict, timeout: int) -> str:
+    req = urllib.request.Request(
+        f"{ollama_url()}/api/generate",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8")).get("response", "")
+
+
+def call_ollama(prompt: str, model: str, timeout: int = TIMEOUT_OLLAMA) -> str:
+    """Generate via local Ollama. Disables chain-of-thought for speed (with a
+    graceful fallback for older Ollama) and strips any stray <think> block."""
+    base = {"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0.2}}
+    try:
+        try:
+            raw = _ollama_generate({**base, "think": False}, timeout)
+        except urllib.error.HTTPError:
+            raw = _ollama_generate(base, timeout)
+        return _THINK_RE.sub("", raw).strip()
+    except Exception as e:
+        print(f"    Ollama exception: {e}")
+        return ""
+
+
+def choose_backend(requested: str, *, ollama_available: bool, claude_available: bool) -> str | None:
+    """Resolve the effective backend. ``auto`` prefers local Ollama, then
+    Claude. Returns ``None`` when the request can't be satisfied."""
+    if requested == "ollama":
+        return "ollama" if ollama_available else None
+    if requested == "claude":
+        return "claude" if claude_available else None
+    if ollama_available:
+        return "ollama"
+    if claude_available:
+        return "claude"
+    return None
+
+
+def generate(prompt: str, backend: str, ollama_model: str | None = None) -> str:
+    if backend == "ollama":
+        return call_ollama(prompt, ollama_model or "")
+    return call_claude(prompt)
+
+
+def extract_for_conversation(cursor: Any, conv_id: int, backend: str = "claude",
+                             ollama_model: str | None = None) -> int:
     cursor.execute("""
         SELECT role::text, content
         FROM messages
@@ -232,7 +330,7 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
         .replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
         .replace("{TRANSCRIPT}", transcript)
     )
-    response = call_claude(prompt)
+    response = generate(prompt, backend, ollama_model)
     if not response:
         return 0
 
@@ -277,7 +375,8 @@ def _parse_id_list(raw: str) -> list[int]:
     return out
 
 
-def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
+def _force_reextract(cursor, conv_ids: list[int], backend: str = "claude",
+                     ollama_model: str | None = None) -> tuple[int, int, int]:
     """Delete previous chunks for the given conversations and re-extract.
 
     Returns ``(deleted, inserted, errors)``. Each conversation is processed
@@ -298,7 +397,7 @@ def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
         deleted_total += deleted
         print(f"  #{cid} re-extract (cleared {deleted} old chunk(s))", end=" ", flush=True)
         try:
-            n = extract_for_conversation(cursor, cid)
+            n = extract_for_conversation(cursor, cid, backend, ollama_model)
             inserted_total += n
             print(f"→ {n} Chunks")
         except Exception as e:
@@ -321,13 +420,37 @@ def main() -> None:
              "current prompt and limits. Use this after changing the "
              "extractor to refresh affected rows.",
     )
+    parser.add_argument("--backend", choices=["auto", "ollama", "claude"], default="auto",
+                        help="Extraction backend. auto = local Ollama first, Claude as fallback.")
+    parser.add_argument("--ollama-model", default=(os.environ.get("THROUGHLINE_OLLAMA_CHAT_MODEL")
+                                                   or os.environ.get("OLLAMA_CHAT_MODEL")),
+                        help="Force a specific Ollama chat model (otherwise auto-detected).")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("Claude Memory DB — Memory Extraction (via Claude CLI)")
+    print("Throughline — Memory Extraction")
     print("=" * 60)
 
-    _require_claude_bin()
+    models = ollama_list_models() if ollama_up() else []
+    ollama_model = pick_ollama_chat_model(models, preferred=args.ollama_model)
+    backend = choose_backend(args.backend, ollama_available=ollama_model is not None,
+                             claude_available=_claude_present())
+    if backend is None:
+        sys.stderr.write(
+            "ERROR: Kein nutzbares Backend.\n"
+            f"  Ollama erreichbar: {ollama_up()} | Chat-Modell: {ollama_model or '—'}\n"
+            f"  Claude CLI vorhanden: {_claude_present()}\n"
+            "  Ziehe ein Ollama-Chat-Modell (z.B. `ollama pull qwen3`) oder installiere die Claude CLI.\n"
+        )
+        raise SystemExit(2)
+    if backend == "claude":
+        _require_claude_bin()
+
+    if backend == "ollama":
+        print(f"Backend: ollama  Modell: {ollama_model}  ({ollama_url()})  PII-Redaktion: {REDACT_PII}")
+    else:
+        print(f"Backend: claude  Modell: {MODEL}  PII-Redaktion: {REDACT_PII}")
+
     conn = _connect()
     cursor = conn.cursor()
 
@@ -335,7 +458,7 @@ def main() -> None:
         conv_ids = _parse_id_list(args.force_conversations)
         print(f"\nForce-re-extracting {len(conv_ids)} conversation(s): {conv_ids}\n")
         try:
-            deleted, inserted, errors = _force_reextract(cursor, conv_ids)
+            deleted, inserted, errors = _force_reextract(cursor, conv_ids, backend, ollama_model)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -372,7 +495,7 @@ def main() -> None:
     for conv_id, project_name, msg_count in convs:
         print(f"  #{conv_id} ({project_name or '–'}, {msg_count} Msgs)", end=" ", flush=True)
         try:
-            n = extract_for_conversation(cursor, conv_id)
+            n = extract_for_conversation(cursor, conv_id, backend, ollama_model)
             conn.commit()
             total_chunks += n
             print(f"→ {n} Chunks")
