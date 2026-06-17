@@ -14,6 +14,45 @@ from shutil import which
 from typing import Any
 
 
+def load_dotenv(path: str | os.PathLike[str] | None = None, *, override: bool = False) -> dict[str, str]:
+    """Load ``KEY=VALUE`` pairs from a ``.env`` file into ``os.environ``.
+
+    Defaults to ``<repo_root>/.env``. Blank lines and ``#`` comments are
+    skipped, an optional leading ``export `` is stripped, and surrounding
+    single/double quotes are removed from the value. Existing environment
+    variables are left untouched unless ``override=True`` — so a value
+    exported in the shell (or injected by Docker) always wins over the file.
+
+    A missing file is a no-op. Returns the mapping of keys that were applied,
+    which makes the call testable and lets the CLI report what it loaded.
+    """
+    target = Path(path) if path is not None else repo_root() / ".env"
+    if not target.is_file():
+        return {}
+
+    applied: dict[str, str] = {}
+    for raw in target.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if not key:
+            continue
+        if not override and key in os.environ:
+            continue
+        os.environ[key] = value
+        applied[key] = value
+    return applied
+
+
 def get_db_config() -> dict[str, Any]:
     """Return psycopg2 connection kwargs resolved from env vars.
 

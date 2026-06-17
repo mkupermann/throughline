@@ -17,6 +17,22 @@ import psycopg2
 import psycopg2.extras
 import streamlit as st
 
+# ── Make `gui` importable no matter how this script is launched ──────────────
+# `streamlit run gui/app.py` only guarantees the script's own directory (gui/)
+# on sys.path — not the repo root. Older Streamlit releases also added the CWD,
+# which used to mask this; on current Streamlit the import below would raise
+# `ModuleNotFoundError: No module named 'gui'`. Put the repo root (gui/'s
+# parent) on the path first so `from gui.page_views import …` always resolves.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+# Honour a local .env (PGUSER / PGPASSWORD / …) when present. load_dotenv never
+# overrides real environment variables, so Docker-injected settings still win.
+from throughline.config import load_dotenv as _load_dotenv  # noqa: E402
+
+_load_dotenv()
+
 # ── Hand our live globals to gui/page_views/* so they can read st/q/page_header/…
 # without re-importing this module (re-import would re-run the sidebar widgets
 # and trip StreamlitDuplicateElementId). See gui/page_views/__init__.py for why we
