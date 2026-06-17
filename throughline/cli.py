@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from throughline import __version__
-from throughline.config import repo_root
+from throughline.config import load_dotenv, repo_root
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
@@ -628,6 +628,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Load a local .env (PGUSER / PGPASSWORD / …) before anything touches the
+    # DB config. Never overrides real environment variables, so shell- or
+    # Docker-provided settings still win.
+    load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     handler: Callable[[argparse.Namespace], int] = args.func
