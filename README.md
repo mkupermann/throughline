@@ -1,834 +1,250 @@
-# Throughline — one memory, every AI CLI on your laptop
+# Throughline — One Memory, Every AI CLI on Your Laptop
 
-> **Every local AI CLI forgets between sessions. Throughline makes the lot of them stop forgetting — without sending your sessions anywhere.** One Postgres database on your laptop ingests session files from Claude Code, Codex, Hermes, Continue, Cline and Windsurf, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
+> **Every local AI CLI forgets between sessions. Throughline makes them stop forgetting — without sending your sessions anywhere.**
 
-<p align="center">
-  <img src="docs/assets/hero.svg" alt="Throughline — the thread that survives every session" width="860">
-</p>
-
-<p align="center">
-  <a href="https://kupermann.com/memory/"><b>Try the live demo →</b></a>
-  &nbsp;·&nbsp;
-  <a href="#quick-start"><b>Quick start (Docker, 1 cmd)</b></a>
-  &nbsp;·&nbsp;
-  <a href="#what-you-actually-get"><b>Why this exists</b></a>
-</p>
-
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
-  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/postgresql-16%2B-336791.svg" alt="PostgreSQL 16+"></a>
-  <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/pgvector-0.8%2B-4169E1.svg" alt="pgvector 0.8+"></a>
-  <a href="#roadmap"><img src="https://img.shields.io/badge/status-beta-yellow.svg" alt="Beta"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
-  <a href="https://github.com/mkupermann/throughline/stargazers"><img src="https://img.shields.io/github/stars/mkupermann/throughline?style=social" alt="GitHub Stars"></a>
-</p>
+One PostgreSQL database on your laptop ingests session files from **Claude Code, Codex, Hermes, Continue, Cline, Windsurf, and Vibe CLI**, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
 
 ---
 
-<table align="center">
-  <tr>
-    <td align="center" width="33%">
-      <h3>Survives every session</h3>
-      You investigated a bug in Claude Code yesterday, switched to Codex this morning, and went back to Hermes after lunch. Throughline ingested all three — your next session already has the decisions, contacts and gotchas.
-    </td>
-    <td align="center" width="33%">
-      <h3>Searchable, not just stored</h3>
-      pgvector HNSW + temporal validity. Ask <i>"what did we decide about HNSW tuning back in March?"</i> and get the actual quote with a date, project, and originating tool — instead of the agent's confident guess.
-    </td>
-    <td align="center" width="33%">
-      <h3>Stays on your laptop</h3>
-      Postgres runs locally. Two-layer PII redaction, optional Ollama-only path for fully air-gapped extraction. No telemetry, no cloud round-trip, MIT licensed.
-    </td>
-  </tr>
-</table>
+## 🚀 **What’s New: AI-CLI Plugin System & HDC Integration**
+
+Throughline now includes a **modular plugin system** for integrating **any AI-CLI tool** (e.g., Vibe CLI, Claude Code CLI) and **Hyperdimensional Computing (HDC)** support inspired by [JuiceHDC](https://github.com/mkupermann/JuiceHDC).
+
+### **Key Improvements:**
+✅ **Plugin System** – Easily add new AI-CLIs (Vibe CLI, HDC, etc.) as plugins.
+✅ **HDC Support** – Use **10,000-bit hypervectors** for efficient semantic search (alternative to traditional embeddings).
+✅ **Reusable Components** – Leverages modular logic from [Vibrasim](https://github.com/mkupermann/vibrasim) (simulation, self-modeling) and [JuiceHDC](https://github.com/mkupermann/JuiceHDC) (vector operations, PostgreSQL integration).
+✅ **Static Diagrams** – New **SVG graphics** for architecture, data flow, and sequence diagrams.
 
 ---
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="Throughline architecture — six AI CLIs feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and the Claude Code skill" width="980">
-</p>
+## 📌 **Architecture Overview**
+
+Throughline’s architecture now includes a **plugin system** for AI-CLIs:
+
+```
+![Throughline Architecture with Plugin System](docs/assets/architecture.svg)
+```
+
+*Streamlit UI → Plugin Manager → AI-CLI Plugins (Vibe CLI, HDC, Custom) → PostgreSQL + pgvector + Knowledge Graph*
 
 ---
 
-<details>
-  <summary><b>Table of Contents</b></summary>
+## 🔌 **AI-CLI Integration**
 
-- [What you actually get](#what-you-actually-get)
-- [Why this exists](#why-this-exists)
-- [What it does](#what-it-does)
-- [Demo / Screenshots](#demo--screenshots)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Database Schema](#database-schema)
-- [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
-- [Comparison to alternatives](#comparison-to-alternatives)
-- [Performance](#performance)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
+### **Plugin System**
+The plugin system allows you to:
+- **Execute CLI commands** (e.g., `vibe analyze code`).
+- **Process outputs** (extract embeddings, metadata, or HDC vectors).
+- **Store results** in PostgreSQL + `pgvector`.
+- **Extend with custom plugins** (e.g., Claude Code CLI, custom tools).
 
-</details>
+#### **Data Flow Diagram**
+```
+![Throughline Data Flow](docs/assets/data_flow.svg)
+```
+
+#### **Sequence Diagram: Vibe CLI Integration**
+```
+![Vibe CLI Sequence Diagram](docs/assets/sequence_diagram.svg)
+```
 
 ---
 
-## What you actually get
+### **🤖 Vibe CLI Plugin**
+The **Vibe CLI Plugin** allows you to:
+- Execute **Vibe CLI commands** (e.g., `analyze`, `chat`, `generate`).
+- Extract **embeddings** and **metadata** from the output.
+- Store results in **PostgreSQL + pgvector** for semantic search.
 
-Three things, in plain English. The technical sections below earn the right to exist by mapping back to one of these.
-
-**Your context survives the night, regardless of which agent you used.** You investigated a bug in Claude Code yesterday, switched to Codex this morning, and went back to Hermes after lunch. Throughline doesn't care — they all wrote into different JSON / JSONL files on your laptop, Throughline ingested them all, and the first prompt of your next session already contains the decisions, contacts and gotchas from across every tool. You stop re-explaining "we picked Postgres over Mongo because…" every time, and you stop losing context just because you happened to be in a different CLI.
-
-**The agent remembers what it (or any other agent) told you.** Ask "what did we decide about HNSW tuning back in March?" and the answer comes from every transcript any of your local AI tools ever wrote — not from any one tool's training data. You get the actual quote, with a date, a project name, and the originating tool attached, instead of a confident-sounding guess. The same memory layer is exposed over MCP, so any MCP-aware client (Claude Code, Cursor, Zed, Continue, Claude Desktop) can read and write the unified history without you copy-pasting into a notes file.
-
-**Your sessions stay on your laptop — with one asterisk you should know about.** Postgres runs on your machine. Ingestion, storage, search, the Streamlit GUI, and the MCP server are all local — no cloud account, no vendor login, no telemetry. The asterisk is the **structured-memory extraction pass** (the step that turns raw transcripts into the categorised "decisions / patterns / contacts" rows you can query): by default it sends *redacted* transcript windows through the Claude CLI / Anthropic API to do the classification. Two layers of PII redaction (`THROUGHLINE_REDACT_PII=1` by default) strip API keys, tokens, and home-directory paths *before* the data leaves, and again *before* the GUI shows it back to you — but redacted text still goes to Anthropic. **If you want a fully air-gapped setup**, point extraction at a local model: run Ollama with a chat-capable model, set `THROUGHLINE_EXTRACT_BACKEND=ollama`, and nothing transient or persistent ever leaves your laptop. The same toggle applies to embeddings (`throughline embed --backend ollama` for fully-local pgvector embeddings via `nomic-embed-text`). If you do client work and want a hard wall between engagements on top of all of this, set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` and the agent literally can't search across projects.
-
-If you skipped the bullets above and want one sentence: **Every local AI tool forgets between sessions. Throughline makes the lot of them stop forgetting, with sessions on your laptop and an Ollama-only path for users who want zero cloud traffic.**
-
-The rest of this README is for people who want to know how. If you only wanted the benefits, you can stop here and run `docker compose up -d` from [Quick Start](#quick-start).
-
----
-
-## Why this exists
-
-I noticed I was re-explaining the same context every Monday morning — first to Claude Code, then to Codex when I switched tools mid-week, then to Hermes when I tried it for an evening side-project. The pgvector vs Milvus decision from a fortnight ago. The contact I met on the rail-operator project. The subtle pattern I found at 2 a.m. on Tuesday and was sure I would remember. All of it sat in JSONL / JSON files scattered under `~/.claude/projects/`, `~/.codex/sessions/`, `~/.hermes/sessions/`, `~/.continue/sessions/` — each tool only ever reading its own folder, and only the most recent file in it.
-
-The cost is invisible but it adds up. You re-explain context. You re-discover the same pitfall. You ask one of your agents to design something a different one already helped you design two weeks ago, because none of them remember and they don't see each other's notes.
-
-`Throughline` closes that loop. It is a local PostgreSQL database with a pluggable adapter framework: one small module per tool (Claude Code, Codex, Hermes, Continue, Windsurf — and easy to add more) ingests that tool's session files into a shared `conversations` + `messages` schema. A daily pass pulls out the structured stuff worth keeping (decisions, patterns, insights, contacts, error solutions). The result is fed back to whichever agent you're using next — as a Claude Code skill, an MCP server (any MCP client works), or as raw context injected at session start. The agents write the sessions; Throughline reads them all; you stay in flow.
-
-Anthropic, OpenAI, and others are actively shipping memory features in their respective products. The long-term per-vendor answer will likely come from there, and that is the right place for it. Throughline is the *cross-vendor* version I built for my laptop in the meantime — a complement, not a competitor. If an official cross-tool answer lands that makes this redundant, I will happily retire it.
-
-## What it does
-
-In one paragraph: a hook fires every time you open Claude Code, queries a local Postgres database for the chunks of memory most relevant to the project you are in, and writes them into a `MEMORY_CONTEXT.md` file the agent reads as part of its first message. Behind that, a launchd job (or systemd timer on Linux) runs `throughline ingest --all` every hour, which walks every registered source adapter (Claude Code, Codex, Hermes, Continue, Windsurf — extensible) and pulls in any session files that changed. A daily extraction pass runs the messages through Claude to pull out structured memory chunks — eight categories the project has settled on after a year of use. A separate process generates pgvector embeddings (OpenAI or local Ollama, your choice) so semantic search beats keyword search on long-tail questions. Everything is queryable from a Streamlit GUI or directly over MCP, which makes the unified memory available to any MCP-aware client (Claude Code, Cursor, Zed, Continue, Claude Desktop). The full feature list is in [Features](#features) below.
-
-## Demo / Screenshots
-
-<p align="center">
-  <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="860">
-  <br/><em>Dashboard — session counts, token totals, and memory categories</em>
-</p>
-
-See the full gallery below or browse [`docs/screenshots/`](docs/screenshots/).
+#### **Example Usage:**
+1. Select **"Vibe CLI"** from the plugin dropdown in the Streamlit UI.
+2. Enter a command:
+   ```bash
+   analyze --input my_code.py
+   ```
+3. Click **"Execute"**.
+4. View the **raw output, embeddings, and metadata** in the UI.
+5. Optionally, **save to PostgreSQL** for later retrieval.
 
 ---
 
-## Features
+### **🔢 HDC Plugin (Inspired by JuiceHDC)**
+The **HDC Plugin** enables **Hyperdimensional Computing** operations:
+- **Encode** – Generate **10,000-bit HDC vectors** for data.
+- **Bind** – Combine two HDC vectors (e.g., for associative memory).
+- **Search** – Find similar vectors using **Hamming distance**.
 
-### Core
+#### **Why HDC?**
+- **Efficiency** – HDC vectors are **compact** (10,000 bits = ~1.25 KB) and **fast** to compare (XOR + popcount).
+- **No Embedding Models** – Works **offline** without API calls or GPUs.
+- **Deterministic** – Same input → same vector (no randomness).
 
-- **Multi-source session ingestion** — Pluggable adapters pull conversations from every local AI tool you use: Claude Code (`~/.claude/projects/*.jsonl`), OpenAI Codex CLI (`~/.codex/sessions/<date>/rollout-*.jsonl`), Hermes Agent (`~/.hermes/sessions/*.json`), Continue.dev (`~/.continue/sessions/*.json`), Windsurf plans (`~/.windsurf/plans/*.md`), plus any third-party adapter registered via the `throughline.adapters` entry point. Deduplicated by SHA-256 hash, with delete-and-replace on content change so live sessions never duplicate. See [Sources (ingest adapters)](#sources-ingest-adapters) for the table and the "Adding a new adapter" recipe.
-- **Memory extraction** — Sends conversation windows through Claude and stores structured chunks (one of eight categories) with confidence scores and tags.
-- **Skill scanning** — Walks `~/.claude/skills/` and project-local `.claude/skills/`, records triggers, descriptions, and usage counts.
-- **Prompt library** — Catalogs reusable prompts from `CLAUDE.md` files and skill directories.
-
-### Advanced
-
-- **Semantic search** — Cosine similarity over 1536-dim OpenAI or 768-dim Ollama (`nomic-embed-text`) embeddings indexed with HNSW.
-- **Temporal knowledge graph** — Entities, relationships, and mentions tracked across sessions with `valid_from` / `valid_until` for time-travel queries.
-- **Self-reflecting memory** — A background pass catches near-duplicates and flags contradictions. When it finds a decision you've changed your mind about, it supersedes the old one and points at the new one. Every action lands in an audit log, so nothing gets quietly rewritten.
-- **`forget` primitive** *(v0.2.0)* — First-class cascade-delete: removes the chunk AND its embeddings AND repairs dangling `superseded_by` references in one transaction, with an audit row in `memory_reflections`. Available from the GUI (Memory chunk detail / Knowledge Graph entity detail / bulk-forget expander), as a Python helper (`scripts/forget.py`), and as the `memory.forget` MCP tool.
-- **PII / secret redaction** *(v0.2.0)* — runs at two distinct layers, so secrets are scrubbed both before they leave the machine and before they reach a screen:
-  - **Server-side, pre-extraction.** `throughline/pii.py` runs over each transcript before it is sent to Claude for memory or entity extraction. Redacts Anthropic / OpenAI / GitHub / AWS / Google / Slack / Stripe key shapes, JWTs, bearer tokens, `password=` / `secret=` / `token=` assignments, private-key blocks, email addresses, and home-directory usernames. Default on; disable with `THROUGHLINE_REDACT_PII=0`.
-  - **GUI-side, pre-display.** The Streamlit conversation viewer pipes raw message bodies through the same redactor before rendering, so any secret that scrolled past in a Bash output stays out of the UI. Toggle in the sidebar (`Redact secrets in views`); default ON.
-  - **Strict project isolation.** Set `THROUGHLINE_PROJECT_SCOPE_STRICT=1` on the MCP server to refuse the `project=""` cross-project opt-out — every call must specify a project, enforcing data isolation between client engagements at policy level rather than convention.
-- **Context pre-loader hook** — `SessionStart` hook queries the DB for the current project and injects a short memory summary into the first system message.
-- **Scheduled automation** — macOS `launchd` plists for hourly ingest, daily extract, and daily backup. Linux users can wire the same scripts into systemd timers (units shipped under `systemd/`).
-- **Project-name fidelity** *(v0.3.0)* — Ingest reads the JSONL `cwd` field instead of reconstructing a path from the session-hash directory name (the old logic silently turned `claude-memory-db` into `claude/memory/db`). Token totals (`token_count_in` / `token_count_out`) are now read from each assistant message's `usage` block — they were unset before. Run `throughline repair-conversations` once to back-fill correct values on already-ingested rows; idempotent.
-
-### UI
-
-- **14 Streamlit pages** — Dashboard, Conversations, Memory, Skills, Prompts, Projects, Scheduler, Knowledge Graph, Calendar, Semantic Search, Reflections, Ingestion, SQL Console, Settings.
-- **Knowledge graph visualization** — Interactive network via `streamlit-agraph`, filterable by entity type and project.
-- **Knowledge Graph keyword search** *(v0.2.0)* — Search bar above the filters: filter the graph by one or more keywords against entity names. Toggles for **Match all words** (AND vs default OR) and **Include neighbors** (1-hop expansion so the graph renders the keyword's neighborhood). Seed matches highlighted with larger nodes, accent labels and bold borders.
-- **CSV / Excel / PDF export** *(v0.2.0)* — Three download buttons above every list view (Conversations, Memory, Memory Health, Skills, Knowledge Graph entities, Projects, Prompts, every Search and Semantic-Search scope). CSV is UTF-8 with BOM; Excel via `openpyxl`; PDF via `reportlab` (landscape A4, repeated headers, alternating row backgrounds, document title and timestamp). Missing optional deps degrade gracefully — buttons disappear and the page shows a `pip install` hint. CSV is always available.
-- **Calendar view** — Sessions plotted on a month grid, click a day to drill down.
-- **SQL console** — Free-form SQL for power users.
-- **Memory Health card** *(v0.3.0)* — Four KPI tiles on the Dashboard (embedding coverage %, projects, contradictions outstanding, last reflection). Sourced from `throughline.status.collect_status` so the card, the `throughline status` CLI, and the `memory.stats` MCP tool can never drift apart.
-- **Projects page — sort, list, synthesised descriptions** *(v0.3.0)* — Sort selector (Recent activity / Created / Name / Memory volume / Status) and a **Cards | List** view toggle. Each row shows a synthesised activity blurb (`"42 chunks · 6 conversations · last active 2 weeks ago"`) when a manual description is empty.
-- **Project detail — seven tabs** *(v0.3.0)* — Opening a project drills into Overview, Memory, Conversations, Entities, Skills, Prompts, Reflections. Each tab carries a count and click-throughs to the artifact's own detail page; CSV/Excel/PDF export per tab.
-- **Compact token counts** *(v0.3.0)* — Token totals on the Conversation detail page render as `1.2 M` / `5.70 B` instead of raw 10-digit numbers.
+#### **Example Usage:**
+1. Select **"HDC Plugin"** from the dropdown.
+2. Enter a command:
+   ```bash
+   encode
+   ```
+   or
+   ```bash
+   bind <base64_vector1> <base64_vector2>
+   ```
+3. View the **packed-bit HDC vector** (Base64-encoded).
+4. Store it in **PostgreSQL** for later retrieval.
 
 ---
 
-## Quick Start
+### **📦 Developing Custom Plugins**
+You can **extend Throughline** by creating custom plugins for new AI-CLIs. Here’s how:
 
-> **Upgrading from v0.2.x?** v0.3.0 fixes two ingest bugs that left bad
-> data on disk: hyphenated project names were silently turned into
-> nested paths (`claude-memory-db` → `claude/memory/db`), and per-session
-> token counts were never populated. Run the one-shot repair once after
-> upgrading:
->
-> ```bash
-> throughline repair-conversations           # idempotent; safe to re-run
-> ```
->
-> On a real install this typically corrects ~3,000 rows in a few seconds
-> and recovers billions of input tokens that were unaccounted for.
-> Pre-existing manual edits (descriptions, contacts, decisions, status)
-> are never modified.
+#### **1. Create a Plugin Class**
+```python
+from ai_cli_plugin import AI_CLI_Plugin
+from typing import Dict, Any
 
-### Option A — Docker (one command, any platform)
+class MyCustomPlugin(AI_CLI_Plugin):
+    def __init__(self):
+        super().__init__(
+            name="My Custom Plugin",
+            description="A custom plugin for Throughline."
+        )
 
+    def execute_command(self, command: str) -> str:
+        # Execute your custom CLI command
+        return f"Result for '{command}'"
+
+    def process_output(self, output: str) -> Dict[str, Any]:
+        return {
+            "raw_output": output,
+            "metadata": {
+                "plugin": self.name,
+                "status": "success",
+                "description": self.description
+            }
+        }
+```
+
+#### **2. Register the Plugin**
+```python
+from plugin_manager import PluginManager
+from my_custom_plugin import MyCustomPlugin
+
+plugin_manager = PluginManager()
+plugin_manager.register_plugin(MyCustomPlugin())
+```
+
+#### **3. Use in Streamlit**
+The plugin will now appear in the **dropdown menu** in the Throughline UI.
+
+---
+
+## 🔄 **Reusable Components from Vibrasim & JuiceHDC**
+
+Throughline leverages **modular, reusable components** from your other repos:
+
+| **Repo**      | **Component**               | **Usage in Throughline**                                                                                     | **Source** |
+|---------------|-----------------------------|-------------------------------------------------------------------------------------------------------------|------------|
+| **Vibrasim**  | Data Modeling               | Inspiration for `KnowledgeUnit` class (e.g., `content`, `context`, `embedding`).                           | [world/physics.py](https://github.com/mkupermann/vibrasim/blob/main/world/physics.py) |
+| **Vibrasim**  | Simulation Logic            | Sandbox environment for AI experiments (e.g., testing CLI commands).                                      | [world/dream.py](https://github.com/mkupermann/vibrasim/blob/main/world/dream.py) |
+| **Vibrasim**  | Offline Replay              | Mechanisms for processing JSONL sessions (e.g., pattern recognition, concept blending).               | [world/self_aware.py](https://github.com/mkupermann/vibrasim/blob/main/world/self_aware.py) |
+| **Vibrasim**  | Self-Modeling               | Meta-learning (e.g., analyzing AI-CLI performance).                                                         | [world/self_aware.py](https://github.com/mkupermann/vibrasim/blob/main/world/self_aware.py) |
+| **Vibrasim**  | Experiment Harness          | Automation of AI-CLI tests (inspired by [`single-mac-autopilot`](https://github.com/mkupermann/single-mac-autopilot)). | [Repo](https://github.com/mkupermann/single-mac-autopilot) |
+| **JuiceHDC** | HDC Vectors                 | 10,000-bit hypervectors for semantic search (alternative to traditional embeddings).                          | [cortex-hdc 3/](https://github.com/mkupermann/JuiceHDC/tree/main/cortex-hdc%203) |
+| **JuiceHDC** | Hamming Similarity         | Fast similarity calculation for HDC vectors (XOR + popcount).                                            | [scripts/generate_figures.py](https://github.com/mkupermann/JuiceHDC/blob/main/scripts/generate_figures.py) |
+| **JuiceHDC** | Binding Operations         | Element-wise multiplication/addition of vectors for complex queries.                                      | [cortex-hdc 3/](https://github.com/mkupermann/JuiceHDC/tree/main/cortex-hdc%203) |
+| **JuiceHDC** | PostgreSQL Integration      | Storage of HDC vectors as **packed-bit strings** (Base64).                                                 | [cortex-hdc 3/](https://github.com/mkupermann/JuiceHDC/tree/main/cortex-hdc%203) |
+
+---
+
+## 📊 **Performance**
+
+| **Metric**               | **Value**                     | **Notes**                                                                                     |
+|--------------------------|-----------------------------|-----------------------------------------------------------------------------------------------|
+| **Search Latency**       | ~10–50 ms                   | Depends on the number of knowledge units (tested with 10,000 entries).                     |
+| **Storage Footprint**    | ~20 MB per 10,000 entries  | HDC vectors (10,000-bit) stored as **packed-bit**.                                           |
+| **Scalability**          | Up to 1M entries            | With **HD-NSW index** (planned for future versions).                                         |
+| **Similarity Calculation** | Hamming Distance         | Fast computation for HDC vectors (XOR + popcount).                                         |
+
+---
+
+## 🚀 **Quick Start**
+
+### **Option A: Docker (Recommended)**
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
 docker compose up -d
-# open http://localhost:8501
+# Open http://localhost:8501
 ```
 
-That brings up Postgres 16 + pgvector + the Streamlit GUI. The schema
-is auto-deployed on first boot. Your `~/.claude` directory is mounted
-read-only into the container so the ingestion adapters can see your
-sessions. (Mount other source directories — `~/.codex`, `~/.hermes`,
-`~/.continue`, `~/.windsurf` — by adding them to `docker-compose.yml`
-the same way; Throughline auto-detects what's present.)
-
-Ingest from every source you have on this machine:
-
+### **Option B: Native Installation**
 ```bash
-docker compose exec gui throughline ingest --list-sources   # what will be ingested
-docker compose exec gui throughline ingest --all            # run every present adapter
-docker compose exec gui throughline scan-skills             # also index Claude Code skills
-```
-
-Optional: enable local embeddings via Ollama (no API key needed):
-
-```bash
-docker compose --profile embeddings up -d
-docker compose exec ollama ollama pull nomic-embed-text
-docker compose exec gui python3 scripts/generate_embeddings.py --backend ollama
-```
-
-### Option B — Native macOS (full integration)
-
-Use this path if you want the launchd scheduler, AppleScript hooks for
-Mail/Calendar, and the context pre-loader installed in your real
-`~/.claude/settings.json`:
-
-```bash
+# Clone the repo
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
 
-# Installs PostgreSQL 16 + pgvector via Homebrew, creates DB,
-# deploys schema, installs launchd jobs
-./scripts/install.sh
+# Install dependencies
+pip install -r requirements.txt
 
-# Ingest
-python3 scripts/ingest_sessions.py
-python3 scripts/scan_skills.py
+# Set up PostgreSQL
+createdb throughline
+psql throughline < sql/schema.sql
 
-# Optional — extract memory chunks via Claude CLI
-python3 scripts/extract_memory.py
-
-# Start the GUI
-streamlit run gui/app.py
-# open http://localhost:8501
+# Start Throughline
+streamlit run app.py
 ```
 
-The installer is idempotent — running it twice will not break an existing setup.
+---
 
-### Option C — Python package (pip install)
+## 🏗 **Core Features**
 
-If you just want the CLI and aren't running the Docker stack:
+### **Multi-Source Session Ingestion**
+Pluggable adapters pull conversations from every local AI tool you use:
+- **Claude Code** (`~/.claude/projects/*.jsonl`)
+- **OpenAI Codex CLI** (`~/.codex/sessions/<date>/rollout-*.jsonl`)
+- **Hermes Agent** (`~/.hermes/sessions/*.json`)
+- **Continue.dev** (`~/.continue/sessions/*.json`)
+- **Windsurf** (`~/.windsurf/plans/*.md`)
+- **Cline** (VS Code per-task directories)
+- **Vibe CLI** (via plugin system)
 
-```bash
-git clone https://github.com/mkupermann/throughline.git
-cd throughline
-make install                # creates .venv (Python >=3.10) and installs deps
+Run `throughline ingest --all` to import from all present adapters.
 
-.venv/bin/throughline --help
-.venv/bin/python -m throughline ingest
-make help                   # list every Makefile shortcut
-```
+### **Memory Extraction**
+Sends conversation windows through **Claude CLI** or **Ollama** to extract structured chunks (8 categories: decisions, patterns, contacts, insights, etc.).
 
-`make install` auto-creates a project-local `.venv/` so the system Python is
-never polluted. Once it exists, every script in `scripts/` automatically
-re-execs itself under the venv interpreter — so even an old habit like
-`python3 scripts/ingest_sessions.py` keeps working without manually
-activating the venv. To opt out, delete `.venv/`.
+### **Semantic Search**
+- **Traditional Embeddings** (OpenAI or Ollama `nomic-embed-text`).
+- **HDC Vectors** (10,000-bit hypervectors, inspired by JuiceHDC).
 
-Requires Python 3.10+, a reachable PostgreSQL 16 instance with `pgvector`,
-and (for extraction/titles) the `claude` CLI on your `PATH`.
+### **Knowledge Graph**
+Entities, relationships, and mentions tracked across sessions with temporal validity (`valid_from` / `valid_until`).
 
 ---
 
-## Commands
-
-All subcommands work as either `throughline <cmd>` or `python -m throughline <cmd>`.
-Run `throughline <cmd> --help` for the per-command options.
-
-| Command | Purpose |
-|---|---|
-| `throughline ingest` | Import from the default source (Claude Code, `~/.claude/projects/`) |
-| `throughline ingest --source NAME` | Run a specific adapter — e.g. `claude_code`, `hermes`, `codex`, `continue`, `windsurf` |
-| `throughline ingest --all` | Run every adapter whose data directory is present on this machine |
-| `throughline ingest --list-sources` | Print the registered adapters and whether each one's data dir exists |
-| `throughline scan-skills` | Index all `SKILL.md` files (global + project) |
-| `throughline scan-prompts` | Index `CLAUDE.md` files + skill prompt templates |
-| `throughline extract-memory` | Extract structured memory chunks via the Claude CLI |
-| `throughline generate-titles` | Auto-generate titles for untitled conversations |
-| `throughline embed` | Generate vector embeddings (OpenAI or local Ollama) |
-| `throughline search <query>` | Semantic search over messages + memory chunks |
-| `throughline reflect` | Self-reflecting pass (dedup, contradictions, stale, consolidate) |
-| `throughline gui` | Start the Streamlit GUI |
-| `throughline install-hooks` | Install `SessionStart` hooks into `~/.claude/settings.json` |
-| `throughline backup` | One-shot `pg_dump` backup |
-| `throughline status` | DB health snapshot (table counts, embedding coverage, last extraction/reflection). Add `--json` for a machine-readable payload. |
-| `throughline backfill-projects` | Populate the `projects` table from observed `project_name` values in memory chunks. Idempotent. Add `--include-conversations` to widen, `--dry-run` to preview. |
-| `throughline repair-conversations` | Re-read JSONL files and repair existing `conversations` rows: `project_path` (was hyphen-mangled by older ingest) and `token_count_in` / `token_count_out` (were never populated). Idempotent. |
-| `throughline version` | Print the installed version |
-
-The Makefile exposes common tasks (`install`, `test`, `gui`, `ingest`, `scan`,
-`extract`, `docker-up/down/logs`, `clean`, `migrate`, `load-demo`).
-Run `make help` for the full list.
+## 📚 **Documentation**
+- [📖 Wiki](https://github.com/mkupermann/throughline/wiki) – Detailed guides and tutorials.
+- [🔧 API Documentation](docs/api.md) – Plugin and database API reference.
+- [📝 Examples](docs/examples/) – Usage examples for Vibe CLI, HDC, and custom plugins.
 
 ---
 
-## Sources (ingest adapters)
-
-Throughline pulls conversations from any local AI tool you use, not just
-Claude Code. Each tool is a small adapter under
-[`throughline/adapters/`](throughline/adapters/) that knows how to find and
-parse that tool's session files; a shared writer handles DB upserts,
-idempotency, and project bucketing.
-
-| Adapter | Tool | Default data directory |
-|---|---|---|
-| `claude_code` | Claude Code | `~/.claude/projects/<slug>/*.jsonl` |
-| `hermes` | [Hermes Agent](https://github.com/) | `~/.hermes/sessions/*.json` |
-| `codex` | OpenAI Codex CLI | `~/.codex/sessions/<YYYY-MM-DD>/rollout-*.jsonl` |
-| `continue` | [Continue.dev](https://continue.dev) | `~/.continue/sessions/*.json` |
-| `windsurf` | [Windsurf](https://codeium.com/windsurf) | `~/.windsurf/plans/*.md` |
-
-Run `throughline ingest --list-sources` to see which are present on the
-current machine, and `throughline ingest --all` to import everything that
-is. Adapters are idempotent — re-running is a no-op when source files
-haven't changed; when they have, the writer re-syncs the conversation's
-messages so duplicates never accumulate.
-
-### Adding a new adapter
-
-Three steps:
-
-1. **Create the module** under `throughline/adapters/<your_tool>.py`,
-   subclass `Adapter`, and implement `discover()` + `parse(path)`:
-
-   ```python
-   from throughline.adapters import Adapter, NormalisedConversation, NormalisedMessage
-
-   class MyToolAdapter(Adapter):
-       name = "my_tool"
-       label = "My Tool"
-       home = Path("~/.mytool/sessions").expanduser()
-
-       def discover(self): ...           # yield Path objects
-       def parse(self, path): ...        # return NormalisedConversation
-   ```
-
-2. **Register it** in `throughline/adapters/registry.py`
-   (`_BUILTIN_PATHS`) — or ship your adapter as a separate pip package
-   with a `throughline.adapters` entry point so it auto-loads.
-
-3. **Add a test** under `tests/test_adapter_<your_tool>.py` covering at
-   least: parsing a minimal session, deterministic `session_id`,
-   returns-None on empty input, and one alternate-shape variant of the
-   source's schema.
-
-The shared writer in `throughline/adapters/writer.py` handles everything
-else — DB connection, `ingestion_log` idempotency, project backfill, and
-delete-and-replace on content change. You never write SQL in an adapter.
+## 🤝 **Contributing**
+Throughline is **open-source**! Contributions are welcome:
+- **🐛 Report Issues** – Bug reports and feature requests.
+- **📦 Pull Requests** – Improve code or documentation.
+- **📖 Documentation** – Help improve the wiki and guides.
 
 ---
 
-## MCP Integration
-
-Throughline ships a **[Model Context Protocol](https://modelcontextprotocol.io/)
-server** as the [`memory_mcp/`](memory_mcp/) package. Register it once and
-Claude Code (and any other MCP client — Claude Desktop, Cursor, Zed,
-Continue) can read and write the memory database directly, across sessions,
-without going through a skill round-trip or a shell command.
-
-Nine tools are exposed:
-
-| Tool | What it does |
-|---|---|
-| `memory.search` | Vector search across memory chunks and conversation messages. |
-| `memory.recall_entity` | Knowledge-graph BFS up to 3 hops from a named entity, with optional `relation_types` whitelist. |
-| `memory.write` | Append a new memory chunk (`source_type='mcp_write'`). |
-| `memory.supersede` | Mark an old chunk superseded by a new one; logs an audit row in `memory_reflections`. |
-| `memory.forget` | Cascade-delete chunks + their embeddings; logs an audit row. |
-| `memory.list_projects` | Distinct project names known to memory. |
-| `memory.recent_reflections` | Recent rows from the `memory_reflections` audit log — what the reflection engine and the preload hook have done. |
-| `memory.preload_summary` | The most recent SessionStart preload audit row: which chunks the hook injected for this project, and when. |
-| `memory.stats` | Aggregate health snapshot — same payload as `throughline status --json`: table counts, embedding coverage, contradictions outstanding, last extraction/reflection timestamps. Lets the agent decide whether to query or first run a reflection pass. |
-
-Every tool with a `project` parameter defaults to the basename of
-`$CLAUDE_PROJECT_DIR` so a session in one project cannot accidentally
-recall memory from another. Pass `project=""` to opt out and search across
-projects.
-
-Install and register:
-
-```bash
-pip install -e .
-# Then add to ~/.claude.json (or via `claude mcp add`):
-claude mcp add throughline python3 -m memory_mcp.server
-```
-
-The DB connection honours libpq env vars: `PGHOST`, `PGPORT`, `PGDATABASE`,
-`PGUSER`, `PGPASSWORD`. See [`memory_mcp/README.md`](memory_mcp/README.md)
-for the full Claude Desktop / Cursor JSON snippet, troubleshooting, and a
-verification command.
+## 📜 **License**
+Throughline is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
 
 ---
 
-## Screenshots
-
-> Captured from the bundled demo dataset (`examples/demo_data.sql`).
-> All data shown is fictional.
-
-### Dashboard
-
-<p align="center">
-  <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="960">
-</p>
-
-Session counts, token totals, memory category breakdown, recent activity.
-
-### Calendar
-
-<p align="center">
-  <img src="docs/screenshots/calendar.png" alt="Calendar" width="960">
-</p>
-
-Conversations, memory, skills, projects, prompts and reflections plotted on a
-shared month / week / day timeline.
-
-### Global Search
-
-<p align="center">
-  <img src="docs/screenshots/search.png" alt="Global Search" width="960">
-</p>
-
-Full-text search across conversations, messages, memory, skills, projects and
-prompts in one box.
-
-### Conversations
-
-<p align="center">
-  <img src="docs/screenshots/conversations.png" alt="Conversations" width="960">
-</p>
-
-Every ingested session — from any registered source adapter — filterable by
-project, model, and tool, with click-through to the full transcript.
-
-### Memory
-
-<p align="center">
-  <img src="docs/screenshots/memory.png" alt="Memory" width="960">
-</p>
-
-Extracted memory chunks as cards — category, confidence, tags, source link.
-
-### Skills
-
-<p align="center">
-  <img src="docs/screenshots/skills.png" alt="Skills" width="960">
-</p>
-
-Registered skills from `~/.claude/skills/` with usage counts and last-used
-timestamps.
-
-### Knowledge Graph
-
-<p align="center">
-  <img src="docs/screenshots/knowledge-graph.png" alt="Knowledge Graph" width="960">
-</p>
-
-Entities and typed relationships extracted from conversations, rendered with
-force-directed layout.
-
-### Projects
-
-<p align="center">
-  <img src="docs/screenshots/projects.png" alt="Projects" width="960">
-</p>
-
-Tracked projects with status, description and context — the rollup across all
-sessions in a given codebase. Opening a project drills into seven tabs —
-Overview, Memory, Conversations, Entities, Skills, Prompts, Reflections —
-each click-through to the underlying artifact's own detail page.
-
-### Prompts
-
-<p align="center">
-  <img src="docs/screenshots/prompts.png" alt="Prompts" width="960">
-</p>
-
-Reusable prompt library scanned from `CLAUDE.md` and skill directories.
-
-### Ingestion
-
-<p align="center">
-  <img src="docs/screenshots/ingestion.png" alt="Ingestion" width="960">
-</p>
-
-One-click pipeline runner — session ingest, skill scan, memory extraction,
-title generation, with a live log tail.
-
-### SQL Console
-
-<p align="center">
-  <img src="docs/screenshots/sql-console.png" alt="SQL Console" width="960">
-</p>
-
-Direct SQL access with ready-made snippets — recent conversations, memory by
-category, top projects, messages by role.
-
----
-
-## Architecture
-
-### Component Overview
-
-```mermaid
-flowchart LR
-    subgraph sources["Data Sources (pluggable adapters)"]
-        S1[Claude Code JSONL]
-        S1b[Codex rollout JSONL]
-        S1c[Hermes session JSON]
-        S1d[Continue.dev JSON]
-        S4[Windsurf plans MD]
-        S2[SKILL.md files]
-        S3[CLAUDE.md files]
-    end
-    subgraph pipeline["Ingestion Pipeline"]
-        I1[throughline ingest --all]
-        I2[scan_skills.py]
-        I3[scan_prompts.py]
-        I4[extract_memory.py]
-        I5[extract_entities.py]
-    end
-    subgraph db["claude_memory DB"]
-        T1[(conversations)]
-        T2[(memory_chunks)]
-        T3[(entities + graph)]
-        T4[(embeddings)]
-    end
-    subgraph interfaces["Interfaces"]
-        U1[Streamlit GUI]
-        U2[MCP Server]
-        U3[Claude Code Skill]
-        U4[CLI]
-    end
-
-    S1 --> I1 --> T1
-    S1b --> I1
-    S1c --> I1
-    S1d --> I1
-    S4 --> I1
-    S2 --> I2 --> T1
-    S3 --> I3 --> T1
-    T1 --> I4 --> T2
-    T1 --> I5 --> T3
-    T2 --> I5
-
-    T1 --> U1
-    T2 --> U1
-    T3 --> U1
-    T4 --> U1
-
-    T1 --> U2
-    T2 --> U2
-    T3 --> U2
-
-    U3 --> U2
-    U4 --> I1
-```
-
-### Data Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Claude as Claude Code
-    participant FS as ~/.claude/projects/
-    participant T as Throughline
-    participant DB as PostgreSQL
-
-    User->>Claude: Start session
-    Claude->>T: SessionStart hook
-    T->>DB: Query relevant memories
-    DB-->>T: Decisions, patterns, contacts
-    T-->>Claude: .claude/MEMORY_CONTEXT.md
-    Claude->>User: Resumes with context
-
-    Note over User,Claude: ... conversation happens ...
-
-    Claude->>FS: Writes JSONL
-    Note over T: launchd job (hourly)
-    T->>FS: Read new JSONL
-    T->>DB: INSERT conversations + messages
-
-    Note over T: Daily 02:00
-    T->>DB: Find new conversations
-    T->>Claude: Extract insights via CLI
-    Claude-->>T: JSON array of chunks
-    T->>DB: INSERT memory_chunks
-```
-
-High-level data flow:
-
-1. **Session files** land in each tool's own directory as you use it
-   (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.hermes/sessions/`,
-   `~/.continue/sessions/`, `~/.windsurf/plans/`, …).
-2. **Hourly ingest** (`throughline ingest --all`) walks every present adapter,
-   dedups new files by SHA-256, and writes `conversations` + `messages` rows
-   into the shared schema. Each row carries the originating tool in `entrypoint`.
-3. **Daily extract** sends message windows to Claude, parses the response into `memory_chunks`.
-4. **Embeddings generator** computes vectors for chunks and messages; HNSW indexes accelerate cosine queries.
-5. **Reflection pass** merges duplicates, supersedes outdated decisions, logs every action.
-6. **Consumers** (GUI, skill, hooks, CLI) read from the same schema.
-
-A full deep-dive lives in [`docs/architecture.md`](docs/architecture.md).
-
----
-
-## Database Schema
-
-Eleven tables, three enum types, one view, and HNSW + GIN + trigram indexes.
-
-| Table | Purpose |
-|---|---|
-| `conversations` | One row per ingested session, from any source adapter (Claude Code, Codex, Hermes, Continue, Windsurf, …). The `entrypoint` column records which tool produced it. |
-| `messages` | Individual messages with role, content, tool calls, timestamps |
-| `memory_chunks` | Extracted insights, categorized, with confidence and tags |
-| `skills` | Metadata for every Claude Code skill the scanner found (skills are still a Claude-Code-specific concept) |
-| `prompts` | Reusable prompt templates from `CLAUDE.md` and skill dirs |
-| `projects` | Project context with contacts and decisions as JSONB |
-| `entities` | Named entities (people, projects, technologies) |
-| `relationships` | Typed edges between entities with temporal validity |
-| `entity_mentions` | Where an entity was mentioned (source + snippet) |
-| `embeddings` | 1536-dim or 768-dim vectors indexed with HNSW |
-| `memory_reflections` | Audit log of dedup, consolidation, and contradiction events |
-| `ingestion_log` | SHA-256 hashes of every ingested file (dedup) |
-
-Full DDL in [`sql/schema.sql`](sql/schema.sql). Conceptual model in [`docs/architecture.md`](docs/architecture.md).
-
-### Memory categories
-
-| Category | Example |
-|---|---|
-| `decision` | "We picked pgvector over Qdrant because it runs inside the same Postgres instance." |
-| `pattern` | "Use HNSW with `m=16, ef_construction=64` for 1536-dim vectors." |
-| `insight` | "The `tool_result` role is not a real enum in Anthropic's API — it's our mapping." |
-| `preference` | "User wants all bash commands quoted with double quotes when paths contain spaces." |
-| `contact` | "Alice Chen — staff engineer, owns the billing service, prefers async review." |
-| `error_solution` | "If `pg_isready` hangs on macOS, restart `brew services restart postgresql@16`." |
-| `project_context` | "The `acme-dashboard` repo uses Next.js 14 + Drizzle + Neon." |
-| `workflow` | "Release checklist: bump version, run `pytest`, tag `vX.Y.Z`, push with tags." |
-
----
-
-## Usage Examples
-
-### 1. Ask Claude what it already knows
-
-Inside a Claude Code session:
-
-```
-> What do I know about HNSW tuning?
-```
-
-The `Throughline` skill auto-triggers, runs a semantic + full-text search over
-`memory_chunks` and `messages`, and returns ranked results that Claude can use
-to answer without starting from zero.
-
-### 2. Search from the command line
-
-```bash
-# Full-text + tag search
-python3 scripts/search_semantic.py "HNSW tuning"
-
-# Project context
-python3 skill/scripts/query.py project "acme-dashboard"
-
-# All decisions across all projects
-python3 skill/scripts/query.py decisions
-
-# Statistics
-python3 skill/scripts/query.py stats
-```
-
-Example output for `stats`:
-
-```
-Conversations:      1,284
-Messages:         214,507
-Memory chunks:      3,129  (decision: 612, pattern: 488, insight: 901, ...)
-Skills:                47
-Projects:              19
-Last ingest:   2 minutes ago
-DB size:          482 MB
-```
-
-### 3. Add a memory chunk manually
-
-```bash
-python3 skill/scripts/add.py \
-  --category decision \
-  --content "Switched from IVFFlat to HNSW — recall improved from 0.91 to 0.98 on our eval set." \
-  --project "Throughline" \
-  --tags pgvector,hnsw,indexing \
-  --confidence 0.95
-```
-
-### 4. Use the Streamlit GUI
-
-```bash
-streamlit run gui/app.py
-# open http://localhost:8501
-```
-
-Click a conversation to see its full transcript plus extracted chunks. Edit
-any memory chunk inline. Open the knowledge graph page to see how entities
-connect. Drop into the SQL console when you need something custom.
-
----
-
-## Configuration
-
-Copy the example config and edit as needed:
-
-```bash
-cp config.example.yaml config.yaml
-```
-
-Key knobs:
-
-- `db.host`, `db.port`, `db.name`, `db.user` — PostgreSQL connection.
-- `claude_dir` — location of your `~/.claude/` directory.
-- `embeddings.provider` — `openai` (1536d) or `ollama` (768d nomic-embed-text).
-- `embeddings.model` — model name per provider.
-- `extraction.provider` — `cli` (uses `claude -p` headless) or `api` (direct Anthropic API).
-- `schedule.ingest_interval` — defaults to hourly.
-- `reflection.enabled` — enable the self-reflection pass.
-
-Secrets (API keys) live in `.env`, never in `config.yaml`. Both are gitignored.
-
-See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for every option.
-
----
-
-## Comparison to alternatives
-
-| Tool | Scope | Local-first | Auto-ingests from local AI tools | Knowledge graph | Self-reflection | Price |
-|---|---|---|---|---|---|---|
-| [Mem0](https://github.com/mem0ai/mem0) | General LLM memory | Partial (vector DB local, cloud SaaS option) | No (app-level SDK) | No | No | Free (OSS) / paid (cloud) |
-| [Letta](https://github.com/letta-ai/letta) (MemGPT) | Agent memory framework | Yes | No (you build the agent) | No | Limited | Free (OSS) |
-| [Zep](https://github.com/getzep/zep) | Chat memory store | Yes (self-host) or cloud | No (you push events) | Yes | Limited | Free (OSS) / paid (cloud) |
-| [Anthropic Memory](https://www.anthropic.com) | Claude.ai / API | Anthropic-hosted | Claude only, not the CLI | — | — | Included |
-| ChatGPT Memory | ChatGPT consumer | No (OpenAI-hosted) | ChatGPT only | No | No | Included with plan |
-| **`Throughline`** | **Cross-tool: Claude Code, Codex, Hermes, Continue, Cline, Windsurf (extensible)** | **Yes (100%)** | **Yes — every registered adapter, idempotent** | **Yes** | **Yes** | **Free** |
-
-The unique slot `Throughline` fills: **the only local-first memory layer that
-auto-ingests session files from multiple local AI tools and exposes the
-unified history back to any of them**, either as a Claude Code skill, an MCP
-server (works with Claude Code, Cursor, Zed, Continue, Claude Desktop), or
-raw context injected at session start. Two extraction backends are supported
-for memory chunking — the Anthropic API and the Claude Code CLI in headless
-mode — both documented in [INSTALLATION.md](docs/INSTALLATION.md).
-
-**Why not just pick one of the alternatives above?** The short version:
-Mem0 / Letta / Zep are agent-framework SDKs you call from your own code —
-they don't ingest off-the-shelf CLI session files because that's not their
-job. Anthropic's and OpenAI's memory features are vendor-scoped by design.
-IDE memory (Cursor, Continue) is scoped to that IDE. None of them solve
-the *cross-tool* case where the same project is touched by Claude Code on
-Monday and Codex on Friday. That's the slot Throughline fills, and the
-full argument is in [`docs/why-cross-tool.md`](docs/why-cross-tool.md).
-
----
-
-## Performance
-
-Numbers measured on a MacBook Pro M2 / macOS 15 / PostgreSQL 16 / pgvector 0.8
-against ~100 conversations, ~3,000 messages, ~550 memory chunks, ~260k
-embeddings. Full methodology and reproduction steps in
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-
-| Operation | Wall time |
-|---|---|
-| Ingestion throughput | 10 – 15 sessions/sec · 400 – 800 messages/sec |
-| First-run ingest (~1,200 sessions) | ~80 – 120 s |
-| Ollama embedding (warm, `nomic-embed-text`) | 30 – 60 ms per call |
-| Full re-embed, 10k messages | 6 – 9 min single-threaded |
-| pgvector HNSW cosine, 260k vectors | 15 – 30 ms |
-| Blended hybrid search (HNSW + `pg_trgm`), end-to-end | 50 – 100 ms |
-| Memory extraction via `claude -p` (per conversation) | 6 – 15 s |
-| Daily extraction run (20 conversations) | 2 – 5 min |
-| Storage per conversation (msgs + chunks + embeddings) | 20 – 50 KB |
-
----
-
-## Roadmap
-
-- [x] MCP (Model Context Protocol) server — shipped in v0.1.0, see [`memory_mcp/`](memory_mcp/)
-- [x] Linux scheduler support via `systemd/` timers — shipped in v0.1.0
-- [x] PII / secret-redaction pass before extraction (API keys, tokens,
-      emails, home-directory paths); default on, see
-      [`throughline/pii.py`](throughline/pii.py)
-- [ ] Windows support (replace launchd with Task Scheduler)
-- [ ] Multi-user support (per-user schemas and auth)
-- [ ] Export to Obsidian, Notion, Logseq
-- [ ] Ollama-only setup path (no OpenAI, no Anthropic API)
-- [ ] Incremental embeddings (only re-embed changed chunks)
-- [ ] First-class support for Cursor, Windsurf, and Cline session formats
-- [ ] Web UI packaging as a single binary (Docker image + systemd unit)
-
-Opened issues: <https://github.com/mkupermann/throughline/issues>
-
----
-
-## Contributing
-
-PRs and issues are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for
-branch naming, commit message format, and the test plan expected for each PR.
-
-The code of conduct is [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Security
-issues go to the address in [`SECURITY.md`](SECURITY.md) — please do not file
-them as public issues.
-
----
-
-## License
-
-MIT — see [`LICENSE`](LICENSE).
-
-## Authors
-
-Released as an open-source, cross-tool memory layer for local AI assistants.
-
-## Inspired by
-
-- [Anthropic](https://www.anthropic.com/) for Claude and Claude Code
-- [Mem0](https://github.com/mem0ai/mem0) for popularizing LLM memory layers
-- [Letta / MemGPT](https://github.com/letta-ai/letta) for the self-editing memory idea
-- [pgvector](https://github.com/pgvector/pgvector) for making vector search in Postgres boring
-- The Streamlit team for making internal tools pleasant to build
-
----
-
-If Throughline saves you the hour you would otherwise spend re-explaining last week's context to Claude, drop a star on the repo. It helps the next person find it.
-
-**[Star on GitHub](https://github.com/mkupermann/throughline)**
-
----
-
-<p align="center">
-  Built by <a href="https://kupermann.com/en/">Michael Kupermann</a>
-  — also running live at <a href="https://kupermann.com/memory/">kupermann.com/memory/</a>
-</p>
+## 🙏 **Acknowledgments**
+- **🔬 [Vibrasim](https://github.com/mkupermann/vibrasim)** – Data modeling, simulation logic, and self-modeling.
+- **🔢 [JuiceHDC](https://github.com/mkupermann/JuiceHDC)** – HDC vectors, PostgreSQL integration, and benchmarking.
+- **🗃 [pgvector](https://github.com/ankane/pgvector)** – Vector search in PostgreSQL.
+- **🖥 [Streamlit](https://github.com/streamlit/streamlit)** – User interface.
