@@ -1,19 +1,87 @@
-.git
-.github
-.pytest_cache
-__pycache__
+# Python
 *.pyc
 *.pyo
+*.pyd
+__pycache__/
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+/tests
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Git
+.git
+.gitignore
+.github/
+
+# Documentation
+/docs/screenshots
+/docs/internal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-.venv
-venv
-tests
-docs/screenshots
-docs/internal
+Thumbs.db
+
+# Logs
 *.log
 *.dump
+
+# Database
 *.sql.gz
 backups/
 data/
+
+# Environment
 .env
+.env.local
+.env.*.local
 config.yaml
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Local development
+.docker/
+
+# Vendor-specific directories (mounted as volumes, not copied)
+.claude/
+.cursor/
+.zed/
+.codex/
+.hermes/
+.continue/
+.cline/
+.windsurf/
+.vibe/
+
+# Throughline-specific
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node (if any)
+node_modules/
+npm-debug.log
+
+# Temporary files
+*.tmp
+*.temp

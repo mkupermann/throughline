@@ -1,23 +1,36 @@
+# Throughline - Universal AI CLI Memory Layer
+# Docker Compose configuration for PostgreSQL + Throughline GUI
+# Supports ALL major AI CLIs: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
+
 services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL with pgvector (Core Database)
+  # ---------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
     container_name: throughline-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: claude_memory
+      POSTGRES_DB: throughline
       POSTGRES_USER: throughline
       POSTGRES_PASSWORD: throughline_dev_password
     ports:
       - "5432:5432"
     volumes:
+      # Persistent database storage (KEEP THIS - contains your data)
       - postgres_data:/var/lib/postgresql/data
+      # Initialize schema on first run
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U throughline -d claude_memory"]
+      test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # Throughline GUI (Streamlit)
+  # ---------------------------------------------------------------------------
   gui:
     build:
       context: .
@@ -28,44 +41,117 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # PostgreSQL connection
       PGHOST: postgres
       PGPORT: 5432
-      PGDATABASE: claude_memory
+      PGDATABASE: throughline
       PGUSER: throughline
       PGPASSWORD: throughline_dev_password
+      # Optional: Configure default adapters
+      THROUGHLINE_DEFAULT_SOURCES: "claude_code,cursor,zed,codex,hermes,continue,cline,windsurf,vibe"
     ports:
       - "8501:8501"
     volumes:
+      # Mount host directories for AI CLI data (REQUIRED for ingestion)
+      # Claude Code
       - ~/.claude:/claude-host:ro
-    command: streamlit run gui/app.py --server.headless=true --server.port=8501 --server.address=0.0.0.0
+      # Cursor
+      - ~/.cursor:/cursor-host:ro
+      # Zed
+      - ~/.zed:/zed-host:ro
+      # Codex
+      - ~/.codex:/codex-host:ro
+      # Hermes
+      - ~/.hermes:/hermes-host:ro
+      # Continue
+      - ~/.continue:/continue-host:ro
+      # Cline
+      - ~/.cline:/cline-host:ro
+      # Windsurf
+      - ~/.windsurf:/windsurf-host:ro
+      # Vibe (Mistral AI)
+      - ~/.vibe:/vibe-host:ro
+      # Local application code (for development)
+      - .:/app
+    command: ["streamlit", "run", "gui/app.py", 
+              "--server.headless=true", 
+              "--server.port=8501", 
+              "--server.address=0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
+  # ---------------------------------------------------------------------------
+  # MCP Server (Optional - for AI CLI integration)
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: throughline-mcp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: throughline
+      PGUSER: throughline
+      PGPASSWORD: throughline_dev_password
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount same host directories as GUI
+      - ~/.claude:/claude-host:ro
+      - ~/.cursor:/cursor-host:ro
+      - ~/.zed:/zed-host:ro
+      - ~/.codex:/codex-host:ro
+      - ~/.hermes:/hermes-host:ro
+      - ~/.continue:/continue-host:ro
+      - ~/.cline:/cline-host:ro
+      - ~/.windsurf:/windsurf-host:ro
+      - ~/.vibe:/vibe-host:ro
+      - .:/app
+    command: ["python", "-m", "throughline.mcp"]
+    profiles:
+      - mcp
+
+  # ---------------------------------------------------------------------------
+  # Ollama (Optional - for local embeddings)
+  # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
     container_name: throughline-ollama
     restart: unless-stopped
-    profiles: ["embeddings"]
+    profiles:
+      - embeddings
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    # GPU support (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
-  # -----------------------------------------------------------------------
-  # Demo profile
-  # -----------------------------------------------------------------------
-  # A second Postgres instance that pre-loads schema.sql plus the bundled
-  # demo dataset from examples/demo_data.sql. Listens on 5433 so it does
-  # not collide with the main `postgres` service above.
-  #
-  # Start with:
-  #   docker compose --profile demo up -d postgres-demo
-  # Connect with:
-  #   psql -h localhost -p 5433 -U throughline -d claude_memory
+  # ---------------------------------------------------------------------------
+  # Demo Database (Optional - pre-loaded with sample data)
+  # ---------------------------------------------------------------------------
   postgres-demo:
     image: pgvector/pgvector:pg16
     container_name: throughline-postgres-demo
-    profiles: ["demo"]
+    profiles:
+      - demo
     environment:
-      POSTGRES_DB: claude_memory
+      POSTGRES_DB: throughline
       POSTGRES_USER: throughline
       POSTGRES_PASSWORD: throughline_dev_password
     ports:
@@ -75,15 +161,24 @@ services:
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./examples/demo_data.sql:/docker-entrypoint-initdb.d/02-demo-data.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U throughline -d claude_memory"]
+      test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+# ---------------------------------------------------------------------------
+# Volumes (Persistent Storage)
+# ---------------------------------------------------------------------------
 volumes:
+  # Database storage - THIS CONTAINS YOUR MEMORY DATA
+  # Do NOT delete this volume unless you want to lose all your data
   postgres_data:
     name: throughline_postgres_data
+  
+  # Demo database storage
   postgres_demo_data:
     name: throughline_postgres_demo_data
+  
+  # Ollama model storage
   ollama_data:
     name: throughline_ollama_data

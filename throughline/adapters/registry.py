@@ -27,6 +27,8 @@ _BUILTIN_PATHS: tuple[str, ...] = (
     "throughline.adapters.continue_dev:ContinueDevAdapter",
     "throughline.adapters.cline:ClineAdapter",
     "throughline.adapters.vibe:VibeAdapter",
+    "throughline.adapters.cursor:CursorAdapter",
+    "throughline.adapters.zed:ZedAdapter",
 )
 
 
