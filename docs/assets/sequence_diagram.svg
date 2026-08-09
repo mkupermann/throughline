@@ -1,49 +1,125 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
-  <!-- Background -->
-  <rect width="100%" height="100%" fill="#f8f9fa" />
-  
-  <!-- Title -->
-  <text x="400" y="30" font-family="Arial" font-size="20" text-anchor="middle" fill="#333">Vibe Session Ingestion Sequence</text>
-  
-  <!-- Lifelines -->
-  <line x1="100" y1="60" x2="100" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
-  <line x1="300" y1="60" x2="300" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
-  <line x1="500" y1="60" x2="500" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
-  <line x1="700" y1="60" x2="700" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
-  
-  <!-- Lifeline labels -->
-  <text x="100" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">User</text>
-  <text x="300" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Vibe Adapter</text>
-  <text x="500" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Parser</text>
-  <text x="700" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">PostgreSQL</text>
-
-  <!-- Messages -->
-  <path d="M100 80 L300 80" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="200" y="75" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">run: throughline ingest --source vibe</text>
-
-  <path d="M300 120 L300 140 L500 140" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="400" y="135" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">discover()</text>
-
-  <path d="M500 140 L500 160 L300 160" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
-  <text x="400" y="155" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">session directories</text>
-
-  <path d="M300 180 L500 180" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="400" y="175" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">parse(session_dir)</text>
-
-  <path d="M500 180 L500 200 L300 200" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
-  <text x="400" y="195" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">NormalisedConversation</text>
-
-  <path d="M300 220 L700 220" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="500" y="215" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">write to DB</text>
-
-  <path d="M700 220 L700 240 L300 240" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
-  <text x="500" y="235" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">ingest summary</text>
-
-  <!-- Arrowhead definition -->
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-label="Universal session ingestion sequence: the CLI asks the registry for all adapters, each adapter discovers and parses session files, the shared writer stores them idempotently in PostgreSQL">
+  <title>Universal session ingestion sequence</title>
+  <desc>Sequence diagram with six lifelines: user, throughline CLI, adapter registry, adapter, shared writer and PostgreSQL. The CLI loads all nine adapters, loops over each adapter and each discovered file, parses them into normalised conversations and writes them idempotently.</desc>
   <defs>
-    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    <style>
+      .title   { font: 700 20px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .subtitle{ font: 400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .actor   { font: 600 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .actorsub{ font: 400 10px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .msg     { font: 500 11.5px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #EAF1FA; }
+      .ret     { font: 400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .frame   { font: 700 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: 1px; fill: #5CA8FF; }
+      .framesub{ font: 400 10.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #7E8FA8; }
+      .note    { font: 400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #C9B8FF; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB8F2"/>
+    </marker>
+    <marker id="arrret" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5E7290"/>
     </marker>
   </defs>
+
+  <rect width="1200" height="700" fill="#0D1524"/>
+  <text x="40" y="38" class="title">Universal session ingestion</text>
+  <text x="320" y="38" class="subtitle">one sequence for all nine tools — the adapter is the only tool-specific part</text>
+
+  <!-- Lifelines -->
+  <g stroke="#2C3B55" stroke-width="1.2" stroke-dasharray="4,5">
+    <line x1="100"  y1="112" x2="100"  y2="640"/>
+    <line x1="300"  y1="112" x2="300"  y2="640"/>
+    <line x1="500"  y1="112" x2="500"  y2="640"/>
+    <line x1="700"  y1="112" x2="700"  y2="640"/>
+    <line x1="900"  y1="112" x2="900"  y2="640"/>
+    <line x1="1100" y1="112" x2="1100" y2="640"/>
+  </g>
+
+  <!-- Actor heads -->
+  <g>
+    <g transform="translate(25,62)">
+      <rect width="150" height="50" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">You</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">terminal</text>
+    </g>
+    <g transform="translate(225,62)">
+      <rect width="150" height="50" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">throughline CLI</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">ingest command</text>
+    </g>
+    <g transform="translate(425,62)">
+      <rect width="150" height="50" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">Adapter Registry</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">built-ins + plug-ins</text>
+    </g>
+    <g transform="translate(625,62)">
+      <rect width="150" height="50" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">Adapter</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">one per AI CLI × 9</text>
+    </g>
+    <g transform="translate(825,62)">
+      <rect width="150" height="50" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">Shared Writer</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">idempotency layer</text>
+    </g>
+    <g transform="translate(1025,62)">
+      <rect width="150" height="50" rx="8" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="24" class="actor" text-anchor="middle">PostgreSQL</text>
+      <text x="75" y="40" class="actorsub" text-anchor="middle">+ pgvector</text>
+    </g>
+  </g>
+
+  <!-- 1 · run -->
+  <line x1="100" y1="146" x2="296" y2="146" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="198" y="138" class="msg" text-anchor="middle">throughline ingest --all</text>
+
+  <!-- 2 · all_adapters -->
+  <line x1="300" y1="180" x2="496" y2="180" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="398" y="172" class="msg" text-anchor="middle">all_adapters()</text>
+  <line x1="496" y1="206" x2="304" y2="206" stroke="#5E7290" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrret)"/>
+  <text x="398" y="224" class="ret" text-anchor="middle">9 built-in adapters + entry-point plug-ins</text>
+
+  <!-- Outer loop frame · per adapter -->
+  <rect x="220" y="244" width="950" height="304" rx="8" fill="none" stroke="#31517E" stroke-width="1.3" stroke-dasharray="7,5"/>
+  <rect x="220" y="244" width="140" height="24" rx="6" fill="#1A2942" stroke="#31517E" stroke-width="1.3"/>
+  <text x="234" y="260.5" class="frame">LOOP · adapter</text>
+  <text x="374" y="260.5" class="framesub">for each of the 9 registered adapters</text>
+
+  <!-- 3 · discover -->
+  <line x1="300" y1="292" x2="696" y2="292" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="498" y="284" class="msg" text-anchor="middle">discover()</text>
+  <line x1="696" y1="318" x2="304" y2="318" stroke="#5E7290" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrret)"/>
+  <text x="498" y="336" class="ret" text-anchor="middle">candidate session files in the tool's home directory</text>
+
+  <!-- Inner loop frame · per file -->
+  <rect x="248" y="356" width="894" height="164" rx="8" fill="none" stroke="#2A6B5C" stroke-width="1.3" stroke-dasharray="7,5"/>
+  <rect x="248" y="356" width="112" height="24" rx="6" fill="#152B2B" stroke="#2A6B5C" stroke-width="1.3"/>
+  <text x="262" y="372.5" class="frame" fill="#35C4A5">LOOP · file</text>
+  <text x="374" y="372.5" class="framesub">sha-256 unchanged since last run → skipped without parsing</text>
+
+  <!-- 4 · parse -->
+  <line x1="300" y1="404" x2="696" y2="404" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="498" y="396" class="msg" text-anchor="middle">parse(path)</text>
+  <line x1="696" y1="430" x2="304" y2="430" stroke="#5E7290" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrret)"/>
+  <text x="498" y="448" class="ret" text-anchor="middle">NormalisedConversation — roles · tool calls · token counts</text>
+
+  <!-- 5 · write -->
+  <line x1="300" y1="472" x2="896" y2="472" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="598" y="464" class="msg" text-anchor="middle">write(conversation)</text>
+  <line x1="900" y1="500" x2="1096" y2="500" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="998" y="492" class="msg" text-anchor="middle">upsert · ON CONFLICT</text>
+
+  <!-- 6 · log -->
+  <line x1="900" y1="536" x2="1096" y2="536" stroke="#8FB8F2" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="998" y="528" class="msg" text-anchor="middle">record ingestion_log</text>
+
+  <!-- 7 · summary -->
+  <line x1="296" y1="582" x2="104" y2="582" stroke="#5E7290" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrret)"/>
+  <text x="200" y="574" class="ret" text-anchor="middle">per-source ingest summary</text>
+
+  <!-- Follow-up note -->
+  <rect x="330" y="606" width="740" height="58" rx="8" fill="#1C2340" stroke="#4B4585"/>
+  <text x="700" y="630" class="note" text-anchor="middle">afterwards, on the same data: throughline extract-memory · embed · generate-titles · reflect</text>
+  <text x="700" y="650" class="note" text-anchor="middle">turn raw conversations into typed memory chunks, embeddings and a knowledge graph</text>
 </svg>

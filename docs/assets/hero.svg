@@ -1,121 +1,74 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Throughline — the thread that survives every session">
-  <title>Throughline — the thread that survives every session</title>
-  <desc>Dark hero graphic with a continuous thread weaving through five session dots, the Throughline wordmark, and a tagline.</desc>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Throughline — one memory layer for every AI CLI on your laptop">
+  <title>Throughline — one memory layer for every AI CLI on your laptop</title>
+  <desc>Nine labelled lines, one per supported AI CLI, converge into a single memory node next to the Throughline wordmark.</desc>
   <defs>
-    <!-- background gradient (subtle top-left to bottom-right) -->
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%"  stop-color="#0D1117"/>
-      <stop offset="100%" stop-color="#0A0E14"/>
+    <style>
+      .lbl { font: 500 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .word { font: 700 44px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; letter-spacing: 0.5px; }
+      .tag { font: 400 16px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .chip { font: 600 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #8FB8F2; letter-spacing: 0.3px; }
+      .node { font: 600 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .nodesub { font: 400 10.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+    </style>
+    <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1524"/>
+      <stop offset="1" stop-color="#101B30"/>
     </linearGradient>
-
-    <!-- thread gradient across accent + success -->
-    <linearGradient id="thread" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#58A6FF"/>
-      <stop offset="55%"  stop-color="#58A6FF"/>
-      <stop offset="100%" stop-color="#7EE787"/>
+    <linearGradient id="lineFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5CA8FF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#5CA8FF" stop-opacity="0.85"/>
     </linearGradient>
-
-    <!-- glow filter for the thread -->
-    <filter id="glow" x="-10%" y="-40%" width="120%" height="180%">
-      <feGaussianBlur stdDeviation="4" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-
-    <!-- faint dot grid pattern -->
-    <pattern id="grid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#1F2630"/>
-    </pattern>
-
-    <!-- session node style -->
-    <radialGradient id="node" cx="50%" cy="50%" r="50%">
-      <stop offset="0%"  stop-color="#1F2630"/>
-      <stop offset="70%" stop-color="#161B22"/>
-      <stop offset="100%" stop-color="#0D1117"/>
-    </radialGradient>
   </defs>
 
-  <!-- background -->
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <rect width="1200" height="630" fill="url(#grid)" opacity="0.6"/>
+  <rect width="1200" height="300" rx="12" fill="url(#heroBg)"/>
+  <rect x="0.5" y="0.5" width="1199" height="299" rx="12" fill="none" stroke="#24344E"/>
 
-  <!-- top micro label -->
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8B949E" font-size="14" letter-spacing="3">
-    <text x="72" y="78">ONE MEMORY · EVERY AI CLI ON YOUR LAPTOP</text>
+  <!-- Nine source lines converging into one node -->
+  <g fill="none" stroke="url(#lineFade)" stroke-width="1.6">
+    <path d="M 150 40  C 330 40,  420 138, 528 146"/>
+    <path d="M 150 66  C 330 66,  420 140, 528 147"/>
+    <path d="M 150 92  C 330 92,  420 142, 528 148"/>
+    <path d="M 150 118 C 330 118, 420 145, 528 149"/>
+    <path d="M 150 144 C 330 144, 420 148, 528 150"/>
+    <path d="M 150 170 C 330 170, 420 153, 528 151"/>
+    <path d="M 150 196 C 330 196, 420 156, 528 152"/>
+    <path d="M 150 222 C 330 222, 420 159, 528 153"/>
+    <path d="M 150 248 C 330 248, 420 161, 528 154"/>
   </g>
 
-  <!-- the thread: a continuous curve weaving through five session nodes -->
-  <!-- nodes at y ~ 355 centers; wave amplitude ~ 55 -->
-  <g filter="url(#glow)">
-    <path d="
-        M 80  355
-        C 200 255, 320 455, 440 355
-        S 680 255, 800 355
-        S 1040 455, 1160 355"
-      fill="none"
-      stroke="url(#thread)"
-      stroke-width="5"
-      stroke-linecap="round"/>
+  <!-- Source labels -->
+  <g class="lbl" text-anchor="end">
+    <text x="142" y="44">Claude Code</text>
+    <text x="142" y="70">Codex CLI</text>
+    <text x="142" y="96">Cursor</text>
+    <text x="142" y="122">Zed</text>
+    <text x="142" y="148">Vibe</text>
+    <text x="142" y="174">Hermes</text>
+    <text x="142" y="200">Continue</text>
+    <text x="142" y="226">Cline</text>
+    <text x="142" y="252">Windsurf</text>
   </g>
 
-  <!-- session nodes -->
+  <!-- Convergence node -->
+  <circle cx="548" cy="150" r="17" fill="#0D1524" stroke="#5CA8FF" stroke-width="2"/>
+  <circle cx="548" cy="150" r="6" fill="#5CA8FF"/>
+  <text x="548" y="192" class="node" text-anchor="middle">one memory</text>
+  <text x="548" y="208" class="nodesub" text-anchor="middle">PostgreSQL + pgvector</text>
+
+  <!-- Wordmark block -->
   <g>
-    <!-- node 1 -->
-    <g transform="translate(80 355)">
-      <circle r="28" fill="url(#node)" stroke="#30363D" stroke-width="1.5"/>
-      <circle r="7" fill="#58A6FF"/>
-      <text x="0" y="62" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#6E7681">session 1</text>
-    </g>
-    <!-- node 2 -->
-    <g transform="translate(350 355)">
-      <circle r="28" fill="url(#node)" stroke="#30363D" stroke-width="1.5"/>
-      <circle r="7" fill="#58A6FF"/>
-      <text x="0" y="62" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#6E7681">session 2</text>
-    </g>
-    <!-- node 3 (center) -->
-    <g transform="translate(600 355)">
-      <circle r="32" fill="url(#node)" stroke="#30363D" stroke-width="1.5"/>
-      <circle r="9" fill="#58A6FF"/>
-      <text x="0" y="64" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#6E7681">session 3</text>
-    </g>
-    <!-- node 4 -->
-    <g transform="translate(850 355)">
-      <circle r="28" fill="url(#node)" stroke="#30363D" stroke-width="1.5"/>
-      <circle r="7" fill="#7EE787"/>
-      <text x="0" y="62" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#6E7681">session 4</text>
-    </g>
-    <!-- node 5 -->
-    <g transform="translate(1120 355)">
-      <circle r="28" fill="url(#node)" stroke="#30363D" stroke-width="1.5"/>
-      <circle r="7" fill="#7EE787"/>
-      <text x="0" y="62" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#6E7681">session 5</text>
+    <text x="660" y="140" class="word">Throughline</text>
+    <text x="662" y="176" class="tag">One memory layer for every AI CLI on your laptop.</text>
+    <g>
+      <rect x="662" y="200" width="118" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="721" y="217" class="chip" text-anchor="middle">9 CLI ADAPTERS</text>
+      <rect x="790" y="200" width="130" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="855" y="217" class="chip" text-anchor="middle">SEMANTIC SEARCH</text>
+      <rect x="930" y="200" width="110" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="985" y="217" class="chip" text-anchor="middle">100% LOCAL</text>
+      <rect x="1050" y="200" width="70" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="1085" y="217" class="chip" text-anchor="middle">MIT</text>
     </g>
   </g>
-
-  <!-- wordmark -->
-  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
-    <text x="72" y="200" font-size="124" font-weight="700" fill="#C9D1D9" letter-spacing="-3">
-      Throughline
-    </text>
-
-    <!-- tagline -->
-    <text x="76" y="250" font-size="26" font-weight="400" fill="#8B949E" letter-spacing="0.3">
-      The thread that survives every session.
-    </text>
-  </g>
-
-  <!-- footer strip -->
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6E7681">
-    <text x="72"   y="555">Postgres · pgvector · local-first · MIT</text>
-    <text x="1128" y="555" text-anchor="end">github.com/mkupermann/throughline</text>
-  </g>
-
-  <!-- bottom accent bar -->
-  <rect x="72" y="575" width="1056" height="2" fill="#21262D"/>
-  <rect x="72" y="575" width="180"  height="2" fill="#58A6FF"/>
-  <rect x="252" y="575" width="60"  height="2" fill="#7EE787"/>
 </svg>
