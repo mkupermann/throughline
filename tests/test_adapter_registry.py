@@ -11,7 +11,7 @@ def test_registry_returns_builtin_adapters():
     # The built-in adapters. Asserting their names so a typo or
     # accidental rename breaks the test rather than silently dropping a
     # source on someone's machine.
-    assert {"claude_code", "windsurf", "hermes", "codex", "continue", "cline", "vibe"} <= names
+    assert {"claude_code", "windsurf", "hermes", "codex", "continue", "cline", "vibe", "cursor", "zed"} <= names
 
 
 def test_every_registered_adapter_subclasses_base():

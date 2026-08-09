@@ -2,7 +2,9 @@
 
 > **Every local AI CLI forgets between sessions. Throughline makes them stop forgetting — without sending your sessions anywhere.**
 
-One PostgreSQL database on your laptop ingests session files from **Claude Code, Codex, Hermes, Continue, Cline, Windsurf, and Vibe (Mistral AI)**, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
+One PostgreSQL database on your laptop ingests session files from **all major AI CLIs** — including **Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, and Vibe (Mistral AI)** — extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
+
+Throughline is **vendor-agnostic**: it doesn't matter which AI assistant you use today or tomorrow. Switch between Mistral, Anthropic, OpenAI, or any other provider — your memory stays intact.
 
 ---
 
@@ -39,15 +41,32 @@ streamlit run gui/app.py
 
 ### Multi-Source Session Ingestion
 Pluggable adapters pull conversations from every local AI tool you use:
-- **Claude Code** (`~/.claude/projects/*.jsonl`)
-- **OpenAI Codex CLI** (`~/.codex/sessions/<date>/rollout-*.jsonl`)
-- **Hermes Agent** (`~/.hermes/sessions/*.json`)
-- **Continue.dev** (`~/.continue/sessions/*.json`)
-- **Windsurf** (`~/.windsurf/plans/*.md`)
-- **Cline** (VS Code per-task directories)
-- **Vibe (Mistral AI)** (`~/.vibe/logs/session/session_*/`)
+- **Claude Code** (`~/.claude/projects/*.jsonl`) — Anthropic
+- **Cursor** (`~/.cursor/sessions/*.jsonl`) — Anysphere
+- **Zed** (`~/.zed/data/sessions/*.json`) — Zed Industries
+- **OpenAI Codex CLI** (`~/.codex/sessions/<date>/rollout-*.jsonl`) — OpenAI
+- **Hermes Agent** (`~/.hermes/sessions/*.json`) — 11x11
+- **Continue.dev** (`~/.continue/sessions/*.json`) — Continue
+- **Cline** (VS Code per-task directories) — Cline
+- **Windsurf** (`~/.windsurf/plans/*.md`) — WindSurf
+- **Vibe (Mistral AI)** (`~/.vibe/logs/session/session_*/`) — Mistral AI
 
 Run `throughline ingest --all` to import from all present adapters.
+
+### Universal Architecture
+Throughline's **adapter-based architecture** means it can support *any* AI CLI tool, not just the built-in ones. Each adapter follows a simple contract:
+- `discover()`: Find conversation files
+- `parse()`: Convert to normalised format
+- `home`: Default storage directory
+
+**Already supported**: 9 major AI CLIs (Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe).
+
+**Missing your favorite tool?** Add an adapter in 3 steps:
+1. Create `throughline/adapters/<name>.py`
+2. Implement the 3 methods
+3. Register in `registry.py`
+
+See the [Adapter Development Guide](docs/adapter_development.md) for details.
 
 ### Memory Extraction
 Sends conversation windows through **Claude CLI** or **Ollama** to extract structured chunks (8 categories: decisions, patterns, contacts, insights, etc.).
@@ -70,6 +89,8 @@ throughline ingest --list-sources
 # Ingest from a specific source
 throughline ingest --source vibe
 throughline ingest --source claude_code
+throughline ingest --source cursor
+throughline ingest --source zed
 throughline ingest --source hermes
 
 # Ingest from all present adapters
