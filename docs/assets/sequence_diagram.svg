@@ -1,71 +1,49 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">
-  <!-- Hintergrund -->
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+  <!-- Background -->
   <rect width="100%" height="100%" fill="#f8f9fa" />
   
-  <!-- Titel -->
-  <text x="500" y="30" font-family="Arial" font-size="20" text-anchor="middle" fill="#333">Sequenzdiagramm: Vibe CLI-Integration</text>
+  <!-- Title -->
+  <text x="400" y="30" font-family="Arial" font-size="20" text-anchor="middle" fill="#333">Vibe Session Ingestion Sequence</text>
   
-  <!-- Lebenslinien -->
-  <line x1="50" y1="60" x2="50" y2="550" stroke="#333" stroke-width="2" />
-  <text x="50" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Benutzer</text>
+  <!-- Lifelines -->
+  <line x1="100" y1="60" x2="100" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
+  <line x1="300" y1="60" x2="300" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
+  <line x1="500" y1="60" x2="500" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
+  <line x1="700" y1="60" x2="700" y2="380" stroke="#666" stroke-width="1" stroke-dasharray="5,5"/>
+  
+  <!-- Lifeline labels -->
+  <text x="100" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">User</text>
+  <text x="300" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Vibe Adapter</text>
+  <text x="500" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Parser</text>
+  <text x="700" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">PostgreSQL</text>
 
-  <line x1="200" y1="60" x2="200" y2="550" stroke="#333" stroke-width="2" />
-  <text x="200" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Streamlit</text>
+  <!-- Messages -->
+  <path d="M100 80 L300 80" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="200" y="75" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">run: throughline ingest --source vibe</text>
 
-  <line x1="350" y1="60" x2="350" y2="550" stroke="#333" stroke-width="2" />
-  <text x="350" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">PluginManager</text>
+  <path d="M300 120 L300 140 L500 140" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="400" y="135" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">discover()</text>
 
-  <line x1="500" y1="60" x2="500" y2="550" stroke="#333" stroke-width="2" />
-  <text x="500" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">VibeCLIPlugin</text>
+  <path d="M500 140 L500 160 L300 160" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
+  <text x="400" y="155" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">session directories</text>
 
-  <line x1="650" y1="60" x2="650" y2="550" stroke="#333" stroke-width="2" />
-  <text x="650" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Vibe CLI</text>
+  <path d="M300 180 L500 180" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="400" y="175" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">parse(session_dir)</text>
 
-  <line x1="800" y1="60" x2="800" y2="550" stroke="#333" stroke-width="2" />
-  <text x="800" y="50" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Datenbank</text>
+  <path d="M500 180 L500 200 L300 200" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
+  <text x="400" y="195" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">NormalisedConversation</text>
 
-  <!-- Nachrichten -->
-  <path d="M50 100 L200 100" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="125" y="95" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Wählt &quot;Vibe CLI&quot;</text>
+  <path d="M300 220 L700 220" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="500" y="215" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">write to DB</text>
 
-  <path d="M50 150 L200 150" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="125" y="145" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Befehl eingeben</text>
+  <path d="M700 220 L700 240 L300 240" stroke="#666" stroke-width="2" fill="none" marker-start="url(#arrowhead)"/>
+  <text x="500" y="235" font-family="Arial" font-size="11" text-anchor="middle" fill="#333">ingest summary</text>
 
-  <path d="M200 180 L350 180" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="275" y="175" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">execute_plugin_command</text>
-
-  <path d="M350 210 L500 210" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="425" y="205" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">execute_command</text>
-
-  <path d="M500 240 L650 240" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="575" y="235" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Führt Befehl aus</text>
-
-  <path d="M650 270 L500 270" stroke="#333" stroke-width="2" fill="none" marker-start="url(#arrowhead)" />
-  <text x="575" y="265" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Rohausgabe</text>
-
-  <path d="M500 300 L500 330" stroke="#333" stroke-width="2" fill="none" />
-  <text x="500" y="315" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">process_output</text>
-
-  <path d="M500 360 L350 360" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="425" y="355" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Verarbeitetes Ergebnis</text>
-
-  <path d="M350 390 L200 390" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="275" y="385" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Ergebnis</text>
-
-  <path d="M200 420 L800 420" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="500" y="415" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Speichert in Datenbank</text>
-
-  <path d="M800 450 L200 450" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="500" y="445" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Bestätigung</text>
-
-  <path d="M200 480 L50 480" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" />
-  <text x="125" y="475" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Zeigt Ergebnis an</text>
-
-  <!-- Pfeilspitze definieren -->
+  <!-- Arrowhead definition -->
   <defs>
-    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
     </marker>
   </defs>
 </svg>

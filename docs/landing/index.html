@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Throughline — one memory across every local AI CLI on your laptop. Ingests sessions from Claude Code, Codex, Hermes, Continue, Windsurf, and Cline into one local Postgres + pgvector store, extracts decisions and contacts, and exposes them via Streamlit, MCP, and a Claude Code skill.">
+  <meta name="description" content="Throughline — one memory across every local AI CLI on your laptop. Ingests sessions from Claude Code, Codex, Hermes, Continue, Windsurf, Cline, and Vibe (Mistral AI) into one local Postgres + pgvector store, extracts decisions and contacts, and exposes them via Streamlit, MCP, and a Claude Code skill.">
   <title>Throughline — One memory · every AI CLI on your laptop</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -439,7 +439,7 @@
 <div class="hero">
   <div class="hero-badge">Open Source &bull; MIT License &bull; Local-First</div>
   <h1>One memory.<br><span class="accent">Every AI CLI</span> on your laptop.</h1>
-  <p>Claude Code, Codex, Hermes, Continue, Windsurf, Cline — they all start every new session as a blank page. Throughline keeps the thread across all of them: one searchable memory of your decisions, contacts and gotchas, on your own machine.</p>
+  <p>Claude Code, Codex, Hermes, Continue, Windsurf, Cline, and Vibe (Mistral AI) — they all start every new session as a blank page. Throughline keeps the thread across all of them: one searchable memory of your decisions, contacts and gotchas, on your own machine.</p>
   <div class="hero-actions">
     <a class="btn btn-primary" href="https://github.com/mkupermann/throughline" target="_blank" rel="noopener">
       View on GitHub
@@ -489,7 +489,7 @@
 
     <div class="feature-card">
       <h3>Six source adapters</h3>
-      <p>Pluggable framework — one small module per local AI tool, dedup by SHA-256, idempotent re-ingest. Today: <strong>Claude Code</strong> (<code>~/.claude/projects/*.jsonl</code>), <strong>OpenAI Codex CLI</strong> (<code>~/.codex/sessions/*.jsonl</code>), <strong>Hermes Agent</strong> (<code>~/.hermes/state.db</code> + <code>sessions/</code>), <strong>Continue.dev</strong> (<code>~/.continue/sessions/*.json</code>), <strong>Windsurf</strong> (<code>~/.windsurf/plans/*.md</code>), <strong>Cline</strong> (VS Code per-task dirs).</p>
+      <p>Pluggable framework — one small module per local AI tool, dedup by SHA-256, idempotent re-ingest. Today: <strong>Claude Code</strong> (<code>~/.claude/projects/*.jsonl</code>), <strong>OpenAI Codex CLI</strong> (<code>~/.codex/sessions/*.jsonl</code>), <strong>Hermes Agent</strong> (<code>~/.hermes/state.db</code> + <code>sessions/</code>), <strong>Continue.dev</strong> (<code>~/.continue/sessions/*.json</code>), <strong>Windsurf</strong> (<code>~/.windsurf/plans/*.md</code>), <strong>Cline</strong> (VS Code per-task dirs), <strong>Vibe (Mistral AI)</strong> (<code>~/.vibe/logs/session/session_*/</code>).</p>
     </div>
 
     <div class="feature-card">
@@ -525,7 +525,7 @@
   <div class="section-title">Architecture, at a glance</div>
   <div class="section-sub">Six sources on the left feed one local core; three consumer surfaces on the right read it.</div>
   <img src="../assets/architecture.svg"
-       alt="Throughline architecture — six AI CLIs feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and a Claude Code skill"
+       alt="Throughline architecture — six AI CLIs plus Vibe feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and a Claude Code skill"
        style="width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border);">
 </section>
 
