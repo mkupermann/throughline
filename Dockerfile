@@ -33,11 +33,11 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Throughline in editable mode
-RUN pip install -e .
-
 # Copy the entire application
 COPY . .
+
+# Install Throughline in editable mode
+RUN pip install -e .
 
 # Create directories for vendor-specific data (mounted from host)
 RUN mkdir -p \
