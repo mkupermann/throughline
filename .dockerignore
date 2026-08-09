@@ -25,8 +25,8 @@ htmlcov/
 .github/
 
 # Documentation
-/docs/screenshots
-/docs/internal
+docs/screenshots
+docs/internal
 
 # IDE
 .idea/
@@ -39,30 +39,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-*.dump
-
-# Database
-*.sql.gz
-backups/
-data/
-
-# Environment
-.env
-.env.local
-.env.*.local
-config.yaml
-
-# Build artifacts
-*.egg-info/
-dist/
-build/
-
-# Local development
-.docker/
-
-# Vendor-specific directories (mounted as volumes, not copied)
+# Data directories (mounted from host)
 .claude/
 .cursor/
 .zed/
@@ -73,15 +50,35 @@ build/
 .windsurf/
 .vibe/
 
-# Throughline-specific
-__pycache__/
-*.py[cod]
-*$py.class
+# Database
+postgres_data/
 
-# Node (if any)
-node_modules/
-npm-debug.log
+# Docker
+Dockerfile
+docker-compose*
+.dockerignore
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local config
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
 
 # Temporary files
 *.tmp
 *.temp
+tmp/
+temp/
+
+# Project specific
+.k2a/
+gui/styles.css
+sql/migrations/
