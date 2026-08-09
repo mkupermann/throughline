@@ -1,66 +1,130 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
-  <!-- Background -->
-  <rect width="100%" height="100%" fill="#f8f9fa" />
-  
-  <!-- Title -->
-  <text x="400" y="30" font-family="Arial" font-size="20" text-anchor="middle" fill="#333">Throughline Data Flow</text>
-  
-  <!-- User -->
-  <rect x="50" y="50" width="120" height="50" rx="5" ry="5" fill="#e3f2fd" stroke="#2196f3" stroke-width="2" />
-  <text x="110" y="78" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">User</text>
-
-  <!-- Streamlit UI -->
-  <rect x="200" y="50" width="120" height="50" rx="5" ry="5" fill="#e8f5e9" stroke="#4caf50" stroke-width="2" />
-  <text x="260" y="78" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Streamlit UI</text>
-
-  <!-- Adapters -->
-  <rect x="350" y="50" width="120" height="50" rx="5" ry="5" fill="#fff3e0" stroke="#ff9800" stroke-width="2" />
-  <text x="410" y="78" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Adapters</text>
-
-  <!-- Vibe CLI -->
-  <rect x="500" y="50" width="120" height="50" rx="5" ry="5" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2" />
-  <text x="560" y="78" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Vibe</text>
-
-  <!-- Processed Results -->
-  <rect x="350" y="120" width="120" height="50" rx="5" ry="5" fill="#fce4ec" stroke="#e91e63" stroke-width="2" />
-  <text x="410" y="148" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Processed</text>
-  <text x="410" y="163" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Data</text>
-
-  <!-- PostgreSQL -->
-  <rect x="500" y="120" width="120" height="50" rx="5" ry="5" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2" />
-  <text x="560" y="148" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">PostgreSQL</text>
-  <text x="560" y="163" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">+ pgvector</text>
-
-  <!-- Knowledge Graph -->
-  <rect x="350" y="200" width="120" height="50" rx="5" ry="5" fill="#fff3e0" stroke="#ff9800" stroke-width="2" />
-  <text x="410" y="228" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Knowledge</text>
-  <text x="410" y="243" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Graph</text>
-
-  <!-- Memory Extraction -->
-  <rect x="500" y="200" width="120" height="50" rx="5" ry="5" fill="#e3f2fd" stroke="#2196f3" stroke-width="2" />
-  <text x="560" y="228" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Memory</text>
-  <text x="560" y="243" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Extraction</text>
-
-  <!-- Semantic Search -->
-  <rect x="425" y="280" width="150" height="50" rx="5" ry="5" fill="#e8f5e9" stroke="#4caf50" stroke-width="2" />
-  <text x="500" y="308" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Semantic</text>
-  <text x="500" y="323" font-family="Arial" font-size="12" text-anchor="middle" fill="#333">Search</text>
-
-  <!-- Arrows -->
-  <path d="M170 75 L200 75" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M320 75 L350 75" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M470 75 L500 75" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M620 75 L650 75 L650 120 L620 120" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M410 175 L410 200" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M560 175 L560 200" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M470 250 L425 280" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <path d="M560 250 L425 280" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-
-  <!-- Arrowhead definition -->
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-label="Throughline data flow: session files are ingested, enriched, stored in PostgreSQL and recalled back into the next session">
+  <title>Throughline data flow</title>
+  <desc>Five stages: session files on disk, ingestion, enrichment, storage in PostgreSQL with pgvector, and recall — with a feedback loop that preloads memory into the next session.</desc>
   <defs>
-    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    <style>
+      .title   { font: 700 20px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .subtitle{ font: 400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .stageh  { font: 700 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: 1.4px; }
+      .stagesub{ font: 500 10.5px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #64748B; }
+      .line    { font: 400 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .linehi  { font: 500 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .num     { font: 700 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #0D1524; }
+      .loop    { font: 500 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #5CA8FF; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5E7290"/>
+    </marker>
+    <marker id="arrblue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5CA8FF"/>
     </marker>
   </defs>
+
+  <rect width="1200" height="490" fill="#0D1524"/>
+  <text x="40" y="38" class="title">Throughline data flow</text>
+  <text x="270" y="38" class="subtitle">from scattered session files to one queryable memory — and back into the next session</text>
+
+  <!-- ── Stage 1 · SOURCES ── -->
+  <g transform="translate(40,70)">
+    <rect width="200" height="280" rx="10" fill="#1A2942" stroke="#31517E"/>
+    <circle cx="26" cy="28" r="11" fill="#5CA8FF"/><text x="26" y="32.5" class="num" text-anchor="middle">1</text>
+    <text x="46" y="32.5" class="stageh" fill="#5CA8FF">SOURCES</text>
+    <text x="16" y="56" class="stagesub">session files on disk</text>
+    <text x="16" y="82"  class="line">Claude Code · Anthropic</text>
+    <text x="16" y="102" class="line">Codex CLI · OpenAI</text>
+    <text x="16" y="122" class="line">Cursor · Anysphere</text>
+    <text x="16" y="142" class="line">Zed · Zed Industries</text>
+    <text x="16" y="162" class="line">Vibe · Mistral AI</text>
+    <text x="16" y="182" class="line">Hermes · JSON + DB</text>
+    <text x="16" y="202" class="line">Continue.dev</text>
+    <text x="16" y="222" class="line">Cline · VS Code</text>
+    <text x="16" y="242" class="line">Windsurf · plans</text>
+    <text x="16" y="268" class="linehi">9 adapters, one contract</text>
+  </g>
+
+  <line x1="240" y1="210" x2="268" y2="210" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ── Stage 2 · INGEST ── -->
+  <g transform="translate(270,70)">
+    <rect width="200" height="280" rx="10" fill="#152B2B" stroke="#2A6B5C"/>
+    <circle cx="26" cy="28" r="11" fill="#35C4A5"/><text x="26" y="32.5" class="num" text-anchor="middle">2</text>
+    <text x="46" y="32.5" class="stageh" fill="#35C4A5">INGEST</text>
+    <text x="16" y="56" class="stagesub">throughline ingest --all</text>
+    <text x="16" y="86"  class="linehi">discover()</text>
+    <text x="16" y="104" class="line">find each tool's session files</text>
+    <text x="16" y="132" class="linehi">parse()</text>
+    <text x="16" y="150" class="line">tool-specific formats in,</text>
+    <text x="16" y="168" class="line">normalised conversations out</text>
+    <text x="16" y="196" class="linehi">shared writer</text>
+    <text x="16" y="214" class="line">roles · tool calls · tokens</text>
+    <text x="16" y="242" class="linehi">idempotent</text>
+    <text x="16" y="260" class="line">sha-256 hash check — re-runs</text>
+    <text x="16" y="276" class="line">of unchanged files are no-ops</text>
+  </g>
+
+  <line x1="470" y1="210" x2="498" y2="210" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ── Stage 3 · ENRICH ── -->
+  <g transform="translate(500,70)">
+    <rect width="200" height="280" rx="10" fill="#152B2B" stroke="#2A6B5C"/>
+    <circle cx="26" cy="28" r="11" fill="#35C4A5"/><text x="26" y="32.5" class="num" text-anchor="middle">3</text>
+    <text x="46" y="32.5" class="stageh" fill="#35C4A5">ENRICH</text>
+    <text x="16" y="56" class="stagesub">extract · embed · title</text>
+    <text x="16" y="86"  class="linehi">memory chunks</text>
+    <text x="16" y="104" class="line">decisions · preferences ·</text>
+    <text x="16" y="122" class="line">error solutions · patterns</text>
+    <text x="16" y="150" class="linehi">knowledge graph</text>
+    <text x="16" y="168" class="line">entities + relationships</text>
+    <text x="16" y="196" class="linehi">embeddings</text>
+    <text x="16" y="214" class="line">OpenAI 1536-d, or</text>
+    <text x="16" y="232" class="line">Ollama 768-d — fully local</text>
+    <text x="16" y="260" class="linehi">titles</text>
+    <text x="16" y="276" class="line">for untitled conversations</text>
+  </g>
+
+  <line x1="700" y1="210" x2="728" y2="210" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ── Stage 4 · STORE ── -->
+  <g transform="translate(730,70)">
+    <rect width="200" height="280" rx="10" fill="#1C2340" stroke="#4B4585"/>
+    <circle cx="26" cy="28" r="11" fill="#9D8CFF"/><text x="26" y="32.5" class="num" text-anchor="middle">4</text>
+    <text x="46" y="32.5" class="stageh" fill="#9D8CFF">STORE</text>
+    <text x="16" y="56" class="stagesub">PostgreSQL 16 + pgvector</text>
+    <text x="16" y="86"  class="linehi">HNSW vector indexes</text>
+    <text x="16" y="104" class="line">cosine similarity search</text>
+    <text x="16" y="132" class="linehi">pg_trgm keyword search</text>
+    <text x="16" y="150" class="line">fast fuzzy full-text</text>
+    <text x="16" y="178" class="linehi">graph tables</text>
+    <text x="16" y="196" class="line">entities · relationships</text>
+    <text x="16" y="224" class="linehi">10 core tables</text>
+    <text x="16" y="242" class="line">conversations, messages,</text>
+    <text x="16" y="260" class="line">memory_chunks, embeddings …</text>
+    <text x="16" y="276" class="line">everything on your machine</text>
+  </g>
+
+  <line x1="930" y1="210" x2="958" y2="210" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ── Stage 5 · RECALL ── -->
+  <g transform="translate(960,70)">
+    <rect width="200" height="280" rx="10" fill="#2A2314" stroke="#8A6A2B"/>
+    <circle cx="26" cy="28" r="11" fill="#F0B44C"/><text x="26" y="32.5" class="num" text-anchor="middle">5</text>
+    <text x="46" y="32.5" class="stageh" fill="#F0B44C">RECALL</text>
+    <text x="16" y="56" class="stagesub">the memory pays out</text>
+    <text x="16" y="86"  class="linehi">throughline search</text>
+    <text x="16" y="104" class="line">hybrid semantic + keyword</text>
+    <text x="16" y="132" class="linehi">MCP server</text>
+    <text x="16" y="150" class="line">search · recall_entity ·</text>
+    <text x="16" y="168" class="line">write · forget · stats …</text>
+    <text x="16" y="196" class="linehi">Streamlit GUI</text>
+    <text x="16" y="214" class="line">14 pages — graph, calendar,</text>
+    <text x="16" y="232" class="line">memory health, SQL console</text>
+    <text x="16" y="260" class="linehi">reflect</text>
+    <text x="16" y="276" class="line">self-review of stored memory</text>
+  </g>
+
+  <!-- ── Feedback loop ── -->
+  <path d="M 1060 350 L 1060 408 L 140 408 L 140 356" fill="none" stroke="#5CA8FF" stroke-width="1.6" stroke-dasharray="6,5" marker-end="url(#arrblue)"/>
+  <text x="600" y="432" class="loop" text-anchor="middle">SessionStart context preload — relevant memory is injected before the first prompt,</text>
+  <text x="600" y="452" class="loop" text-anchor="middle">so whichever AI CLI you open next already knows your history</text>
 </svg>
