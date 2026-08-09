@@ -33,6 +33,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Throughline in editable mode
+RUN pip install -e .
+
 # Copy the entire application
 COPY . .
 
@@ -49,8 +52,8 @@ RUN mkdir -p \
     /vibe-sessions
 
 # Expose ports
-EXPOSE 8501  # Streamlit GUI
-EXPOSE 8000  # MCP server (optional)
+EXPOSE 8501
+EXPOSE 8000
 
 # Health check for GUI
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
@@ -61,6 +64,3 @@ CMD ["streamlit", "run", "gui/app.py", \
      "--server.headless=true", \
      "--server.port=8501", \
      "--server.address=0.0.0.0"]
-
-# Alternative: Run MCP server
-# CMD ["python", "-m", "throughline.mcp"]

@@ -4,7 +4,7 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL with pgvector (Core Database)
+  # PostgreSQL with pgvector (Core Database - PRESERVED)
   # ---------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
@@ -133,38 +133,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # GPU support (uncomment if you have NVIDIA GPU)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-
-  # ---------------------------------------------------------------------------
-  # Demo Database (Optional - pre-loaded with sample data)
-  # ---------------------------------------------------------------------------
-  postgres-demo:
-    image: pgvector/pgvector:pg16
-    container_name: throughline-postgres-demo
-    profiles:
-      - demo
-    environment:
-      POSTGRES_DB: throughline
-      POSTGRES_USER: throughline
-      POSTGRES_PASSWORD: throughline_dev_password
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_demo_data:/var/lib/postgresql/data
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./examples/demo_data.sql:/docker-entrypoint-initdb.d/02-demo-data.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
 # ---------------------------------------------------------------------------
 # Volumes (Persistent Storage)
@@ -174,10 +142,6 @@ volumes:
   # Do NOT delete this volume unless you want to lose all your data
   postgres_data:
     name: throughline_postgres_data
-  
-  # Demo database storage
-  postgres_demo_data:
-    name: throughline_postgres_demo_data
   
   # Ollama model storage
   ollama_data:
