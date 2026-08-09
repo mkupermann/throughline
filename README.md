@@ -2,7 +2,7 @@
 
 > **Every local AI CLI forgets between sessions. Throughline makes them stop forgetting — without sending your sessions anywhere.**
 
-One PostgreSQL database on your laptop ingests session files from **Claude Code, Codex, Hermes, Continue, Cline, Windsurf, and Vibe CLI**, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
+One PostgreSQL database on your laptop ingests session files from **Claude Code, Codex, Hermes, Continue, Cline, Windsurf, and Vibe (Mistral AI)**, extracts structured memory chunks, and feeds the unified history back to whichever tool you happen to be using next.
 
 ---
 
@@ -207,7 +207,7 @@ Pluggable adapters pull conversations from every local AI tool you use:
 - **Continue.dev** (`~/.continue/sessions/*.json`)
 - **Windsurf** (`~/.windsurf/plans/*.md`)
 - **Cline** (VS Code per-task directories)
-- **Vibe CLI** (via plugin system)
+- **Vibe (Mistral AI)** (`~/.vibe/logs/session/session_*/`)
 
 Run `throughline ingest --all` to import from all present adapters.
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Vibe (Mistral AI) adapter.** New adapter in `throughline/adapters/vibe.py` 
+  that ingests Vibe CLI sessions from `~/.vibe/logs/session/session_*/` directories.
+  Supports parsing of `meta.json` and `messages.jsonl` files, ANSI code cleaning,
+  tool call extraction, role mapping (user/assistant/system/tool), timestamp parsing,
+  and full metadata preservation. Registered in the adapter system as `vibe` source.
+  Includes comprehensive unit tests in `tests/test_adapter_vibe.py`.
+
 ## [0.3.0] — 2026-05-10
 
 ### Fixed
