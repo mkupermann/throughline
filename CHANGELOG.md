@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and full metadata preservation. Registered in the adapter system as `vibe` source.
   Includes comprehensive unit tests in `tests/test_adapter_vibe.py`.
 
+### Changed
+
+- **Cross-tool conflict detection now groups by `source_tool` rather than
+  `entrypoint`.** `entrypoint` records *how* a tool was invoked, and Claude
+  Code writes both `cli` and `sdk-cli` into it — so `conflicts.py` was
+  comparing Claude Code against itself and reporting the result as a
+  cross-tool disagreement. Measured on the live `claude_memory` database
+  (3,234 conversations): before the fix, `find_conflicts()` returned 295
+  conflicts, all `stale_drift`, effectively all `cli` vs `sdk-cli` pairs.
+  After the fix it returns 0. This is a correction, not a regression — a
+  join over `active` memory_chunks shows zero `project_name` + `category`
+  groups with more than one distinct `source_tool` right now, i.e. today's
+  corpus genuinely has no cross-tool overlap in memory chunks (Claude Code
+  is the only tool with `active` chunks; Windsurf/Hermes/Vibe conversations
+  exist but haven't produced `active` chunks that share a project+category
+  with anything else yet). The signature analysis will start finding real
+  conflicts again once other tools' conversations get reflected into
+  memory_chunks alongside Claude Code's.
+
 ## [0.3.0] — 2026-05-10
 
 ### Fixed

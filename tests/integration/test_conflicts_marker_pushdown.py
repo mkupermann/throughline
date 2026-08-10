@@ -111,11 +111,12 @@ def seeded(db_connection):
         for i, tool in enumerate(TOOLS):
             cur.execute(
                 """
-                INSERT INTO conversations (session_id, project_path, entrypoint, started_at, message_count)
-                VALUES (gen_random_uuid(), %s, %s, now() - make_interval(mins => %s), 10)
+                INSERT INTO conversations
+                    (session_id, project_path, entrypoint, source_tool, started_at, message_count)
+                VALUES (gen_random_uuid(), %s, %s, %s, now() - make_interval(mins => %s), 10)
                 RETURNING id
                 """,
-                (f"/repo/proj-{i % 2}", tool, i),
+                (f"/repo/proj-{i % 2}", tool, tool, i),
             )
             conv_id = cur.fetchone()[0]
             for j, body in enumerate(BODIES):

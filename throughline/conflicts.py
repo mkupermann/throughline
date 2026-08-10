@@ -58,7 +58,7 @@ class ConflictChunk:
     """One side of a conflict — a single memory chunk with its tool provenance."""
 
     chunk_id: int
-    tool: str                   # the conversations.entrypoint value (claude_code, codex, ...)
+    tool: str                   # the conversations.source_tool value (claude_code, codex, ...)
     project: str | None
     category: str
     content: str                # truncated to ~500 chars by the SQL
@@ -211,7 +211,7 @@ def _connect():
 # wants it.
 _CHUNK_FIELDS = """
     mc.id                                AS chunk_id,
-    COALESCE(c.entrypoint, 'unknown')    AS tool,
+    COALESCE(c.source_tool, 'unknown')   AS tool,
     mc.project_name                      AS project,
     mc.category::text                    AS category,
     LEFT(mc.content, 500)                AS content,
@@ -248,7 +248,7 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
             WHERE b.id = a.superseded_by
         ) ab ON true
         WHERE a.superseded_by IS NOT NULL
-          AND ab.tool <> COALESCE(ca.entrypoint, 'unknown')
+          AND ab.tool <> COALESCE(ca.source_tool, 'unknown')
           {"AND a.project_name = %(project)s" if project else ""}
         ORDER BY a.superseded_at DESC NULLS LAST, a.id DESC
         LIMIT 500
@@ -312,7 +312,7 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
                     mc.content AS full_content,
                     mc.created_at,
                     mc.status,
-                    COALESCE(c.entrypoint, 'unknown') AS tool,
+                    COALESCE(c.source_tool, 'unknown') AS tool,
                     e.{vec_col} AS vec
                 FROM public.memory_chunks mc
                 JOIN public.messages       m  ON m.id = mc.source_id
@@ -402,7 +402,7 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
                 mc.created_at,
                 mc.status,
                 mc.access_count,
-                COALESCE(c.entrypoint, 'unknown') AS tool
+                COALESCE(c.source_tool, 'unknown') AS tool
             FROM public.memory_chunks mc
             JOIN public.messages       m  ON m.id = mc.source_id
             JOIN public.conversations  c  ON c.id = m.conversation_id
@@ -461,6 +461,21 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
 def _first_marker(text: str) -> str:
     m = _CONTRADICTION_RE.search(text or "")
     return m.group(0) if m else "?"
+
+
+def tools_in_use(conn) -> list[str]:
+    """Distinct providers that have contributed conversations.
+
+    Grouping moved from ``entrypoint`` to ``source_tool`` because the former
+    holds `cli` and `sdk-cli` for one and the same tool. Conflict counts will
+    move — probably down — and that is a correction, not a regression.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT source_tool FROM conversations "
+            "WHERE source_tool IS NOT NULL ORDER BY 1"
+        )
+        return [r[0] for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
