@@ -1,6 +1,17 @@
+import type { ReactNode } from "react";
+import { createElement } from "react";
+import { act, renderHook } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
-import { parseFindState, toApiParams, toSearchParams } from "./useFindState";
+import { parseFindState, toApiParams, toSearchParams, useFindState } from "./useFindState";
+
+/** Mounts `useFindState` (which needs `useSearchParams`, hence a Router) at `path`. */
+function withRouter(path: string) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(MemoryRouter, { initialEntries: [path] }, children);
+  };
+}
 
 /**
  * The URL is the state — that is the Phase 2 acceptance bar, and these two
@@ -146,5 +157,50 @@ describe("toApiParams", () => {
     // Dropping it would silently turn "show me chunks with no embedding"
     // into "show me anything" — the opposite of what was asked.
     expect(toApiParams(parse("q=x&has_embedding=false")).get("has_embedding")).toBe("false");
+  });
+});
+
+/**
+ * `providers` is deliberately excluded from both `clearAll` and
+ * `activeFilterCount` — spec §4.2: provider is app-scope (the bar shows it
+ * everywhere), category/tag/confidence/etc. are Find-local. If "Clear N" on
+ * this page silently blanked the scope, the provider bar mounted in Shell
+ * would change state from a control that looks completely unrelated to it.
+ * That invariant lived only in a code comment on `FindState.providers`
+ * until now — nothing exercised `clearAll`/`activeFilterCount` at all, so a
+ * future edit that added `providers: []` to `clearAll`'s patch, or summed
+ * `providers.length` into the count, would break the spec with no test
+ * failing. Added per code review of Task 9.
+ */
+describe("clearAll", () => {
+  it("leaves the provider scope untouched while clearing Find-local facets", () => {
+    const { result } = renderHook(() => useFindState(), {
+      wrapper: withRouter("/find?provider=hermes&category=insight&tag=db"),
+    });
+    expect(result.current.state.providers).toEqual(["hermes"]);
+
+    act(() => {
+      result.current.clearAll();
+    });
+
+    expect(result.current.state.providers).toEqual(["hermes"]);
+    expect(result.current.state.categories).toEqual([]);
+    expect(result.current.state.tags).toEqual([]);
+  });
+});
+
+describe("activeFilterCount", () => {
+  it("does not count an active provider scope", () => {
+    const { result } = renderHook(() => useFindState(), {
+      wrapper: withRouter("/find?provider=hermes&provider=vibe"),
+    });
+    expect(result.current.activeFilterCount).toBe(0);
+  });
+
+  it("still counts Find-local facets normally alongside an active scope", () => {
+    const { result } = renderHook(() => useFindState(), {
+      wrapper: withRouter("/find?provider=hermes&category=insight&tag=db"),
+    });
+    expect(result.current.activeFilterCount).toBe(2);
   });
 });

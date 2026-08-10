@@ -44,4 +44,33 @@ describe("provider scope", () => {
     const sp = new URLSearchParams("provider=hermes&provider=vibe");
     expect(carryProviders("/operate", sp)).toBe("/operate?provider=hermes&provider=vibe");
   });
+
+  // `to` was assumed to always be a bare path (true for every NAV target
+  // today), so the original implementation did `${to}?${carried}`
+  // unconditionally — producing "/curate?tab=queue?provider=hermes" for any
+  // caller that navigates to a path already carrying a query or a fragment
+  // (e.g. a future command-palette entry). Regression coverage per review.
+  it("merges into an existing query string instead of appending a second '?'", () => {
+    const sp = new URLSearchParams("provider=hermes");
+    expect(carryProviders("/curate?tab=queue", sp)).toBe("/curate?tab=queue&provider=hermes");
+  });
+
+  it("preserves a fragment, placing it after the query", () => {
+    const sp = new URLSearchParams("provider=hermes");
+    expect(carryProviders("/curate#section", sp)).toBe("/curate?provider=hermes#section");
+  });
+
+  it("merges an existing query and preserves a fragment together", () => {
+    const sp = new URLSearchParams("provider=hermes&provider=vibe");
+    expect(carryProviders("/curate?tab=queue#section", sp)).toBe(
+      "/curate?tab=queue&provider=hermes&provider=vibe#section",
+    );
+  });
+
+  it("does not duplicate a provider param already present in `to`", () => {
+    // The scope in `sp` is authoritative — a stale `provider=` embedded in
+    // `to` itself must not survive alongside it.
+    const sp = new URLSearchParams("provider=hermes");
+    expect(carryProviders("/curate?provider=codex", sp)).toBe("/curate?provider=hermes");
+  });
 });
