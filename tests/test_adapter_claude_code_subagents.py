@@ -112,3 +112,84 @@ def test_is_present_is_false_for_an_empty_directory(tmp_path, monkeypatch):
 def test_is_present_is_true_when_a_file_exists(projects):
     adapter, _ = projects
     assert adapter.is_present() is True
+
+
+# --- Symlink hardening -------------------------------------------------
+#
+# These call excluded_reason() directly on the symlinked path rather than
+# going through discover(). On Python 3.13+, rglob("*.jsonl") no longer
+# follows directory symlinks by default (recurse_symlinks=False), so a
+# discover()-based test of case (b) below would pass vacuously on this
+# interpreter and give zero protection on the 3.12 CI runner (this repo's
+# floor is Python 3.10). A symlinked *file* (case (a)) reaches discover()
+# on every Python version regardless, since only directory-symlink
+# recursion changed — but testing excluded_reason() directly is the same
+# either way and isn't version-sensitive.
+
+
+def test_symlinked_file_pointing_into_subagents_is_excluded(tmp_path, monkeypatch):
+    """(a) A symlink FILE at project top level -> real subagents/agent-0.jsonl.
+
+    The symlink's own path carries no "subagents" segment, so the literal
+    rel.parts check alone would miss it and let it reach the writer.
+    """
+    home = tmp_path / "projects"
+    sid = str(uuid.uuid4())
+    real = home / "-Users-x" / sid / "subagents" / "agent-0.jsonl"
+    _write_session(real, sid)
+    link = home / "-Users-x" / "link-to-agent.jsonl"
+    link.symlink_to(real)
+
+    adapter = ClaudeCodeAdapter()
+    monkeypatch.setattr(type(adapter), "home", home)
+
+    assert "subagents" not in link.relative_to(home).parts
+    assert adapter.excluded_reason(link) == "subagent transcript"
+
+
+def test_symlinked_dir_pointing_into_subagents_is_excluded(tmp_path, monkeypatch):
+    """(b) A symlinked DIR named "alias" (not "subagents") -> the real subagents/ dir.
+
+    Walking through the alias never puts the literal string "subagents" in
+    the path being tested; only resolving the symlink reveals it.
+    """
+    home = tmp_path / "projects"
+    sid = str(uuid.uuid4())
+    real_dir = home / "-Users-x" / sid / "subagents"
+    _write_session(real_dir / "agent-0.jsonl", sid)
+    alias = home / "-Users-x" / "alias"
+    alias.symlink_to(real_dir, target_is_directory=True)
+    path_through_alias = alias / "agent-0.jsonl"
+
+    adapter = ClaudeCodeAdapter()
+    monkeypatch.setattr(type(adapter), "home", home)
+
+    assert "subagents" not in path_through_alias.relative_to(home).parts
+    assert adapter.excluded_reason(path_through_alias) == "subagent transcript"
+
+
+def test_real_file_literally_named_subagents_dot_jsonl_is_still_ingested(tmp_path, monkeypatch):
+    """(c) A genuine (non-symlink) session file named "subagents.jsonl" is not a
+    directory called "subagents" — it must still be ingested."""
+    home = tmp_path / "projects"
+    sid = str(uuid.uuid4())
+    f = home / "-Users-x" / "subagents.jsonl"
+    _write_session(f, sid)
+
+    adapter = ClaudeCodeAdapter()
+    monkeypatch.setattr(type(adapter), "home", home)
+
+    assert adapter.excluded_reason(f) is None
+
+
+def test_broken_symlink_is_excluded_without_raising(tmp_path, monkeypatch):
+    """(d) A symlink whose target does not exist must be excluded, not raise."""
+    home = tmp_path / "projects"
+    (home / "-Users-x").mkdir(parents=True)
+    link = home / "-Users-x" / "broken.jsonl"
+    link.symlink_to(home / "-Users-x" / "does-not-exist.jsonl")
+
+    adapter = ClaudeCodeAdapter()
+    monkeypatch.setattr(type(adapter), "home", home)
+
+    assert adapter.excluded_reason(link) is not None
