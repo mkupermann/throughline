@@ -529,11 +529,21 @@ def _provider_clause(alias: str, filters: FindFilters, params: dict) -> str:
 
 
 def _provider_clause_via_conversation(source_col: str, filters: FindFilters, params: dict) -> str:
-    """For tables that reach conversations by id, e.g. memory_chunks.source_id."""
+    """For tables that reach conversations by id, e.g. memory_chunks.source_id.
+
+    ``source_id`` is polymorphic — no FK, no CHECK constraint — and means "a
+    conversation id" only when the row's ``source_type = 'conversation'``.
+    Without that guard, a row of some other source_type whose source_id
+    happens to collide with a real conversation id would be silently (and
+    wrongly) attributed to that conversation's provider. Mirrors the same
+    guard already used in ``queries/activity.py``.
+    """
     if not filters.providers:
         return ""
     params["providers"] = list(filters.providers)
+    alias, _, _ = source_col.rpartition(".")
     return (
+        f" AND {alias}.source_type = 'conversation'"
         f" AND EXISTS (SELECT 1 FROM conversations pc "
         f"WHERE pc.id = {source_col} AND pc.source_tool = ANY(%(providers)s))"
     )

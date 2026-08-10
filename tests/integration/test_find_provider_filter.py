@@ -70,3 +70,26 @@ def test_messages_inherit_provider_through_their_conversation(corpus):
         limit=50,
     )
     assert len(res.items) == 1
+
+
+def test_memory_chunk_source_id_only_means_conversation_when_source_type_matches(corpus):
+    """``memory_chunks.source_id`` is polymorphic: no FK, no CHECK constraint.
+    It means "a conversation id" only when source_type='conversation'. A row
+    of a different source_type whose source_id deliberately collides with a
+    real hermes conversation id must NOT be attributed to hermes — that
+    collision is exactly what an unguarded EXISTS would get wrong."""
+    with corpus.cursor() as cur:
+        cur.execute("SELECT id FROM conversations WHERE source_tool='hermes' LIMIT 1")
+        hermes_conv_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO memory_chunks (source_type, source_id, content, category) "
+            "VALUES ('manual', %s, 'zebrafish manual note', 'insight')",
+            (hermes_conv_id,),
+        )
+    corpus.commit()
+    res = F.find(
+        corpus, "zebrafish",
+        filters=F.FindFilters(kinds=["memory"], providers=["hermes"]),
+        limit=50,
+    )
+    assert res.items == []
