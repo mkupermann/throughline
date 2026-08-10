@@ -1,0 +1,63 @@
+import type { TimelineDayItem } from "@/lib/api";
+
+/**
+ * What a clicked cell actually contains (design spec §5.1: "clicking a cell
+ * is what loads rows"). Only a day-bucket cell can open this directly — a
+ * week or month cell has no single date to ask `/timeline/day/{date}` for,
+ * so TimelinePage zooms the range into that bucket's span instead of calling
+ * this with a fraction of what the cell counted.
+ */
+export function TimelineDetail({
+  day,
+  providers,
+  data,
+  isLoading,
+  onClose,
+}: {
+  day: string;
+  /** The active provider scope, carried into the detail request and stated
+   *  here so the list never implies it covers more than it does. */
+  providers: string[];
+  data: { day: string; items: TimelineDayItem[] } | undefined;
+  isLoading: boolean;
+  onClose: () => void;
+}) {
+  const items = data?.items ?? [];
+
+  return (
+    <div className="timeline-detail" role="region" aria-label={`Events on ${day}`}>
+      <div className="timeline-detail-head">
+        <h2>
+          {day}
+          {providers.length > 0 && (
+            <span className="timeline-detail-scope"> · scoped to {providers.join(", ")}</span>
+          )}
+        </h2>
+        <button type="button" className="linkbutton" onClick={onClose}>
+          Close
+        </button>
+      </div>
+
+      {isLoading && <p className="muted">Loading…</p>}
+
+      {!isLoading && items.length === 0 && (
+        <p className="empty-state">
+          No events on {day}
+          {providers.length > 0 ? " for the current provider scope." : "."}
+        </p>
+      )}
+
+      {items.length > 0 && (
+        <ul className="timeline-detail-list">
+          {items.map((item) => (
+            <li key={`${item.kind}-${item.id}`} className="timeline-detail-row">
+              <span className={`kind kind-${item.kind}`}>{item.kind}</span>
+              <span className="timeline-detail-title">{item.title}</span>
+              <span className="timeline-detail-provider">{item.provider}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -356,8 +356,26 @@ export interface TimelineRange {
   cells: TimelineCell[];
 }
 
+/**
+ * One row from `GET /timeline/day/{date}` — verified against
+ * `_detail_columns()` and the SELECT built in `day_detail()` in
+ * throughline/queries/timeline.py, which every kind's branch of that query
+ * aliases to exactly these five columns. This is NOT a `FindItem`: the
+ * declaration `items: FindItem[]` that used to sit on `timelineApi.day()`
+ * was wrong in the same way `TimelineCell.kind: Kind` was — a shape
+ * TypeScript could not check because JSON arrives as strings.
+ */
+export interface TimelineDayItem {
+  id: number;
+  kind: TimelineKind;
+  /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */
+  provider: string;
+  ts: string;
+  title: string;
+}
+
 export const timelineApi = {
   range: (qs: URLSearchParams) => request<TimelineRange>(`/timeline?${qs}`),
   day: (day: string, qs: URLSearchParams) =>
-    request<{ day: string; items: FindItem[] }>(`/timeline/day/${day}?${qs}`),
+    request<{ day: string; items: TimelineDayItem[] }>(`/timeline/day/${day}?${qs}`),
 };

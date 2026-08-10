@@ -342,6 +342,11 @@
 .kind-skill { color: var(--chart-4); }
 .kind-project { color: var(--chart-3); }
 .kind-prompt { color: var(--chart-2); }
+/* Timeline-only kinds (TimelineKind adds these three to Find's six) fold
+   into --chart-other, same as any 7th+ category in the categorical palette. */
+.kind-entity,
+.kind-reflection,
+.kind-ingestion { color: var(--chart-other); }
 
 /* ── Table ───────────────────────────────────────────────────────────── */
 .table-wrap {

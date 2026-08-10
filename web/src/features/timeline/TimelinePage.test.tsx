@@ -4,26 +4,37 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
+import type { TimelineRange, TimelineDayItem } from "@/lib/api";
 import { TimelinePage } from "./TimelinePage";
 
-// Typed with its real argument (rather than `(...a: unknown[]) => ...`) so
-// `range.mock.calls.at(-1)?.[0]` below is a `URLSearchParams`, not an element
-// of an inferred zero-length tuple.
-const range = vi.fn(async (_qs: URLSearchParams) => ({
+// Typed with its real arguments (rather than `(...a: unknown[]) => ...`) so
+// `.mock.calls.at(-1)?.[0]` below is a `URLSearchParams`, not an element of
+// an inferred zero-length tuple. The explicit `Promise<TimelineRange>`
+// return type (rather than letting `bucket: "day"` narrow to that literal)
+// is what lets `mockResolvedValueOnce` below hand back a "month" bucket.
+const range = vi.fn(async (_qs: URLSearchParams): Promise<TimelineRange> => ({
   since: "2026-01-01",
   until: "2026-03-31",
-  bucket: "day" as const,
+  bucket: "day",
   cells: [
-    { bucket: "2026-01-05", provider: "claude_code", kind: "conversation" as const, n: 12 },
-    { bucket: "2026-01-05", provider: "hermes", kind: "conversation" as const, n: 3 },
-    { bucket: "2026-02-01", provider: "not_tool_specific", kind: "skill" as const, n: 2 },
+    { bucket: "2026-01-05", provider: "claude_code", kind: "conversation", n: 12 },
+    { bucket: "2026-01-05", provider: "hermes", kind: "conversation", n: 3 },
+    { bucket: "2026-02-01", provider: "not_tool_specific", kind: "skill", n: 2 },
   ],
+}));
+
+const day = vi.fn(async (
+  _day: string,
+  _qs: URLSearchParams,
+): Promise<{ day: string; items: TimelineDayItem[] }> => ({
+  day: "2026-01-05",
+  items: [],
 }));
 
 vi.mock("@/lib/api", () => ({
   timelineApi: {
     range: (qs: URLSearchParams) => range(qs),
-    day: async () => ({ day: "2026-01-05", items: [] }),
+    day: (d: string, qs: URLSearchParams) => day(d, qs),
   },
 }));
 
@@ -86,5 +97,74 @@ describe("TimelinePage", () => {
     });
     renderAt();
     expect(await screen.findByText(/no activity in this range/i)).toBeTruthy();
+  });
+
+  // §5.1: "Clicking a cell is what loads rows." These four cover the
+  // drill-down: a day cell loads that day, a week/month cell cannot (a
+  // single date can't represent a week or month) so it zooms instead, the
+  // active provider scope must reach the detail request, and an empty day
+  // must say so rather than render nothing.
+
+  it("a day-bucket cell click issues a day request and renders rows", async () => {
+    day.mockResolvedValueOnce({
+      day: "2026-01-05",
+      items: [
+        {
+          id: 1, kind: "conversation", provider: "claude_code",
+          ts: "2026-01-05T10:00:00Z", title: "Planning session",
+        },
+      ],
+    });
+    renderAt();
+    const cell = await screen.findByRole("button", {
+      name: /^claude_code, 2026-01-05, 12 events$/,
+    });
+    await userEvent.click(cell);
+    expect(day.mock.calls.at(-1)?.[0]).toBe("2026-01-05");
+    expect(await screen.findByText("Planning session")).toBeTruthy();
+  });
+
+  it("a month-bucket cell click narrows the range instead of requesting a single day", async () => {
+    range.mockResolvedValueOnce({
+      since: "2026-01-01",
+      until: "2026-12-31",
+      bucket: "month",
+      cells: [{ bucket: "2026-02-01", provider: "claude_code", kind: "conversation" as const, n: 40 }],
+    });
+    renderAt();
+    const cell = await screen.findByRole("button", {
+      name: /^claude_code, 2026-02-01, 40 events$/,
+    });
+    const rangeCallsBefore = range.mock.calls.length;
+    const dayCallsBefore = day.mock.calls.length;
+    await userEvent.click(cell);
+    // A single date cannot stand for a month — no day request goes out...
+    expect(day.mock.calls.length).toBe(dayCallsBefore);
+    // ...instead the range narrows to that month's span and refetches.
+    expect(range.mock.calls.length).toBeGreaterThan(rangeCallsBefore);
+    const qs = String(range.mock.calls.at(-1)?.[0] ?? "");
+    expect(qs).toContain("since=2026-02-01");
+    expect(qs).toContain("until=2026-02-28");
+  });
+
+  it("carries the active provider scope into the detail request", async () => {
+    renderAt("/timeline?provider=hermes");
+    const cell = await screen.findByRole("button", {
+      name: /^hermes, 2026-01-05, 3 events$/,
+    });
+    await userEvent.click(cell);
+    await screen.findByRole("region", { name: /events on 2026-01-05/i });
+    const qs = String(day.mock.calls.at(-1)?.[1] ?? "");
+    expect(qs).toContain("provider=hermes");
+  });
+
+  it("shows a message rather than a blank panel when a clicked day has no events", async () => {
+    day.mockResolvedValueOnce({ day: "2026-01-05", items: [] });
+    renderAt();
+    const cell = await screen.findByRole("button", {
+      name: /^claude_code, 2026-01-05, 12 events$/,
+    });
+    await userEvent.click(cell);
+    expect(await screen.findByText(/no events on 2026-01-05/i)).toBeTruthy();
   });
 });

@@ -85,11 +85,92 @@
   flex: 1;
   min-width: 0;
 }
-.timeline-cell {
+.timeline-cell-wrap {
+  /* Carries the grid's `cell` role (ARIA table structure, unchanged from
+     the read-only version); the interactive element goes inside it rather
+     than overriding this cell's role onto the button, which would make it
+     unfindable as a button. */
+  display: flex;
   flex: 1 0 4px;
   min-width: 4px;
+}
+.timeline-cell {
+  /* A real <button> (spec: clickable cells must be real buttons with an
+     accessible name, not divs with onClick — keyboard-reachable natively),
+     so the usual button chrome needs resetting to keep the density-strip
+     look. */
+  flex: 1;
+  min-width: 4px;
   height: 18px;
+  padding: 0;
+  border: 0;
   border-radius: 2px;
   /* One token, opacity varying — that IS the intensity encoding (§5.2). */
   background: var(--seq-5);
+  cursor: pointer;
+}
+.timeline-cell:hover,
+.timeline-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Detail panel (clicking a day-bucket cell) ──────────────────────────
+   §5.1: "Clicking a cell is what loads rows." A week/month cell zooms the
+   range instead of opening this — see TimelinePage's handleCellClick. */
+.timeline-detail {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.timeline-detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.timeline-detail-head h2 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.timeline-detail-scope {
+  font-weight: 400;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.timeline-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.timeline-detail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+}
+.timeline-detail-row:hover {
+  background: var(--surface-hover);
+}
+.timeline-detail-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.timeline-detail-provider {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }

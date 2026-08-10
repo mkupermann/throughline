@@ -6,7 +6,8 @@ import { timelineApi } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { readProviders } from "@/lib/providerScope";
 
-import { RangeControl, presetRange, type Range } from "./RangeControl";
+import { RangeControl, bucketSpan, presetRange, type Range } from "./RangeControl";
+import { TimelineDetail } from "./TimelineDetail";
 
 /**
  * Activity over a date range, in per-provider lanes.
@@ -32,7 +33,18 @@ function laneLabel(provider: string): string {
 export function TimelinePage() {
   const [sp] = useSearchParams();
   const [range, setRange] = useState<Range>(() => presetRange(90));
+  // The day whose detail is open, or null when no cell is selected. Only a
+  // day-bucket cell ever sets this directly — see handleCellClick below.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const providers = readProviders(sp);
+
+  // Any range change invalidates whatever day was open — it may no longer
+  // even be in range, and showing stale detail for the old range is worse
+  // than closing it.
+  const handleRangeChange = (r: Range) => {
+    setRange(r);
+    setSelectedDay(null);
+  };
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -46,6 +58,36 @@ export function TimelinePage() {
     queryKey: ["timeline", qs.toString()],
     queryFn: () => timelineApi.range(qs),
   });
+
+  const dayQs = useMemo(() => {
+    const p = new URLSearchParams();
+    for (const name of providers) p.append("provider", name);
+    return p;
+  }, [providers.join(",")]);
+
+  const { data: dayData, isLoading: dayLoading } = useQuery({
+    queryKey: ["timeline-day", selectedDay, dayQs.toString()],
+    queryFn: () => timelineApi.day(selectedDay as string, dayQs),
+    enabled: selectedDay !== null,
+  });
+
+  /**
+   * Clicking a cell loads its rows (spec §5.1) — but only a day-bucket cell
+   * has a single date to ask `/timeline/day/{date}` for. A week or month
+   * cell would have to pick one day out of several and show a fraction of
+   * what it counted — the exact "the number and the list disagree" failure
+   * `day_detail`'s default was fixed for. So a week/month click zooms the
+   * range into that bucket's span instead, and `pick_bucket` re-buckets it
+   * finer on the next fetch — clicking a month shows that month by day.
+   */
+  const handleCellClick = (bucketDate: string) => {
+    if (!data) return;
+    if (data.bucket === "day") {
+      setSelectedDay(bucketDate);
+    } else {
+      handleRangeChange(bucketSpan(data.bucket, bucketDate));
+    }
+  };
 
   const { lanes, buckets, max, totals } = useMemo(() => {
     const cells = data?.cells ?? [];
@@ -81,7 +123,7 @@ export function TimelinePage() {
         </p>
       </header>
 
-      <RangeControl value={range} onChange={setRange} />
+      <RangeControl value={range} onChange={handleRangeChange} />
 
       {isLoading && <p className="muted">Loading…</p>}
 
@@ -100,20 +142,37 @@ export function TimelinePage() {
                 {buckets.map((b) => {
                   const n = totals.get(`${lane}|${b}`) ?? 0;
                   return (
-                    <span
-                      key={b}
-                      role="cell"
-                      className="timeline-cell"
-                      style={{ opacity: n === 0 ? 0.08 : 0.25 + 0.75 * (n / max) }}
-                      title={`${laneLabel(lane)} · ${b} · ${n}`}
-                      aria-label={`${laneLabel(lane)}, ${b}, ${n} events`}
-                    />
+                    // The wrapper carries the grid's `cell` role; the button
+                    // inside stays an unmodified, un-role-overridden button
+                    // (role="button" would be dropped if `role="cell"` sat
+                    // on the button itself), so it is findable and operable
+                    // as a button by both assistive tech and tests.
+                    <span key={b} role="cell" className="timeline-cell-wrap">
+                      <button
+                        type="button"
+                        className="timeline-cell"
+                        style={{ opacity: n === 0 ? 0.08 : 0.25 + 0.75 * (n / max) }}
+                        title={`${laneLabel(lane)} · ${b} · ${n}`}
+                        aria-label={`${laneLabel(lane)}, ${b}, ${n} events`}
+                        onClick={() => handleCellClick(b)}
+                      />
+                    </span>
                   );
                 })}
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {selectedDay && (
+        <TimelineDetail
+          day={selectedDay}
+          providers={providers}
+          data={dayData}
+          isLoading={dayLoading}
+          onClose={() => setSelectedDay(null)}
+        />
       )}
     </section>
   );
