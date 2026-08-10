@@ -20,6 +20,7 @@ const range = vi.fn(async (_qs: URLSearchParams): Promise<TimelineRange> => ({
     { bucket: "2026-01-05", provider: "claude_code", kind: "conversation", n: 12 },
     { bucket: "2026-01-05", provider: "hermes", kind: "conversation", n: 3 },
     { bucket: "2026-01-05", provider: "not_tool_specific", kind: "skill", n: 5 },
+    { bucket: "2026-01-05", provider: "unattributed", kind: "conversation", n: 1 },
     { bucket: "2026-02-01", provider: "not_tool_specific", kind: "skill", n: 2 },
   ],
 }));
@@ -216,6 +217,33 @@ describe("TimelinePage", () => {
     await screen.findByRole("region", { name: /events on 2026-01-05/i });
     const qs = String(day.mock.calls.at(-1)?.[1] ?? "");
     expect(qs).toContain("provider=hermes");
+  });
+
+  it("the unattributed lane's cell click carries that provider, not an unfiltered request", async () => {
+    // Regression: this lane used to skip the provider filter client-side
+    // (there being no way to express source_tool IS NULL through the old
+    // filter), so its click came back with every provider's rows for that
+    // day mixed in — the cell said "1 events" but the panel showed rows
+    // belonging to other lanes too. queries/timeline.py now understands
+    // "unattributed" as a real filter value (source_tool IS NULL), so the
+    // client sends it like any other lane.
+    day.mockResolvedValueOnce({
+      day: "2026-01-05",
+      items: [
+        {
+          id: 9, kind: "conversation", provider: "unattributed",
+          ts: "2026-01-05T09:00:00Z", title: "No recorded tool",
+        },
+      ],
+    });
+    renderAt();
+    const cell = await screen.findByRole("button", {
+      name: /^\(unattributed\), 2026-01-05, 1 events$/,
+    });
+    await userEvent.click(cell);
+    await screen.findByText("No recorded tool");
+    const qs = String(day.mock.calls.at(-1)?.[1] ?? "");
+    expect(qs).toBe("provider=unattributed");
   });
 
   it("the not-tool-specific lane's cell click carries no provider filter", async () => {

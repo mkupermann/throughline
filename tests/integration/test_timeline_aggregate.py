@@ -230,3 +230,101 @@ def test_calendar_extras_excluded_under_active_provider_filter(calendar_extras):
         kinds=["entity", "reflection", "ingestion"], providers=["hermes"],
     )
     assert agg == []
+
+
+# ── "unattributed" as a filterable provider ──────────────────────────────
+#
+# Regression: clicking the unattributed lane's cell used to skip the provider
+# filter client-side entirely (there being no way to express `source_tool IS
+# NULL` through the old `= ANY(...)`-only filter), so the detail request came
+# back with every provider's rows for that day mixed in with the actual
+# unattributed ones — while the "showing N of M" total was still the cell's
+# true (small) count. That is the same "number and list disagree" failure the
+# day_detail truncation-total fix exists to prevent, one lane over. Fixed by
+# making "unattributed" a real filter value: it means `source_tool IS NULL`,
+# OR'd with any named providers in the same request.
+
+
+@pytest.fixture()
+def mixed_attribution(db_connection):
+    """Conversations from a named tool, plus some with source_tool left NULL
+    (the shape ingestion leaves rows in — see sql/migrations/002_source_tool.sql's
+    "everything else stays NULL, deliberately")."""
+    base = datetime(2026, 3, 19, tzinfo=timezone.utc)
+    with db_connection.cursor() as cur:
+        for i, tool in enumerate(["hermes", "hermes", "claude_code", None, None, None]):
+            cur.execute(
+                "INSERT INTO conversations "
+                "(session_id, project_path, source_tool, started_at, message_count) "
+                "VALUES (gen_random_uuid(), '/t', %s, %s, 1)",
+                (tool, base + timedelta(hours=i)),
+            )
+    db_connection.commit()
+    return db_connection
+
+
+def test_aggregate_unattributed_matches_null_source_tool_not_the_literal_string(mixed_attribution):
+    since = until = date(2026, 3, 19)
+    agg = T.aggregate(
+        mixed_attribution, since, until, "day", kinds=["conversation"], providers=["unattributed"],
+    )
+    assert {r["provider"] for r in agg} == {"unattributed"}
+    total = sum(r["n"] for r in agg)
+
+    with mixed_attribution.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM conversations "
+            "WHERE source_tool IS NULL AND started_at >= %s AND started_at < %s + interval '1 day'",
+            (since, until),
+        )
+        raw = cur.fetchone()[0]
+    assert total == raw == 3
+
+
+def test_day_detail_unattributed_matches_null_source_tool_not_the_literal_string(mixed_attribution):
+    detail = T.day_detail(
+        mixed_attribution, date(2026, 3, 19),
+        kinds=["conversation"], providers=["unattributed"], limit=100, offset=0,
+    )
+    assert len(detail) == 3
+    assert all(r["provider"] == "unattributed" for r in detail)
+
+
+def test_aggregate_mixed_named_and_unattributed_returns_the_union(mixed_attribution):
+    """A request for ["hermes", "unattributed"] must not silently pick one."""
+    since = until = date(2026, 3, 19)
+    agg = T.aggregate(
+        mixed_attribution, since, until, "day",
+        kinds=["conversation"], providers=["hermes", "unattributed"],
+    )
+    assert {r["provider"] for r in agg} == {"hermes", "unattributed"}
+    total = sum(r["n"] for r in agg)
+
+    with mixed_attribution.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM conversations "
+            "WHERE (source_tool = 'hermes' OR source_tool IS NULL) "
+            "AND started_at >= %s AND started_at < %s + interval '1 day'",
+            (since, until),
+        )
+        raw = cur.fetchone()[0]
+    assert total == raw == 5
+
+
+def test_day_detail_mixed_named_and_unattributed_returns_the_union(mixed_attribution):
+    detail = T.day_detail(
+        mixed_attribution, date(2026, 3, 19),
+        kinds=["conversation"], providers=["hermes", "unattributed"], limit=100, offset=0,
+    )
+    assert len(detail) == 5
+    assert {r["provider"] for r in detail} == {"hermes", "unattributed"}
+
+
+def test_aggregate_unattributed_alone_does_not_pull_in_named_providers(mixed_attribution):
+    """The claude_code row must not leak into an unattributed-only request."""
+    since = until = date(2026, 3, 19)
+    agg = T.aggregate(
+        mixed_attribution, since, until, "day", kinds=["conversation"], providers=["unattributed"],
+    )
+    assert "claude_code" not in {r["provider"] for r in agg}
+    assert "hermes" not in {r["provider"] for r in agg}

@@ -25,22 +25,18 @@ import { TimelineDetail } from "./TimelineDetail";
 const NOT_TOOL_SPECIFIC = "not_tool_specific";
 
 //: `COALESCE(source_tool, 'unattributed')` in queries/timeline.py's SELECT —
-//: a real lane that can appear in the grid, but not a value the provider
-//: filter (`source_tool = ANY(...)`) can ever match: real rows have
-//: source_tool IS NULL, never the literal string "unattributed". Passing it
-//: through as a detail-request filter would zero out a cell that just
-//: reported a nonzero count — the same "number and list disagree" failure
-//: this file's own day-detail fix exists to prevent. Treated the same as
-//: NOT_TOOL_SPECIFIC: no provider filter applied when this lane is clicked.
+//: a real lane that CAN be filtered on: queries/timeline.py's
+//: `_split_providers`/`_provider_filter` translate this sentinel into
+//: `source_tool IS NULL` server-side (real rows never hold the literal
+//: string), OR'd with any named providers in the same request. Unlike
+//: NOT_TOOL_SPECIFIC, this lane's rows DO have a provider column — they're
+//: conversations/messages/memory with no recorded tool, not a different
+//: kind of event — so it is sent through like any other lane.
 const UNATTRIBUTED = "unattributed";
-
-//: Lanes with no real provider identity behind them — clicking their cell
-//: must not turn into a `source_tool = ANY([...])` filter (see UNATTRIBUTED).
-const NOT_FILTERABLE = new Set([NOT_TOOL_SPECIFIC, UNATTRIBUTED]);
 
 function laneLabel(provider: string, labels: Map<string, string>): string {
   if (provider === NOT_TOOL_SPECIFIC) return "not tool-specific";
-  if (provider === "unattributed") return "(unattributed)";
+  if (provider === UNATTRIBUTED) return "(unattributed)";
   return labels.get(provider) ?? provider;
 }
 
@@ -111,11 +107,14 @@ export function TimelinePage() {
   const dayQs = useMemo(() => {
     const p = new URLSearchParams();
     // The clicked lane IS the scope for its own detail request — see the
-    // state comment on selectedLane. Kinds with no provider column
-    // (not_tool_specific) vanish from day_detail entirely if a provider
-    // filter is present at all, and "unattributed" has no source_tool value
-    // the filter can match, so neither ever gets one.
-    if (selectedLane && !NOT_FILTERABLE.has(selectedLane)) {
+    // state comment on selectedLane. NOT_TOOL_SPECIFIC is the one exception:
+    // its kinds (skills, projects, ...) have no provider column at all, and
+    // day_detail drops them entirely the moment ANY provider filter is
+    // present — so that lane's click must carry none. "unattributed" DOES
+    // have a provider column (it means source_tool IS NULL), and
+    // queries/timeline.py's provider filter now understands it as a real
+    // filter value, so it's sent through like any other lane.
+    if (selectedLane && selectedLane !== NOT_TOOL_SPECIFIC) {
       p.append("provider", selectedLane);
     }
     return p;
@@ -244,7 +243,7 @@ export function TimelinePage() {
       {selectedDay && (
         <TimelineDetail
           day={selectedDay}
-          providers={selectedLane && !NOT_FILTERABLE.has(selectedLane) ? [selectedLane] : []}
+          providers={selectedLane && selectedLane !== NOT_TOOL_SPECIFIC ? [selectedLane] : []}
           total={selectedTotal}
           data={dayData}
           isLoading={dayLoading}

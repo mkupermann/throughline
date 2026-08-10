@@ -21,6 +21,14 @@ from ._exec import rows
 #: `message`, which the old Calendar did not break out on its own.
 NOT_TOOL_SPECIFIC = "not_tool_specific"
 
+#: The lane label `aggregate()`/`day_detail()` emit for rows whose provider
+#: column is NULL (`COALESCE(source_tool, 'unattributed')` below). Not a
+#: value `source_tool` can ever hold — real unattributed rows are NULL, never
+#: the literal string. Requesting this as a provider filter therefore has to
+#: mean "also match NULL", not "match the literal string" (which `= ANY(...)`
+#: alone can never do — NULL never equals anything). See _split_providers.
+UNATTRIBUTED = "unattributed"
+
 BUCKETS = ("day", "week", "month")
 
 #: Every kind the Timeline can show, with the table and timestamp it reads and
@@ -53,6 +61,41 @@ _SOURCES: dict[str, tuple[str, str, str | None]] = {
 }
 
 
+def _split_providers(providers: list[str]) -> tuple[list[str], bool]:
+    """Split a requested provider list into (named providers, include_null).
+
+    `"unattributed"` is the sentinel the client sends for "rows with no
+    recorded tool" (see UNATTRIBUTED) — it never appears in `source_tool`
+    itself, so it is pulled out of the list that becomes `= ANY(...)` and
+    turned into an explicit `IS NULL` instead.
+    """
+    named = [p for p in providers if p != UNATTRIBUTED]
+    return named, len(named) != len(providers)
+
+
+def _provider_filter(
+    provider_col: str, providers: list[str], named: list[str], include_null: bool
+) -> str:
+    """The `AND ...` fragment for one kind's provider column.
+
+    Three shapes, depending on what was requested:
+    - nothing requested -> no filter.
+    - only "unattributed" -> `IS NULL` alone (an empty `= ANY(%(providers)s)`
+      with no bound param would be a SQL error, not "match nothing").
+    - anything else -> `= ANY(...)`, OR'd with `IS NULL` when "unattributed"
+      was requested alongside named providers, so a mixed request like
+      ["hermes", "unattributed"] returns the union rather than silently
+      picking one.
+    """
+    if not providers:
+        return ""
+    if include_null and not named:
+        return f" AND {provider_col} IS NULL"
+    if include_null:
+        return f" AND ({provider_col} = ANY(%(providers)s) OR {provider_col} IS NULL)"
+    return f" AND {provider_col} = ANY(%(providers)s)"
+
+
 def pick_bucket(since: date, until: date) -> str:
     """<=90 days by day, <=2 years by week, beyond by month.
 
@@ -81,8 +124,9 @@ def aggregate(
         return []
 
     params: dict = {"since": since, "until": until, "bucket": bucket}
-    if providers:
-        params["providers"] = list(providers)
+    named_providers, include_null = _split_providers(providers)
+    if named_providers:
+        params["providers"] = named_providers
 
     parts: list[str] = []
     for kind in wanted:
@@ -94,8 +138,8 @@ def aggregate(
             provider_expr = f"'{NOT_TOOL_SPECIFIC}'"
             provider_filter = ""
         else:
-            provider_expr = f"COALESCE({provider_col}, 'unattributed')"
-            provider_filter = f" AND {provider_col} = ANY(%(providers)s)" if providers else ""
+            provider_expr = f"COALESCE({provider_col}, '{UNATTRIBUTED}')"
+            provider_filter = _provider_filter(provider_col, providers, named_providers, include_null)
 
         parts.append(
             f"""
@@ -134,8 +178,9 @@ def day_detail(
         return []
 
     params: dict = {"day": day, "limit": limit, "offset": offset}
-    if providers:
-        params["providers"] = list(providers)
+    named_providers, include_null = _split_providers(providers)
+    if named_providers:
+        params["providers"] = named_providers
 
     parts: list[str] = []
     for kind in wanted:
@@ -147,8 +192,8 @@ def day_detail(
             provider_expr = f"'{NOT_TOOL_SPECIFIC}'"
             provider_filter = ""
         else:
-            provider_expr = f"COALESCE({provider_col}, 'unattributed')"
-            provider_filter = f" AND {provider_col} = ANY(%(providers)s)" if providers else ""
+            provider_expr = f"COALESCE({provider_col}, '{UNATTRIBUTED}')"
+            provider_filter = _provider_filter(provider_col, providers, named_providers, include_null)
 
         parts.append(
             f"""
