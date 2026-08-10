@@ -114,6 +114,9 @@ class FindFilters:
     since: Any = None
     until: Any = None
     has_embedding: bool | None = None
+    #: Provider names (``conversations.source_tool``). App-scope, unlike the
+    #: other facets — see design spec §4.2.
+    providers: list[str] = field(default_factory=list)
 
     def wants(self, kind: str) -> bool:
         return not self.kinds or kind in self.kinds
@@ -170,6 +173,7 @@ def _lex_memory(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
 
 def _lex_message(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
     clauses, params = _date_filters(f, "m.created_at")
+    clauses += _provider_clause("c", f, params)
     proj = ""
     if f.projects:
         proj = "AND c.project_name = ANY(%(projects)s)"
@@ -205,6 +209,7 @@ def _lex_message(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
 
 def _lex_conversation(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
     clauses, params = _date_filters(f, "c.started_at")
+    clauses += _provider_clause("c", f, params)
     proj = ""
     if f.projects:
         proj = "AND c.project_name = ANY(%(projects)s)"
@@ -243,6 +248,8 @@ def _lex_conversation(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
 
 
 def _lex_skill(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -281,6 +288,8 @@ def _lex_project(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
     memory was right there. `id` is the registry id where one exists, and
     NULL otherwise — the UI routes on name.
     """
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -322,6 +331,8 @@ def _lex_project(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
 
 
 def _lex_prompt(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -374,6 +385,7 @@ def _browse_memory(conn, f: FindFilters, limit: int) -> list[Row]:
 
 def _browse_message(conn, f: FindFilters, limit: int) -> list[Row]:
     clauses, params = _date_filters(f, "m.created_at")
+    clauses += _provider_clause("c", f, params)
     proj = ""
     if f.projects:
         proj = "AND c.project_name = ANY(%(projects)s)"
@@ -397,6 +409,7 @@ def _browse_message(conn, f: FindFilters, limit: int) -> list[Row]:
 
 def _browse_conversation(conn, f: FindFilters, limit: int) -> list[Row]:
     clauses, params = _date_filters(f, "c.started_at")
+    clauses += _provider_clause("c", f, params)
     proj = ""
     if f.projects:
         proj = "AND c.project_name = ANY(%(projects)s)"
@@ -419,6 +432,8 @@ def _browse_conversation(conn, f: FindFilters, limit: int) -> list[Row]:
 
 
 def _browse_skill(conn, f: FindFilters, limit: int) -> list[Row]:
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -436,6 +451,8 @@ def _browse_skill(conn, f: FindFilters, limit: int) -> list[Row]:
 
 
 def _browse_project(conn, f: FindFilters, limit: int) -> list[Row]:
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -464,6 +481,8 @@ def _browse_project(conn, f: FindFilters, limit: int) -> list[Row]:
 
 
 def _browse_prompt(conn, f: FindFilters, limit: int) -> list[Row]:
+    if f.providers:
+        return []
     return rows(
         conn,
         """
@@ -500,6 +519,25 @@ _LEXICAL = {
 
 
 # ── Filter fragment builders ────────────────────────────────────────────────
+
+def _provider_clause(alias: str, filters: FindFilters, params: dict) -> str:
+    """SQL fragment restricting *alias* (a conversations alias) by provider."""
+    if not filters.providers:
+        return ""
+    params["providers"] = list(filters.providers)
+    return f" AND {alias}.source_tool = ANY(%(providers)s)"
+
+
+def _provider_clause_via_conversation(source_col: str, filters: FindFilters, params: dict) -> str:
+    """For tables that reach conversations by id, e.g. memory_chunks.source_id."""
+    if not filters.providers:
+        return ""
+    params["providers"] = list(filters.providers)
+    return (
+        f" AND EXISTS (SELECT 1 FROM conversations pc "
+        f"WHERE pc.id = {source_col} AND pc.source_tool = ANY(%(providers)s))"
+    )
+
 
 def _date_filters(f: FindFilters, column: str) -> tuple[str, dict[str, Any]]:
     clauses, params = "", {}
@@ -544,6 +582,7 @@ def _common_memory_filters(f: FindFilters) -> tuple[str, dict[str, Any]]:
             f" AND {op} (SELECT 1 FROM embeddings e "
             "WHERE e.source_type = 'memory_chunk' AND e.source_id = mc.id)"
         )
+    clauses += _provider_clause_via_conversation("mc.source_id", f, params)
     return clauses, params
 
 
@@ -574,6 +613,7 @@ def _semantic(
 
     mem_clauses, mem_params = _common_memory_filters(f)
     msg_clauses, msg_params = _date_filters(f, "m.created_at")
+    msg_clauses += _provider_clause("c", f, msg_params)
     msg_proj = ""
     if f.projects:
         msg_proj = "AND c.project_name = ANY(%(msg_projects)s)"
