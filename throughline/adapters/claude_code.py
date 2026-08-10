@@ -77,7 +77,7 @@ class ClaudeCodeAdapter(Adapter):
         """Every transcript, at any depth.
 
         Was ``proj.glob("*.jsonl")`` — non-recursive, which could not reach
-        124 of the 250 files present. The deeper ones are subagent
+        133 of the 260 files present. The deeper ones are subagent
         transcripts; nobody decided to exclude them, the glob simply did not
         reach them.
         """

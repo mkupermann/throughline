@@ -100,9 +100,37 @@ class TestHermesJSONAdapter:
         )
         assert a.is_present() is False
 
-    def test_is_present_when_only_sessions_dir_exists(self, tmp_path, monkeypatch):
+    def test_is_present_when_sessions_dir_exists_but_is_empty(self, tmp_path, monkeypatch):
+        # Spec §4.4: an existing-but-empty data dir must not report present.
         fake_root = tmp_path / ".hermes"
         (fake_root / "sessions").mkdir(parents=True)
+        a = HermesAdapter()
+        monkeypatch.setattr(
+            HermesAdapter, "_hermes_root", property(lambda self: fake_root)
+        )
+        assert a.is_present() is False
+
+    def test_is_present_when_a_session_export_exists(self, tmp_path, monkeypatch):
+        fake_root = tmp_path / ".hermes"
+        sessions = fake_root / "sessions"
+        sessions.mkdir(parents=True)
+        (sessions / "session_1.json").write_text(
+            json.dumps({"session_id": "1", "messages": [{"role": "user", "content": "hi"}]}),
+            encoding="utf-8",
+        )
+        a = HermesAdapter()
+        monkeypatch.setattr(
+            HermesAdapter, "_hermes_root", property(lambda self: fake_root)
+        )
+        assert a.is_present() is True
+
+    def test_is_present_when_only_state_db_exists(self, tmp_path, monkeypatch):
+        # state.db counts as a discovered file even before its rows are
+        # checked — same "discovered, not necessarily parseable" rule
+        # Task 5 established for claude_code.
+        fake_root = tmp_path / ".hermes"
+        fake_root.mkdir(parents=True)
+        (fake_root / "state.db").write_bytes(b"")
         a = HermesAdapter()
         monkeypatch.setattr(
             HermesAdapter, "_hermes_root", property(lambda self: fake_root)

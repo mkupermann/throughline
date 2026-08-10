@@ -255,9 +255,20 @@ class HermesAdapter(Adapter):
         return Path("~/.hermes").expanduser()
 
     def is_present(self) -> bool:
-        # Present if either source exists — state.db OR a sessions dir.
-        root = self._hermes_root
-        return (root / "state.db").exists() or (root / "sessions").exists()
+        """At least one candidate file — ``state.db`` or a session export — exists.
+
+        Was "the db file exists OR the sessions directory exists" — an
+        empty ``~/.hermes/sessions/`` (dir created, nothing exported yet)
+        reported present with nothing to ingest. ``discover()`` already
+        enumerates both sources (it appends ``state.db`` itself when
+        present, and globs ``session_*.json`` under ``sessions/``), so
+        deriving from it covers both without duplicating the enumeration,
+        matching the "at least one file discovered" contract from Task 5.
+        A present-but-empty ``state.db`` still counts, same as Task 5's
+        rule for claude_code: "discovered" means the writer has a candidate
+        file, not that it necessarily parses into a conversation.
+        """
+        return any(True for _ in self.discover())
 
     def discover(self) -> Iterable[Path]:
         out: list[Path] = []

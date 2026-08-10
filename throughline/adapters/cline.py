@@ -263,7 +263,18 @@ class ClineAdapter(Adapter):
     home = Path("~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks").expanduser()
 
     def is_present(self) -> bool:
-        return any(p.exists() for p in _candidate_task_roots())
+        """At least one task directory was found, across all candidate roots.
+
+        Was "any candidate root directory exists" — a Cline install with an
+        empty ``tasks/`` dir (e.g. the extension installed but never used)
+        reported present with nothing to ingest. Cline's data can live under
+        several historical roots (see ``_candidate_task_roots``), so this
+        can't just fall back to the base class's ``home``-based default —
+        that only checks one of them. Deriving from ``discover()`` (which
+        already walks every root) keeps the multi-root awareness while
+        matching the "at least one file discovered" contract from Task 5.
+        """
+        return any(True for _ in self.discover())
 
     def discover(self) -> Iterable[Path]:
         seen: set[Path] = set()

@@ -142,3 +142,34 @@ class TestClineAdapter:
         a = ClineAdapter()
         names = sorted(p.name for p in a.discover())
         assert names == ["task1", "task2"]
+
+    def test_is_present_false_when_roots_exist_but_have_no_task_dirs(self, tmp_path, monkeypatch):
+        # Spec §4.4, same rule as claude_code: an existing-but-empty data
+        # dir must not report present. Both candidate roots exist here —
+        # only their emptiness should make this False.
+        root_a = tmp_path / "roota"
+        root_b = tmp_path / "rootb"
+        root_a.mkdir(); root_b.mkdir()
+        monkeypatch.setattr(
+            "throughline.adapters.cline._candidate_task_roots",
+            lambda: [root_a, root_b],
+        )
+        assert ClineAdapter().is_present() is False
+
+    def test_is_present_true_when_a_task_dir_exists_in_any_root(self, tmp_path, monkeypatch):
+        root_a = tmp_path / "roota"
+        root_b = tmp_path / "rootb"
+        root_a.mkdir(); root_b.mkdir()
+        (root_b / "task1").mkdir()
+        monkeypatch.setattr(
+            "throughline.adapters.cline._candidate_task_roots",
+            lambda: [root_a, root_b],
+        )
+        assert ClineAdapter().is_present() is True
+
+    def test_is_present_false_when_no_root_exists(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "throughline.adapters.cline._candidate_task_roots",
+            lambda: [tmp_path / "missing_a", tmp_path / "missing_b"],
+        )
+        assert ClineAdapter().is_present() is False
