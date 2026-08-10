@@ -349,6 +349,16 @@
   color: var(--text-primary);
   border-color: var(--border-strong);
 }
+/* The "(unattributed)" row: informational only, not a scope toggle — see
+   ProviderBar.tsx. No pointer cursor, no hover state, so it doesn't look
+   clickable. */
+.provider-chip-static {
+  cursor: default;
+}
+.provider-chip-static:hover {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
 
 /* ── Narrow viewports ────────────────────────────────────────────────
  * Desktop-first by design (see the plan): this only keeps the app usable

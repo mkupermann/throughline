@@ -15,6 +15,8 @@ vi.mock("@/lib/api", () => ({
           pending: 126, excluded: 98, ingested: 3016, last_run: null, status: "pending" },
         { name: "hermes", label: "Hermes", chart_slot: 3, on_disk: 33,
           pending: 33, excluded: 0, ingested: 0, last_run: null, status: "not_ingested" },
+        { name: "(unattributed)", label: "(unattributed)", chart_slot: 0, on_disk: 0,
+          pending: 0, excluded: 0, ingested: 8, last_run: null, status: "unknown" },
       ],
     }),
   },
@@ -77,6 +79,23 @@ describe("ProviderBar", () => {
     renderAt("/find?provider=hermes");
     const hermes = await screen.findByRole("button", { name: /Hermes/ });
     expect(hermes.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("shows the unattributed count without offering it as a filter", async () => {
+    // source_tool IS NULL has no value the `= ANY(...)` provider filter can
+    // match, in Find or in Timeline — a clickable chip here would set
+    // ?provider=(unattributed) and silently zero out every result. It must
+    // show its count (the 8 conversations are real) but never be a button.
+    renderAt("/find");
+    const count = formatCount(8);
+    await screen.findByText(count);
+    expect(screen.queryByRole("button", { name: /\(unattributed\)/ })).toBeNull();
+  });
+
+  it("never adds provider=(unattributed) to the URL", async () => {
+    renderAt("/find");
+    await screen.findByText(formatCount(8));
+    expect(screen.getByTestId("loc").textContent).not.toContain("unattributed");
   });
 
   it("renders nothing on Console", async () => {

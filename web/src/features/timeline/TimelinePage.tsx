@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { timelineApi } from "@/lib/api";
+import { providersApi, timelineApi } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { readProviders } from "@/lib/providerScope";
 
@@ -24,10 +24,42 @@ import { TimelineDetail } from "./TimelineDetail";
  */
 const NOT_TOOL_SPECIFIC = "not_tool_specific";
 
-function laneLabel(provider: string): string {
+//: `COALESCE(source_tool, 'unattributed')` in queries/timeline.py's SELECT —
+//: a real lane that can appear in the grid, but not a value the provider
+//: filter (`source_tool = ANY(...)`) can ever match: real rows have
+//: source_tool IS NULL, never the literal string "unattributed". Passing it
+//: through as a detail-request filter would zero out a cell that just
+//: reported a nonzero count — the same "number and list disagree" failure
+//: this file's own day-detail fix exists to prevent. Treated the same as
+//: NOT_TOOL_SPECIFIC: no provider filter applied when this lane is clicked.
+const UNATTRIBUTED = "unattributed";
+
+//: Lanes with no real provider identity behind them — clicking their cell
+//: must not turn into a `source_tool = ANY([...])` filter (see UNATTRIBUTED).
+const NOT_FILTERABLE = new Set([NOT_TOOL_SPECIFIC, UNATTRIBUTED]);
+
+function laneLabel(provider: string, labels: Map<string, string>): string {
   if (provider === NOT_TOOL_SPECIFIC) return "not tool-specific";
   if (provider === "unattributed") return "(unattributed)";
-  return provider;
+  return labels.get(provider) ?? provider;
+}
+
+//: Column-header thinning for the date axis (Fix: the grid had no date axis
+//: at all — dates lived only in tooltips/aria-labels). A day-bucket range can
+//: have up to ~90 columns; a week bucket up to ~104; labelling every one
+//: overlaps illegibly, so only every Nth gets text. The last bucket always
+//: gets one too, so the range's end date is never the one label thinning drops.
+const MAX_AXIS_LABELS = 12;
+
+function axisStride(bucketCount: number): number {
+  return Math.max(1, Math.ceil(bucketCount / MAX_AXIS_LABELS));
+}
+
+function axisLabel(bucketDate: string, bucket: string): string {
+  // Full ISO date is wasted width on a 4px-wide column; a bucket already
+  // implies its own year in the common case (a 90-day day-bucket view, a
+  // multi-year week/month view still gets the year so ticks stay unambiguous).
+  return bucket === "month" ? bucketDate.slice(0, 7) : bucketDate.slice(5);
 }
 
 export function TimelinePage() {
@@ -36,7 +68,23 @@ export function TimelinePage() {
   // The day whose detail is open, or null when no cell is selected. Only a
   // day-bucket cell ever sets this directly — see handleCellClick below.
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // The lane of the cell that opened `selectedDay` — the detail request must
+  // scope to exactly this lane, not the app-wide provider scope, or clicking
+  // one provider's row opens every provider's events for that day.
+  const [selectedLane, setSelectedLane] = useState<string | null>(null);
   const providers = readProviders(sp);
+
+  // Same queryKey as ProviderBar — one shared cache entry, not a second
+  // request for the same data (see OperatePage.tsx for the same pattern).
+  const { data: providersData } = useQuery({
+    queryKey: ["providers"],
+    queryFn: () => providersApi.list(),
+    staleTime: 60_000,
+  });
+  const providerLabels = useMemo(
+    () => new Map((providersData?.providers ?? []).map((p) => [p.name, p.label])),
+    [providersData],
+  );
 
   // Any range change invalidates whatever day was open — it may no longer
   // even be in range, and showing stale detail for the old range is worse
@@ -44,6 +92,7 @@ export function TimelinePage() {
   const handleRangeChange = (r: Range) => {
     setRange(r);
     setSelectedDay(null);
+    setSelectedLane(null);
   };
 
   const qs = useMemo(() => {
@@ -61,9 +110,16 @@ export function TimelinePage() {
 
   const dayQs = useMemo(() => {
     const p = new URLSearchParams();
-    for (const name of providers) p.append("provider", name);
+    // The clicked lane IS the scope for its own detail request — see the
+    // state comment on selectedLane. Kinds with no provider column
+    // (not_tool_specific) vanish from day_detail entirely if a provider
+    // filter is present at all, and "unattributed" has no source_tool value
+    // the filter can match, so neither ever gets one.
+    if (selectedLane && !NOT_FILTERABLE.has(selectedLane)) {
+      p.append("provider", selectedLane);
+    }
     return p;
-  }, [providers.join(",")]);
+  }, [selectedLane]);
 
   const { data: dayData, isLoading: dayLoading } = useQuery({
     queryKey: ["timeline-day", selectedDay, dayQs.toString()],
@@ -80,9 +136,10 @@ export function TimelinePage() {
    * range into that bucket's span instead, and `pick_bucket` re-buckets it
    * finer on the next fetch — clicking a month shows that month by day.
    */
-  const handleCellClick = (bucketDate: string) => {
+  const handleCellClick = (lane: string, bucketDate: string) => {
     if (!data) return;
     if (data.bucket === "day") {
+      setSelectedLane(lane);
       setSelectedDay(bucketDate);
     } else {
       handleRangeChange(bucketSpan(data.bucket, bucketDate));
@@ -112,6 +169,12 @@ export function TimelinePage() {
   }, [data]);
 
   const grandTotal = (data?.cells ?? []).reduce((s, c) => s + c.n, 0);
+  const stride = axisStride(buckets.length);
+  // The cell's own aggregate count — the authority for "showing X of N" in
+  // the detail panel below, instead of trusting day_detail's (capped) row
+  // count. Looked up by the exact (lane, bucket) pair the open panel is for.
+  const selectedTotal =
+    selectedLane && selectedDay ? totals.get(`${selectedLane}|${selectedDay}`) : undefined;
 
   return (
     <section className="timeline-page">
@@ -133,10 +196,23 @@ export function TimelinePage() {
 
       {lanes.length > 0 && (
         <div className="timeline-grid" role="table" aria-label="Activity by provider over time">
+          <div className="timeline-lane timeline-axis" role="row" aria-hidden="true">
+            <span className="timeline-lane-label" />
+            <div className="timeline-cells">
+              {buckets.map((b, i) => {
+                const show = i % stride === 0 || i === buckets.length - 1;
+                return (
+                  <span key={b} className="timeline-axis-label">
+                    {show ? axisLabel(b, data?.bucket ?? "day") : ""}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
           {lanes.map((lane) => (
             <div className="timeline-lane" role="row" key={lane}>
               <span className="timeline-lane-label" role="rowheader">
-                {laneLabel(lane)}
+                {laneLabel(lane, providerLabels)}
               </span>
               <div className="timeline-cells">
                 {buckets.map((b) => {
@@ -152,9 +228,9 @@ export function TimelinePage() {
                         type="button"
                         className="timeline-cell"
                         style={{ opacity: n === 0 ? 0.08 : 0.25 + 0.75 * (n / max) }}
-                        title={`${laneLabel(lane)} · ${b} · ${n}`}
-                        aria-label={`${laneLabel(lane)}, ${b}, ${n} events`}
-                        onClick={() => handleCellClick(b)}
+                        title={`${laneLabel(lane, providerLabels)} · ${b} · ${n}`}
+                        aria-label={`${laneLabel(lane, providerLabels)}, ${b}, ${n} events`}
+                        onClick={() => handleCellClick(lane, b)}
                       />
                     </span>
                   );
@@ -168,10 +244,14 @@ export function TimelinePage() {
       {selectedDay && (
         <TimelineDetail
           day={selectedDay}
-          providers={providers}
+          providers={selectedLane && !NOT_FILTERABLE.has(selectedLane) ? [selectedLane] : []}
+          total={selectedTotal}
           data={dayData}
           isLoading={dayLoading}
-          onClose={() => setSelectedDay(null)}
+          onClose={() => {
+            setSelectedDay(null);
+            setSelectedLane(null);
+          }}
         />
       )}
     </section>

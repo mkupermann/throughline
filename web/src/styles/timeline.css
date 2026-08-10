@@ -115,6 +115,27 @@
   outline-offset: 1px;
 }
 
+/* ── Date axis ────────────────────────────────────────────────────────
+   Fix: the grid had lane labels and cells but no date axis at all — dates
+   lived only in tooltips/aria-labels, so quiet periods (no cells rendered
+   for a date with zero activity across every lane never happens here, since
+   `buckets` already unions every date PRESENT — but reading "where am I in
+   the range" required hovering). One placeholder per bucket column keeps
+   this row's cells flex-aligned with every lane's `.timeline-cells` below;
+   most are empty text nodes (see TimelinePage's axisStride thinning). */
+.timeline-axis {
+  margin-bottom: 2px;
+}
+.timeline-axis-label {
+  flex: 1 0 4px;
+  min-width: 4px;
+  overflow: visible;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 /* ── Detail panel (clicking a day-bucket cell) ──────────────────────────
    §5.1: "Clicking a cell is what loads rows." A week/month cell zooms the
    range instead of opening this — see TimelinePage's handleCellClick. */
@@ -142,6 +163,10 @@
   font-weight: 400;
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+.timeline-detail-truncated {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
 }
 .timeline-detail-list {
   list-style: none;
