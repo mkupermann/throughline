@@ -79,7 +79,7 @@ def find(
             vector_literal = embedding.vec_literal(vec)
             model, column = backend.model, backend.column
 
-    has_filters = any([kind, category, project, status, tag, since, until]) or \
+    has_filters = any([kind, category, project, provider, status, tag, since, until]) or \
         min_confidence is not None or has_embedding is not None
 
     with connection(settings) as conn:

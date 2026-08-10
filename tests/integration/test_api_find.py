@@ -128,6 +128,56 @@ def test_occurred_at_serialises_as_string(client, corpus):
         assert item["occurred_at"] is None or isinstance(item["occurred_at"], str)
 
 
+@pytest.fixture()
+def provider_corpus(db_connection):
+    """Three providers, so a filter has something to narrow away as well as
+    something to keep — and a fourth (cursor) with no rows at all, to prove a
+    provider-with-no-data case returns empty rather than everything."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO conversations
+                (session_id, project_path, source_tool, started_at, message_count, summary)
+            VALUES (gen_random_uuid(), '/p', 'claude_code', now(), 1, 'alpha'),
+                   (gen_random_uuid(), '/p', 'hermes',      now(), 1, 'beta'),
+                   (gen_random_uuid(), '/p', 'hermes',      now(), 1, 'gamma'),
+                   (gen_random_uuid(), '/p', 'windsurf',    now(), 1, 'delta')
+            RETURNING id, source_tool
+            """
+        )
+        by_provider: dict[str, list[int]] = {}
+        for conv_id, tool in cur.fetchall():
+            by_provider.setdefault(tool, []).append(conv_id)
+    db_connection.commit()
+    return by_provider
+
+
+def test_provider_filter_alone_browses(client, provider_corpus):
+    """The primary interaction this whole plan exists for: click a provider
+    chip, type nothing, see that provider's memory. `kind` is deliberately
+    NOT passed here — `kind` alone was already enough to trip the router into
+    browse mode before this fix, which would let this test pass on the buggy
+    code for the wrong reason. Provider must trip it on its own."""
+    body = client.get("/api/find", params={"provider": "hermes"}).json()
+    got = {i["id"] for i in body["items"] if i["kind"] == "conversation"}
+    assert got == set(provider_corpus["hermes"])
+    assert provider_corpus["claude_code"][0] not in got
+
+
+def test_two_providers_union_with_no_query(client, provider_corpus):
+    body = client.get(
+        "/api/find", params=[("provider", "hermes"), ("provider", "windsurf")]
+    ).json()
+    got = {i["id"] for i in body["items"] if i["kind"] == "conversation"}
+    assert got == set(provider_corpus["hermes"]) | set(provider_corpus["windsurf"])
+
+
+def test_provider_with_no_data_returns_empty_without_erroring(client, provider_corpus):
+    r = client.get("/api/find", params={"provider": "cursor"})
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
 def test_facets(client, corpus):
     body = client.get("/api/find/facets").json()
     assert set(body) == {"kinds", "categories", "statuses", "projects", "tags"}
