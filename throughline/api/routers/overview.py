@@ -183,6 +183,30 @@ def _build_overview(conn, settings: Settings) -> Overview:
             )
         )
 
+    # 8,453 messages once sat on disk, fully parseable, one command away —
+    # and nothing in the product ever said so. A provider with files on disk
+    # and zero rows imported gets its own attention item, one per provider,
+    # pointing at Operate rather than silently waiting to be noticed.
+    from throughline.queries import providers as PQ
+
+    for row in PQ.coverage(conn):
+        if row["status"] != "not_ingested":
+            continue
+        attention.append(
+            AttentionItem(
+                id=f"provider-not-ingested-{row['name']}",
+                severity="warning",
+                title=f"{row['label']}: {row['pending']} file(s) on disk, 0 ingested",
+                detail=(
+                    f"{row['label']} data is present and parseable but has never been "
+                    f"imported. Run the {row['label']} ingest to bring it in."
+                ),
+                count=row["pending"],
+                action="/operate",
+                action_label=f"Ingest {row['label']}",
+            )
+        )
+
     if attention:
         n = len(attention)
         plural = "item needs" if n == 1 else "items need"

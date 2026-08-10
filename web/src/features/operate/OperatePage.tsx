@@ -2,9 +2,112 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
 
-import { operateApi, type JobSummary } from "@/lib/api";
+import { operateApi, providersApi, type JobSummary, type ProviderCoverage } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
+
+/** Text label per status — colour alone never carries the meaning. */
+const STATUS_LABEL: Record<ProviderCoverage["status"], string> = {
+  ok: "OK",
+  pending: "Pending",
+  not_ingested: "Not ingested",
+  no_data: "No data",
+  unknown: "Unknown",
+};
+
+function fmtLastRun(v: string | null): string {
+  return v ? v.slice(0, 16).replace("T", " ") : "—";
+}
+
+/**
+ * Coverage per source: what's on disk against what's imported (spec §4.3).
+ *
+ * 8,453 messages once sat on disk, fully parseable, one command away, and
+ * nothing in the product said so. This table is the fix for Operate; the
+ * Overview attention item is the fix for the headline surface.
+ *
+ * The Ingest button only appears where a matching `ingest_<name>` job is
+ * registered — the "(unattributed)" pseudo-row coverage() adds has no such
+ * job, and offering a control guaranteed to 404 is the same mistake
+ * `check_requirement`'s docstring warns against for the regular job list.
+ */
+function ProvidersTable({
+  providers,
+  jobs,
+  onIngest,
+}: {
+  providers: ProviderCoverage[];
+  jobs: JobSummary[];
+  onIngest: (name: string) => void;
+}) {
+  const jobByName = new Map(jobs.map((j) => [j.name, j]));
+  return (
+    <div className="table-wrap scroll-x">
+      <table className="sqltable providers-table">
+        <caption className="sr-only">
+          Coverage per source: files on disk, pending, excluded and imported, with an ingest
+          action for each.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Provider</th>
+            <th scope="col">On disk</th>
+            <th scope="col">Pending</th>
+            <th scope="col" title="Discovered but not ingested (subagent transcripts).">
+              Excluded
+            </th>
+            <th scope="col">Ingested</th>
+            <th scope="col">Last run</th>
+            <th scope="col">Status</th>
+            <th scope="col">
+              <span className="sr-only">Action</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {providers.map((p) => {
+            const job = jobByName.get(`ingest_${p.name}`);
+            return (
+              <tr key={p.name}>
+                <th scope="row">{p.label}</th>
+                <td className="tabular">{formatCount(p.on_disk)}</td>
+                <td className="tabular">{formatCount(p.pending)}</td>
+                <td
+                  className="tabular"
+                  title="Discovered but not ingested (subagent transcripts)."
+                >
+                  {formatCount(p.excluded)}
+                </td>
+                <td className="tabular">{formatCount(p.ingested)}</td>
+                <td className="tabular">{fmtLastRun(p.last_run)}</td>
+                <td>
+                  <span className={`status-pill status-${p.status}`}>
+                    {STATUS_LABEL[p.status] ?? p.status}
+                  </span>
+                </td>
+                <td>
+                  {job ? (
+                    <button
+                      type="button"
+                      className="button is-small"
+                      onClick={() => onIngest(p.name)}
+                      disabled={job.running}
+                    >
+                      <Play size={12} aria-hidden />
+                      {job.running ? "Running…" : "Ingest"}
+                    </button>
+                  ) : (
+                    <span aria-hidden>—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 /**
  * Live job output.
@@ -124,6 +227,14 @@ export function OperatePage() {
     refetchInterval: activeJob ? 4000 : false,
   });
 
+  // Same queryKey as ProviderBar — one shared cache entry, not a second
+  // request for the same data.
+  const { data: providersData } = useQuery({
+    queryKey: ["providers"],
+    queryFn: () => providersApi.list(),
+    staleTime: 60_000,
+  });
+
   const runJob = useMutation({
     mutationFn: (name: string) => operateApi.run(name),
     onSuccess: (res) => setActiveJob({ name: res.name, id: res.job_id }),
@@ -228,6 +339,21 @@ export function OperatePage() {
         </dl>
       </section>
 
+      <section className="stack-top" aria-labelledby="coverage-h">
+        <h2 id="coverage-h" className="section-label">
+          Provider coverage
+        </h2>
+        {providersData ? (
+          <ProvidersTable
+            providers={providersData.providers}
+            jobs={data.jobs}
+            onIngest={(name) => runJob.mutate(`ingest_${name}`)}
+          />
+        ) : (
+          <div className="skeleton skeleton-row" />
+        )}
+      </section>
+
       <section className="stack-top">
         <h2 className="section-label">
           <Terminal size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Jobs
@@ -244,6 +370,10 @@ export function OperatePage() {
                 qc.invalidateQueries({ queryKey: ["operate"] });
                 qc.invalidateQueries({ queryKey: ["curate"] });
                 qc.invalidateQueries({ queryKey: ["overview"] });
+                // The job just cleared the server-side scan cache (jobs.py
+                // _pump), but the client still holds the pre-ingest coverage
+                // response until this query is told to refetch too.
+                qc.invalidateQueries({ queryKey: ["providers"] });
               }}
             />
           ))}

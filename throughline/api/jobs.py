@@ -146,6 +146,28 @@ JOBS: dict[str, JobSpec] = {
 }
 
 
+def _per_provider_jobs() -> dict[str, JobSpec]:
+    """One ingest job per adapter.
+
+    Targeted rather than `--all` because the Overview item that surfaces an
+    un-ingested source should lead to importing exactly that source.
+    """
+    from throughline import providers as P
+
+    return {
+        f"ingest_{p.name}": JobSpec(
+            f"ingest_{p.name}",
+            f"Ingest {p.label}",
+            f"Import new {p.label} sessions.",
+            _cli("ingest", "--source", p.name),
+        )
+        for p in P.PROVIDERS
+    }
+
+
+JOBS.update(_per_provider_jobs())
+
+
 @dataclass
 class Job:
     id: str
@@ -265,6 +287,15 @@ class JobRunner:
         except Exception as exc:
             job.finish(None, error=str(exc))
         finally:
+            # Coverage caches the filesystem side for up to CACHE_TTL_SECONDS
+            # (throughline/queries/providers.py) — without this an ingest that
+            # just succeeded keeps reporting pre-ingest counts, which reads as
+            # "the ingest did nothing". Unconditional: even a failed or
+            # partial ingest may have changed what's on disk or in the log.
+            if job.name.startswith("ingest"):
+                from throughline.queries import providers as PQ
+
+                PQ.invalidate_scan_cache()
             with self._lock:
                 if self._current.get(job.name) == job.id:
                     self._current.pop(job.name, None)
