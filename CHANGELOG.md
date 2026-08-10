@@ -19,21 +19,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Cross-tool conflict detection now groups by `source_tool` rather than
-  `entrypoint`.** `entrypoint` records *how* a tool was invoked, and Claude
-  Code writes both `cli` and `sdk-cli` into it — so `conflicts.py` was
-  comparing Claude Code against itself and reporting the result as a
-  cross-tool disagreement. Measured on the live `claude_memory` database
-  (3,234 conversations): before the fix, `find_conflicts()` returned 295
-  conflicts, all `stale_drift`, effectively all `cli` vs `sdk-cli` pairs.
-  After the fix it returns 0. This is a correction, not a regression — a
-  join over `active` memory_chunks shows zero `project_name` + `category`
-  groups with more than one distinct `source_tool` right now, i.e. today's
-  corpus genuinely has no cross-tool overlap in memory chunks (Claude Code
-  is the only tool with `active` chunks; Windsurf/Hermes/Vibe conversations
-  exist but haven't produced `active` chunks that share a project+category
-  with anything else yet). The signature analysis will start finding real
-  conflicts again once other tools' conversations get reflected into
-  memory_chunks alongside Claude Code's.
+  `entrypoint`, and reaches `conversations` through the correct join.** Two
+  separate bugs in `conflicts.py`, both fixed together:
+
+  1. `entrypoint` records *how* a tool was invoked, and Claude Code writes
+     both `cli` and `sdk-cli` into it, so conflict detection was comparing
+     Claude Code against itself and reporting the result as a cross-tool
+     disagreement.
+  2. Every query reached `conversations` via
+     `JOIN messages ON messages.id = memory_chunks.source_id`, but
+     `memory_chunks.source_id` is a **conversations** id when
+     `source_type='conversation'` (see `scripts/extract_memory.py`) — never
+     a messages id. Because `conversations` and `messages` each have their
+     own independently incrementing id sequence, a chunk's `source_id`
+     regularly collides with an unrelated message's id, and the join
+     silently resolved to *that* message's conversation instead of failing.
+     Live check: 664 chunk `source_id`s matched a conversation directly;
+     the messages-join landed on a different conversation for 643 of them.
+     Fixed by joining `memory_chunks` straight to `conversations` on
+     `source_id`, guarded by `source_type = 'conversation'` — the same
+     pattern already used in `queries/find.py`
+     (`_provider_clause_via_conversation`) and `queries/timeline.py` (the
+     `memory` source).
+
+  Measured on the live `claude_memory` database (3,234 conversations) with
+  both bugs present (original code): `find_conflicts()` returned 295
+  conflicts, all `stale_drift`. Grouping by `source_tool` alone, with the
+  join bug still in place, measured 0 — that number was an artifact of the
+  join sending every chunk's tool lookup through `messages` and landing on
+  the wrong conversation; it undercounted and was never committed as a
+  final result. With both fixes in place, `find_conflicts()` returns
+  **261** (15 `supersession`, 246 `stale_drift`). Note what those 261
+  actually are: every affected `(project, category)` group pairs
+  `claude_code` against `unknown` — memory chunks whose `source_type` isn't
+  `conversation` (manual entries, consolidations, reflection merges), not a
+  second CLI tool. There is still no genuine multi-CLI-tool disagreement in
+  the live corpus today (Claude Code is the only tool with `active`
+  memory_chunks); the signature analysis will start finding real
+  cross-tool conflicts once Windsurf/Hermes/Vibe conversations are
+  reflected into memory_chunks alongside Claude Code's.
 
 ## [0.3.0] — 2026-05-10
 

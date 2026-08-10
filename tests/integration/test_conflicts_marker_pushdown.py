@@ -37,8 +37,8 @@ LEGACY_SQL = """
                COALESCE(c.entrypoint, 'unknown') AS tool,
                e.embedding_768 AS vec
         FROM public.memory_chunks mc
-        JOIN public.messages m ON m.id = mc.source_id
-        JOIN public.conversations c ON c.id = m.conversation_id
+        LEFT JOIN public.conversations c
+            ON c.id = mc.source_id AND mc.source_type = 'conversation'
         JOIN public.embeddings e ON e.source_type = 'memory_chunk' AND e.source_id = mc.id
         WHERE mc.status = 'active' AND e.embedding_768 IS NOT NULL
           AND mc.category IN ('decision', 'pattern', 'insight')
@@ -58,8 +58,8 @@ NEW_SQL = """
                COALESCE(c.entrypoint, 'unknown') AS tool,
                e.embedding_768 AS vec
         FROM public.memory_chunks mc
-        JOIN public.messages m ON m.id = mc.source_id
-        JOIN public.conversations c ON c.id = m.conversation_id
+        LEFT JOIN public.conversations c
+            ON c.id = mc.source_id AND mc.source_type = 'conversation'
         JOIN public.embeddings e ON e.source_type = 'memory_chunk' AND e.source_id = mc.id
         WHERE mc.status = 'active' AND e.embedding_768 IS NOT NULL
           AND mc.category IN ('decision', 'pattern', 'insight')
@@ -120,25 +120,22 @@ def seeded(db_connection):
             )
             conv_id = cur.fetchone()[0]
             for j, body in enumerate(BODIES):
-                cur.execute(
-                    """
-                    INSERT INTO messages (conversation_id, role, content, created_at)
-                    VALUES (%s, 'assistant', %s, now() - make_interval(mins => %s))
-                    RETURNING id
-                    """,
-                    (conv_id, body, j),
-                )
-                msg_id = cur.fetchone()[0]
+                # source_type='conversation', source_id=conv_id mirrors real
+                # extraction (scripts/extract_memory.py inserts memory_chunks
+                # this way — source_id is a conversations.id, never a
+                # messages.id). A conversation produces several chunks, so
+                # several chunks legitimately share one source_id here, same
+                # as in production.
                 cur.execute(
                     """
                     INSERT INTO memory_chunks
                         (source_type, source_id, content, category, project_name, status, created_at)
-                    VALUES ('message', %s, %s, %s, %s, 'active',
+                    VALUES ('conversation', %s, %s, %s, %s, 'active',
                             now() - make_interval(days => %s))
                     RETURNING id
                     """,
                     (
-                        msg_id,
+                        conv_id,
                         body,
                         ["decision", "pattern", "insight"][j % 3],
                         f"proj-{i % 2}",

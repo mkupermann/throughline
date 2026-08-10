@@ -205,7 +205,17 @@ def _connect():
 
 
 # The shared SELECT used to materialise a chunk side of a conflict. It joins
-# memory_chunks → messages → conversations to recover the originating tool.
+# memory_chunks straight to conversations to recover the originating tool:
+# memory_chunks.source_id IS conversations.id when source_type='conversation'
+# (see scripts/extract_memory.py, which inserts source_type='conversation',
+# source_id=conv_id). There is no messages table in this path — source_id is
+# a conversation id, not a message id. The join must be LEFT + guarded by
+# source_type='conversation', mirroring queries/find.py's
+# _provider_clause_via_conversation and queries/timeline.py's "memory"
+# source: an unguarded join risks a silent wrong-tool match whenever a
+# memory_chunk's source_id happens to also be a valid id in some other
+# table (it does not need to fail — a stray match is worse, because it
+# looks like a normal row and attributes the chunk to the wrong tool).
 # We use COALESCE(LEFT(content, 500), '') to keep payloads small for the
 # CLI / JSON output; the full content is one query away if a consumer
 # wants it.
@@ -238,13 +248,13 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
             ab.created_at  AS b_created_at,
             ab.status      AS b_status
         FROM public.memory_chunks a
-        JOIN public.messages       am ON am.id = a.source_id
-        JOIN public.conversations  ca ON ca.id = am.conversation_id
+        LEFT JOIN public.conversations ca
+            ON ca.id = a.source_id AND a.source_type = 'conversation'
         JOIN LATERAL (
             SELECT {_CHUNK_FIELDS.replace('mc.', 'b.').replace('c.', 'cb.')}
             FROM public.memory_chunks b
-            JOIN public.messages       bm ON bm.id = b.source_id
-            JOIN public.conversations  cb ON cb.id = bm.conversation_id
+            LEFT JOIN public.conversations cb
+                ON cb.id = b.source_id AND b.source_type = 'conversation'
             WHERE b.id = a.superseded_by
         ) ab ON true
         WHERE a.superseded_by IS NOT NULL
@@ -315,8 +325,8 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
                     COALESCE(c.source_tool, 'unknown') AS tool,
                     e.{vec_col} AS vec
                 FROM public.memory_chunks mc
-                JOIN public.messages       m  ON m.id = mc.source_id
-                JOIN public.conversations  c  ON c.id = m.conversation_id
+                LEFT JOIN public.conversations c
+                    ON c.id = mc.source_id AND mc.source_type = 'conversation'
                 JOIN public.embeddings     e  ON e.source_type = 'memory_chunk'
                                               AND e.source_id   = mc.id
                 WHERE mc.status = 'active'
@@ -404,8 +414,8 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
                 mc.access_count,
                 COALESCE(c.source_tool, 'unknown') AS tool
             FROM public.memory_chunks mc
-            JOIN public.messages       m  ON m.id = mc.source_id
-            JOIN public.conversations  c  ON c.id = m.conversation_id
+            LEFT JOIN public.conversations c
+                ON c.id = mc.source_id AND mc.source_type = 'conversation'
             WHERE mc.status = 'active'
               {"AND mc.project_name = %(project)s" if project else ""}
         )
