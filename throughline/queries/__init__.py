@@ -24,6 +24,7 @@ from . import (
     search,
     semantic,
     skills,
+    timeline,
 )
 from ._exec import Row, execute, execute_batch, one, rows, scalar
 
@@ -45,4 +46,5 @@ __all__ = [
     "search",
     "semantic",
     "skills",
+    "timeline",
 ]

@@ -1,0 +1,174 @@
+"""Timeline: a bucketed aggregate over a date range.
+
+The previous Timeline rendered `data.items` — the current page of search
+results, 30 by default. Sources were verified reachable; range never was.
+This returns counts per (bucket, provider, kind), so the row count depends on
+the range and the provider count, never on the corpus size: 90 days x 9
+providers is ~810 rows whether the database holds 3,000 conversations or
+3,000,000. Detail arrives only when a cell is clicked.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+from ._exec import rows
+
+#: Skills, projects and prompts are not per-tool. They get their own lane
+#: rather than being forced into a provider or dropped, so every kind stays
+#: reachable even though it has no `source_tool` to key on.
+NOT_TOOL_SPECIFIC = "not_tool_specific"
+
+BUCKETS = ("day", "week", "month")
+
+#: Every kind the Timeline can show, with the table and timestamp it reads and
+#: how it reaches a provider (None = the not-tool-specific lane).
+_SOURCES: dict[str, tuple[str, str, str | None]] = {
+    "conversation": ("conversations c", "c.started_at", "c.source_tool"),
+    "message": (
+        "messages m JOIN conversations c ON c.id = m.conversation_id",
+        "m.created_at",
+        "c.source_tool",
+    ),
+    "memory": (
+        "memory_chunks mc LEFT JOIN conversations c "
+        "ON mc.source_type = 'conversation' AND mc.source_id = c.id",
+        "mc.created_at",
+        "c.source_tool",
+    ),
+    # Column names verified against throughline/queries/activity.py, which
+    # already reads all six tables. `skills` has no single event timestamp —
+    # activity.py coalesces the same three columns, and so must this.
+    "skill": ("skills s", "COALESCE(s.file_modified, s.last_used, s.created_at)", None),
+    "project": ("projects p", "p.created_at", None),
+    "prompt": ("prompts pr", "pr.created_at", None),
+}
+
+
+def pick_bucket(since: date, until: date) -> str:
+    """<=90 days by day, <=2 years by week, beyond by month.
+
+    Keeps "all time" cheap without the caller having to think about it.
+    """
+    span = (until - since).days
+    if span <= 90:
+        return "day"
+    if span <= 730:
+        return "week"
+    return "month"
+
+
+def aggregate(
+    conn,
+    since: date,
+    until: date,
+    bucket: str,
+    kinds: list[str],
+    providers: list[str],
+) -> list[dict]:
+    if bucket not in BUCKETS:
+        raise ValueError(f"bucket must be one of {BUCKETS}, got {bucket!r}")
+    wanted = [k for k in (kinds or list(_SOURCES)) if k in _SOURCES]
+    if not wanted:
+        return []
+
+    params: dict = {"since": since, "until": until, "bucket": bucket}
+    if providers:
+        params["providers"] = list(providers)
+
+    parts: list[str] = []
+    for kind in wanted:
+        frm, ts, provider_col = _SOURCES[kind]
+        if provider_col is None:
+            if providers:
+                # A provider scope is active and this kind has no provider.
+                continue
+            provider_expr = f"'{NOT_TOOL_SPECIFIC}'"
+            provider_filter = ""
+        else:
+            provider_expr = f"COALESCE({provider_col}, 'unattributed')"
+            provider_filter = f" AND {provider_col} = ANY(%(providers)s)" if providers else ""
+
+        parts.append(
+            f"""
+            SELECT date_trunc(%(bucket)s, {ts})::date AS bucket,
+                   {provider_expr} AS provider,
+                   '{kind}' AS kind,
+                   count(*) AS n
+            FROM {frm}
+            WHERE {ts} >= %(since)s
+              AND {ts} < (%(until)s::date + interval '1 day')
+              {provider_filter}
+            GROUP BY 1, 2
+            """
+        )
+
+    if not parts:
+        return []
+    sql = " UNION ALL ".join(parts) + " ORDER BY bucket, provider, kind"
+    return rows(conn, sql, params)
+
+
+def day_detail(
+    conn,
+    day: date,
+    kinds: list[str],
+    providers: list[str],
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """One day's events. Clicking a cell is what loads rows."""
+    wanted = [k for k in (kinds or ["conversation"]) if k in _SOURCES]
+    if not wanted:
+        return []
+
+    params: dict = {"day": day, "limit": limit, "offset": offset}
+    if providers:
+        params["providers"] = list(providers)
+
+    parts: list[str] = []
+    for kind in wanted:
+        frm, ts, provider_col = _SOURCES[kind]
+        id_expr, title_expr = _detail_columns(kind)
+        if provider_col is None:
+            if providers:
+                continue
+            provider_expr = f"'{NOT_TOOL_SPECIFIC}'"
+            provider_filter = ""
+        else:
+            provider_expr = f"COALESCE({provider_col}, 'unattributed')"
+            provider_filter = f" AND {provider_col} = ANY(%(providers)s)" if providers else ""
+
+        parts.append(
+            f"""
+            SELECT {id_expr} AS id,
+                   '{kind}' AS kind,
+                   {provider_expr} AS provider,
+                   {ts} AS ts,
+                   {title_expr} AS title
+            FROM {frm}
+            WHERE {ts} >= %(day)s
+              AND {ts} < (%(day)s::date + interval '1 day')
+              {provider_filter}
+            """
+        )
+
+    if not parts:
+        return []
+    sql = (
+        " UNION ALL ".join(parts)
+        + " ORDER BY ts DESC, kind, id DESC LIMIT %(limit)s OFFSET %(offset)s"
+    )
+    return rows(conn, sql, params)
+
+
+def _detail_columns(kind: str) -> tuple[str, str]:
+    """(id expression, title expression) per kind for the day view."""
+    return {
+        "conversation": ("c.id", "COALESCE(c.summary, c.project_name, '(conversation)')"),
+        "message": ("m.id", "left(m.content, 200)"),
+        "memory": ("mc.id", "left(mc.content, 200)"),
+        "skill": ("s.id", "s.name"),
+        "project": ("p.id", "p.name"),
+        "prompt": ("pr.id", "COALESCE(pr.name, '(prompt)')"),
+    }[kind]
