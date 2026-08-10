@@ -725,21 +725,31 @@ def _write_session(path: Path, session_id: str) -> None:
 
 @pytest.fixture()
 def projects(tmp_path, monkeypatch):
-    """A parent session at depth 2 and three subagents beneath it."""
+    """A parent session, three direct subagents, and two nested under a workflow.
+
+    The nested shape is real: on the author's machine 26 files live at
+    ``<session>/subagents/workflows/wf_<id>/agent-*.jsonl``, where the
+    immediate parent directory is the workflow, not ``subagents``.
+    """
     home = tmp_path / "projects"
     sid = str(uuid.uuid4())
     _write_session(home / "-Users-x" / f"{sid}.jsonl", sid)
     for i in range(3):
         _write_session(home / "-Users-x" / sid / "subagents" / f"agent-{i}.jsonl", sid)
+    for i in range(2):
+        _write_session(
+            home / "-Users-x" / sid / "subagents" / "workflows" / "wf_abc" / f"agent-{i}.jsonl",
+            sid,
+        )
     adapter = ClaudeCodeAdapter()
     monkeypatch.setattr(type(adapter), "home", home)
     return adapter, sid
 
 
 def test_discover_all_reaches_the_deeper_files(projects):
-    """The old `proj.glob('*.jsonl')` could not see 124 of 250 files."""
+    """The old `proj.glob('*.jsonl')` could not see 132 of 259 files."""
     adapter, _ = projects
-    assert len(list(adapter.discover_all())) == 4
+    assert len(list(adapter.discover_all())) == 6
 
 
 def test_discover_excludes_subagents(projects):
@@ -756,6 +766,22 @@ def test_excluded_reason_explains_itself(projects):
     parent = adapter.home / "-Users-x" / f"{sid}.jsonl"
     assert adapter.excluded_reason(sub) == "subagent transcript"
     assert adapter.excluded_reason(parent) is None
+
+
+def test_nested_workflow_subagents_are_also_excluded(projects):
+    """The regression guard for the narrow rule.
+
+    `path.parent.name == "subagents"` passes every other test in this file and
+    still lets these through — 26 such files exist on the author's machine, 25
+    of which share a sessionId with a top-level file. Excluding by "subagents
+    anywhere in the relative path" is what makes this pass.
+    """
+    adapter, sid = projects
+    nested = (
+        adapter.home / "-Users-x" / sid / "subagents" / "workflows" / "wf_abc" / "agent-0.jsonl"
+    )
+    assert adapter.excluded_reason(nested) == "subagent transcript"
+    assert all("subagents" not in str(p) for p in adapter.discover())
 
 
 def test_is_present_is_false_for_an_empty_directory(tmp_path, monkeypatch):
@@ -860,8 +886,21 @@ In `throughline/adapters/claude_code.py`, replace lines 71-78:
         report success. Ingesting them properly needs its own identity
         (uuid5 of parent + filename) and a `parent_session_id` column; that is
         specified as follow-up work in the design spec §9.3.
+
+        Matches ``subagents`` anywhere in the path below ``home``, NOT just as
+        the immediate parent. On this machine 26 of the 132 deeper files live
+        at ``<session>/subagents/workflows/wf_<id>/agent-*.jsonl`` — their
+        immediate parent is the workflow directory, and a
+        ``path.parent.name == "subagents"`` test lets every one of them
+        through to the writer. 25 of those 26 share a ``sessionId`` with a
+        top-level file, so that narrower test would ship exactly the data loss
+        this exclusion exists to prevent.
         """
-        if path.parent.name == self.SUBAGENT_DIR:
+        try:
+            rel = path.relative_to(self.home)
+        except ValueError:
+            rel = path
+        if self.SUBAGENT_DIR in rel.parts:
             return "subagent transcript"
         return None
 ```
