@@ -17,8 +17,10 @@
 - **Task 5 is atomic.** The recursive glob and the subagent exclusion ship in one commit, never two (spec §9.1). `ingest --all` is safe today *because* the glob is non-recursive; shipping `rglob` alone introduces silent data loss.
 - **Migrations are idempotent.** Each `UPDATE` is guarded by `source_tool IS NULL` so a re-run changes zero rows.
 - **Provider is app-scope; category/tag/confidence are Find-local** (spec §4.2). The provider bar is hidden on Console.
-- Run Python tests with `python3 -m pytest`. Integration tests need a live database and are marked `@pytest.mark.integration`.
+- **Run Python tests with `./.venv/bin/python -m pytest`, never bare `python3`.** Bare `python3` cannot import `fastapi`, so every API integration test *silently skips* and a green run means nothing: 393 passed under `python3` against 529 under `.venv`. A task whose tests skip has not been tested.
+- Integration tests need a live database and are marked `@pytest.mark.integration`.
 - Frontend tests run with `npm test` from `web/`.
+- Baseline at the start of this plan: **529 passed** (`./.venv/bin/python -m pytest tests/ -q`). No task may reduce that number.
 
 ---
 
