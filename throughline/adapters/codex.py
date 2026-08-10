@@ -200,6 +200,7 @@ class CodexAdapter(Adapter):
             project_path=project_path,
             model=model,
             entrypoint="codex",
+            source_tool="codex",
             started_at=started,
             ended_at=ended,
             messages=norm,

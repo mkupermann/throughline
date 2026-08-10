@@ -77,6 +77,11 @@ class NormalisedConversation:
     token_count_out: int | None = None
     summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: WHICH tool produced this conversation — the adapter's own ``name``.
+    #: Distinct from ``entrypoint``, which is HOW that tool was invoked.
+    #: Adapters must set this; leaving it None means "unattributed" and the
+    #: UI will render it as such rather than guessing.
+    source_tool: str | None = None
 
 
 @dataclass

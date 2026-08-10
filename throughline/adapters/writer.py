@@ -58,13 +58,14 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
         INSERT INTO conversations
             (session_id, project_path, model, entrypoint, git_branch,
              started_at, ended_at, message_count,
-             token_count_in, token_count_out, summary, metadata)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             token_count_in, token_count_out, summary, metadata, source_tool)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (session_id) DO UPDATE
         SET ended_at      = EXCLUDED.ended_at,
             message_count = EXCLUDED.message_count,
             model         = COALESCE(EXCLUDED.model, conversations.model),
             metadata      = conversations.metadata || EXCLUDED.metadata,
+            source_tool   = COALESCE(EXCLUDED.source_tool, conversations.source_tool),
             updated_at    = NOW()
         RETURNING id
         """,
@@ -81,6 +82,7 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
             conv.token_count_out,
             conv.summary,
             Json(conv.metadata or {}),
+            conv.source_tool,
         ),
     )
     return cur.fetchone()[0]

@@ -164,4 +164,5 @@ class ClaudeCodeAdapter(Adapter):
             token_count_in=tokens_in or None,
             token_count_out=tokens_out or None,
             metadata={"source": "claude_code"},
+            source_tool="claude_code",
         )

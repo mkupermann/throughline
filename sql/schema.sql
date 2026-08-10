@@ -114,7 +114,8 @@ END) STORED,
     tags text[] DEFAULT '{}'::text[],
     metadata jsonb DEFAULT '{}'::jsonb,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    source_tool text
 );
 
 
@@ -813,6 +814,13 @@ CREATE INDEX idx_conversations_project_name ON public.conversations USING btree 
 --
 
 CREATE INDEX idx_conversations_session_id ON public.conversations USING btree (session_id);
+
+
+--
+-- Name: idx_conversations_source_tool; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_conversations_source_tool ON public.conversations USING btree (source_tool);
 
 
 --
