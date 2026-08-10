@@ -1,13 +1,15 @@
-import { NavLink, Outlet, ScrollRestoration, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { Moon, Sun, Monitor, Command as CommandIcon } from "lucide-react";
 
 import { NAV } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
+import { carryProviders } from "@/lib/providerScope";
 import { CommandPalette } from "./CommandPalette";
+import { ProviderBar } from "./ProviderBar";
 
-/** `g` followed by a nav chord jumps between surfaces. */
-function useGoChords() {
+/** `g` followed by a nav chord jumps between surfaces, carrying provider scope. */
+function useGoChords(sp: URLSearchParams) {
   const navigate = useNavigate();
   const armed = useRef(false);
   const timer = useRef<number | null>(null);
@@ -36,7 +38,7 @@ function useGoChords() {
         const item = NAV.find((n) => n.chord === e.key.toLowerCase());
         if (item) {
           e.preventDefault();
-          navigate(item.to);
+          navigate(carryProviders(item.to, sp));
         }
         disarm();
         return;
@@ -53,7 +55,7 @@ function useGoChords() {
       document.removeEventListener("keydown", onKey);
       disarm();
     };
-  }, [navigate]);
+  }, [navigate, sp]);
 }
 
 function ThemeToggle() {
@@ -77,7 +79,8 @@ function ThemeToggle() {
 }
 
 export function Shell() {
-  useGoChords();
+  const [sp] = useSearchParams();
+  useGoChords(sp);
   const [paletteHintSeen, setPaletteHintSeen] = useState(false);
 
   useEffect(() => {
@@ -107,7 +110,7 @@ export function Shell() {
             {NAV.map((item) => (
               <li key={item.to}>
                 <NavLink
-                  to={item.to}
+                  to={carryProviders(item.to, sp)}
                   end={item.to === "/"}
                   className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
                 >
@@ -134,6 +137,7 @@ export function Shell() {
       </aside>
 
       <main id="main" className="main" tabIndex={-1}>
+        <ProviderBar />
         <Outlet />
       </main>
 

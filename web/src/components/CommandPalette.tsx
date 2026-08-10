@@ -1,10 +1,11 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Moon, Sun, Monitor } from "lucide-react";
 
 import { NAV } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
+import { carryProviders } from "@/lib/providerScope";
 
 /**
  * ⌘K palette. For a single-user, keyboard-driven tool this is the primary
@@ -14,6 +15,7 @@ import { useTheme } from "@/lib/theme";
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const [sp] = useSearchParams();
   const { setTheme, resolved } = useTheme();
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export function CommandPalette() {
             <Command.Item
               key={item.to}
               value={`${item.label} ${item.hint}`}
-              onSelect={() => run(() => navigate(item.to))}
+              onSelect={() => run(() => navigate(carryProviders(item.to, sp)))}
               className="palette-item"
             >
               <item.icon size={15} aria-hidden />

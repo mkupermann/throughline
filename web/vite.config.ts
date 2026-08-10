@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -7,6 +8,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
+  },
+  test: {
+    // Component tests (ProviderBar etc.) need a DOM; plain logic tests
+    // (providerScope.test.ts) run fine under it too.
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
   },
   server: {
     port: 5173,

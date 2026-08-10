@@ -282,6 +282,74 @@
   font-size: var(--text-md);
 }
 
+/* ── Provider bar ─────────────────────────────────────────────────────
+ * The provider scope, always on screen (except Console — see ProviderBar.tsx).
+ * A chip carries a text label and count; colour (the active/dot states) is
+ * never the only differentiator, since only six chart hues cover nine
+ * providers. */
+.provider-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  /* Lives inside .main, which already carries the horizontal page padding —
+     this only adds the gap before the page content below it. */
+  margin-bottom: var(--space-5);
+}
+
+.provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.provider-chip:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.provider-chip.is-active {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.provider-chip-label {
+  white-space: nowrap;
+}
+.provider-chip-count {
+  color: var(--text-muted);
+}
+.provider-chip.is-active .provider-chip-count {
+  color: var(--accent);
+}
+/* Pending-import indicator — paired with an aria-label on the dot itself
+   (see ProviderBar.tsx), so it is never colour-only. */
+.provider-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--status-warning);
+  flex-shrink: 0;
+}
+.provider-chip-clear {
+  border-style: dashed;
+  color: var(--text-muted);
+  background: transparent;
+}
+.provider-chip-clear:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
 /* ── Narrow viewports ────────────────────────────────────────────────
  * Desktop-first by design (see the plan): this only keeps the app usable
  * down to ~1024px, it is not a mobile layout. */
