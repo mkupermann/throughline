@@ -256,9 +256,18 @@ class TestZedAdapter:
         assert conv.metadata["zed_version"] == "1.0.0"
         assert conv.metadata["workspace"] == "/path/to/workspace"
 
-    def test_is_present_when_dir_exists(self, tmp_path, monkeypatch):
+    def test_is_present_when_dir_exists_but_empty(self, tmp_path, monkeypatch):
+        # Spec §4.4: an existing-but-empty data dir must not report present.
         zed_dir = tmp_path / ".zed" / "data" / "sessions"
         zed_dir.mkdir(parents=True)
+        a = ZedAdapter()
+        monkeypatch.setattr(a, "home", zed_dir)
+        assert a.is_present() is False
+
+    def test_is_present_when_a_session_file_exists(self, tmp_path, monkeypatch):
+        zed_dir = tmp_path / ".zed" / "data" / "sessions"
+        zed_dir.mkdir(parents=True)
+        (zed_dir / "session_1.json").write_text("{}\n")
         a = ZedAdapter()
         monkeypatch.setattr(a, "home", zed_dir)
         assert a.is_present() is True

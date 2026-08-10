@@ -173,9 +173,18 @@ class TestCursorAdapter:
         assert conv.metadata["source"] == "cursor"
         assert "cursor_session_hash" in conv.metadata or "file_path" in conv.metadata
 
-    def test_is_present_when_dir_exists(self, tmp_path, monkeypatch):
+    def test_is_present_when_dir_exists_but_empty(self, tmp_path, monkeypatch):
+        # Spec §4.4: an existing-but-empty data dir must not report present.
         cursor_dir = tmp_path / ".cursor" / "sessions"
         cursor_dir.mkdir(parents=True)
+        a = CursorAdapter()
+        monkeypatch.setattr(a, "home", cursor_dir)
+        assert a.is_present() is False
+
+    def test_is_present_when_a_session_file_exists(self, tmp_path, monkeypatch):
+        cursor_dir = tmp_path / ".cursor" / "sessions"
+        cursor_dir.mkdir(parents=True)
+        (cursor_dir / "session_1.jsonl").write_text("{}\n")
         a = CursorAdapter()
         monkeypatch.setattr(a, "home", cursor_dir)
         assert a.is_present() is True

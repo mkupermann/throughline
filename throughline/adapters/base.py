@@ -4,7 +4,9 @@ The contract intentionally stays small. An adapter:
 
 - says whether the tool's data directory exists on this machine
   (``is_present``) — cheap, no parsing;
-- yields the files that look like conversations (``discover``);
+- ``discover`` yields the files that will be ingested; ``discover_all``
+  yields every candidate including excluded ones; ``excluded_reason``
+  explains an exclusion;
 - parses one file into a ``NormalisedConversation`` (``parse``).
 
 Everything else — DB connections, idempotency via ``ingestion_log``,
@@ -116,13 +118,42 @@ class Adapter(ABC):
     label: str
     home: Path
 
-    def is_present(self) -> bool:
-        """Cheap detection — does this tool's data dir exist on this box?"""
-        return self.home.expanduser().exists()
-
     @abstractmethod
     def discover(self) -> Iterable[Path]:
-        """Yield candidate conversation files. May be empty."""
+        """Yield the files ingestion will process. May be empty.
+
+        This must ALREADY exclude anything unsafe to ingest. An adapter that
+        widens its search must widen ``discover_all`` and narrow here — see
+        ``excluded_reason`` and the design spec §9.1.
+        """
+
+    def discover_all(self) -> Iterable[Path]:
+        """Every candidate file, including ones excluded from ingestion.
+
+        The *coverage* view: what exists on disk, for counting and reporting.
+        Defaults to ``discover()``, so an adapter with no exclusions needs no
+        extra code — and a third-party adapter published through the
+        ``throughline.adapters`` entry point keeps working untouched.
+        """
+        return self.discover()
+
+    def excluded_reason(self, path: Path) -> str | None:
+        """Why *path* is discovered but must not be ingested, or None.
+
+        Default: nothing is excluded.
+        """
+        return None
+
+    def is_present(self) -> bool:
+        """Does this tool have any data on this box?
+
+        Was "the directory exists", which reported `cline` as present while
+        it contributed nothing. Now: at least one candidate file was found.
+        """
+        home = self.home.expanduser()
+        if not home.exists():
+            return False
+        return any(True for _ in self.discover_all())
 
     @abstractmethod
     def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":

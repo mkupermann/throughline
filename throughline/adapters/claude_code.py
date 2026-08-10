@@ -68,14 +68,57 @@ class ClaudeCodeAdapter(Adapter):
     label = "Claude Code"
     home = Path("~/.claude/projects").expanduser()
 
-    def discover(self) -> Iterable[Path]:
+    #: Subagent transcripts live at
+    #: ``~/.claude/projects/<proj>/<session>/subagents/agent-*.jsonl`` and
+    #: inherit their parent's ``sessionId``. See ``excluded_reason``.
+    SUBAGENT_DIR = "subagents"
+
+    def discover_all(self) -> Iterable[Path]:
+        """Every transcript, at any depth.
+
+        Was ``proj.glob("*.jsonl")`` — non-recursive, which could not reach
+        124 of the 250 files present. The deeper ones are subagent
+        transcripts; nobody decided to exclude them, the glob simply did not
+        reach them.
+        """
         if not self.home.exists():
             return []
         out: list[Path] = []
         for proj in self.home.iterdir():
             if proj.is_dir():
-                out.extend(proj.glob("*.jsonl"))
+                out.extend(proj.rglob("*.jsonl"))
         return sorted(out)
+
+    def excluded_reason(self, path: Path) -> str | None:
+        """Subagent transcripts are counted, not ingested.
+
+        A subagent's transcript carries its *parent's* ``sessionId``. The
+        writer upserts ``ON CONFLICT (session_id)`` and replaces messages with
+        a DELETE, so ingesting 33 subagent files plus the parent would resolve
+        them all to one row, each deleting the previous one's messages — and
+        report success. Ingesting them properly needs its own identity
+        (uuid5 of parent + filename) and a `parent_session_id` column; that is
+        specified as follow-up work in the design spec §9.3.
+
+        Matches ``subagents`` anywhere in the path below ``home``, NOT just as
+        the immediate parent. On this machine 26 of the 132 deeper files live
+        at ``<session>/subagents/workflows/wf_<id>/agent-*.jsonl`` — their
+        immediate parent is the workflow directory, and a
+        ``path.parent.name == "subagents"`` test lets every one of them
+        through to the writer. 25 of those 26 share a ``sessionId`` with a
+        top-level file, so that narrower test would ship exactly the data loss
+        this exclusion exists to prevent.
+        """
+        try:
+            rel = path.relative_to(self.home)
+        except ValueError:
+            rel = path
+        if self.SUBAGENT_DIR in rel.parts:
+            return "subagent transcript"
+        return None
+
+    def discover(self) -> Iterable[Path]:
+        return [p for p in self.discover_all() if self.excluded_reason(p) is None]
 
     def parse(self, path: Path) -> NormalisedConversation | None:
         legacy = _load_legacy()
