@@ -66,6 +66,15 @@ describe("parseFindState", () => {
     expect(parse("min_confidence=").minConfidence).toBeNull();
     expect(parse("min_confidence=0.6").minConfidence).toBe(0.6);
   });
+
+  it("parses providers from the URL", () => {
+    const s = parseFindState(new URLSearchParams("provider=hermes&provider=vibe"));
+    expect(s.providers).toEqual(["hermes", "vibe"]);
+  });
+
+  it("defaults providers to empty", () => {
+    expect(parseFindState(new URLSearchParams("")).providers).toEqual([]);
+  });
 });
 
 describe("toSearchParams", () => {
@@ -76,9 +85,20 @@ describe("toSearchParams", () => {
   it("round-trips every field it serialises", () => {
     const qs =
       "q=pgvector&kind=memory&kind=message&category=decision&project=alpha" +
-      "&status=active&tag=db&min_confidence=0.7&has_embedding=true" +
+      "&status=active&tag=db&provider=hermes&min_confidence=0.7&has_embedding=true" +
       "&mode=table&page=2&per_page=50";
     expect(parseFindState(toSearchParams(parse(qs)))).toEqual(parse(qs));
+  });
+
+  it("carries the provider scope through, like any other facet", () => {
+    // Unlike category/tag/confidence (Find-local, spec §4.2), provider must
+    // not be dropped by an ordinary `update()` on this page — otherwise
+    // typing a search query while "Hermes" is scoped would silently clear
+    // the scope from the URL.
+    expect(toSearchParams(parse("provider=hermes&provider=vibe")).getAll("provider")).toEqual([
+      "hermes",
+      "vibe",
+    ]);
   });
 
   it("round-trips values containing spaces and delimiters", () => {
@@ -109,6 +129,11 @@ describe("toApiParams", () => {
   it("forwards each facet value as a repeated param", () => {
     const p = toApiParams(parse("q=x&kind=memory&kind=skill"));
     expect(p.getAll("kind")).toEqual(["memory", "skill"]);
+  });
+
+  it("forwards the provider scope, so an active scope actually filters results", () => {
+    const p = toApiParams(parse("q=x&provider=hermes&provider=vibe"));
+    expect(p.getAll("provider")).toEqual(["hermes", "vibe"]);
   });
 
   it("omits filters that are not set", () => {

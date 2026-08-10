@@ -81,6 +81,25 @@ export const api = {
 };
 
 
+// ── Providers ────────────────────────────────────────────────────────────
+
+export interface ProviderCoverage {
+  name: string;
+  label: string;
+  chart_slot: number;
+  on_disk: number;
+  pending: number;
+  excluded: number;
+  ingested: number;
+  last_run: string | null;
+  status: "ok" | "pending" | "not_ingested" | "no_data" | "unknown";
+}
+
+export const providersApi = {
+  list: () => request<{ providers: ProviderCoverage[] }>("/providers"),
+};
+
+
 // ── Find ─────────────────────────────────────────────────────────────────
 
 export type Kind = "conversation" | "message" | "memory" | "skill" | "project" | "prompt";
@@ -306,4 +325,28 @@ export const consoleApi = {
       enums: { name: string; values: string[] }[];
       snippets: { title: string; sql: string }[];
     }>("/console/schema"),
+};
+
+
+// ── Timeline ─────────────────────────────────────────────────────────────
+
+export interface TimelineCell {
+  bucket: string;
+  /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */
+  provider: string;
+  kind: Kind;
+  n: number;
+}
+
+export interface TimelineRange {
+  since: string;
+  until: string;
+  bucket: "day" | "week" | "month";
+  cells: TimelineCell[];
+}
+
+export const timelineApi = {
+  range: (qs: URLSearchParams) => request<TimelineRange>(`/timeline?${qs}`),
+  day: (day: string, qs: URLSearchParams) =>
+    request<{ day: string; items: FindItem[] }>(`/timeline/day/${day}?${qs}`),
 };

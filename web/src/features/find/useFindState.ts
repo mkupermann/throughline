@@ -19,6 +19,14 @@ export interface FindState {
   projects: string[];
   statuses: string[];
   tags: string[];
+  /**
+   * App-scope, not Find-local (spec §4.2) — parsed here because Find reads
+   * and filters by it like any other facet, but it is deliberately left out
+   * of `clearAll`/`activeFilterCount` below: those describe what "Clear N"
+   * removes, and clearing filters on this page must not silently drop the
+   * scope the provider bar is showing everywhere else.
+   */
+  providers: string[];
   minConfidence: number | null;
   hasEmbedding: boolean | null;
   mode: ViewMode;
@@ -33,6 +41,7 @@ const DEFAULTS: FindState = {
   projects: [],
   statuses: [],
   tags: [],
+  providers: [],
   minConfidence: null,
   hasEmbedding: null,
   mode: "list",
@@ -40,7 +49,7 @@ const DEFAULTS: FindState = {
   perPage: 30,
 };
 
-const MULTI = ["kind", "category", "project", "status", "tag"] as const;
+const MULTI = ["kind", "category", "project", "status", "tag", "provider"] as const;
 
 const MAX_PER_PAGE = 200;
 
@@ -72,6 +81,7 @@ export function parseFindState(sp: URLSearchParams): FindState {
     projects: sp.getAll("project"),
     statuses: sp.getAll("status"),
     tags: sp.getAll("tag"),
+    providers: sp.getAll("provider"),
     minConfidence: conf === null || conf === "" ? null : Number(conf),
     hasEmbedding: emb === null ? null : emb === "true",
     mode: (["table", "timeline", "graph"] as const).includes(sp.get("mode") as never)
@@ -91,6 +101,10 @@ export function toSearchParams(s: FindState): URLSearchParams {
   s.projects.forEach((v) => sp.append("project", v));
   s.statuses.forEach((v) => sp.append("status", v));
   s.tags.forEach((v) => sp.append("tag", v));
+  // Not one of the defaults skipped above — the provider scope must survive
+  // every `update()` on this page (e.g. typing a query), not just be
+  // readable on first load. See the `providers` field doc on `FindState`.
+  s.providers.forEach((v) => sp.append("provider", v));
   if (s.minConfidence !== null) sp.set("min_confidence", String(s.minConfidence));
   if (s.hasEmbedding !== null) sp.set("has_embedding", String(s.hasEmbedding));
   if (s.mode !== "list") sp.set("mode", s.mode);
@@ -109,7 +123,7 @@ export function useFindState() {
       // Any change to what is being searched resets paging — otherwise you
       // land on page 4 of a result set that now has one page.
       const pagingKeys: (keyof FindState)[] = [
-        "q", "kinds", "categories", "projects", "statuses", "tags",
+        "q", "kinds", "categories", "projects", "statuses", "tags", "providers",
         "minConfidence", "hasEmbedding", "perPage",
       ];
       if (patch.page === undefined && pagingKeys.some((k) => k in patch)) next.page = 0;
@@ -121,7 +135,10 @@ export function useFindState() {
   /** Toggle one value inside a multi-select facet. */
   const toggle = useCallback(
     (facet: (typeof MULTI)[number], value: string) => {
-      const key = ({ kind: "kinds", category: "categories", project: "projects", status: "statuses", tag: "tags" } as const)[facet];
+      const key = ({
+        kind: "kinds", category: "categories", project: "projects", status: "statuses",
+        tag: "tags", provider: "providers",
+      } as const)[facet];
       const current = state[key];
       update({ [key]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value] } as Partial<FindState>);
     },
@@ -152,6 +169,9 @@ export function toApiParams(s: FindState): URLSearchParams {
   s.projects.forEach((v) => sp.append("project", v));
   s.statuses.forEach((v) => sp.append("status", v));
   s.tags.forEach((v) => sp.append("tag", v));
+  // App-scope, forwarded like any other facet so "I am looking at Hermes"
+  // actually filters Find's results, not just the URL that says so.
+  s.providers.forEach((v) => sp.append("provider", v));
   if (s.minConfidence !== null) sp.set("min_confidence", String(s.minConfidence));
   if (s.hasEmbedding !== null) sp.set("has_embedding", String(s.hasEmbedding));
   sp.set("limit", String(s.perPage));
