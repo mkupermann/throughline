@@ -135,3 +135,17 @@ def test_idempotent() -> None:
     once = redact(text)
     twice = redact(once)
     assert once == twice
+
+
+class TestPrefixedSecretNames:
+    """Regression: `\\b` treats `_` as a word char, so prefixed names like
+    DB_PASSWORD previously passed through unredacted."""
+
+    def test_env_style_prefixed_names_redacted(self):
+        assert redact("DB_PASSWORD=hunter2secret") == "DB_PASSWORD=<REDACTED>"
+        assert redact("GITHUB_TOKEN: abc123def456") == "GITHUB_TOKEN=<REDACTED>"
+        assert redact('OPENAI_API_KEY="sk-proj-xyz789"') == "OPENAI_API_KEY=<REDACTED>"
+
+    def test_home_path_leaves_trailing_punctuation(self):
+        assert redact('path = "/Users/someone"') == 'path = "/Users/<user>"'
+        assert redact("(/Users/bob), ok") == "(/Users/<user>), ok"

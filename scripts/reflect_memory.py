@@ -150,18 +150,18 @@ def parse_json_object(text: str) -> dict | None:
             lines = lines[:-1]
         text = "\n".join(lines)
     start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end < 0 or end <= start:
+    if start < 0:
         return None
     try:
-        return json.loads(text[start:end + 1])
+        obj, _ = json.JSONDecoder().raw_decode(text, start)
     except json.JSONDecodeError:
         return None
+    return obj if isinstance(obj, dict) else None
 
 
 def _first_val(row):
     """Gibt das erste Feld eines fetchone() zurueck — funktioniert fuer tuple und RealDictCursor."""
-    if row is None:
+    if not row:
         return None
     if isinstance(row, dict):
         return next(iter(row.values()))
@@ -233,9 +233,10 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
                 pairs.append((items[i], items[j]))
     print(f"  Gruppen: {sum(1 for v in groups.values() if len(v) > 1)}  |  Paare: {len(pairs)}")
 
-    if limit > 0 and len(pairs) > max_pairs:
-        pairs = pairs[:max_pairs]
-        print(f"  Begrenzt auf {max_pairs} Paare.")
+    cap = min(limit, max_pairs) if limit > 0 else max_pairs
+    if len(pairs) > cap:
+        pairs = pairs[:cap]
+        print(f"  Begrenzt auf {cap} Paare.")
 
     stats = {"pairs": len(pairs), "duplicates": 0, "merged": 0, "errors": 0}
     # Chunks die bereits gemergt wurden, sollen nicht erneut eingehen
@@ -367,9 +368,10 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
                 pairs.append((items[i], items[j]))
     print(f"  Paare zu pruefen: {len(pairs)}")
 
-    if limit > 0 and len(pairs) > max_pairs:
-        pairs = pairs[:max_pairs]
-        print(f"  Begrenzt auf {max_pairs} Paare.")
+    cap = min(limit, max_pairs) if limit > 0 else max_pairs
+    if len(pairs) > cap:
+        pairs = pairs[:cap]
+        print(f"  Begrenzt auf {cap} Paare.")
 
     stats = {"pairs": len(pairs), "contradictions": 0, "superseded": 0, "errors": 0}
     for a, b in pairs:

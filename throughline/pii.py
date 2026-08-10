@@ -55,10 +55,13 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
     # --- Explicit password/secret/token/api_key assignments --------------
     # Matches `password = "abc"`, `SECRET='abc'`, `token=abc123` etc.
+    # ``\b`` alone misses prefixed names (DB_PASSWORD, GITHUB_TOKEN, …)
+    # because ``_`` is a word character — hence the explicit prefix group.
     (re.compile(r"""(?ix)
-        \b(
-            password | passwd | pwd |
-            secret | api_?key | token
+        (
+            (?: [A-Za-z0-9_\-]* [_\-] )?
+            (?: password | passwd | pwd |
+                secret | api_?key | token )
         )
         \s* [:=] \s*
         ['"]?
@@ -70,8 +73,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), "<REDACTED_EMAIL>"),
 
     # --- Home-directory usernames ----------------------------------------
-    (re.compile(r"/Users/([^/\s]+)"), "/Users/<user>"),
-    (re.compile(r"/home/([^/\s]+)"), "/home/<user>"),
+    (re.compile(r"/Users/[A-Za-z0-9._\-]+"), "/Users/<user>"),
+    (re.compile(r"/home/[A-Za-z0-9._\-]+"), "/home/<user>"),
 ]
 
 

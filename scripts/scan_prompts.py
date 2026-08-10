@@ -234,6 +234,7 @@ def ingest_skill_prompts(cur: Any, stats: dict[str, int]) -> None:
             else:
                 stats["updated"] += 1
         except Exception as e:
+            conn.rollback()
             print(f"  ! {skill_md}: {e}")
             stats["errors"] += 1
 

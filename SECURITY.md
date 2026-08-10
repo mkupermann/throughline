@@ -11,14 +11,14 @@ security model.
 - PostgreSQL database running on `localhost:5432`
 - Python scripts reading/writing local files under `~/.claude/` and the
   repository directory
-- Streamlit GUI on `http://localhost:8501`
+- web UI on `http://127.0.0.1:8787`
 - launchd jobs that run as the logged-in user
 - API keys (optional) for OpenAI or Anthropic, stored in environment variables
 
 ### Out of scope
 
 - Multi-user deployments (the default `trust` auth is single-user only)
-- Network-exposed databases or UIs — running Streamlit on `0.0.0.0` is not
+- Network-exposed databases or UIs — running the web UI on `0.0.0.0` is not
   supported and not recommended
 - Shared CI/CD infrastructure
 

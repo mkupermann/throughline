@@ -48,3 +48,16 @@ env/
 .claude/sessions/
 .claude/projects/
 MEMORY_CONTEXT.md
+
+# Session/knowledge-base artifacts
+.k2a/
+
+# Frontend build tooling. The built assets in throughline/web/ ARE committed
+# (see docs/UI_REDESIGN_PLAN.md §9: `pip install throughline` must never
+# require Node), but the dependency tree and local caches are not.
+web/node_modules/
+web/.vite/
+web/dist/
+
+# Subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/

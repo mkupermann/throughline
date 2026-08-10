@@ -139,6 +139,16 @@ class Adapter(ABC):
     @staticmethod
     def sha256_file(path: Path) -> str:
         h = hashlib.sha256()
+        if path.is_dir():
+            # Directory-based sources (e.g. Vibe session dirs): hash every
+            # file's relative path + content in sorted order so the digest
+            # changes iff the session content changes.
+            for fp in sorted(p for p in path.rglob("*") if p.is_file()):
+                h.update(str(fp.relative_to(path)).encode())
+                with open(fp, "rb") as f:
+                    for chunk in iter(lambda: f.read(8192), b""):
+                        h.update(chunk)
+            return h.hexdigest()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)

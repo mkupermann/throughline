@@ -145,19 +145,21 @@ def _patch_adapter_homes(monkeypatch, tmp_path: Path) -> dict[str, Path]:
         "continue": tmp_path / "continue" / "sessions",
         "windsurf": tmp_path / "windsurf" / "plans",
         "cline": tmp_path / "cline_tasks",
+        "vibe": tmp_path / "vibe" / "logs" / "session",
+        "cursor": tmp_path / "cursor" / "sessions",
+        "zed": tmp_path / "zed" / "data" / "sessions",
     }
-    homes["claude_code"].mkdir(parents=True)
-    homes["hermes"].mkdir(parents=True)
-    homes["codex"].mkdir(parents=True)
-    homes["continue"].mkdir(parents=True)
-    homes["windsurf"].mkdir(parents=True)
-    homes["cline"].mkdir(parents=True)
+    for d in homes.values():
+        d.mkdir(parents=True, exist_ok=True)
 
     from throughline.adapters.claude_code import ClaudeCodeAdapter
     from throughline.adapters.codex import CodexAdapter
     from throughline.adapters.continue_dev import ContinueDevAdapter
     from throughline.adapters.windsurf import WindsurfAdapter
     from throughline.adapters.cline import ClineAdapter
+    from throughline.adapters.vibe import VibeAdapter
+    from throughline.adapters.cursor import CursorAdapter
+    from throughline.adapters.zed import ZedAdapter
     from throughline.adapters import hermes as hermes_mod
 
     monkeypatch.setattr(ClaudeCodeAdapter, "home", homes["claude_code"])
@@ -165,6 +167,9 @@ def _patch_adapter_homes(monkeypatch, tmp_path: Path) -> dict[str, Path]:
     monkeypatch.setattr(ContinueDevAdapter, "home", homes["continue"])
     monkeypatch.setattr(WindsurfAdapter, "home", homes["windsurf"])
     monkeypatch.setattr(ClineAdapter, "home", homes["cline"])
+    monkeypatch.setattr(VibeAdapter, "home", homes["vibe"])
+    monkeypatch.setattr(CursorAdapter, "home", homes["cursor"])
+    monkeypatch.setattr(ZedAdapter, "home", homes["zed"])
     # Hermes is special: its discover() walks ``_hermes_root`` directly.
     monkeypatch.setattr(
         hermes_mod.HermesAdapter,

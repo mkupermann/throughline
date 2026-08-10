@@ -62,7 +62,7 @@ decided.
    The memory skill runs a full-text search over `memory_chunks` filtered by
    project and category = `decision`.
 
-2. Alternatively, run the query directly in psql or the Streamlit SQL console.
+2. Alternatively, run the query directly in psql or the the web UI SQL console.
 
    ```sql
    SELECT content, confidence, created_at::date
@@ -173,9 +173,9 @@ VALUES
    'active');
 ```
 
-**Option C — Streamlit GUI**
+**Option C — web UI**
 
-Open the GUI (`streamlit run gui/app.py`), navigate to "Memory Chunks", click
+Open the web UI (`throughline serve`), go to Curate, select the chunk and
 "Add chunk", fill in the form and save. The GUI writes the same SQL as Option B.
 
 ### Tips

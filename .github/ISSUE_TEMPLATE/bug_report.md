@@ -25,7 +25,7 @@ assignees: ''
 - OS: <!-- e.g. macOS 14.5 / Ubuntu 22.04 -->
 - PostgreSQL version: <!-- `psql --version` -->
 - Python version: <!-- `python3 --version` -->
-- Streamlit version: <!-- `streamlit --version` -->
+- the web UI version: <!-- `throughline serve --version` -->
 - Installed via: <!-- install.sh / manual -->
 
 ## Logs / stack trace

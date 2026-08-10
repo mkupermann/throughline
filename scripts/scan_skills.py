@@ -168,9 +168,13 @@ def main() -> None:
             else:
                 updated += 1
         except Exception as e:
+            # Roll back so one bad row doesn't abort the transaction and
+            # silently discard every following upsert.
+            conn.rollback()
             print(f"  ✗ {skill['name']}: {e}")
+        else:
+            conn.commit()
 
-    conn.commit()
     cursor.close()
     conn.close()
 

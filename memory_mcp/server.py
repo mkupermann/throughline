@@ -21,16 +21,45 @@ from pathlib import Path
 
 import psycopg2.extras
 
-# Reuse existing query/forget helpers from gui/ and scripts/.
+# Reuse existing helpers from scripts/. Retrieval itself comes from
+# throughline.queries, the same layer the CLI and the HTTP API use — the MCP
+# server previously imported `semantic_helper` out of the Streamlit `gui/`
+# package, which coupled the memory Claude Code reads to a UI that no longer
+# exists.
 _ROOT = Path(__file__).resolve().parent.parent
-for sub in ("scripts", "gui"):
+for sub in ("scripts",):
     p = str(_ROOT / sub)
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import semantic_helper  # type: ignore  # noqa: E402
+from throughline import embedding as _embedding  # noqa: E402
+from throughline.queries import semantic as _semantic  # noqa: E402
+
 from forget import forget_chunks  # type: ignore  # noqa: E402
 from graph_query import resolve_entity  # type: ignore  # noqa: E402
+
+
+def _semantic_search(conn, query: str, limit: int = 20, project: str | None = None) -> list[dict]:
+    """Embed *query* and run vector retrieval, or return [] if that is not possible.
+
+    Fails soft, exactly as the old helper did: with no embedding backend the
+    caller gets an empty list rather than an exception, so `memory.search`
+    degrades instead of erroring inside an agent's tool call.
+    """
+    info = _embedding.backend_info()
+    if not info.available:
+        return []
+    vec = _embedding.embed_query(query)
+    if vec is None:
+        return []
+    return _semantic.semantic_search(
+        conn,
+        _embedding.vec_literal(vec),
+        model=info.model,
+        column=info.column,
+        limit=limit,
+        project=project,
+    )
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
@@ -115,7 +144,7 @@ def search(
 
     conn = connect()
     try:
-        rows = semantic_helper.semantic_search(conn, query, limit=limit, project=project)
+        rows = _semantic_search(conn, query, limit=limit, project=project)
     finally:
         conn.close()
 

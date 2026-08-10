@@ -1,0 +1,137 @@
+"""Pipeline-health and ingestion queries — the ``/operate`` surface."""
+
+from __future__ import annotations
+
+from ._exec import Row, one, rows, scalar
+
+
+def pipeline_counts(conn) -> Row:
+    """Headline counts for each stage of the pipeline."""
+    return one(
+        conn,
+        """
+        SELECT
+            (SELECT count(*) FROM conversations)   AS conversations,
+            (SELECT count(*) FROM messages)        AS messages,
+            (SELECT count(*) FROM memory_chunks)   AS chunks,
+            (SELECT count(*) FROM embeddings)      AS embeddings,
+            (SELECT count(*) FROM skills)          AS skills,
+            (SELECT count(*) FROM prompts)         AS prompts,
+            (SELECT count(*) FROM entities)        AS entities,
+            (SELECT count(*) FROM ingestion_log)   AS ingest_runs
+        """,
+    ) or {}
+
+
+def pending_extraction(conn, min_messages: int = 5) -> int:
+    """Conversations with no extracted chunks yet.
+
+    Note the known issue this inherits: a conversation that legitimately
+    yields zero chunks stays "pending" forever and is re-analysed on every
+    run. Fixing that needs an explicit processed-marker column, which is a
+    schema change and therefore out of scope for the extraction phase — it is
+    tracked separately.
+    """
+    return int(
+        scalar(
+            conn,
+            """
+            SELECT count(*) FROM conversations c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM memory_chunks mc
+                WHERE mc.source_type = 'conversation' AND mc.source_id = c.id
+            )
+              AND c.message_count >= %s
+            """,
+            (min_messages,),
+            0,
+        )
+        or 0
+    )
+
+
+def missing_titles(conn, min_messages: int = 2) -> int:
+    return int(
+        scalar(
+            conn,
+            """
+            SELECT count(*) FROM conversations
+            WHERE (summary IS NULL OR summary = '') AND message_count >= %s
+            """,
+            (min_messages,),
+            0,
+        )
+        or 0
+    )
+
+
+def embedding_coverage(conn, model: str | None = None) -> Row:
+    """Share of active memory chunks that have an embedding."""
+    return one(
+        conn,
+        """
+        SELECT
+            count(*) AS total,
+            count(*) FILTER (
+                WHERE EXISTS (
+                    SELECT 1 FROM embeddings e
+                    WHERE e.source_type = 'memory_chunk'
+                      AND e.source_id = mc.id
+                      AND (%s IS NULL OR e.model = %s)
+                )
+            ) AS embedded
+        FROM memory_chunks mc
+        WHERE COALESCE(mc.status, 'active') = 'active'
+        """,
+        (model, model),
+    ) or {"total": 0, "embedded": 0}
+
+
+def recent_ingestion(conn, limit: int = 50) -> list[Row]:
+    return rows(
+        conn,
+        """
+        SELECT id, file_path, file_hash, record_count, ingested_at
+        FROM ingestion_log
+        ORDER BY ingested_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+
+def last_ingestion_at(conn):
+    return scalar(conn, "SELECT max(ingested_at) FROM ingestion_log")
+
+
+def embeddings_by_model(conn) -> list[Row]:
+    return rows(
+        conn,
+        """
+        SELECT model, count(*) AS n,
+               count(*) FILTER (WHERE embedding_1536 IS NOT NULL) AS dim_1536,
+               count(*) FILTER (WHERE embedding_768  IS NOT NULL) AS dim_768
+        FROM embeddings
+        GROUP BY model
+        ORDER BY n DESC
+        """,
+    )
+
+
+def vector_extension_ok(conn) -> bool:
+    """True when the pgvector shared library is actually loadable.
+
+    The catalogue can list the extension while the ``.so`` is gone — that is
+    exactly what a Homebrew major-version bump does. Detect it here so the
+    UI can say "pgvector is broken" instead of surfacing a raw
+    ``could not access file "$libdir/vector"`` from deep inside a query.
+    """
+    try:
+        scalar(conn, "SELECT '[1,2,3]'::vector <=> '[1,2,3]'::vector")
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False

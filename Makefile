@@ -1,4 +1,4 @@
-.PHONY: install venv test test-integration migrate load-demo gui ingest scan extract docker-up docker-down docker-logs clean help
+.PHONY: install venv test test-integration migrate load-demo serve ingest scan extract docker-up docker-down docker-logs clean help
 
 # Resolve a Python 3.10+ interpreter for venv bootstrap (override with `make PYTHON=…`).
 PYTHON ?= $(shell command -v python3.12 || command -v python3.11 || command -v python3.10 || command -v python3)
@@ -48,8 +48,8 @@ migrate:  ## Apply pending SQL migrations from sql/migrations/
 load-demo:  ## Load the bundled demo dataset into claude_memory
 	bash scripts/load_demo.sh
 
-gui:  ## Start the Streamlit GUI
-	streamlit run gui/app.py
+serve:  ## Start the web UI + API on http://127.0.0.1:8787
+	throughline serve
 
 ingest:  ## Ingest Claude Code JSONL sessions
 	python -m throughline ingest

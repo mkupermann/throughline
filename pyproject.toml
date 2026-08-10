@@ -41,12 +41,10 @@ classifiers = [
 ]
 dependencies = [
     "psycopg2-binary>=2.9.9",
-    "streamlit>=1.32.0",
-    "pandas>=2.0.0",
-    "plotly>=5.18.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
     "pyyaml>=6.0",
-    "streamlit-agraph>=0.0.45",
-    "streamlit-calendar>=1.3.0",
+    "mcp>=1.2.0,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -78,7 +76,10 @@ include = ["throughline*", "memory_mcp*"]
 exclude = ["tests*", "scripts*", "gui*", "docs*", "examples*", "skill*", "sql*", "launchd*"]
 
 [tool.setuptools.package-data]
-throughline = ["py.typed"]
+# web/** is the built frontend (vite writes here — see web/vite.config.ts).
+# It is committed and shipped so `pip install throughline` yields a working
+# UI without Node anywhere in the install path.
+throughline = ["py.typed", "web/**/*"]
 
 [tool.ruff]
 line-length = 120

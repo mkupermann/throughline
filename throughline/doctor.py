@@ -133,7 +133,9 @@ def check_python_version() -> CheckResult:
 
 @_check("required_packages", "python")
 def check_required_packages() -> CheckResult:
-    required = ["psycopg2", "streamlit", "pandas", "jinja2", "yaml"]
+    # What `throughline serve` and the pipeline actually import. The
+    # Streamlit/pandas/plotly stack left with the old GUI.
+    required = ["psycopg2", "fastapi", "uvicorn", "yaml"]
     missing: list[str] = []
     for pkg in required:
         try:

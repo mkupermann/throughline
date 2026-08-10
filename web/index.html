@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Throughline</title>
+    <meta name="description" content="Persistent long-term memory across AI coding tools" />
+    <script>
+      // Set the theme before first paint so a dark-mode user never sees a
+      // white flash. Reads the same key the ThemeProvider writes; "system"
+      // (or no value) leaves the attribute off and lets prefers-color-scheme
+      // decide, which is what the token file expects.
+      (function () {
+        try {
+          var t = localStorage.getItem("throughline-theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {
+          /* private mode: fall through to system */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

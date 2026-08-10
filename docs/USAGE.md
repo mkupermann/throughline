@@ -28,10 +28,10 @@ relevant to this directory.
 
 Claude sees it on session start and has instant context.
 
-### 3. Open the GUI when you need to review
+### 3. Open the web UI when you need to review
 
 ```bash
-cd gui && streamlit run app.py
+throughline serve   # http://127.0.0.1:8787
 ```
 
 Landing page: a 4-metric dashboard (conversations, messages, skills,
@@ -228,7 +228,7 @@ python3 ~/.claude/skills/claude-memory/scripts/query.py stats
 - **Embeddings with Ollama** on Apple Silicon: about 20 chunks/second.
   OpenAI `text-embedding-3-small` at batch size 100: about 200 chunks
   per API call in under a second.
-- **Streamlit on first load** can take 5–8 seconds to warm up. Leave the
+- **the web UI on first load** can take 5–8 seconds to warm up. Leave the
   tab open.
 
 ## Tips

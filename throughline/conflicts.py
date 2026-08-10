@@ -30,7 +30,7 @@ This module finds three classes of cross-tool conflict:
    back. Not technically a contradiction, but worth seeing.
 
 All three return ``Conflict`` records with a stable schema so the CLI
-and the (future) Streamlit page can consume them.
+and the Curate surface can consume them.
 
 Public entry point: ``find_conflicts(conn=None, *, project=None,
 since_days=None, min_similarity=0.85) -> ConflictReport``.
@@ -157,6 +157,18 @@ def _has_contradiction_marker(text: str) -> bool:
     return bool(_CONTRADICTION_RE.search(text or ""))
 
 
+# The same marker set as a POSIX regex for Postgres' case-insensitive `~*`.
+# Derived from _CONTRADICTION_MARKERS so the SQL predicate and the Python
+# predicate cannot drift apart — `test_sql_and_python_markers_agree` asserts
+# they classify identically.
+#
+# Why it exists: _semantic_conflicts used to apply the marker test in Python,
+# *after* the database had already materialised every high-similarity pair.
+# Pushing it into the join collapses an all-pairs self-join (|group|^2 vector
+# distance computations) down to |marker-bearing chunks| x |group|.
+_CONTRADICTION_SQL_RE = r"\m(" + "|".join(_CONTRADICTION_MARKERS) + r")\M"
+
+
 # ---------------------------------------------------------------------------
 # DB connect (mirrors throughline.status._connect so config stays consistent)
 # ---------------------------------------------------------------------------
@@ -178,7 +190,11 @@ def _connect():
     if pw:
         cfg["password"] = pw
     try:
-        return psycopg2.connect(**cfg)
+        conn = psycopg2.connect(**cfg)
+        # Autocommit: a swallowed query error must not leave the transaction
+        # aborted and poison every subsequent (read-only) query.
+        conn.autocommit = True
+        return conn
     except Exception:
         return None
 
@@ -314,18 +330,24 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
                 b.chunk_id, b.tool, b.project_name, b.category, b.content,
                 b.created_at, b.status, b.full_content,
                 1 - (a.vec <=> b.vec) AS cosine_sim
-            FROM chunk_vec a
-            JOIN chunk_vec b
+            FROM chunk_vec b
+            JOIN chunk_vec a
               ON a.project_name = b.project_name
              AND a.category     = b.category
              AND a.tool        <> b.tool
              AND a.chunk_id     < b.chunk_id      -- pair each unordered pair once
              AND a.created_at  <= b.created_at    -- a is the older side
-            WHERE 1 - (a.vec <=> b.vec) >= %(min_sim)s
+             AND 1 - (a.vec <=> b.vec) >= %(min_sim)s
+            -- The newer side must carry a contradiction marker. This used to
+            -- run in Python over every returned pair; as a join predicate it
+            -- shrinks the driving side to the few chunks that can possibly
+            -- produce a conflict, instead of computing a vector distance for
+            -- every pair in the project+category group.
+            WHERE b.full_content ~* %(marker_re)s
             ORDER BY cosine_sim DESC
             LIMIT 500
         """
-        params = {"min_sim": float(min_similarity)}
+        params = {"min_sim": float(min_similarity), "marker_re": _CONTRADICTION_SQL_RE}
         if project:
             params["project"] = project
         try:
@@ -546,6 +568,11 @@ def format_human(report: ConflictReport) -> str:
         return f"Cannot reach the memory DB: {report.error or 'unknown error'}"
 
     if not report.conflicts:
+        if report.error:
+            return (
+                "Conflict scan incomplete — no results, but errors occurred:\n"
+                f"  {report.error}"
+            )
         return (
             "No cross-tool conflicts found"
             + (f" for project '{report.params.get('project')}'." if report.params.get("project") else ".")

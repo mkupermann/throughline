@@ -1,0 +1,65 @@
+/* Detail routes. Every colour is a token. */
+
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+.backlink:hover {
+  color: var(--accent);
+}
+.detail-id {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.detail-long {
+  margin-bottom: var(--space-5);
+}
+.detail-long p {
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  /* Long-form text stays readable rather than running edge to edge. */
+  max-width: 78ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+.detail-field {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.detail-field dt {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.detail-field dd {
+  margin: 2px 0 0;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}

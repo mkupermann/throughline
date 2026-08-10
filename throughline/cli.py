@@ -124,7 +124,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 0
 
     if args.all:
-        results = run_many([a for a in all_adapters() if a.is_present()])
+        present = [a for a in all_adapters() if a.is_present()]
+        if not present:
+            print("No sources present — nothing ingested. "
+                  "Run 'throughline ingest --list-sources' to see expected paths.")
+            return 1
+        results = run_many(present)
         return 0 if all(r.errors == 0 for r in results) else 1
 
     name = args.source
@@ -201,24 +206,27 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     return _call_script_main("reflect_memory", passthrough)
 
 
-def cmd_gui(args: argparse.Namespace) -> int:
-    """Launch the Streamlit GUI (`streamlit run gui/app.py`)."""
-    root = _ensure_scripts_on_path()
-    app = root / "gui" / "app.py"
-    if not app.is_file():
-        print(f"ERROR: GUI entrypoint not found: {app}", file=sys.stderr)
-        return 2
-    extra: list[str] = []
-    if args.port:
-        extra += ["--server.port", str(args.port)]
-    cmd = ["streamlit", "run", str(app), *extra]
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the web UI and its JSON API from one process on one port."""
     try:
-        return subprocess.call(cmd)
-    except FileNotFoundError:
+        from throughline.api.server import serve
+        from throughline.api.settings import RemoteBindRefused
+    except ImportError as exc:
         print(
-            "ERROR: `streamlit` not installed. Install with: " "pip install -e . (core deps include Streamlit).",
+            f"ERROR: the API server could not be imported ({exc}).\n"
+            "Reinstall with: pip install -e .",
             file=sys.stderr,
         )
+        return 2
+    try:
+        return serve(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_level=args.log_level,
+        )
+    except RemoteBindRefused as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
 
@@ -329,6 +337,9 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
         return 0
     print(conflicts_format(report))
     if not report.db_reachable:
+        return 2
+    if report.error and not report.conflicts:
+        # Every strategy failed — don't let that masquerade as a clean run.
         return 2
     return 0 if not report.conflicts else 1
 
@@ -480,13 +491,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None, help="Cap on pair-comparisons per mode.")
     p.set_defaults(func=cmd_reflect)
 
-    # gui
+    # serve
     p = sub.add_parser(
-        "gui",
-        help="Start the Streamlit GUI (requires `streamlit` on PATH).",
+        "serve",
+        help="Serve the web UI and JSON API on one port (default: 127.0.0.1:8787).",
     )
-    p.add_argument("--port", type=int, default=None, help="Port for the Streamlit server (default: 8501).")
-    p.set_defaults(func=cmd_gui)
+    p.add_argument(
+        "--host",
+        default=None,
+        help=(
+            "Bind address (default 127.0.0.1). Non-loopback is refused unless "
+            "THROUGHLINE_ALLOW_REMOTE=1 — the API has no authentication."
+        ),
+    )
+    p.add_argument("--port", type=int, default=None, help="Port (default: 8787).")
+    p.add_argument("--reload", action="store_true", help="Auto-reload on source changes (development).")
+    p.add_argument(
+        "--log-level",
+        default="info",
+        choices=["critical", "error", "warning", "info", "debug", "trace"],
+        help="uvicorn log level.",
+    )
+    p.set_defaults(func=cmd_serve)
 
     # install-hooks
     p = sub.add_parser(

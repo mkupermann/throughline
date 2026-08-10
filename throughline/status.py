@@ -4,7 +4,7 @@ One source of truth for three surfaces:
 
   * ``throughline status`` CLI subcommand (human + ``--json``)
   * ``memory.stats`` MCP tool
-  * Streamlit GUI Memory Health card
+  * the web UI (Overview verdict, Operate panel)
 
 Each surface formats the same dict; nobody re-implements the SQL.
 
@@ -141,7 +141,11 @@ def _connect():
     if pw:
         cfg["password"] = pw
     try:
-        return psycopg2.connect(**cfg)
+        conn = psycopg2.connect(**cfg)
+        # Autocommit: a swallowed query error must not leave the transaction
+        # aborted and poison every subsequent (read-only) query.
+        conn.autocommit = True
+        return conn
     except Exception:
         return None
 

@@ -1,0 +1,130 @@
+/* Scope Tailwind's scanner to hand-written source only.
+ *
+ * Without source(), v4 auto-detects files from the project root and will
+ * happily scan a previous build's compiled JS, generating utilities for
+ * class-like strings inside it. That inflated the bundle by ~2.4 kB and made
+ * the output depend on whether a stale build was lying around — a build that
+ * is not reproducible is a build you cannot review. */
+@import "tailwindcss" source("../");
+@import "./tokens.css";
+
+/* Expose the tokens to Tailwind's utility generator so `bg-surface-raised`,
+ * `text-secondary`, `border-muted` etc. resolve to the same variables the
+ * hand-written CSS uses. One source of truth, two access paths. */
+@theme inline {
+  --color-surface-base: var(--surface-base);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-overlay: var(--surface-overlay);
+
+  --color-border-default: var(--border);
+  --color-border-muted: var(--border-muted);
+  --color-border-strong: var(--border-strong);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-inverted: var(--text-inverted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-wash: var(--accent-wash);
+
+  --color-good: var(--status-good);
+  --color-warning: var(--status-warning);
+  --color-serious: var(--status-serious);
+  --color-critical: var(--status-critical);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* Explicit background: the host paints its own ground behind the page, so
+     a transparent body borrows the wrong theme. */
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Keyboard focus is a first-class citizen here — this is a keyboard-driven
+   tool. Never remove the ring; only restyle it. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Numeric columns must not jitter as values change. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: var(--accent-wash-strong);
+}
+
+/* Wide content scrolls inside its own box; the page body never scrolls
+   sideways. */
+.scroll-x {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Screen-reader-only, but focusable — used by the skip link. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.sr-only:focus {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: var(--z-toast);
+  width: auto;
+  height: auto;
+  clip: auto;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-2);
+}
