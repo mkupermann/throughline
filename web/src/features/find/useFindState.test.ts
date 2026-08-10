@@ -45,9 +45,12 @@ describe("parseFindState", () => {
 
   it("only accepts known view modes", () => {
     expect(parse("mode=table").mode).toBe("table");
-    expect(parse("mode=timeline").mode).toBe("timeline");
     expect(parse("mode=graph").mode).toBe("graph");
     // A hand-edited or stale URL must not put the UI into an unrenderable mode.
+    // "timeline" was a Find view mode before Task 11 moved it to its own
+    // surface (/timeline) — a URL still carrying it must fall back like any
+    // other unknown mode, not resurrect the deleted view.
+    expect(parse("mode=timeline").mode).toBe("list");
     expect(parse("mode=chart").mode).toBe("list");
     expect(parse("mode=").mode).toBe("list");
   });

@@ -10,7 +10,7 @@ import { useSearchParams } from "react-router-dom";
  * the browser back button restore the exact prior view instead of an
  * approximation of it.
  */
-export type ViewMode = "list" | "table" | "timeline" | "graph";
+export type ViewMode = "list" | "table" | "graph";
 
 export interface FindState {
   q: string;
@@ -84,7 +84,7 @@ export function parseFindState(sp: URLSearchParams): FindState {
     providers: sp.getAll("provider"),
     minConfidence: conf === null || conf === "" ? null : Number(conf),
     hasEmbedding: emb === null ? null : emb === "true",
-    mode: (["table", "timeline", "graph"] as const).includes(sp.get("mode") as never)
+    mode: (["table", "graph"] as const).includes(sp.get("mode") as never)
       ? (sp.get("mode") as ViewMode)
       : "list",
     page: urlNumber(sp.get("page"), { min: 0, fallback: 0 }),

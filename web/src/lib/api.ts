@@ -330,11 +330,22 @@ export const consoleApi = {
 
 // ── Timeline ─────────────────────────────────────────────────────────────
 
+/**
+ * The Timeline's kind vocabulary is wider than Find's. `Kind` has six values
+ * and drives an exhaustive `Record<Kind, string>` in ResultList.tsx — Find's
+ * search endpoint can never return more than that. `/api/timeline` reads
+ * nine tables (throughline/queries/timeline.py's `_SOURCES`), three of which
+ * — entity, reflection, ingestion — Find never surfaces. Widening `Kind`
+ * itself would force every exhaustive switch/map keyed on it to grow branches
+ * Find can never hit, so the Timeline gets its own, wider union instead.
+ */
+export type TimelineKind = Kind | "entity" | "reflection" | "ingestion";
+
 export interface TimelineCell {
   bucket: string;
   /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */
   provider: string;
-  kind: Kind;
+  kind: TimelineKind;
   n: number;
 }
 

@@ -126,7 +126,10 @@ def day_detail(
     offset: int = 0,
 ) -> list[dict]:
     """One day's events. Clicking a cell is what loads rows."""
-    wanted = [k for k in (kinds or ["conversation"]) if k in _SOURCES]
+    # Default must match aggregate()'s: a cell counted with no kind filter
+    # (all nine kinds) has to expand into a list of the same nine kinds, or
+    # the number you click and the list you get disagree.
+    wanted = [k for k in (kinds or list(_SOURCES)) if k in _SOURCES]
     if not wanted:
         return []
 

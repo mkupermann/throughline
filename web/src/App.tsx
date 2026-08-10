@@ -5,6 +5,7 @@ import { Shell } from "@/components/Shell";
 import { ThemeProvider } from "@/lib/theme";
 import { OverviewPage } from "@/features/overview/OverviewPage";
 import { FindPage } from "@/features/find/FindPage";
+import { TimelinePage } from "@/features/timeline/TimelinePage";
 import { DETAIL_KINDS, DetailPage } from "@/features/detail/DetailPage";
 import { CuratePage } from "@/features/curate/CuratePage";
 import { OperatePage } from "@/features/operate/OperatePage";
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <OverviewPage /> },
       { path: "find", element: <FindPage /> },
+      { path: "timeline", element: <TimelinePage /> },
       { path: "curate", element: <CuratePage /> },
       { path: "operate", element: <OperatePage /> },
       ...Object.entries(DETAIL_KINDS).map(([prefix, kind]) => ({

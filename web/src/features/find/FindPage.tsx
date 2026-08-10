@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { CalendarRange, Download, Info, LayoutList, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
+import { Download, Info, LayoutList, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
 
 import { findApi, type ApiError } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { FacetRail } from "./FacetRail";
 import { ResultList } from "./ResultList";
 import { ResultTable } from "./ResultTable";
-import { ResultTimeline } from "./ResultTimeline";
 import { ResultGraph } from "./ResultGraph";
 import { toApiParams, useFindState } from "./useFindState";
 import { downloadCsv } from "./exportCsv";
@@ -114,14 +113,6 @@ export function FindPage() {
             aria-pressed={state.mode === "table"}
           >
             <Rows3 size={14} aria-hidden /> Table
-          </button>
-          <button
-            type="button"
-            className={state.mode === "timeline" ? "is-on" : ""}
-            onClick={() => update({ mode: "timeline" })}
-            aria-pressed={state.mode === "timeline"}
-          >
-            <CalendarRange size={14} aria-hidden /> Timeline
           </button>
           <button
             type="button"
@@ -234,8 +225,6 @@ export function FindPage() {
                 </div>
               ) : state.mode === "table" ? (
                 <ResultTable items={data.items} />
-              ) : state.mode === "timeline" ? (
-                <ResultTimeline items={data.items} />
               ) : state.mode === "graph" ? (
                 <ResultGraph items={data.items} />
               ) : (

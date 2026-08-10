@@ -1,0 +1,95 @@
+/* Timeline: activity over a date range, in per-provider lanes.
+ *
+ * Lanes use INTENSITY, not categorical hue (design spec §5.2). One sequential
+ * token (--seq-5) supplies the colour; opacity alone carries the count. That
+ * is deliberate — the lane label already names the provider in text, so a
+ * second, categorical encoding of the same fact would be redundant, and
+ * intensity is what a cell actually means (how much happened, not which
+ * provider). Categorical colour by provider stays on the provider chips
+ * (ProviderBar), where a colour dot is the only label at a glance.
+ */
+
+.page-hint {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+}
+
+.timeline-page .muted {
+  color: var(--text-muted);
+}
+
+/* ── Range control ───────────────────────────────────────────────────── */
+.range-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+.range-preset {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.range-preset:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.range-date {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.range-date input[type="date"] {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+}
+
+/* ── Lanes and cells ─────────────────────────────────────────────────── */
+.timeline-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-x: auto;
+}
+.timeline-lane {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.timeline-lane-label {
+  flex: 0 0 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.timeline-cells {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.timeline-cell {
+  flex: 1 0 4px;
+  min-width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  /* One token, opacity varying — that IS the intensity encoding (§5.2). */
+  background: var(--seq-5);
+}

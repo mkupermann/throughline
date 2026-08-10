@@ -118,6 +118,37 @@ def test_day_detail_returns_that_days_events(spread):
     assert all(str(r["ts"])[:10] == "2026-02-01" for r in detail)
 
 
+def test_day_detail_defaults_to_all_kinds_like_aggregate(db_connection):
+    """day_detail's default kind list must match aggregate's default (every
+    kind in _SOURCES), not just ['conversation'] — otherwise the number a
+    cell counts (aggregate, kinds=[]) and the list clicking it shows
+    (day_detail, kinds=[]) disagree."""
+    day = date(2026, 7, 1)
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO conversations "
+            "(session_id, project_path, source_tool, started_at, message_count) "
+            "VALUES (gen_random_uuid(), '/t', 'claude_code', %s, 1)",
+            (datetime(2026, 7, 1, 12, tzinfo=timezone.utc),),
+        )
+        cur.execute(
+            "INSERT INTO skills (name, description, path, created_at) "
+            "VALUES ('t-skill-day', 'd', '/tmp/y/SKILL.md', %s) ON CONFLICT DO NOTHING",
+            (datetime(2026, 7, 1, 13, tzinfo=timezone.utc),),
+        )
+    db_connection.commit()
+
+    agg_kinds = {
+        r["kind"] for r in T.aggregate(db_connection, day, day, "day", kinds=[], providers=[])
+    }
+    detail_kinds = {
+        r["kind"]
+        for r in T.day_detail(db_connection, day, kinds=[], providers=[], limit=100, offset=0)
+    }
+    assert detail_kinds == agg_kinds
+    assert detail_kinds >= {"conversation", "skill"}
+
+
 def test_sources_cover_every_old_calendar_source():
     """The old Calendar (throughline/queries/activity.py's EVENT_SOURCES) read
     eight sources: conversations, memory, skills, projects, prompts, entities,
