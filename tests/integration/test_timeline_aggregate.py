@@ -116,3 +116,86 @@ def test_day_detail_returns_that_days_events(spread):
     )
     assert len(detail) >= 1
     assert all(str(r["ts"])[:10] == "2026-02-01" for r in detail)
+
+
+def test_sources_cover_every_old_calendar_source():
+    """The old Calendar (throughline/queries/activity.py's EVENT_SOURCES) read
+    eight sources: conversations, memory, skills, projects, prompts, entities,
+    reflections, ingestion. Round 1 of this task shipped only five of the
+    eight non-conversation ones — dropping entity/reflection/ingestion
+    reproduced the exact "lost the complete picture" bug this task exists to
+    fix. This set is written out by hand, not derived from `_SOURCES` itself,
+    so a future edit that silently deletes a key still fails this test.
+    """
+    old_calendar_sources = {
+        "conversation", "memory", "skill", "project", "prompt",
+        "entity", "reflection", "ingestion",
+    }
+    assert old_calendar_sources <= set(T._SOURCES)
+
+
+@pytest.fixture()
+def calendar_extras(db_connection):
+    """Rows for the three not-tool-specific sources dropped in round 1:
+    entities, memory_reflections, ingestion_log."""
+    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    with db_connection.cursor() as cur:
+        for i in range(5):
+            ts = base + timedelta(days=i)
+            cur.execute(
+                "INSERT INTO entities (entity_type, name, canonical_name, first_seen) "
+                "VALUES ('person', %s, %s, %s)",
+                (f"person-{i}", f"person-{i}", ts),
+            )
+            cur.execute(
+                "INSERT INTO memory_reflections (reflection_type, created_at) "
+                "VALUES ('merge', %s)",
+                (ts,),
+            )
+            cur.execute(
+                "INSERT INTO ingestion_log (file_path, file_hash, ingested_at) "
+                "VALUES (%s, %s, %s)",
+                (f"/x/{i}.jsonl", f"hash-{i}", ts),
+            )
+    db_connection.commit()
+    return db_connection
+
+
+@pytest.mark.parametrize(
+    "kind,table,ts_col",
+    [
+        ("entity", "entities", "first_seen"),
+        ("reflection", "memory_reflections", "created_at"),
+        ("ingestion", "ingestion_log", "ingested_at"),
+    ],
+)
+def test_calendar_extras_reconcile_and_land_in_not_tool_specific(
+    calendar_extras, kind, table, ts_col
+):
+    """§5.3: entities/reflections/ingestion have no provider dimension. They
+    must reconcile like every other lane, and land in NOT_TOOL_SPECIFIC."""
+    since, until = date(2026, 6, 1), date(2026, 6, 30)
+    agg = T.aggregate(calendar_extras, since, until, "day", kinds=[kind], providers=[])
+    total = sum(r["n"] for r in agg)
+
+    with calendar_extras.cursor() as cur:
+        cur.execute(
+            f"SELECT count(*) FROM {table} "
+            f"WHERE {ts_col} >= %s AND {ts_col} < %s + interval '1 day'",
+            (since, until),
+        )
+        raw = cur.fetchone()[0]
+
+    assert total == raw == 5, f"{kind}: lane total {total} != raw count {raw}"
+    assert all(r["provider"] == T.NOT_TOOL_SPECIFIC for r in agg)
+
+
+def test_calendar_extras_excluded_under_active_provider_filter(calendar_extras):
+    """A provider scope must not sweep in provider-less rows — same rule
+    already enforced for skill/project/prompt, now covering all six
+    not-tool-specific kinds."""
+    agg = T.aggregate(
+        calendar_extras, date(2026, 6, 1), date(2026, 6, 30), "day",
+        kinds=["entity", "reflection", "ingestion"], providers=["hermes"],
+    )
+    assert agg == []

@@ -14,9 +14,11 @@ from datetime import date
 
 from ._exec import rows
 
-#: Skills, projects and prompts are not per-tool. They get their own lane
-#: rather than being forced into a provider or dropped, so every kind stays
-#: reachable even though it has no `source_tool` to key on.
+#: Skills, projects, prompts, entities, reflections and ingestion runs are not
+#: per-tool. They get their own lane rather than being forced into a provider
+#: or dropped, so all eight of the old Calendar's sources
+#: (throughline/queries/activity.py's EVENT_SOURCES) stay reachable — plus
+#: `message`, which the old Calendar did not break out on its own.
 NOT_TOOL_SPECIFIC = "not_tool_specific"
 
 BUCKETS = ("day", "week", "month")
@@ -42,6 +44,12 @@ _SOURCES: dict[str, tuple[str, str, str | None]] = {
     "skill": ("skills s", "COALESCE(s.file_modified, s.last_used, s.created_at)", None),
     "project": ("projects p", "p.created_at", None),
     "prompt": ("prompts pr", "pr.created_at", None),
+    "entity": ("entities e", "e.first_seen", None),
+    "reflection": ("memory_reflections mr", "mr.created_at", None),
+    # File paths could in principle be matched back to an adapter, but that's
+    # a path-parsing heuristic for no real benefit — ingestion is a pipeline
+    # concern, not a per-tool one. Leave it in the not-tool-specific lane.
+    "ingestion": ("ingestion_log il", "il.ingested_at", None),
 }
 
 
@@ -171,4 +179,7 @@ def _detail_columns(kind: str) -> tuple[str, str]:
         "skill": ("s.id", "s.name"),
         "project": ("p.id", "p.name"),
         "prompt": ("pr.id", "COALESCE(pr.name, '(prompt)')"),
+        "entity": ("e.id", "e.name"),
+        "reflection": ("mr.id", "mr.reflection_type"),
+        "ingestion": ("il.id", "il.file_path"),
     }[kind]
