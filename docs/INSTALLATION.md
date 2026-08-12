@@ -124,14 +124,14 @@ python3 scripts/scan_prompts.py
 Expected output:
 
 ```
-Claude Memory DB — Session Ingestion
+Throughline — session ingestion
 ============================================================
-Gefunden: 47 JSONL-Dateien
+Found: 47 JSONL files
 
-Ergebnis:
-  Ingestiert:  47 Sessions (3068 Messages)
-  Übersprungen: 0
-  Fehler:      0
+Result:
+  Ingested: 47 sessions (3068 messages)
+  Skipped:  0
+  Errors:   0
 ```
 
 Your numbers will vary.

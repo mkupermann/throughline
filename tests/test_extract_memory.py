@@ -72,17 +72,17 @@ class TestTranscriptBuilding:
         messages = [("user", long_content)]
         transcript = em.build_transcript(messages)
         assert em.MAX_MESSAGE_CHARS == 8000
-        # 8000 chars + "...[gekürzt]" + role header markup → well under 9 KB.
+        # 8000 chars + "...[truncated]" + role header markup → well under 9 KB.
         assert len(transcript) < 9_000
-        assert "gekürzt" in transcript
+        assert "[truncated]" in transcript
 
     def test_messages_at_or_below_cap_are_kept_intact(self):
-        # 7,500-char assistant message survives without the gekürzt marker.
+        # 7,500-char assistant message survives without the truncation marker.
         # This is the regression: a 6,533-char "Stunning, innovative, perfect"
         # plan used to be cut to 1,000 chars; it must now pass through whole.
         content = "y" * 7_500
         transcript = em.build_transcript([("assistant", content)])
-        assert "gekürzt" not in transcript
+        assert "[truncated]" not in transcript
         assert "y" * 7_500 in transcript
 
     def test_truncates_total_transcript(self):
@@ -124,7 +124,7 @@ class TestExtractorContract:
         p = em.PROMPT_TEMPLATE.lower()
         assert "axis" in p
         assert "tier" in p
-        assert "pro ranked" in p or "pro rankedem item" in p
+        assert "one chunk per ranked item" in p
 
     def test_parse_id_list_handles_basic_input(self):
         assert em._parse_id_list("10, 15, 47") == [10, 15, 47]

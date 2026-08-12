@@ -71,14 +71,14 @@ def parse_skill_md(skill_md_path: Path) -> dict[str, Any]:
                     if key in ("name", "description", "version"):
                         result[key] = val
 
-    # Trigger-Wörter aus Description extrahieren
+    # Pull trigger words out of the description
     desc = result.get("description", "")
     triggers = []
     # Suche nach "Trigger bei/on:" oder "Triggers:"
     trigger_match = re.search(r'[Tt]rigger[s]?\s+(?:bei|on|:)\s*["\']([^"\']+)["\']', desc)
     if trigger_match:
         triggers = [t.strip() for t in trigger_match.group(1).split(",")]
-    # Alternativ: Wörter in Quotes extrahieren
+    # Otherwise: take quoted words
     else:
         triggers = re.findall(r'["\']([a-zA-Z0-9äöüßÄÖÜ][a-zA-Z0-9äöüßÄÖÜ\s\-/]+)["\']', desc)[:10]
 
@@ -87,7 +87,7 @@ def parse_skill_md(skill_md_path: Path) -> dict[str, Any]:
 
 
 def scan_directory(skills_dir: Path, skill_type: str) -> list[dict[str, Any]]:
-    """Scannt ein Skills-Verzeichnis. Gibt Liste von Skill-Dicts zurück."""
+    """Scan one skills directory. Returns a list of skill dicts."""
     skills: list[dict[str, Any]] = []
     if not skills_dir.exists():
         return skills

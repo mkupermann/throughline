@@ -121,6 +121,12 @@ and it never does:
 | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
 | `OPENAI_API_KEY` | read only by the `openai` backend |
 
+These apply to answering, extraction, titling and reflection alike — one probe,
+one order, no per-feature configuration. `THROUGHLINE_MEMORY_LANG` forces the
+language extracted memory and generated titles are written in; left unset they
+follow the session, so German sessions produce German memory and English ones
+English.
+
 `auto` probes Ollama first, so a machine running a local model never makes a
 network call and never had to be configured not to. `throughline doctor` prints
 which model will answer and whether it runs locally; the UI says so on screen

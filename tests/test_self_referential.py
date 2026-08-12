@@ -16,7 +16,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from throughline.self_referential import first_user_text, self_referential_reason
+from throughline.self_referential import (
+    first_user_text,
+    generated_by,
+    self_referential_reason,
+)
 
 
 # The exact openings recorded on disk, including the older wordings. Each entry
@@ -118,3 +122,62 @@ def test_end_to_end_a_generated_transcript_is_dropped():
         _Msg("assistant", "Provider-Sichtbarkeit wiederhergestellt"),
     ]
     assert self_referential_reason(first_user_text(msgs)) == "generate_titles"
+
+
+class TestEveryLivePromptIsRecognised:
+    """A prompt the marker list does not know produces unlabelled self-talk.
+
+    This is the coupling that makes prompt edits dangerous, and it is invisible
+    at the edit site: `scripts/generate_titles.py` has no reason to mention
+    `self_referential.py`, so rewording its prompt silently stops Throughline
+    from recognising its own calls — and the next ingest files them as the
+    user's work. That is precisely how 3,017 machine-generated conversations
+    got into the corpus in the first place.
+
+    So the test walks the live prompts rather than a copied list of strings: a
+    new prompt, or a reworded one, fails here until its marker is added.
+    """
+
+    def _prompts(self):
+        import sys
+        from pathlib import Path
+
+        scripts = str(Path(__file__).resolve().parent.parent / "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+
+        import extract_entities
+        import extract_memory
+        import generate_titles
+        import reflect_memory
+
+        return [
+            ("extract_memory", "PROMPT_TEMPLATE", extract_memory.PROMPT_TEMPLATE),
+            ("extract_entities", "PROMPT_TEMPLATE", extract_entities.PROMPT_TEMPLATE),
+            ("generate_titles", "PROMPT", generate_titles.PROMPT),
+            ("reflect_memory", "DEDUP_PROMPT", reflect_memory.DEDUP_PROMPT),
+            ("reflect_memory", "MERGE_PROMPT", reflect_memory.MERGE_PROMPT),
+            ("reflect_memory", "CONTRA_PROMPT", reflect_memory.CONTRA_PROMPT),
+            ("reflect_memory", "STALE_PROMPT", reflect_memory.STALE_PROMPT),
+            ("reflect_memory", "CONSOLIDATE_PROMPT", reflect_memory.CONSOLIDATE_PROMPT),
+        ]
+
+    def test_each_prompt_is_attributed_to_its_own_script(self):
+        for script, name, prompt in self._prompts():
+            got = generated_by(prompt)
+            assert got == script, (
+                f"{script}.{name} is not recognised as self-generated "
+                f"(got {got!r}). Add its opening line to _MARKERS in "
+                f"throughline/self_referential.py — the list is append-only, "
+                f"so keep the existing entries."
+            )
+
+    def test_the_superseded_german_wordings_still_match(self):
+        """Years of transcripts on disk can only ever be found by their text."""
+        for text, script in (
+            ("Du analysierst eine Entwickler-Session (Claude Code, Codex...", "extract_memory"),
+            ("Du bekommst einen Auszug aus einer Claude Code Session.", "generate_titles"),
+            ("Du bekommst zwei Memory-Chunks aus einer persoenlichen "
+             "Wissensdatenbank.", "reflect_memory"),
+        ):
+            assert generated_by(text) == script, f"lost the historical marker for {script}"

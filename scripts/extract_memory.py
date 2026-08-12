@@ -15,9 +15,12 @@ product whose whole claim is that it does not. Two independent reviews named
 it as the gap between "would use" and "would adopt", which is a fair reading:
 a memory layer you cannot fill without vendor X is vendor X's memory layer.
 
-The prompt is unchanged and still German, which is a real limitation for
-everyone else and is tracked separately — changing it changes what gets
-extracted, and that is not a decision to smuggle into a refactor.
+The prompt itself is English; what language it *answers* in comes from
+``throughline.prompts.output_language``, which follows the transcript unless
+``THROUGHLINE_MEMORY_LANG`` overrides it. Rewording anything here means adding
+the new opening line to ``throughline.self_referential._MARKERS`` — otherwise
+the tool stops recognising its own calls and re-ingests them as the user's
+work. ``tests/test_self_referential.py`` fails if you forget.
 
 By default the transcript is run through ``throughline.pii.redact`` before it
 is sent — set ``THROUGHLINE_REDACT_PII=0`` to disable.
@@ -46,6 +49,7 @@ import psycopg2
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from throughline import llm as _llm  # noqa: E402
+from throughline import prompts as _prompts  # noqa: E402
 from throughline.pii import count_redactions, redact  # noqa: E402
 
 DB_CONFIG: dict[str, Any] = {
@@ -97,7 +101,7 @@ MAX_TRANSCRIPT_CHARS = 80000
 # Cap per-message content shown to the extractor. The previous 1,000-char
 # cap silently beheaded any long assistant message — multi-axis plans,
 # ranked recommendation lists, deep reviews. Anything above ~6 KB used to
-# disappear with a "[gekürzt]" marker. The transcript-level
+# disappear behind a truncation marker. The transcript-level
 # MAX_TRANSCRIPT_CHARS cap (80,000) already protects against runaway
 # prompt growth, so the per-message cap only needs to be wide enough that
 # a single richly-structured assistant turn survives intact.
@@ -116,42 +120,43 @@ SLEEP_BETWEEN_CALLS = 2.0
 # clear-before-reextract is committed even when the LLM call gives up.
 TIMEOUT_PER_CALL = 300
 
-PROMPT_TEMPLATE = """Du analysierst eine Entwickler-Session (Claude Code, Codex, Hermes, Continue, Windsurf, Cline) und extrahierst verwertbare Erkenntnisse als strukturiertes JSON.
+PROMPT_TEMPLATE = """You are reading one developer session from an AI coding assistant (Claude Code, Codex, Cursor, Zed, Vibe, Hermes, Continue, Cline, Windsurf) and extracting what is worth keeping, as structured JSON.
 
-Extrahiere NUR non-obvious Informationen die in FUTURE Sessions nützlich sind:
-- decision: Architekturentscheidungen ("Wir nutzen pgvector statt Milvus weil...")
-- pattern: Wiederverwendbare Muster ("AppleScript ist schneller mit whose-Filter")
-- insight: Überraschende Erkenntnisse ("KeyVault RBAC blockiert App-Zugriff")
-- preference: User-Präferenzen ("User bevorzugt Duzen, keine Füllsätze")
-- contact: Person/Rolle/Kontext ("Jane Doe = Migration Lead, Project Alpha")
-- error_solution: Problem + Lösung ("pg16 + pgvector: selbst kompilieren")
-- project_context: Projektwissen ("Project Alpha Summer Release Q2/2026")
-- workflow: Abläufe ("launchd-Job: install-schedule.sh install")
+Extract ONLY non-obvious things that will be useful in a FUTURE session:
+- decision: an architectural choice and its reason ("pgvector over Milvus, because...")
+- pattern: a reusable technique ("AppleScript is faster with a whose-filter")
+- insight: something surprising that was learned ("KeyVault RBAC blocks app access")
+- preference: how this person wants to work ("prefers terse answers, no filler")
+- contact: a person, their role, their context ("Jane Doe = migration lead, Project Alpha")
+- error_solution: a problem and what actually fixed it ("pg16 + pgvector: compile it yourself")
+- project_context: durable knowledge about a project ("Project Alpha ships Q2/2026")
+- workflow: how something is run ("launchd job: install-schedule.sh install")
 
-WICHTIG — Strukturierte Inhalte erhalten, NICHT zusammenfassen:
-Wenn die Session strukturierte Pläne, geordnete Empfehlungslisten oder Mehr-Achsen-
-Frameworks enthält (z.B. "Axis A/B/C/D", "Tier 1/2/3", "Free wins / Tier 1 / Tier 2",
-"PR 1/8, PR 2/8, …", numerierte Roadmaps, Review-Berichte mit Scores), dann
-PRO RANKEDEM ITEM bzw. PRO ACHSE EIN EIGENER CHUNK — nicht alles in eine einzige
-"insight"-Zeile zusammenfassen. Erhalte: die ursprüngliche Reihenfolge, ggf. Zeit-
-oder Aufwandsschätzungen ("~2 hr"), die Begründung in 1-2 Sätzen, und tagge
-einheitlich mit dem Framework-Namen (z.B. tags=["throughline-review","axis-A",
-"stunning"]) damit verwandte Chunks später wieder zusammengeführt werden können.
+IMPORTANT — preserve structure, do not summarise it away:
+If the session contains a structured plan, a ranked list of recommendations, or a
+multi-axis framework (for example "Axis A/B/C/D", "Tier 1/2/3", "PR 1/8, PR 2/8, ...",
+a numbered roadmap, a review with scores), then emit ONE CHUNK PER RANKED ITEM or
+PER AXIS — do not collapse the whole thing into a single "insight" line. Keep the
+original order, keep any time or effort estimate ("~2 hr"), keep the reasoning in
+one or two sentences, and tag every chunk of the same framework alike (for example
+tags=["throughline-review","axis-A","stunning"]) so they can be reassembled later.
 
-Output: REINES JSON-Array (keine Markdown-Fences, kein Erklärtext), max {MAX_CHUNKS} Chunks.
+{LANG}
+
+Output: a PURE JSON array — no markdown fences, no explanation — with at most {MAX_CHUNKS} chunks.
 
 Format:
 [
-  {"content": "...", "category": "decision", "tags": ["postgresql", "pgvector"], "confidence": 0.9, "project": "claude-memory-db"}
+  {"content": "...", "category": "decision", "tags": ["postgresql", "pgvector"], "confidence": 0.9, "project": "throughline"}
 ]
 
-Wenn nichts Verwertbares: []
+If there is nothing worth keeping: []
 
 Transcript:
 
 {TRANSCRIPT}
 
-Gib NUR das JSON-Array zurück, nichts anderes."""
+Return ONLY the JSON array, nothing else."""
 
 
 def build_transcript(messages: list[tuple[str, str | None]]) -> str:
@@ -162,7 +167,7 @@ def build_transcript(messages: list[tuple[str, str | None]]) -> str:
         if role == "tool_result":
             continue
         if len(content) > MAX_MESSAGE_CHARS:
-            content = content[:MAX_MESSAGE_CHARS] + "...[gekürzt]"
+            content = content[:MAX_MESSAGE_CHARS] + "...[truncated]"
         parts.append(f"[{role.upper()}]\n{content}\n")
     transcript = "\n".join(parts)
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
@@ -243,6 +248,7 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     prompt = (
         PROMPT_TEMPLATE
         .replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
+        .replace("{LANG}", _prompts.output_language())
         .replace("{TRANSCRIPT}", transcript)
     )
     response = call_model(prompt)
@@ -434,7 +440,7 @@ def main() -> None:
             print(f"  #{cid} ({proj or '–'}, {n} Msgs)")
         remaining = pending - len(convs)
         print(f"\nDry run — nichts extrahiert, nichts geschrieben. "
-              f"{remaining} würden danach offen bleiben.")
+              f"{remaining} would still be pending afterwards.")
         cursor.close()
         conn.close()
         return

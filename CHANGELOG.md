@@ -28,6 +28,21 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Added
 
+- **The prompts are in English.** All eight — extraction, entity extraction,
+  titling, and the five reflection prompts — were written in German, which made
+  them unreadable to most people the project is published for and silently
+  forced German output on every user regardless of the language they work in.
+  Output language now follows the session by default, so a German corpus stays
+  German and an English one comes out English; `THROUGHLINE_MEMORY_LANG` forces
+  one language.
+
+  Rewording a prompt has a non-obvious consequence: Throughline recognises its
+  own model calls by their opening line, so a changed prompt stops it noticing
+  its own transcripts and the next ingest files them as your work. The German
+  openings are therefore kept alongside the English ones — the marker list is
+  append-only — and a new test walks every live prompt and fails if any is not
+  attributed to the script that owns it.
+
 - **Extraction, titling and reflection now use any model backend.** All three
   shelled out to the `claude` CLI unconditionally, which made the pipeline that
   fills memory depend on one vendor — and made those jobs impossible inside the

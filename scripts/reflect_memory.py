@@ -34,6 +34,7 @@ import os
 import re
 
 from throughline import llm as _llm
+from throughline import prompts as _prompts
 from throughline.self_referential import agent_call_cwd
 import sys
 import time
@@ -175,30 +176,33 @@ def log_reflection(cur, reflection_type: str, affected: list[int],
 
 # ---- MODE: dedup ------------------------------------------------------------
 
-DEDUP_PROMPT = """Du bekommst zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank.
+DEDUP_PROMPT = """Two memory chunks from one person's knowledge base.
 
-Chunk A (ID {id_a}, erstellt {date_a}):
+Chunk A (ID {id_a}, created {date_a}):
 {content_a}
 
-Chunk B (ID {id_b}, erstellt {date_b}):
+Chunk B (ID {id_b}, created {date_b}):
 {content_b}
 
-Beurteile: Sagen diese Chunks im Kern dasselbe (nahe Duplikate oder Umformulierungen),
-oder sind sie komplementaer (ergaenzen sich, unterschiedlicher Kontext)?
+Do these say the same thing at heart — near-duplicates or rewordings — or are
+they complementary, covering different context?
 
-Antworte REINES JSON ohne Markdown-Fences:
-{{"duplicate": true|false, "confidence": 0.0-1.0, "reasoning": "kurz, 1-2 Saetze"}}
+Answer as PURE JSON, no markdown fences:
+{{"duplicate": true|false, "confidence": 0.0-1.0, "reasoning": "one or two sentences"}}
 """
 
-MERGE_PROMPT = """Du bekommst zwei Memory-Chunks die denselben Sachverhalt beschreiben.
-Formuliere einen einzigen konsolidierten Chunk der beide Inhalte verbindet,
-kompakt und verlustarm. Behalte wichtige Details (Namen, Zahlen, Projekte).
+MERGE_PROMPT = """Two memory chunks describing the same thing.
+
+Write a single consolidated chunk carrying both, compact and lossless. Keep the
+details that matter — names, numbers, projects.
 
 Chunk A: {content_a}
 Chunk B: {content_b}
 
-Antworte mit REINEM JSON:
-{{"content": "Merged content string"}}
+{LANG}
+
+Answer as PURE JSON:
+{{"content": "merged content string"}}
 """
 
 
@@ -263,7 +267,9 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
                 continue
 
             # Merge
-            merge_prompt = MERGE_PROMPT.format(content_a=a["content"], content_b=b["content"])
+            merge_prompt = MERGE_PROMPT.format(
+            content_a=a["content"], content_b=b["content"], LANG=_prompts.output_language()
+        )
             merge_resp = call_model(merge_prompt)
             merge_obj = parse_json_object(merge_resp)
             merged_content = (merge_obj or {}).get("content") if merge_obj else None
@@ -313,24 +319,24 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
 
 # ---- MODE: contradictions ---------------------------------------------------
 
-CONTRA_PROMPT = """Zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank
-({category}, Projekt {project}):
+CONTRA_PROMPT = """Two memory chunks from one person's knowledge base
+({category}, project {project}):
 
-Chunk A (ID {id_a}, erstellt {date_a}):
+Chunk A (ID {id_a}, created {date_a}):
 {content_a}
 
-Chunk B (ID {id_b}, erstellt {date_b}):
+Chunk B (ID {id_b}, created {date_b}):
 {content_b}
 
-Widersprechen sich diese Aussagen sachlich (z.B. alte vs. neue Entscheidung,
-unterschiedliche Praeferenz, gegensaetzliche Muster)? Oder sind sie einfach
-verschieden/komplementaer?
+Do these contradict each other on the facts — an old decision against a newer
+one, opposite preferences, conflicting patterns? Or are they merely different,
+each true in its own context?
 
-Antworte REINES JSON:
+Answer as PURE JSON:
 {{"contradicts": true|false,
-  "newer_id": <ID des neueren/gueltigen Chunks oder null>,
+  "newer_id": <id of the newer, still-valid chunk, or null>,
   "confidence": 0.0-1.0,
-  "reasoning": "kurze Begruendung"}}
+  "reasoning": "one or two sentences"}}
 """
 
 
@@ -424,22 +430,22 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
 
 # ---- MODE: stale ------------------------------------------------------------
 
-STALE_PROMPT = """Ein Memory-Chunk aus einer persoenlichen Wissensdatenbank:
+STALE_PROMPT = """One memory chunk from a person's knowledge base:
 
 "{content}"
-(Erstellt am {created_at}, heute ist {today})
+(created {created_at}; today is {today})
 
-Ist diese Information zeitlich begrenzt (verfallsdatiert)?
-Beispiele fuer zeitlich begrenzt: konkrete Meetings, Sprint-Ziele, aktuelle Zustaende.
-Beispiele fuer nicht zeitlich begrenzt: Architekturentscheidungen, Personen, dauerhafte Praeferenzen.
+Does this information have a shelf life?
+Things that do: a specific meeting, a sprint goal, a current state of affairs.
+Things that do not: architectural decisions, people, lasting preferences.
 
-Falls zeitlich begrenzt: wann laeuft die Info voraussichtlich ab?
+If it does, when is it likely to stop being true?
 
-Antworte REINES JSON:
+Answer as PURE JSON:
 {{"stale": true|false,
-  "expires_at": "YYYY-MM-DD" oder null,
+  "expires_at": "YYYY-MM-DD" or null,
   "confidence": 0.0-1.0,
-  "reasoning": "kurz"}}
+  "reasoning": "one sentence"}}
 """
 
 
@@ -519,18 +525,21 @@ def mode_stale(cur, conn, limit: int, dry_run: bool) -> dict:
 
 # ---- MODE: consolidate ------------------------------------------------------
 
-CONSOLIDATE_PROMPT = """Du bekommst mehrere Memory-Chunks zum gleichen Thema.
-Erstelle einen uebergeordneten Super-Chunk, der die Kernaussagen aller
-Chunks in kondensierter Form zusammenfasst. Der Super-Chunk soll als
-stabile Referenz dienen (sichtbar verwandt, aber nicht redundant zu Original).
+CONSOLIDATE_PROMPT = """Several memory chunks about the same subject.
+
+Write one chunk above them that carries what they all say, condensed. It should
+work as a stable reference — recognisably related to the originals without
+simply repeating them.
 
 Chunks:
 {items}
 
-Antworte REINES JSON:
-{{"content": "Konsolidierter Inhalt",
+{LANG}
+
+Answer as PURE JSON:
+{{"content": "consolidated content",
   "tags": ["tag1", "tag2"],
-  "reasoning": "kurze Begruendung warum zusammengefasst"}}
+  "reasoning": "why these belong together"}}
 """
 
 
@@ -583,7 +592,7 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
         items_text = "\n\n".join(
             f"[ID {i['id']}] {i['content']}" for i in items[:8]  # cap per cluster
         )
-        prompt = CONSOLIDATE_PROMPT.format(items=items_text)
+        prompt = CONSOLIDATE_PROMPT.format(items=items_text, LANG=_prompts.output_language())
         resp = call_model(prompt)
         obj = parse_json_object(resp)
         if not obj or "content" not in obj:

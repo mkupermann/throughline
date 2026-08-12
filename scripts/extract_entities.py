@@ -89,21 +89,24 @@ ALLOWED_ENTITY_TYPES = {"person", "project", "technology", "decision", "concept"
 ALLOWED_REL_TYPES = {"works_on", "uses", "decided", "blocks", "relates_to", "member_of",
                       "reports_to", "depends_on", "replaces"}
 
-PROMPT_TEMPLATE = """Du analysierst ein Session-Transcript und extrahierst strukturierte Entitäten + Beziehungen als JSON.
+PROMPT_TEMPLATE = """You are reading a session transcript and extracting the entities and relationships in it as JSON.
 
-Erlaubte Entity-Types: person, project, technology, decision, concept, organization
-Erlaubte Relation-Types: works_on, uses, decided, blocks, relates_to, member_of, reports_to, depends_on, replaces
+Allowed entity types: person, project, technology, decision, concept, organization
+Allowed relation types: works_on, uses, decided, blocks, relates_to, member_of, reports_to, depends_on, replaces
 
-Regeln:
-- Nur konkrete, identifizierbare Entitäten (keine generischen Begriffe wie "user", "code", "file")
-- Personen: echte Namen (nicht "Assistant", "User")
-- Projekte: konkrete benannte Projekte (z.B. "Project Alpha 2026", "claude-memory")
-- Technologien: konkrete Tools/Libs/Versionen (z.B. "PostgreSQL 16", "pgvector", "Streamlit")
-- Decisions: konkret getroffene Entscheidungen
-- Relationships: nur wenn klar aus Transcript ableitbar
-- confidence: 0.6-1.0 (höher bei eindeutigen Fakten)
+Rules:
+- Only concrete, identifiable entities — never generic words like "user", "code", "file"
+- People: real names, never "Assistant" or "User"
+- Projects: specific named projects ("Project Alpha 2026", "throughline")
+- Technologies: specific tools, libraries, versions ("PostgreSQL 16", "pgvector", "FastAPI")
+- Decisions: choices actually made, not options discussed
+- Relationships: only where the transcript makes them clear
+- confidence: 0.6-1.0, higher for unambiguous facts
 
-Output: REINES JSON (keine Markdown-Fences, kein Erklärtext):
+Names stay in the language the transcript uses them in — a project is not
+translated because the surrounding conversation changed language.
+
+Output: PURE JSON, no markdown fences, no explanation:
 {
   "entities": [
     {"type": "person", "name": "Jane Doe", "attributes": {"role": "Migration Lead", "organization": "Acme Corp"}},
@@ -116,17 +119,17 @@ Output: REINES JSON (keine Markdown-Fences, kein Erklärtext):
   ]
 }
 
-Falls nichts Verwertbares: {"entities": [], "relationships": []}
+If there is nothing worth extracting: {"entities": [], "relationships": []}
 
 Transcript:
 
 {TRANSCRIPT}
 
-Gib NUR das JSON-Objekt zurück, nichts anderes."""
+Return ONLY the JSON object, nothing else."""
 
 
 def canonicalize(name: str) -> str:
-    """Normalisiere Namen: lowercase, ohne Akzente, trim."""
+    """Normalise a name: lowercase, accents stripped, trimmed."""
     if not name:
         return ""
     # Unicode-Normalisierung + Akzente entfernen
@@ -154,7 +157,7 @@ def build_transcript(messages: list) -> str:
         if role == "tool_result":
             continue
         if len(content) > MAX_MESSAGE_CHARS:
-            content = content[:MAX_MESSAGE_CHARS] + "...[gekürzt]"
+            content = content[:MAX_MESSAGE_CHARS] + "...[truncated]"
         parts.append(f"[{role.upper()}]\n{content}\n")
     transcript = "\n".join(parts)
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
@@ -163,7 +166,7 @@ def build_transcript(messages: list) -> str:
 
 
 def build_context_snippet(messages: list, entity_name: str, max_len: int = 300) -> str:
-    """Baue einen kurzen Kontext-Auszug wo die Entity erwähnt wurde."""
+    """Build a short context excerpt around where the entity was mentioned."""
     if not entity_name:
         return ""
     pattern = re.compile(re.escape(entity_name), re.IGNORECASE)
@@ -232,7 +235,7 @@ def call_claude(prompt: str) -> str:
 
 def upsert_entity(cursor, entity_type: str, name: str, attributes: dict,
                    project_name: str | None, confidence: float) -> int | None:
-    """Insert or update entity. Gibt entity_id zurück."""
+    """Insert or update an entity. Returns the entity_id."""
     canonical = canonicalize(name)
     if not canonical or entity_type not in ALLOWED_ENTITY_TYPES:
         return None
@@ -261,7 +264,7 @@ def insert_relationship(cursor, from_id: int, to_id: int, relation_type: str,
         return False
     if from_id == to_id:
         return False
-    # Deduplizieren: gleiche Relation nicht doppelt pro Source einfügen
+    # Dedupe: never insert the same relation twice for one source
     cursor.execute("""
         SELECT id FROM relationships
         WHERE from_entity = %s AND to_entity = %s AND relation_type = %s
@@ -319,7 +322,7 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
     entities = parsed.get("entities", []) or []
     relationships = parsed.get("relationships", []) or []
 
-    # Entity-Name -> ID mapping (für Relationship-Resolution)
+    # Entity name -> id, for resolving relationships
     name_to_id: dict[str, int] = {}
     entities_inserted = 0
 
@@ -457,7 +460,7 @@ def main() -> None:
             else:
                 kept.append(row)
         if skipped:
-            print(f"  {skipped} selbstreferenzielle Transcripts übersprungen "
+            print(f"  skipped {skipped} self-referential transcript(s) "
                   f"(Throughlines eigene claude -p Aufrufe)")
         convs = kept
 

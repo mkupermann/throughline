@@ -198,7 +198,7 @@ Every adapter has its own test module built on a sample of that tool's real on-d
 ### Storage and retrieval
 
 - **PostgreSQL 16 + pgvector**: conversations, messages, and extracted memory chunks in a normalised schema (`sql/schema.sql`), with vector similarity search over embeddings and trigram search over content.
-- **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. It goes through the same swappable backend as everything else — as do title generation and the reflection engine, so a machine running Ollama fills its memory without a network call and without an API key.
+- **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. It goes through the same swappable backend as everything else — as do title generation and the reflection engine, so a machine running Ollama fills its memory without a network call and without an API key. Memory comes back in the language the session was held in, so a bilingual corpus stays bilingual instead of being translated one conversation at a time; `THROUGHLINE_MEMORY_LANG` forces a single language when that is what you want.
 - **MCP server**: `memory_mcp` exposes the memory database to any MCP-capable client over stdio, so every supported CLI can query the shared memory at runtime.
 - **Bring your own model.** Embeddings and answers both run through whatever backend you point them at, chosen by probe with local first — a machine running Ollama never reaches the network and never had to be configured not to. Nothing here is tied to one vendor:
 
@@ -209,6 +209,7 @@ Every adapter has its own test module built on a sample of that tool's real on-d
   | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
   | `OPENAI_API_KEY` | only read by the `openai` backend |
   | `THROUGHLINE_EXTRACT_MODEL` · `THROUGHLINE_TITLE_MODEL` · `THROUGHLINE_REFLECT_MODEL` | per-job model override, when one job wants a bigger model than the rest |
+  | `THROUGHLINE_MEMORY_LANG` | force the language memory is written in; by default it follows the session |
 
   `throughline doctor` reports which model will answer and whether it runs locally, and every answer in the UI says so on screen.
 

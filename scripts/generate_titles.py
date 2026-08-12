@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generiert prägnante Titel für alle Conversations die noch keinen haben.
-Nutzt Claude CLI (kein separater API-Key nötig).
+Writes a short title for every conversation that has none.
+Uses whatever model `throughline.llm` finds — local first.
 """
 from _bootstrap import use_venv  # noqa: E402
 use_venv()
@@ -10,6 +10,7 @@ use_venv()
 import os
 
 from throughline import llm as _llm
+from throughline import prompts as _prompts
 from throughline.self_referential import agent_call_cwd
 import sys
 import time
@@ -57,29 +58,31 @@ MAX_PREVIEW_CHARS = 4000
 SLEEP = 1.5
 TIMEOUT = 60
 
-PROMPT = """Du bekommst einen Auszug aus einer Claude Code Session. Generiere einen prägnanten deutschen Titel (max 60 Zeichen) der den INHALT zusammenfasst.
+PROMPT = """Below is an excerpt from a session with an AI coding assistant. Write one short title (60 characters maximum) that says what the session was ABOUT.
 
-Regeln:
-- Kurz und konkret — kein "Hilfe bei..." oder "Session über..."
-- Inhaltsspezifisch: Technologie/Thema nennen
-- KEINE Anführungszeichen, KEINE Punkte am Ende
-- Format: Nomen-Phrase oder Aktion ("PostgreSQL Memory-DB aufsetzen", "Project Alpha Kickoff-Protokoll")
+Rules:
+- Short and specific — never "Help with..." or "Session about..."
+- Name the technology or the subject
+- NO quotation marks, NO trailing full stop
+- Shape: a noun phrase or an action ("PostgreSQL memory DB setup", "Project Alpha kickoff notes")
 
-Beispiele guter Titel:
-- "Claude Memory: Schema + Ingestion"
-- "Mail Drafter Skill + launchd Scheduler"
-- "Project Alpha E2E-Testing Strategie"
-- "Diary Automation for Notes App"
+Good titles:
+- "Throughline: schema + ingestion"
+- "Mail drafter skill + launchd scheduler"
+- "Project Alpha E2E testing strategy"
+- "Diary automation for Notes app"
 
-Session-Auszug:
+{LANG}
+
+Session excerpt:
 
 {TRANSCRIPT}
 
-Gib NUR den Titel zurück, sonst nichts. Keine Anführungszeichen, keine Erklärung."""
+Return ONLY the title, nothing else. No quotation marks, no explanation."""
 
 
 def build_preview(messages: list[tuple[str, str | None]]) -> str:
-    """Baut kurzen Transcript-Preview für Titel-Generation."""
+    """Build the short transcript preview a title is written from."""
     parts = []
     total = 0
     for role, content in messages:
@@ -166,7 +169,11 @@ def main() -> None:
         if len(preview) < 100:
             continue
 
-        prompt = PROMPT.replace("{TRANSCRIPT}", preview)
+        prompt = (
+            PROMPT
+            .replace("{LANG}", _prompts.output_language())
+            .replace("{TRANSCRIPT}", preview)
+        )
         title = call_model(prompt)
 
         if not title:

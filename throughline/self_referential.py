@@ -119,6 +119,18 @@ _MARKERS: tuple[tuple[str, str], ...] = (
     # two-message conversations into the corpus they exist to measure.
     ("below is one record from someone's working history", "retrieval_eval"),
     ("you are answering a factual question about the throughline", "run_eval"),
+    # English rewrites of the four prompts above, from 2026-08-12. The German
+    # openings are kept — they are the only thing that identifies the years of
+    # transcripts already on disk, and a marker list is append-only for exactly
+    # this reason. Deleting a superseded wording does not tidy the list; it
+    # un-labels history.
+    ("you are reading one developer session from an ai coding assistant", "extract_memory"),
+    ("you are reading a session transcript and extracting the entities", "extract_entities"),
+    ("below is an excerpt from a session with an ai coding assistant", "generate_titles"),
+    ("two memory chunks from one person's knowledge base", "reflect_memory"),
+    ("two memory chunks describing the same thing", "reflect_memory"),
+    ("one memory chunk from a person's knowledge base", "reflect_memory"),
+    ("several memory chunks about the same subject", "reflect_memory"),
 )
 
 #: Marker an assistant puts at the head of a prompt it sends to another

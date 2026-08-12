@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Context Pre-Loader für Claude Code SessionStart-Hook.
+Context pre-loader for the Claude Code SessionStart hook.
 
 Schreibt relevante Memory-Chunks als Markdown nach
     $CLAUDE_PROJECT_DIR/.claude/MEMORY_CONTEXT.md
@@ -39,7 +39,7 @@ DB_CONFIG: dict[str, Any] = {
     "port": int(os.environ.get("PGPORT", "5432")),
 }
 
-# Kategorien die ins CLAUDE.md-Injection gehören
+# Categories worth injecting into CLAUDE.md
 RELEVANT_CATEGORIES = ("decision", "preference", "pattern", "error_solution", "project_context")
 TOP_N = 20
 
@@ -77,7 +77,7 @@ def get_project_name(project_dir: Path) -> str:
 
 def fetch_relevant(cursor: Any, project_name: str) -> list[dict[str, Any]]:
     """
-    Holt primär Chunks mit passendem project_name, fällt zurück auf globale Chunks.
+    Prefers chunks whose project_name matches; falls back to global chunks.
     """
     like = f"%{project_name}%"
     cursor.execute(f"""

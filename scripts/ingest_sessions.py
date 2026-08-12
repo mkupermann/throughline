@@ -97,7 +97,7 @@ def map_role(entry: dict[str, Any]) -> str:
     role = msg.get("role", "")
 
     if entry_type == "user" or role == "user":
-        # Prüfe ob es ein tool_result ist
+        # Is this a tool_result?
         content = msg.get("content", "")
         if isinstance(content, list):
             for block in content:
@@ -138,7 +138,7 @@ def _first_cwd(entries: list[dict[str, Any]]) -> str | None:
 
 
 def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
-    """Ingestiert eine einzelne JSONL-Datei. Gibt die Anzahl eingefügter Messages zurück.
+    """Ingest one JSONL file. Returns how many messages were inserted.
 
     The ``project_path`` arg is now a *fallback*: if any JSONL entry
     carries a real ``cwd`` we prefer that. The fallback is still useful
@@ -159,7 +159,7 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
     if not entries:
         return 0
 
-    # Filtere auf Message-Einträge (haben 'message' key)
+    # Keep only message entries (they carry a 'message' key)
     msg_entries = [e for e in entries if "message" in e and isinstance(e.get("message"), dict)]
     if not msg_entries:
         return 0
@@ -197,7 +197,7 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
     # cost-incurring input read; "token_count_out" is just output_tokens.
     conv_tokens_in, conv_tokens_out = _sum_usage(msg_entries)
 
-    # Conversation einfügen
+    # Insert the conversation
     try:
         cursor.execute("""
             INSERT INTO conversations (session_id, project_path, model, entrypoint, git_branch,
@@ -219,7 +219,7 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
         print(f"  Fehler bei Conversation {session_id}: {e}")
         return 0
 
-    # Messages einfügen
+    # Insert the messages
     msg_count = 0
     for entry in msg_entries:
         msg = entry.get("message", {})
@@ -355,7 +355,7 @@ def main() -> None:
     print(f"\n{'=' * 60}")
     print(f"Ergebnis:")
     print(f"  Ingestiert:  {ingested} Sessions ({total_messages} Messages)")
-    print(f"  Übersprungen: {skipped}")
+    print(f"  Skipped: {skipped}")
     print(f"  Fehler:      {errors}")
     print(f"{'=' * 60}")
 

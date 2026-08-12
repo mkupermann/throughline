@@ -7,7 +7,7 @@ Commands:
   path <from> <to>            Shortest path zwischen zwei Entities
   timeline <entity>           Chronologischer Verlauf einer Entity
   top-entities [--type TYPE]  Top nach mention_count
-  contradictions              Findet widersprüchliche Beziehungen
+  contradictions              Find relationships that disagree
 """
 from _bootstrap import use_venv  # noqa: E402
 use_venv()
@@ -56,7 +56,7 @@ def canonicalize(name: str) -> str:
 
 
 def resolve_entity(cursor: Any, query: str) -> list[dict[str, Any]]:
-    """Sucht Entity nach exaktem canonical oder LIKE-Fallback. Gibt list[(id, name, type, project)] zurück."""
+    """Look an entity up by exact canonical name, then by LIKE. Returns list[(id, name, type, project)]."""
     canon = canonicalize(query)
     cursor.execute("""
         SELECT id, name, entity_type, project_name, mention_count
@@ -81,7 +81,7 @@ def resolve_entity(cursor: Any, query: str) -> list[dict[str, Any]]:
 def cmd_neighbors(cursor: Any, entity_query: str) -> None:
     rows = resolve_entity(cursor, entity_query)
     if not rows:
-        print(f"Keine Entity gefunden für: {entity_query}")
+        print(f"No entity found for: {entity_query}")
         return
     if len(rows) > 1 and not all(r[0] == rows[0][0] for r in rows):
         print(f"Mehrere Treffer — nutze ersten ({rows[0][1]}):")
@@ -171,7 +171,7 @@ def cmd_path(cursor: Any, from_query: str, to_query: str) -> None:
     cursor.execute("SELECT id, name, entity_type FROM entities WHERE id = ANY(%s)", (path_ids,))
     id_to_meta = {r[0]: (r[1], r[2]) for r in cursor.fetchall()}
 
-    print(f"  Länge: {depth} Hops")
+    print(f"  length: {depth} hops")
     print()
     for i, eid in enumerate(path_ids):
         name, etype = id_to_meta.get(eid, ("?", "?"))
@@ -183,7 +183,7 @@ def cmd_path(cursor: Any, from_query: str, to_query: str) -> None:
 def cmd_timeline(cursor: Any, entity_query: str) -> None:
     rows = resolve_entity(cursor, entity_query)
     if not rows:
-        print(f"Keine Entity gefunden für: {entity_query}")
+        print(f"No entity found for: {entity_query}")
         return
     entity_id = rows[0][0]
     entity_name = rows[0][1]
@@ -208,7 +208,7 @@ def cmd_timeline(cursor: Any, entity_query: str) -> None:
             print(f"    »{snippet_short}«")
         print()
 
-    # Relationship-Änderungen
+    # Relationship changes
     cursor.execute("""
         SELECT r.created_at, r.relation_type, e_from.name, e_to.name, r.source_id
         FROM relationships r
@@ -249,8 +249,8 @@ def cmd_top(cursor: Any, entity_type: str | None, limit: int = 20) -> None:
 
 
 def cmd_contradictions(cursor: Any) -> None:
-    """Findet Relationships mit gleichem from+to+type aber widersprüchlichen Attributes oder unterschiedlichen Confidence-Werten."""
-    print("\n── Widersprüchliche Beziehungen ──\n")
+    """Relationships sharing from+to+type but disagreeing on attributes or confidence."""
+    print("\n── Conflicting relationships ──\n")
 
     # 1) Gleiche from+to aber unterschiedliche Relation-Types
     cursor.execute("""
@@ -294,7 +294,7 @@ def cmd_contradictions(cursor: Any) -> None:
                 print(f"      attrs: {a}")
         print()
 
-    # 3) Entities mit mehreren widersprüchlichen Attributes über Mentions
+    # 3) Entities whose mentions disagree about their attributes
     cursor.execute("""
         SELECT name, entity_type,
                jsonb_object_keys(attributes) AS attr_key,
@@ -304,8 +304,8 @@ def cmd_contradictions(cursor: Any) -> None:
         ORDER BY mentions DESC
         LIMIT 20
     """)
-    # nicht extrem aussagekräftig, skip falls leer
-    print("  (Siehe oben für widersprüchliche Relationships.)")
+    # low signal; skip when empty
+    print("  (See the conflicting relationships above.)")
 
 
 def main() -> None:

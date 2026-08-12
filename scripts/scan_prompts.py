@@ -41,7 +41,8 @@ def _connect() -> "psycopg2.extensions.connection":
         )
         raise SystemExit(2) from e
 
-# Typische Pfade für CLAUDE.md (schnelle Scans, KEIN Google Drive rglob)
+# Where CLAUDE.md usually lives — kept narrow so the scan stays fast and
+# never rglobs a synced cloud folder
 HOME = Path.home()
 SEARCH_PATHS = [
     HOME,                                                # ~/CLAUDE.md (global user)
@@ -62,7 +63,7 @@ def find_claude_mds() -> list[Path]:
         direct = root / "CLAUDE.md"
         if direct.is_file():
             found.add(direct)
-        # find mit prune für node_modules etc. + Tiefe-Limit
+        # find, pruning node_modules and friends, with a depth limit
         try:
             result = subprocess.run(
                 [

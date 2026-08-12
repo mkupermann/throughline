@@ -2,11 +2,11 @@
 """
 Embedding generator for the Throughline database.
 
-Unterstützt zwei Backends:
+Two backends are supported:
   --backend openai   -> OpenAI text-embedding-3-small (1536 dim)   [OPENAI_API_KEY]
   --backend ollama   -> Ollama nomic-embed-text (768 dim)          [lokal]
 
-Generiert Embeddings für:
+Generates embeddings for:
   - ALLE memory_chunks
   - Messages mit role IN ('user','assistant') UND length(content) >= 100
 
@@ -15,7 +15,7 @@ Schreibt in Tabelle `embeddings` mit separaten Spalten:
   embedding_768  (vector(768))    -> Ollama
 
 Upsert-Strategie: Zeilen-Key ist (source_type, source_id, model).
-Skippt automatisch bereits embeddete Einträge.
+Rows that already have an embedding for the model are skipped.
 
 Usage:
     python3 generate_embeddings.py --backend openai
@@ -211,7 +211,7 @@ def pick_backend(choice: str) -> Backend:
             )
             sys.exit(2)
     if choice == "auto":
-        print("Backend: ollama (OPENAI_API_KEY fehlt, Ollama verfügbar)")
+        print("Backend: ollama (no OPENAI_API_KEY, Ollama reachable)")
     return OllamaBackend()
 
 
@@ -219,7 +219,7 @@ def pick_backend(choice: str) -> Backend:
 def fetch_pending(cursor: Any, backend: Backend, limit: int | None) -> list[tuple[str, int, str | None]]:
     """
     Liefert (source_type, source_id, content) aller Zeilen,
-    für die noch KEIN Embedding mit dem gegebenen Modell existiert.
+    that have NO embedding for the given model yet.
     """
     lim_sql = f"LIMIT {int(limit)}" if limit else ""
     cursor.execute(f"""
@@ -263,7 +263,7 @@ def upsert_embedding(cursor: Any, backend: Backend, source_type: str, source_id:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--backend", choices=["openai", "ollama", "auto"], default="auto")
-    ap.add_argument("--limit", type=int, default=None, help="nur N Einträge verarbeiten (Test)")
+    ap.add_argument("--limit", type=int, default=None, help="process only N rows (for a quick check)")
     ap.add_argument("--only", choices=["memory_chunk", "message", "both"], default="both")
     args = ap.parse_args()
 
@@ -278,7 +278,7 @@ def main() -> None:
     if args.only != "both":
         pending = [p for p in pending if p[0] == args.only]
     total = len(pending)
-    print(f"Zu verarbeiten: {total} Einträge\n")
+    print(f"To process: {total} rows\n")
     if total == 0:
         print("Nichts zu tun.")
         return
