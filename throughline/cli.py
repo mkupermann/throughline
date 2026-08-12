@@ -158,8 +158,15 @@ def cmd_scan_prompts(args: argparse.Namespace) -> int:
 
 
 def cmd_extract_memory(args: argparse.Namespace) -> int:
-    """Extract structured memory chunks via Claude CLI."""
-    return _call_script_main("extract_memory")
+    """Extract structured memory chunks (local Ollama or Claude CLI)."""
+    passthrough: list[str] = []
+    if args.backend:
+        passthrough += ["--backend", args.backend]
+    if args.ollama_model:
+        passthrough += ["--ollama-model", args.ollama_model]
+    if args.force_conversations:
+        passthrough += ["--force-conversations", args.force_conversations]
+    return _call_script_main("extract_memory", passthrough)
 
 
 def cmd_generate_titles(args: argparse.Namespace) -> int:
@@ -417,8 +424,14 @@ def build_parser() -> argparse.ArgumentParser:
     # extract-memory
     p = sub.add_parser(
         "extract-memory",
-        help="Extract structured memory chunks via the Claude CLI (requires `claude`).",
+        help="Extract structured memory chunks (local Ollama or Claude CLI).",
     )
+    p.add_argument("--backend", choices=["auto", "ollama", "claude"], default="auto",
+                   help="Extraction backend. auto = local Ollama first, Claude as fallback.")
+    p.add_argument("--ollama-model", default=None,
+                   help="Force a specific Ollama chat model (otherwise auto-detected).")
+    p.add_argument("--force-conversations", metavar="IDS",
+                   help="Comma-separated conversation IDs to re-extract (clears their chunks first).")
     p.set_defaults(func=cmd_extract_memory)
 
     # generate-titles
