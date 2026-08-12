@@ -26,17 +26,18 @@
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
 }
+/* The mark is a drawn line, not a letter in a box. It therefore sits on the
+ * sidebar surface rather than on a filled tile — a tile would put a hard edge
+ * around a shape whose whole point is that it runs past its own boundary.
+ * `--brand-node-fill` tells the nodes what to punch out to, so the line reads
+ * as passing through them in either theme. */
 .brand-mark {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: var(--text-md);
+  color: var(--accent);
+  --brand-node-fill: var(--surface-base);
   flex-shrink: 0;
 }
 .brand-text {
@@ -146,7 +147,12 @@
 .main {
   min-width: 0;
   padding: var(--space-6) var(--space-6) var(--space-7);
-  max-width: 1200px;
+  /* Was a hard 1200px, which left ~280px of dead gutter on a 1456px window
+   * while the cards inside were squeezed. Prose still gets a readable measure
+   * from the per-page `max-width: NNch` rules; this cap only stops the shell
+   * itself from stretching absurdly on an ultrawide display. */
+  max-width: 1600px;
+  width: 100%;
 }
 .main:focus {
   outline: none;
@@ -169,12 +175,25 @@
   color: var(--text-secondary);
 }
 
+/* Section heading, used on every surface.
+ *
+ * Was 11px uppercase with wide tracking in the muted ink — a micro-label. Four
+ * of them down one page (NEEDS ATTENTION / INVENTORY / ACTIVITY / MEMORY BY
+ * CATEGORY) all shouted at the same volume, which is the same as none: the
+ * reader got no order to read in, and uppercase at that size is measurably
+ * slower to read besides.
+ *
+ * Now a real heading — sentence case, secondary ink, sized just under the page
+ * title. Redefined here rather than replaced at each call site so all twelve
+ * uses across Operate, Detail, Find and Console follow, instead of Overview
+ * having its own private typography and the app carrying two competing
+ * conventions. */
 .section-label {
-  font-size: var(--text-xs);
+  font-size: var(--text-md);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--text-secondary);
   margin-bottom: var(--space-3);
 }
 
@@ -379,4 +398,12 @@
   .main {
     padding: var(--space-5) var(--space-4) var(--space-6);
   }
+}
+
+/* Count of adapters omitted from the bar because they hold nothing here. Plain
+   text, not a chip: it is a footnote about the bar, not another scope. */
+.provider-bar-note {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
 }

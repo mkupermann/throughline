@@ -1,4 +1,4 @@
--- Knowledge Graph Schema-Erweiterung für claude_memory
+-- Knowledge graph schema extension for Throughline
 -- Tabellen: entities, relationships, entity_mentions
 
 CREATE TABLE IF NOT EXISTS entities (

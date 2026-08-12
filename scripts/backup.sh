@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Memory — DB Backup Script
-# Erstellt täglich einen pg_dump der claude_memory DB und rotiert alte Backups.
+# Writes a daily pg_dump of the Throughline database and rotates old backups.
 
 set -e
 # `set -e` alone does NOT catch a failing pg_dump in `pg_dump | gzip`, because a
@@ -13,7 +13,7 @@ set -o pipefail
 # Override with the CLAUDE_MEMORY_BACKUP_DIR environment variable.
 BACKUP_DIR="${CLAUDE_MEMORY_BACKUP_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/claude-memory/backups}"
 RETENTION_DAYS=30
-DB_NAME="${PGDATABASE:-claude_memory}"
+DB_NAME="${PGDATABASE:-throughline}"
 DB_USER="${PGUSER:-$USER}"
 PG_BIN="${PG_BIN:-/opt/homebrew/opt/postgresql@16/bin}"
 

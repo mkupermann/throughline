@@ -197,7 +197,11 @@ def _lex_message(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
                )                          AS score
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.content ILIKE %(like)s
+        -- Messages from sessions a person had. The join is already here for
+        -- the project filter, so this costs nothing and keeps the tool's own
+        -- prompts out of message results.
+        WHERE c.generated_by IS NULL
+          AND m.content ILIKE %(like)s
           {clauses}
           {proj}
         ORDER BY score DESC, m.created_at DESC
@@ -234,7 +238,11 @@ def _lex_conversation(conn, term: str, f: FindFilters, limit: int) -> list[Row]:
                    0.05
                )                     AS score
         FROM conversations c
-        WHERE (COALESCE(c.summary, '') ILIKE %(like)s
+        -- Sessions a person had. The tool's own `claude -p` calls
+        -- outnumbered real ones ten to one, so every result page was
+        -- mostly Throughline quoting itself back at the reader.
+        WHERE c.generated_by IS NULL
+          AND (COALESCE(c.summary, '') ILIKE %(like)s
                OR c.project_name ILIKE %(like)s
                OR %(term)s <%% COALESCE(c.summary, '')
                OR %(term)s <%% COALESCE(c.project_name, ''))
@@ -399,7 +407,8 @@ def _browse_message(conn, f: FindFilters, limit: int) -> list[Row]:
                NULL::text AS status, NULL::float AS confidence,
                m.conversation_id, 0.0::float AS score
         FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE TRUE {clauses} {proj}
+        -- Human sessions only, as in the search variant above.
+        WHERE c.generated_by IS NULL {clauses} {proj}
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT %(limit)s
         """,
@@ -423,7 +432,10 @@ def _browse_conversation(conn, f: FindFilters, limit: int) -> list[Row]:
                NULL::text AS status, NULL::float AS confidence,
                c.id AS conversation_id, 0.0::float AS score
         FROM conversations c
-        WHERE c.started_at IS NOT NULL {clauses} {proj}
+        -- Sessions a person had. The tool's own `claude -p` calls
+        -- outnumbered real ones ten to one, so every result page was
+        -- mostly Throughline quoting itself back at the reader.
+        WHERE c.generated_by IS NULL AND c.started_at IS NOT NULL {clauses} {proj}
         ORDER BY c.started_at DESC, c.id DESC
         LIMIT %(limit)s
         """,
@@ -873,7 +885,10 @@ def facets(conn) -> dict[str, list[dict[str, Any]]]:
             WHERE project_name IS NOT NULL GROUP BY project_name
             UNION ALL
             SELECT project_name, count(*) FROM conversations
-            WHERE project_name IS NOT NULL GROUP BY project_name
+            -- The project facet offers a filter; it must count what that
+            -- filter can return.
+            WHERE project_name IS NOT NULL AND generated_by IS NULL
+            GROUP BY project_name
         ) u GROUP BY name ORDER BY n DESC LIMIT 100
         """,
     )
@@ -884,8 +899,38 @@ def facets(conn) -> dict[str, list[dict[str, Any]]]:
     )
     kinds = [
         {"value": "memory", "n": int(scalar(conn, "SELECT count(*) FROM memory_chunks", (), 0) or 0)},
-        {"value": "message", "n": int(scalar(conn, "SELECT count(*) FROM messages", (), 0) or 0)},
-        {"value": "conversation", "n": int(scalar(conn, "SELECT count(*) FROM conversations", (), 0) or 0)},
+        {
+            "value": "message",
+            # Same rule as conversations below: the message searches join
+            # `conversations` and filter on it, so an unfiltered count here
+            # advertised 85,407 where 73,818 can be reached.
+            "n": int(
+                scalar(
+                    conn,
+                    "SELECT count(*) FROM messages m "
+                    "JOIN conversations c ON c.id = m.conversation_id "
+                    "WHERE c.generated_by IS NULL",
+                    (),
+                    0,
+                )
+                or 0
+            ),
+        },
+        {
+            "value": "conversation",
+            # Must match what the searches actually return. This counted every
+            # stored row — 3,606 against 330 reachable — so the facet rail
+            # promised results no query could produce.
+            "n": int(
+                scalar(
+                    conn,
+                    "SELECT count(*) FROM conversations WHERE generated_by IS NULL",
+                    (),
+                    0,
+                )
+                or 0
+            ),
+        },
         {"value": "skill", "n": int(scalar(conn, "SELECT count(*) FROM skills", (), 0) or 0)},
         {"value": "project", "n": int(scalar(conn, "SELECT count(*) FROM projects", (), 0) or 0)},
         {"value": "prompt", "n": int(scalar(conn, "SELECT count(*) FROM prompts", (), 0) or 0)},

@@ -24,10 +24,45 @@ security model.
 
 ## Known Considerations
 
+### Where stored content can leave the machine
+
+Two places, both of them a model call:
+
+1. **Answering a question.** `throughline ask`, and the Ask panel in the UI,
+   send the retrieved excerpts to whichever model answers. With a local backend
+   (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine, and
+   `auto` probes local backends first for exactly this reason.
+   `throughline doctor` prints which model will answer and whether it is local;
+   the UI states it with every answer. `THROUGHLINE_REDACT_PROMPTS=1` runs the
+   excerpts through [`throughline/pii.py`](throughline/pii.py) first — off by
+   default, because this is your own history on your own machine.
+2. **Memory extraction.** Transcripts go to the Anthropic API or the `claude`
+   CLI. Redaction here is **on** by default; `THROUGHLINE_REDACT_PII=0` disables
+   it. Extraction is optional — skip it and the rest of the tool still works.
+
+Retrieval, ranking, indexing, embeddings against a local backend, and every
+listing in the UI are entirely local. There is no telemetry and no account.
+
+### The API has no authentication
+
+`throughline serve` binds to loopback and the compose stack publishes only to
+`127.0.0.1`. There is no login, by design for a single-user local tool: anything
+that can reach the port can read everything, and the Console endpoint can run
+arbitrary read-only SQL. That is safe on a single-user machine and unsafe the
+moment the port is exposed — do not bind it to `0.0.0.0`, do not put it behind a
+tunnel, and treat shell access to the machine as full access to the database.
+
+### Encryption at rest
+
+There is none, beyond whatever the disk provides. The database is a normal
+PostgreSQL cluster and the backups are plain `pg_dump` output. On macOS,
+FileVault covers both; on Linux, use an encrypted volume if the corpus warrants
+it.
+
 ### Database access
 
 The default installation uses PostgreSQL's `trust` authentication — anyone with
-shell access to your machine can read the `claude_memory` database. If your
+shell access to your machine can read the Throughline database. If your
 machine is shared, switch to password auth or `scram-sha-256` and set
 `PGPASSWORD` in your environment.
 
@@ -40,7 +75,7 @@ Claude Code JSONL sessions may contain:
 - Tool-call arguments that may include paths or identifiers
 - Email addresses, user names, and project names mentioned in conversations
 
-Treat the `claude_memory` database as confidential by default. Do not commit
+Treat the Throughline database as confidential by default. Do not commit
 database dumps, do not share backups, do not upload to cloud storage without
 encryption.
 

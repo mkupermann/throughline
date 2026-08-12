@@ -194,6 +194,62 @@ def cmd_search(args: argparse.Namespace) -> int:
     return _call_script_main("search_semantic", passthrough)
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Answer a question from the stored history, with citations."""
+    from throughline import ask as _ask
+    from throughline.status import _connect
+
+    conn = _connect()
+    if conn is None:
+        print("Cannot reach PostgreSQL. Try `throughline doctor --category postgres`.")
+        return 1
+    try:
+        result = _ask.answer(
+            conn,
+            args.question,
+            # None means "whatever the module's measured default is", so the
+            # CLI cannot drift from it silently.
+            top_k=args.top_k if args.top_k is not None else _ask.DEFAULT_TOP_K,
+            project=args.project,
+            model=args.model,
+        )
+    finally:
+        conn.close()
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return 0 if result.text else 1
+
+    if result.degraded and not result.text:
+        print(result.degraded)
+        # Sources without an answer still beat nothing: the reader can go and
+        # read them, which is what they would have done before this command
+        # existed.
+        if result.sources:
+            print()
+            _print_sources(result.sources)
+        return 1
+
+    print(result.text)
+    if result.cited:
+        print()
+        _print_sources(result.cited)
+    elif result.sources:
+        # An uncited answer is unverifiable, and silence about that would hide
+        # exactly the failure this command must not have.
+        print()
+        print("(no citations — treat this answer as unverified)")
+        _print_sources(result.sources[:3])
+    return 0
+
+
+def _print_sources(sources) -> None:
+    print("Sources:")
+    for s in sources:
+        where = s.project or "—"
+        print(f"  [{s.n}] {s.ref}  ·  {where}")
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     """Run the self-reflecting memory engine (dedup / contradictions / stale / consolidate)."""
     passthrough: list[str] = []
@@ -236,7 +292,7 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
-    """Run a one-shot backup of the claude_memory database."""
+    """Run a one-shot backup of the Throughline database."""
     return _run_shell_script("backup.sh", [])
 
 
@@ -353,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="throughline",
         description=(
-            "Throughline — persistent long-term memory for Claude Code. "
+            "Throughline — one local memory layer for every AI coding CLI. "
             "Run `throughline <command> --help` for per-command options."
         ),
     )
@@ -476,6 +532,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None, help="Max number of results to return.")
     p.set_defaults(func=cmd_search)
 
+    # ask
+    p = sub.add_parser(
+        "ask",
+        help="Ask a question about your history and get a cited answer.",
+        description=(
+            "Retrieves the nearest records with pgvector, then has a model "
+            "answer from them and cite what it used. Needs embeddings "
+            "(`throughline embed`) and an answering model — Ollama, any "
+            "OpenAI-compatible server, or the `claude` CLI, whichever is "
+            "found first. `throughline doctor` reports which one that is."
+        ),
+    )
+    p.add_argument("question", help="A question, in any language.")
+    p.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="How many records to retrieve (default: throughline.ask.DEFAULT_TOP_K).",
+    )
+    p.add_argument("--project", default=None, help="Restrict retrieval to one project.")
+    p.add_argument(
+        "--model",
+        default=None,
+        help="Model for the answer. Default: whatever the configured backend resolves to.",
+    )
+    p.add_argument("--json", action="store_true", help="Emit the answer and sources as JSON.")
+    p.set_defaults(func=cmd_ask)
+
     # reflect
     p = sub.add_parser(
         "reflect",
@@ -494,7 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
     # serve
     p = sub.add_parser(
         "serve",
-        help="Serve the web UI and JSON API on one port (default: 127.0.0.1:8787).",
+        help="Serve the web UI and JSON API on one port (default: 127.0.0.1:8790).",
     )
     p.add_argument(
         "--host",
@@ -504,7 +588,7 @@ def build_parser() -> argparse.ArgumentParser:
             "THROUGHLINE_ALLOW_REMOTE=1 — the API has no authentication."
         ),
     )
-    p.add_argument("--port", type=int, default=None, help="Port (default: 8787).")
+    p.add_argument("--port", type=int, default=None, help="Port (default: 8790).")
     p.add_argument("--reload", action="store_true", help="Auto-reload on source changes (development).")
     p.add_argument(
         "--log-level",
@@ -524,7 +608,7 @@ def build_parser() -> argparse.ArgumentParser:
     # backup
     p = sub.add_parser(
         "backup",
-        help="Run a one-shot pg_dump backup of the claude_memory DB.",
+        help="Run a one-shot pg_dump backup of the Throughline database.",
     )
     p.set_defaults(func=cmd_backup)
 

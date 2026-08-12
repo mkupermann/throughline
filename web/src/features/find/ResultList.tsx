@@ -1,3 +1,4 @@
+import { forwardRef, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { FindItem, Kind } from "@/lib/api";
 
@@ -67,14 +68,24 @@ function when(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
+  // Same locale as the rest of the interface — see lib/format.ts. This read
+  // "9. Aug. 2026" beside English labels.
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
   }).format(d);
 }
 
-export function ResultRow({ item, terms }: { item: FindItem; terms: string[] }) {
+export const ResultRow = forwardRef<
+  HTMLLIElement,
+  {
+    item: FindItem;
+    terms: string[];
+    isSelected?: boolean;
+    onSelect?: () => void;
+  }
+>(function ResultRow({ item, terms, isSelected, onSelect }, ref) {
   // A message's own text is the snippet — its `title` is the *conversation*
   // summary, which is identical for every message in that conversation. Using
   // it as the heading made five distinct results look like the same row, so
@@ -85,7 +96,15 @@ export function ResultRow({ item, terms }: { item: FindItem; terms: string[] }) 
     : item.title || (item.kind === "memory" ? item.category : null) || KIND_LABEL[item.kind];
 
   return (
-    <li className="result">
+    <li
+      className={`result${isSelected ? " is-selected" : ""}`}
+      ref={ref}
+      // Clicking anywhere in the row makes it the selection too, so mouse and
+      // keyboard end up in the same place rather than the preview showing one
+      // result while the reader points at another.
+      onMouseDown={onSelect}
+      aria-current={isSelected ? "true" : undefined}
+    >
       <Link to={routeFor(item)} className="result-link">
         <div className="result-head">
           <span className={`kind kind-${item.kind}`}>
@@ -124,13 +143,42 @@ export function ResultRow({ item, terms }: { item: FindItem; terms: string[] }) 
       </Link>
     </li>
   );
-}
+});
 
-export function ResultList({ items, terms }: { items: FindItem[]; terms: string[] }) {
+export function ResultList({
+  items,
+  terms,
+  selected,
+  onSelect,
+}: {
+  items: FindItem[];
+  terms: string[];
+  selected?: number;
+  onSelect?: (i: number) => void;
+}) {
+  // Keeps the selected row in view as j/k walk past the fold. `nearest` rather
+  // than `center`: recentring on every keypress makes the list jump under the
+  // reader even when the next row was already perfectly visible.
+  const selectedRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    // Optional call, not just optional chaining on the ref: `scrollIntoView`
+    // is absent in jsdom and in older embedded webviews, and an exception
+    // thrown from an effect unmounts the whole results tree — losing the list
+    // to make it scroll slightly better is a bad trade.
+    selectedRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selected]);
+
   return (
     <ul className="results">
-      {items.map((item) => (
-        <ResultRow key={`${item.kind}-${item.id}`} item={item} terms={terms} />
+      {items.map((item, i) => (
+        <ResultRow
+          key={`${item.kind}-${item.id}`}
+          item={item}
+          terms={terms}
+          isSelected={i === selected}
+          ref={i === selected ? selectedRef : undefined}
+          onSelect={() => onSelect?.(i)}
+        />
       ))}
     </ul>
   );

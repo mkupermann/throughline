@@ -11,6 +11,8 @@ import json
 import os
 import re
 import subprocess
+
+from throughline.self_referential import agent_call_cwd
 import sys
 import time
 import unicodedata
@@ -20,14 +22,21 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
-try:
-    from throughline.pii import count_redactions, redact
-except ImportError:
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from throughline.pii import count_redactions, redact
+# THIS repo must win over any installed `throughline`. A stale editable install
+# of throughline 0.2.0 — pointing at ../claude-memory-db — sits in user
+# site-packages and is on the path of every Python 3.14 on this machine. When a
+# script runs with its own directory first on sys.path, that old package
+# resolves first, and because it happens to contain `pii.py` the import below
+# SUCCEEDS: `throughline` binds to 0.2.0 in sys.modules, and every later
+# `throughline.*` import in this process is answered from a package that has no
+# `adapters`, `queries` or `api`. Prepending the repo root before the first
+# import is what makes this file use the code it ships beside.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from throughline.pii import count_redactions, redact  # noqa: E402
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -198,11 +207,16 @@ def parse_json_response(text: str) -> dict:
 
 def call_claude(prompt: str) -> str:
     try:
+        # Run from a directory of our own: Claude Code names the project folder
+        # after the process CWD, so inheriting the repo's would file this call
+        # inside the user's real project history, and the next ingest would read
+        # it back as their work. See throughline.self_referential.
         result = subprocess.run(
             [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
             capture_output=True,
             text=True,
             timeout=TIMEOUT_PER_CALL,
+            cwd=str(agent_call_cwd()),
         )
         if result.returncode != 0:
             print(f"    Claude CLI error (exit {result.returncode}): {result.stderr[:200]}")
@@ -410,6 +424,42 @@ def main() -> None:
             LIMIT %s
         """, (args.min_messages, args.limit))
     convs = cursor.fetchall()
+
+    # Drop transcripts that are Throughline calling `claude -p` on itself.
+    # Claude Code records those calls as sessions, so they land in the corpus
+    # and — being the most recent thing that happened — sit at the very front
+    # of this newest-first queue. On this database 10 of the 12 newest
+    # candidates were the extractor's own prompt. Each would cost a `claude -p`
+    # call to discover it holds no entities.
+    if not args.conv_id:
+        # Import from THIS repo explicitly. A stale editable install of
+        # throughline 0.2.0 (pointing at ../claude-memory-db) sits in user
+        # site-packages, and when a script runs with its own directory first on
+        # sys.path that old package wins — it has no `adapters`, `queries` or
+        # `api`, so the import fails or, worse, silently resolves to 0.2.0 code.
+        import sys as _sys
+        from pathlib import Path as _Path
+        _repo = str(_Path(__file__).resolve().parent.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        from throughline.self_referential import self_referential_reason
+
+        kept, skipped = [], 0
+        for row in convs:
+            cursor.execute(
+                "SELECT content FROM messages WHERE conversation_id = %s AND role = 'user' "
+                "ORDER BY id LIMIT 1",
+                (row[0],),
+            )
+            first = cursor.fetchone()
+            if self_referential_reason(first[0] if first else None):
+                skipped += 1
+            else:
+                kept.append(row)
+        if skipped:
+            print(f"  {skipped} selbstreferenzielle Transcripts übersprungen "
+                  f"(Throughlines eigene claude -p Aufrufe)")
+        convs = kept
 
     print(f"\n{len(convs)} Conversations zu analysieren\n")
     if not convs:

@@ -26,11 +26,12 @@ import psycopg2
 from psycopg2.extras import Json, execute_values
 
 from .base import Adapter, IngestSummary, NormalisedConversation
+from throughline.self_referential import first_user_text, self_referential_reason
 
 
 def _db_config() -> dict[str, Any]:
     return {
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
@@ -175,6 +176,45 @@ def _backfill_projects_from_observed(cur: Any) -> int:
     return len(missing)
 
 
+def _record_decision(conn: Any, cur: Any, fp: Path, fhash: str) -> None:
+    """Log a file we deliberately declined to ingest, with ``record_count = 0``.
+
+    A file that parses to nothing — an empty transcript, or one this tool
+    recognises as its own ``claude -p`` call — used to be rolled back and
+    skipped without leaving any trace. Three consequences, all bad:
+
+    1. `pending` counts discovered files that have no ``ingestion_log`` row, so
+       these stayed pending forever, pinning the provider chip to an amber
+       "N pending" that no amount of ingesting could clear — and a warning that
+       cannot be cleared is one the user learns to ignore, including on the day
+       it means something real.
+    2. Every subsequent run re-read and re-parsed every one of them.
+    3. The decision was invisible: nothing recorded that the file was seen and
+       judged, so "we never looked at it" and "we looked and said no" were
+       indistinguishable after the fact.
+
+    ``record_count = 0`` distinguishes a decline from a real ingest, and the
+    ``(file_path, file_hash)`` key means a file that later grows gets a new hash
+    and is judged again rather than being written off permanently.
+
+    Rolls back first: the caller reaches here from an aborted parse, and on a
+    failed transaction PostgreSQL rejects every further statement until the
+    block ends.
+    """
+    conn.rollback()
+    try:
+        cur.execute(
+            "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
+            "VALUES (%s, %s, 0) ON CONFLICT DO NOTHING",
+            (str(fp), fhash),
+        )
+        conn.commit()
+    except Exception:
+        # Never let bookkeeping abort an ingest run: the next file matters more
+        # than recording this one's rejection.
+        conn.rollback()
+
+
 def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = True) -> IngestSummary:
     """Run a single adapter against the DB.
 
@@ -229,13 +269,32 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
                 # (Hermes state.db SQLite) uniformly.
                 if parsed is None:
                     summary.skipped += 1
-                    conn.rollback()
+                    _record_decision(conn, cur, fp, fhash)
                     continue
                 convs = parsed if isinstance(parsed, list) else [parsed]
                 convs = [c for c in convs if c and c.messages]
+
+                # Drop transcripts that are Throughline calling `claude -p`
+                # itself. Claude Code records those calls as sessions, so
+                # without this every ingest sweeps the tool's own prompts back
+                # in as if they were the user's work — 81% of the author's
+                # corpus at the time this was added. They also crowd the
+                # extraction queue, which is ordered newest-first, and each one
+                # costs a `claude -p` call to learn it holds nothing.
+                kept = []
+                for c in convs:
+                    reason = self_referential_reason(first_user_text(c.messages))
+                    if reason:
+                        summary.self_referential += 1
+                        if verbose:
+                            print(f"    ~ {fp.name}: skipped ({reason} prompt)")
+                    else:
+                        kept.append(c)
+                convs = kept
+
                 if not convs:
                     summary.skipped += 1
-                    conn.rollback()
+                    _record_decision(conn, cur, fp, fhash)
                     continue
                 written = 0
                 for conv in convs:

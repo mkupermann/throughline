@@ -123,7 +123,15 @@ def coverage(conn) -> list[dict]:
         for r in rows(
             conn,
             """
-            SELECT source_tool, count(*) AS ingested, max(started_at) AS last_run
+            -- Sessions a person had, per tool. The chip reads as "how much of
+            -- my work came through this assistant"; counting the tool's own
+            -- `claude -p` calls made Claude Code show 3,439 where 172 were
+            -- real, which is not a coverage figure but a measure of how often
+            -- Throughline ran.
+            SELECT source_tool,
+                   count(*) FILTER (WHERE generated_by IS NULL) AS ingested,
+                   count(*) FILTER (WHERE generated_by IS NOT NULL) AS generated,
+                   max(started_at) FILTER (WHERE generated_by IS NULL) AS last_run
             FROM conversations
             GROUP BY source_tool
             """,

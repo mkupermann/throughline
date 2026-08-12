@@ -25,6 +25,8 @@ export interface Overview {
   attention: AttentionItem[];
   activity: { day: string; n: number }[];
   totals: Record<string, number>;
+  /** Chunk counts per memory category, already sorted descending by the API. */
+  categories: { category: string; n: number }[];
 }
 
 /** An API error carrying the server's structured payload, not just a status. */
@@ -43,9 +45,13 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
+    // `...init` spreads first so a caller's own keys (method, body) apply,
+    // and `headers` is assigned after the spread so the merged object wins.
+    // The other order silently dropped Accept the moment any caller passed a
+    // header of its own — which nothing did until /ask needed content-type.
     res = await fetch(`/api${path}`, {
-      headers: { Accept: "application/json", ...(init?.headers ?? {}) },
       ...init,
+      headers: { Accept: "application/json", ...(init?.headers ?? {}) },
     });
   } catch (cause) {
     // Server not running at all — distinct from a server that answered.
@@ -165,6 +171,105 @@ export interface GraphEdgeDTO {
   confidence: number | null;
 }
 
+export interface AskSource {
+  n: number;
+  kind: string;
+  id: number;
+  ref: string;
+  project: string | null;
+  category: string | null;
+  conversation_id: number | null;
+  distance: number | null;
+  excerpt: string;
+}
+
+export interface AskResponse {
+  question: string;
+  answer: string;
+  sources: AskSource[];
+  cited: number[];
+  degraded: string | null;
+  backend: string;
+  model: string;
+  /** True when the model ran on this machine and no excerpt left it. */
+  local: boolean;
+}
+
+export interface ProjectSummary {
+  project: string;
+  sessions: number;
+  messages: number;
+  first_active: string | null;
+  last_active: string | null;
+  tools: number;
+  tool_names: string[];
+}
+
+export interface ProjectSession {
+  id: number;
+  session_id: string;
+  title: string | null;
+  message_count: number;
+  started_at: string | null;
+  ended_at: string | null;
+  source_tool: string | null;
+  model: string | null;
+  git_branch: string | null;
+  generated_by: string | null;
+}
+
+export interface ProjectSessions {
+  project: string;
+  order: string;
+  q: string | null;
+  sessions: ProjectSession[];
+  total: number;
+  offset: number;
+  has_more: boolean;
+  include_generated: boolean;
+  /** Machine-generated sessions withheld from the list but still stored. */
+  hidden_generated: number;
+}
+
+export const projectsApi = {
+  recent: (days = 7) =>
+    request<{ days: number; projects: ProjectSummary[] }>(`/projects/recent?days=${days}`),
+  sessions: (
+    project: string,
+    opts: {
+      order?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+      includeGenerated?: boolean;
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    if (opts.order) p.set("order", opts.order);
+    if (opts.q) p.set("q", opts.q);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.includeGenerated) p.set("include_generated", "true");
+    // The name is a path segment and may contain spaces or dots — "The
+    // FireScore Website" is a real project here.
+    return request<ProjectSessions>(
+      `/projects/${encodeURIComponent(project)}/sessions?${p.toString()}`,
+    );
+  },
+};
+
+export const askApi = {
+  // POST, not GET: a question is prose, and keeping it out of the URL keeps it
+  // out of access logs and browser history — this tool's whole subject is the
+  // user's private working history.
+  ask: (body: { question: string; top_k?: number; project?: string | null }) =>
+    request<AskResponse>("/ask", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+};
+
 export const findApi = {
   search: (params: URLSearchParams) => request<FindResponse>(`/find?${params.toString()}`),
   facets: () => request<Facets>("/find/facets"),
@@ -174,8 +279,12 @@ export const findApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sources }),
     }),
-  detail: (kind: string, id: number | string) =>
-    request<DetailResponse>(`/detail/${kind}/${id}`),
+  detail: (kind: string, id: number | string, page?: { offset: number; limit: number }) =>
+    request<DetailResponse>(
+      page
+        ? `/detail/${kind}/${id}?msg_offset=${page.offset}&msg_limit=${page.limit}`
+        : `/detail/${kind}/${id}`,
+    ),
   projectByName: (name: string) =>
     request<DetailResponse>(`/detail/project/by-name/${encodeURIComponent(name)}`),
 };
@@ -372,6 +481,10 @@ export interface TimelineDayItem {
   provider: string;
   ts: string;
   title: string;
+  /** The conversation this row belongs to, or null when it belongs to none.
+   *  Needed because `id` on a message row is the MESSAGE id — routing a
+   *  message by its own id would open an unrelated conversation. */
+  conversation_id: number | null;
 }
 
 export const timelineApi = {

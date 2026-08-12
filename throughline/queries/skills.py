@@ -95,7 +95,9 @@ def list_projects(conn, sort: str = "last_activity", descending: bool | None = N
                    max(started_at) AS last_activity,
                    min(started_at) AS first_activity
             FROM conversations
-            WHERE project_name IS NOT NULL
+            -- Per-project rollups shown beside a project's own record; they
+            -- must agree with the project view, which counts human sessions.
+            WHERE project_name IS NOT NULL AND generated_by IS NULL
             GROUP BY project_name
         ) cv ON cv.project_name = p.name
         ORDER BY {key} {direction} NULLS LAST, p.name ASC
@@ -237,7 +239,9 @@ def get_project_by_name(conn, name: str) -> Row | None:
                 FROM memory_chunks WHERE project_name = %(name)s GROUP BY project_name
                 UNION ALL
                 SELECT project_name, 0, count(*), max(started_at), min(started_at)
-                FROM conversations WHERE project_name = %(name)s GROUP BY project_name
+                FROM conversations
+                WHERE project_name = %(name)s AND generated_by IS NULL
+                GROUP BY project_name
             ) u GROUP BY name
         )
         SELECT COALESCE(o.name, p.name)              AS name,

@@ -17,7 +17,7 @@ interface Point {
 export function Sparkline({
   data,
   days,
-  height = 96,
+  height = 200,
   label,
 }: {
   data: Point[];
@@ -60,12 +60,36 @@ export function Sparkline({
   const total = series.reduce((a, b) => a + b.n, 0);
   const active = hover !== null ? series[hover] : null;
 
+  // Y ticks at 0 / mid / max. Rendered as HTML beside the plot rather than as
+  // SVG <text>: the plot stretches with `preserveAspectRatio="none"`, which
+  // would squash any text inside it horizontally. Three ticks is enough to read
+  // a value off the line without turning the chart into graph paper.
+  const yTicks = [max, Math.round(max / 2), 0];
+
+  // X labels at first / middle / last. More than three collide once the window
+  // narrows, and a date axis only has to establish the span and direction.
+  const xTicks = series.length
+    ? [
+        { i: 0, day: series[0].day },
+        { i: Math.floor((series.length - 1) / 2), day: series[Math.floor((series.length - 1) / 2)].day },
+        { i: series.length - 1, day: series[series.length - 1].day },
+      ]
+    : [];
+
   return (
     <figure className="spark" aria-labelledby={titleId}>
       <figcaption id={titleId} className="spark-caption">
         <span>{label}</span>
         <span className="spark-total tabular">{total} total</span>
       </figcaption>
+
+      <div className="spark-axis-y" aria-hidden="true">
+        {yTicks.map((t) => (
+          <span key={t} className="tabular">
+            {t}
+          </span>
+        ))}
+      </div>
 
       <div className="spark-plot">
         <svg
@@ -80,6 +104,20 @@ export function Sparkline({
             setHover(Math.max(0, Math.min(series.length - 1, Math.round(rel / stepX))));
           }}
         >
+          {/* Gridlines sit under the data and stay recessive — they are a
+            * reading aid, not a subject. vector-effect keeps them hairline
+            * regardless of how far the plot stretches. */}
+          {yTicks.map((t) => (
+            <line
+              key={t}
+              x1={0}
+              x2={w}
+              y1={y(t)}
+              y2={y(t)}
+              className="spark-grid"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
           <path d={area} className="spark-area" />
           <path d={line} className="spark-line" />
           {active && (
@@ -105,6 +143,14 @@ export function Sparkline({
             <strong className="tabular">{active.n}</strong> on {formatDay(active.day)}
           </div>
         )}
+      </div>
+
+      <div className="spark-axis-x" aria-hidden="true">
+        {xTicks.map((t) => (
+          <span key={t.i} style={{ left: `${(x(t.i) / w) * 100}%` }}>
+            {formatDay(t.day)}
+          </span>
+        ))}
       </div>
     </figure>
   );

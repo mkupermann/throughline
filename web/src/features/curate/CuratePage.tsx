@@ -44,15 +44,41 @@ function QueueTab({
 
 export function CuratePage() {
   const [sp, setSp] = useSearchParams();
-  const active = sp.get("queue") ?? "low-confidence";
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  //: A destructive action waiting to be confirmed, or null.
+  const [pending, setPending] = useState<{ action: string; ids: number[] } | null>(null);
   const toast = useToast();
   const qc = useQueryClient();
 
   const { data: queues } = useQuery({ queryKey: ["curate", "queues"], queryFn: curateApi.queues });
+
+  // An explicit ?queue= always wins — that is the user's own choice, and a
+  // shared or bookmarked link must land where it says.
+  //
+  // Without one, open the first queue that actually holds something, in the
+  // order the API returns (which is its priority order). The default used to
+  // be the literal "low-confidence", so on a healthy database Curate opened on
+  // an empty queue reading "Nothing in this queue" while 474 items waited two
+  // tabs away — a worklist showing an empty list is indistinguishable from one
+  // with no work in it.
+  //
+  // Falling back to the first queue when every count is zero is deliberate:
+  // that case means there is genuinely nothing to curate, and "Nothing in this
+  // queue" is then the correct and honest thing to show.
+  const urlQueue = sp.get("queue");
+  const resolved =
+    urlQueue ?? queues?.queues.find((q) => q.count > 0)?.name ?? queues?.queues[0]?.name;
+  const active = resolved ?? "low-confidence";
+
+  // Hold the fetch until the choice is actually knowable. Without `enabled`,
+  // the first paint runs before the queue list arrives, fetches whatever the
+  // fallback happens to be, then re-fetches the real one — one wasted request
+  // and a visible flash of the wrong queue's contents. With an explicit
+  // ?queue= there is nothing to wait for, so it fetches immediately.
   const { data: queue, isPending } = useQuery({
     queryKey: ["curate", "queue", active],
     queryFn: () => curateApi.queue(active),
+    enabled: resolved !== undefined,
   });
 
   const setQueue = useCallback(
@@ -121,13 +147,63 @@ export function CuratePage() {
     },
   });
 
+  // Actions that remove something from view. Undo exists, but a single click
+  // applying `forget` to every selected chunk is a decision worth stating
+  // before it happens rather than offering to reverse afterwards — and a
+  // toast that scrolls away is a poor place to keep the only way back.
+  //
+  // Deliberately narrow: raising confidence or clearing an expiry are
+  // adjustments, and a confirmation on those trains the reader to click
+  // through the ones that matter.
+  const DESTRUCTIVE = new Set(["forget", "supersede"]);
+
   const run = (action: string) => {
     const ids = [...selected];
     if (!ids.length) return;
+    if (DESTRUCTIVE.has(action)) {
+      setPending({ action, ids });
+      return;
+    }
     act.mutate({ action, ids, value: action === "raise_confidence" ? 0.8 : undefined });
   };
 
+  const commit = () => {
+    if (!pending) return;
+    act.mutate({ action: pending.action, ids: pending.ids });
+    setPending(null);
+  };
+
   const totalOutstanding = queues?.total ?? 0;
+
+  const confirmDialog = pending ? (
+    <div className="confirm-scrim" role="presentation" onClick={() => setPending(null)}>
+      <div
+        className="confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-h"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-h">
+          {pending.action === "forget" ? "Forget" : "Supersede"} {pending.ids.length}{" "}
+          {pending.ids.length === 1 ? "chunk" : "chunks"}?
+        </h2>
+        <p>
+          {pending.action === "forget"
+            ? "They stop being returned by search, by the MCP server, and by Ask. Nothing is erased — the rows stay and this can be undone."
+            : "They are marked as replaced and drop out of active memory. Nothing is erased."}
+        </p>
+        <div className="confirm-actions">
+          <button type="button" className="button" onClick={() => setPending(null)} autoFocus>
+            Cancel
+          </button>
+          <button type="button" className="button is-danger" onClick={commit}>
+            {pending.action === "forget" ? "Forget" : "Supersede"} {pending.ids.length}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   const body = useMemo(() => {
     if (isPending) return <div className="skeleton skeleton-row" />;
@@ -229,6 +305,8 @@ export function CuratePage() {
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </>
   );
 }

@@ -131,9 +131,21 @@ describe("TimelinePage", () => {
     // each cell's own aria-label already states) but still visibly present.
     const rows = within(table).getAllByRole("row", { hidden: true });
     expect(rows[0].getAttribute("aria-hidden")).toBe("true");
-    // 2026-01-05 is a bucket present in the mocked range; its thinned label
-    // is "01-05" (day bucket -> MM-DD, see TimelinePage's axisLabel).
-    expect(within(rows[0]).getByText("01-05")).toBeTruthy();
+
+    // The axis spans the whole response window (2026-01-01..2026-03-31), one
+    // column per day, including the days no lane has rows for — so distance
+    // along it means elapsed time. It used to carry only the five dates that
+    // had data, which drew 01-05 and 02-01 as neighbours at even spacing: the
+    // axis looked like time and measured nothing.
+    const columns = rows[0].querySelectorAll(".timeline-axis-label");
+    expect(columns.length).toBe(90);
+
+    // Labels are thinned to stay legible, but the window's own endpoints are
+    // never the ones dropped — a reader has to be able to place the axis.
+    const labels = [...columns].map((c) => c.textContent).filter(Boolean);
+    expect(labels[0]).toBe("01-01");
+    expect(labels.at(-1)).toBe("03-31");
+    expect(labels.length).toBeLessThanOrEqual(13);
   });
 
   // ── Cell click loads that day's rows (§5.1) ─────────────────────────────
@@ -143,13 +155,12 @@ describe("TimelinePage", () => {
   // an empty day must say so rather than render nothing.
 
   it("a day-bucket cell click issues a day request and renders rows", async () => {
-    day.mockResolvedValueOnce({
+    day.mockResolvedValue({
       day: "2026-01-05",
       items: [
         {
           id: 1, kind: "conversation", provider: "claude_code",
-          ts: "2026-01-05T10:00:00Z", title: "Planning session",
-        },
+          ts: "2026-01-05T10:00:00Z", title: "Planning session", conversation_id: 1 },
       ],
     });
     renderAt();
@@ -227,13 +238,12 @@ describe("TimelinePage", () => {
     // belonging to other lanes too. queries/timeline.py now understands
     // "unattributed" as a real filter value (source_tool IS NULL), so the
     // client sends it like any other lane.
-    day.mockResolvedValueOnce({
+    day.mockResolvedValue({
       day: "2026-01-05",
       items: [
         {
           id: 9, kind: "conversation", provider: "unattributed",
-          ts: "2026-01-05T09:00:00Z", title: "No recorded tool",
-        },
+          ts: "2026-01-05T09:00:00Z", title: "No recorded tool", conversation_id: 9 },
       ],
     });
     renderAt();
@@ -262,7 +272,7 @@ describe("TimelinePage", () => {
   });
 
   it("shows a message rather than a blank panel when a clicked day has no events", async () => {
-    day.mockResolvedValueOnce({ day: "2026-01-05", items: [] });
+    day.mockResolvedValue({ day: "2026-01-05", items: [] });
     renderAt();
     const cell = await screen.findByRole("button", {
       name: /^Claude Code, 2026-01-05, 12 events$/,
@@ -275,11 +285,11 @@ describe("TimelinePage", () => {
     // Fix: `/timeline/day/{date}` caps at 100 rows and the panel showed no
     // total and no indication of truncation — a cell whose aria-label said
     // "8600 events" opened a silently truncated 100-row list.
-    day.mockResolvedValueOnce({
+    day.mockResolvedValue({
       day: "2026-01-05",
       items: Array.from({ length: 2 }, (_, i) => ({
         id: i, kind: "conversation" as const, provider: "claude_code",
-        ts: "2026-01-05T10:00:00Z", title: `Item ${i}`,
+        ts: "2026-01-05T10:00:00Z", title: `Item ${i}`, conversation_id: i,
       })),
     });
     renderAt();
@@ -291,4 +301,42 @@ describe("TimelinePage", () => {
     // The cell's own count (12) is the authority, not items.length (2).
     expect(await screen.findByText(/showing 2 of 12/i)).toBeTruthy();
   });
+
+  // ── The page answers on arrival ─────────────────────────────────────────
+  // The grid filled the top third and left the rest blank behind an
+  // instruction to click something. "What happened, and when" has an obvious
+  // default answer — the last thing that happened.
+
+  it("opens the most recent active day without being asked", async () => {
+    day.mockResolvedValue({
+      day: "2026-02-01",
+      items: [
+        { id: 9, kind: "skill", provider: "not_tool_specific",
+          ts: "2026-02-01T09:00:00Z", title: "Latest thing", conversation_id: null },
+      ],
+    });
+    renderAt();
+    // 2026-02-01 is the latest bucket holding anything in the mocked range;
+    // 2026-01-05 is busier but older, and recency is what a timeline defaults
+    // to.
+    expect(await screen.findByText("Latest thing")).toBeTruthy();
+    expect(day.mock.calls.at(-1)?.[0]).toBe("2026-02-01");
+  });
+
+  it("stays closed once dismissed, rather than reopening itself", async () => {
+    // The default must not fight the reader: closing the panel is a decision,
+    // and an effect that re-fires on the next render would overrule it.
+    day.mockResolvedValue({
+      day: "2026-02-01",
+      items: [
+        { id: 9, kind: "skill", provider: "not_tool_specific",
+          ts: "2026-02-01T09:00:00Z", title: "Latest thing", conversation_id: null },
+      ],
+    });
+    renderAt();
+    await screen.findByText("Latest thing");
+    await userEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.queryByText("Latest thing")).toBeNull();
+  });
+
 });

@@ -17,7 +17,7 @@
 #   - the `vector` and `pg_trgm` PostgreSQL extensions installed at the server level
 #
 # Environment overrides:
-#   FRESH_DB_NAME      default: claude_memory_fresh_$$ (process id suffix)
+#   FRESH_DB_NAME      default: throughline_fresh_$$ (process id suffix)
 #   PGUSER / PGHOST / PGPORT  passed through to psql/createdb
 #   PYTHON_BIN         default: python3
 #
@@ -61,7 +61,7 @@ if [ -z "${PSQL:-}" ]; then
     fi
 fi
 
-DB_NAME="${FRESH_DB_NAME:-claude_memory_fresh_$$}"
+DB_NAME="${FRESH_DB_NAME:-throughline_fresh_$$}"
 FAILURES=()
 
 log()   { printf '[fresh-install] %s\n' "$*"; }

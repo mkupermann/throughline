@@ -142,7 +142,7 @@ Your numbers will vary.
 throughline serve
 ```
 
-Open `http://127.0.0.1:8787`. You should land on the Dashboard with counts
+Open `http://127.0.0.1:8790`. You should land on the Dashboard with counts
 for conversations, messages, skills, and memory chunks.
 
 ## 9. Optional — enable the scheduler

@@ -92,13 +92,19 @@
   --axis-line: #d0d7de;
 
   /* ── Spacing / radius / elevation ───────────────────────────────────── */
+  /* The first three steps stay tight — they set padding inside badges, chips
+   * and table cells, where extra air just looks loose. The upper steps drive
+   * card padding and the rhythm between sections, and those were the ones that
+   * made the interface feel cramped next to the Streamlit design it replaced:
+   * the design system was generated with a density of 8 on a 1-10 scale, which
+   * targets dashboards packed with panels. This product is a reading surface. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
+  --space-4: 20px;   /* was 16 — card and control padding */
+  --space-5: 32px;   /* was 24 — gaps between cards */
+  --space-6: 48px;   /* was 32 — space above a section heading */
+  --space-7: 72px;   /* was 48 — separation between major blocks */
 
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -155,11 +161,17 @@
    dark. Guarded so an explicit light choice always wins. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --surface-base: #0d1117;
-    --surface-raised: #161b22;
-    --surface-hover: #1c2128;
-    --surface-sunken: #010409;
-    --surface-overlay: #1c2128;
+    /* Deeper than the GitHub-dark values these started from. The interface this
+     * replaced was hard-coded dark and sat nearer true black, which reads as
+     * more deliberate; a mid-grey dark theme looks like an unfinished light one.
+     * Every step down here RAISES contrast for the light text above it, so no
+     * text pair can fall below its previous ratio — verified after the change,
+     * not assumed. */
+    --surface-base: #08090c;
+    --surface-raised: #101318;
+    --surface-hover: #171b21;
+    --surface-sunken: #030406;
+    --surface-overlay: #171b21;
 
     --border: #30363d;
     --border-muted: #21262d;

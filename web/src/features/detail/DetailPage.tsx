@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, OctagonAlert } from "lucide-react";
 
 import { findApi, type ApiError } from "@/lib/api";
+import { Transcript, type TranscriptMessage } from "./Transcript";
 
 /** URL prefix -> API kind. Short prefixes keep deep links pasteable. */
 export const DETAIL_KINDS = {
@@ -45,6 +46,37 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
     queryFn: () => (kind === "project" ? findApi.projectByName(id!) : findApi.detail(kind, id!)),
     enabled: Boolean(id),
   });
+
+  // Messages beyond the first page, appended as the reader asks for them.
+  //
+  // Held here rather than refetched with a bigger limit: re-requesting 500
+  // messages to add 500 more doubles the transfer on every click, and by the
+  // tenth page of a 5,560-message session that is 5MB re-sent to show the
+  // last 500.
+  const [more, setMore] = useState<TranscriptMessage[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // A new record means the accumulated tail belongs to the previous one.
+  useEffect(() => {
+    setMore([]);
+  }, [kind, id]);
+
+  const related = (data?.related ?? {}) as Record<string, unknown>;
+  const firstPage = (related.messages as TranscriptMessage[] | undefined) ?? [];
+  const messageTotal = Number(related.message_total ?? firstPage.length);
+  const shownCount = firstPage.length + more.length;
+
+  async function loadMore() {
+    if (loadingMore || !id) return;
+    setLoadingMore(true);
+    try {
+      const next = await findApi.detail(kind, id, { offset: shownCount, limit: 500 });
+      const page = ((next.related ?? {}) as Record<string, unknown>).messages;
+      if (Array.isArray(page)) setMore((prev) => prev.concat(page as TranscriptMessage[]));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   // Escape goes back — a detail view is a modal in spirit and must always
   // have a keyboard exit.
@@ -124,7 +156,39 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
       </section>
 
       {Object.entries(data.related ?? {}).map(([name, rowsList]) =>
-        rowsList.length ? (
+        rowsList.length && name === "messages" ? (
+          <section key={name} className="stack-top">
+            <h2 className="section-label">
+              Transcript{" "}
+              <span className="tabular">
+                ({shownCount.toLocaleString("en-US")} of {messageTotal.toLocaleString("en-US")})
+              </span>
+            </h2>
+            {/* Rendered as a transcript, not as a list of content strings. The
+                generic renderer below shows `content` truncated at 400
+                characters, which on a real session hides every command the
+                model ran and every result it read back — those live in
+                `content_blocks`, and 772 of one 5,560-message session's
+                assistant messages have no `content` at all. */}
+            <Transcript messages={(rowsList as unknown as TranscriptMessage[]).concat(more)} />
+            {/* The endpoint returns 500 messages at a time. A 5,560-message
+                session showed its first 500 and gave no way to reach the rest,
+                which reads as "the history stops here" — the one impression a
+                transcript must not create. */}
+            {shownCount < messageTotal && (
+              <button
+                type="button"
+                className="button stack-top"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore
+                  ? "Loading…"
+                  : `Show more — ${shownCount.toLocaleString("en-US")} of ${messageTotal.toLocaleString("en-US")}`}
+              </button>
+            )}
+          </section>
+        ) : rowsList.length ? (
           <section key={name} className="stack-top">
             <h2 className="section-label">
               {name} <span className="tabular">({rowsList.length})</span>

@@ -13,9 +13,35 @@ An adapter subclasses `throughline.adapters.base.Adapter` and provides:
 |---|---|
 | `name` | Machine identifier, used as `--source <name>` and as `conversations.source` |
 | `label` | Human-readable name shown in listings and the GUI |
-| `home` | The directory the adapter scans; `is_present` checks its existence cheaply |
-| `discover()` | Yield candidate conversation files (no parsing) |
-| `parse(path)` | Convert one file into a `NormalisedConversation`, or `None` to skip |
+| `home` | The directory the adapter scans |
+| `discover()` | Yield the files ingestion will process (no parsing) |
+| `parse(path)` | Convert one file into a `NormalisedConversation` — or a `list` of them when one file holds several sessions (a SQLite `state.db` with N rows), or `None` to skip |
+
+Two members are optional and default to sensible no-ops, so an existing adapter —
+including a third-party one published through the entry point — keeps working
+untouched:
+
+| Member | Purpose |
+|---|---|
+| `discover_all()` | Every candidate on disk, *including* files ingestion skips. Defaults to `discover()` |
+| `excluded_reason(path)` | Why a discovered file must not be ingested, or `None`. Defaults to `None` |
+
+Implement them only when your tool writes files that exist but should not be
+ingested. `discover_all()` is the coverage view — it answers "what is there?",
+which is what the provider bar counts and what `is_present` is derived from (a
+tool is present when `discover_all()` yields at least one file, not merely when
+`home` exists). `discover()` is the ingestion view: it answers "what should we
+read?" and **must already exclude** everything unsafe.
+
+The invariant between them: every path in `discover_all()` that
+`excluded_reason()` gives a reason for is absent from `discover()`. Widen
+`discover_all()`, then narrow `discover()` — never the reverse, or excluded files
+get ingested.
+
+The Claude Code adapter is the worked example: it searches `~/.claude/projects`
+recursively, then excludes subagent transcripts, which are machine-generated and
+would swamp the corpus. See `throughline/adapters/claude_code.py` and
+`tests/test_adapter_claude_code_subagents.py`.
 
 ```python
 from pathlib import Path

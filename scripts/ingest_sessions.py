@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Session-Ingestion für claude_memory DB.
+Session ingestion for the Throughline database.
 Liest Claude Code JSONL-Sessions und speichert sie in PostgreSQL.
 """
 from _bootstrap import use_venv  # noqa: E402
@@ -19,7 +19,7 @@ import psycopg2
 from psycopg2.extras import Json
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),

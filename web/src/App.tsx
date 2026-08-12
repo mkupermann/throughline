@@ -8,6 +8,7 @@ import { FindPage } from "@/features/find/FindPage";
 import { TimelinePage } from "@/features/timeline/TimelinePage";
 import { DETAIL_KINDS, DetailPage } from "@/features/detail/DetailPage";
 import { CuratePage } from "@/features/curate/CuratePage";
+import { ProjectPage } from "@/features/projects/ProjectPage";
 import { OperatePage } from "@/features/operate/OperatePage";
 import { ConsolePage } from "@/features/console/ConsolePage";
 import { ToastProvider } from "@/components/Toaster";
@@ -38,6 +39,9 @@ const router = createBrowserRouter([
       { path: "find", element: <FindPage /> },
       { path: "timeline", element: <TimelinePage /> },
       { path: "curate", element: <CuratePage /> },
+      // `*` so a project name with a slash-free but otherwise awkward shape
+      // ("The FireScore Website") survives the round trip.
+      { path: "project/:name", element: <ProjectPage /> },
       { path: "operate", element: <OperatePage /> },
       ...Object.entries(DETAIL_KINDS).map(([prefix, kind]) => ({
         path: `${prefix}/:id`,

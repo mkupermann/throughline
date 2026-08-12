@@ -63,7 +63,14 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Throughline web UI + JSON API — http://127.0.0.1:8787
+  # Throughline web UI + JSON API — http://127.0.0.1:8788
+  #
+  # Published on 8788 rather than 8787. 8787 is a popular default and is easily
+  # held by another local service — a service-managed one (launchd, systemd) will
+  # even reclaim it the instant a container releases it, so `up` fails with
+  # "address already in use" on every attempt. The container still listens on
+  # 8787 internally, which is why the healthcheck below is unchanged. Change only
+  # the left-hand side of the mapping if 8788 is taken on your machine too.
   # ---------------------------------------------------------------------------
   web:
     build:
@@ -79,7 +86,7 @@ services:
     ports:
       # Published on loopback only: the API has no authentication, so the
       # container must not be reachable from the rest of the network.
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:8788:8787"
     volumes: *source-mounts
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8787/api/health"]

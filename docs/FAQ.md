@@ -25,7 +25,7 @@ Code's JSONL format.
 
 Not by default. Everything runs on localhost:
 - PostgreSQL on `localhost:5432`
-- the web UI on `127.0.0.1:8787`
+- the web UI on `127.0.0.1:8790` (`throughline serve`) or `127.0.0.1:8788` (Docker)
 
 Optional network use, opt-in per feature:
 - OpenAI API for embeddings — only if you pick the `openai` backend

@@ -62,7 +62,7 @@ cat > "$PLIST" <<PLIST_EOF
         <key>PGUSER</key>
         <string>${PGUSER:-$USER}</string>
         <key>PGDATABASE</key>
-        <string>${PGDATABASE:-claude_memory}</string>
+        <string>${PGDATABASE:-throughline}</string>
         <key>PGHOST</key>
         <string>${PGHOST:-localhost}</string>
         <key>PGPORT</key>

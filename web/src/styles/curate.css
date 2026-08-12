@@ -358,3 +358,58 @@
   color: var(--text-muted);
   background: var(--surface-hover);
 }
+
+/* ── Confirmation for destructive bulk actions ────────────────────────
+   `forget` applied to every selected chunk used to run on one click, with
+   undo living in a toast that scrolls away. Undo is a good backstop and a
+   poor gate: it puts the only way back somewhere temporary, and it asks the
+   reader to notice a mistake they have not been told they are about to make.
+
+   Only `forget` and `supersede` are gated. Raising a confidence or clearing
+   an expiry are adjustments, and confirming those would teach the reader to
+   click through the ones that matter. */
+.confirm-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+.confirm {
+  width: min(440px, 100%);
+  padding: var(--space-5);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-3);
+}
+.confirm h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.confirm p {
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+/* Cancel holds focus, so Enter and Escape both do the safe thing. The
+   destructive button carries its own colour AND says what it will do to how
+   many — never colour alone. */
+.button.is-danger {
+  background: var(--status-critical);
+  border-color: var(--status-critical);
+  color: var(--surface-base);
+}
+.button.is-danger:hover {
+  filter: brightness(1.08);
+}

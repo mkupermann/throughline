@@ -1,6 +1,6 @@
 """Throughline doctor — diagnose install / runtime issues.
 
-``throughline doctor`` runs a structured battery of checks across five
+``throughline doctor`` runs a structured battery of checks across six
 categories and reports each as PASS / WARN / FAIL with a one-line remedy
 hint. Exit codes:
 
@@ -23,6 +23,11 @@ Categories
    OpenAI key present (if configured), or neither (then warn).
 5. **Scheduled jobs** — launchd plists on macOS or systemd timers on
    Linux. Warn if not installed; the user may run ingest manually.
+6. **Archive integrity** — the database's own consistency, and whether a
+   recent backup exists. Separate from the rest because this store is the
+   only surviving copy of most of what it holds: the source CLIs rotate
+   their transcripts away, so 91% of ingested Claude Code sessions no
+   longer exist on disk and nothing else could reconstruct them.
 
 Each check returns a ``CheckResult`` dataclass. The CLI module formats
 them; the JSON mode emits the raw list so other tools (CI, health
@@ -35,6 +40,7 @@ import os
 import shutil
 import socket
 import sys
+import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -47,7 +53,7 @@ from typing import Any, Callable, Iterable
 @dataclass
 class CheckResult:
     name: str                         # short stable identifier ("python_version")
-    category: str                     # one of the five categories above
+    category: str                     # one of the six categories above
     status: str                       # "pass" | "warn" | "fail"
     message: str                      # human-readable, one line
     remedy: str | None = None         # optional one-line fix hint
@@ -194,7 +200,7 @@ def check_postgres_reachable() -> CheckResult:
     if conn is None:
         host = os.environ.get("PGHOST", "localhost")
         port = os.environ.get("PGPORT", "5432")
-        db = os.environ.get("PGDATABASE", "claude_memory")
+        db = os.environ.get("PGDATABASE", "throughline")
         return CheckResult(
             "postgres_reachable", "postgres", "fail",
             f"cannot connect to Postgres at {host}:{port}/{db}",
@@ -391,6 +397,33 @@ def check_embeddings_backend() -> CheckResult:
 # --- 5. Scheduled jobs ------------------------------------------------------
 
 
+@_check("answer_backend", "embeddings")
+def check_answer_backend() -> CheckResult:
+    """Which model answers questions, and whether it runs on this machine.
+
+    Worth its own line because the answer decides where the corpus goes: a
+    local model keeps every excerpt here, a hosted one does not. That should be
+    visible without reading the source.
+    """
+    from throughline import llm
+
+    info = llm.backend_info()
+    if not info.available:
+        return CheckResult(
+            "answer_backend", "embeddings", "warn",
+            f"no model available for `throughline ask` — {info.detail}",
+            remedy="ollama pull llama3.1:8b — or set THROUGHLINE_ANSWER_BASE_URL / OPENAI_API_KEY",
+            details={"available": False, "detail": info.detail},
+        )
+    where = "runs locally" if info.local else "sends excerpts off this machine"
+    return CheckResult(
+        "answer_backend", "embeddings", "pass",
+        f"{info.backend}/{info.model} — {where}",
+        details={"backend": info.backend, "model": info.model, "local": info.local,
+                 "detail": info.detail},
+    )
+
+
 @_check("scheduled_jobs", "schedule")
 def check_scheduled_jobs() -> CheckResult:
     if sys.platform == "darwin":
@@ -440,6 +473,164 @@ def check_scheduled_jobs() -> CheckResult:
     )
 
 
+# --- 6. Archive integrity ---------------------------------------------------
+#
+# These exist because of a measurement, not a hunch: of 3,630 Claude Code
+# transcripts this tool has ingested, 91% no longer exist on disk — the source
+# CLI rotated them away. For those the database is not a convenient index over
+# files that still exist somewhere. It is the only surviving copy, and nothing
+# else can ever be used to reconstruct it. A store in that position has to be
+# checkable, or "we still have your history" is a claim nobody can test.
+
+
+@_check("archive_consistency", "archive")
+def check_archive_consistency() -> CheckResult:
+    """Internal contradictions the database can detect about itself.
+
+    Three cheap questions with no legitimate non-zero answer:
+
+    - messages whose conversation no longer exists (a broken parent link),
+    - active memory chunks pointing at a conversation that is gone (memory
+      whose provenance can no longer be shown),
+    - ``conversations.message_count`` disagreeing with the rows actually
+      present. That column is denormalised and it is not cosmetic: the
+      extraction and entity queues both filter on ``message_count >= N``, so a
+      wrong value silently changes which conversations are ever processed.
+    """
+    from throughline.status import _connect
+
+    conn = _connect()
+    if conn is None:
+        return CheckResult("archive_consistency", "archive", "warn", "skipped (Postgres not reachable)")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  (SELECT count(*) FROM messages m
+                     WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = m.conversation_id)),
+                  (SELECT count(*) FROM memory_chunks mc
+                     WHERE mc.source_type = 'conversation' AND mc.source_id IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = mc.source_id)),
+                  (SELECT count(*) FROM (
+                      SELECT c.id FROM conversations c
+                      LEFT JOIN messages m ON m.conversation_id = c.id
+                      GROUP BY c.id, c.message_count
+                      HAVING c.message_count IS DISTINCT FROM count(m.id)) t)
+                """
+            )
+            orphan_messages, dangling_chunks, count_drift = (int(v) for v in cur.fetchone())
+    finally:
+        conn.close()
+
+    details = {
+        "orphan_messages": orphan_messages,
+        "dangling_memory_chunks": dangling_chunks,
+        "message_count_drift": count_drift,
+    }
+    problems = [f"{v} {k.replace('_', ' ')}" for k, v in details.items() if v]
+    if not problems:
+        return CheckResult(
+            "archive_consistency", "archive", "pass",
+            "no orphaned rows, no dangling memory, message counts agree",
+            details=details,
+        )
+    # One remedy per fault actually present. A hint about a problem the reader
+    # does not have is noise, and noise is how a warning stops being read.
+    remedies = []
+    if count_drift:
+        remedies.append(
+            "recompute the counts: UPDATE conversations c SET message_count = "
+            "(SELECT count(*) FROM messages m WHERE m.conversation_id = c.id) "
+            "WHERE c.message_count IS DISTINCT FROM (SELECT count(*) FROM messages m "
+            "WHERE m.conversation_id = c.id) — re-ingesting will not fix these, "
+            "since most of their source files no longer exist on disk"
+        )
+    if dangling_chunks:
+        remedies.append(
+            "dangling chunks keep their content and lose only their link to the "
+            "conversation they came from; deleting them would destroy memory, so "
+            "leave them unless you know the conversation is gone for good"
+        )
+    if orphan_messages:
+        remedies.append(
+            "orphaned messages should be impossible — messages.conversation_id "
+            "carries a foreign key. Investigate before deleting anything"
+        )
+
+    # Warn, not fail: every one of these is a bookkeeping fault, not lost
+    # content — the messages themselves are intact. Failing would put doctor
+    # into a permanent red state over something that never blocks a read.
+    return CheckResult(
+        "archive_consistency", "archive", "warn",
+        "; ".join(problems),
+        remedy="; ".join(remedies) or None,
+        details=details,
+    )
+
+
+@_check("archive_backup", "archive")
+def check_archive_backup() -> CheckResult:
+    """Is there a recent, non-empty backup of the only copy?
+
+    Redundancy is the first property an archive owes its owner, and it is the
+    one that fails silently: a scheduled job that stopped working leaves
+    exactly the same evidence as one that never existed.
+    """
+    # Same resolution order as scripts/backup.sh, so the check looks where the
+    # job writes. If those two ever disagree, this reports "no backups" beside
+    # a directory full of them.
+    override = os.environ.get("CLAUDE_MEMORY_BACKUP_DIR")
+    if override:
+        backup_dir = Path(override)
+    else:
+        data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        backup_dir = data_home / "claude-memory" / "backups"
+
+    if not backup_dir.is_dir():
+        return CheckResult(
+            "archive_backup", "archive", "warn",
+            f"no backup directory at {backup_dir}",
+            remedy="bash scripts/install_backup_agent.sh",
+            details={"backup_dir": str(backup_dir)},
+        )
+
+    dumps = sorted(backup_dir.glob("*.sql.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
+    dumps = [p for p in dumps if p.stat().st_size > 0]
+    if not dumps:
+        return CheckResult(
+            "archive_backup", "archive", "warn",
+            f"backup directory holds no usable dump ({backup_dir})",
+            remedy="bash scripts/backup.sh",
+            details={"backup_dir": str(backup_dir)},
+        )
+
+    newest = dumps[0]
+    age_h = (time.time() - newest.stat().st_mtime) / 3600.0
+    size_mb = newest.stat().st_size / 1024 / 1024
+    details = {
+        "newest": newest.name,
+        "age_hours": round(age_h, 1),
+        "size_mb": round(size_mb, 1),
+        "count": len(dumps),
+    }
+    # 48h, not 24: the schedule is daily, so a 24h threshold would report a
+    # warning every day in the hours before the run rather than only when a
+    # run has actually been missed.
+    if age_h > 48:
+        return CheckResult(
+            "archive_backup", "archive", "warn",
+            f"newest backup is {age_h / 24:.1f} days old ({newest.name})",
+            remedy="bash scripts/backup.sh — and check the agent: launchctl list | grep claude-memory",
+            details=details,
+        )
+    return CheckResult(
+        "archive_backup", "archive", "pass",
+        f"{len(dumps)} backup(s), newest {age_h:.1f}h old, {size_mb:.0f} MB",
+        details=details,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
@@ -454,7 +645,10 @@ _ALL_CHECKS: list[Callable[[], CheckResult]] = [
     check_schema_present,
     check_source_adapters,
     check_embeddings_backend,
+    check_answer_backend,
     check_scheduled_jobs,
+    check_archive_consistency,
+    check_archive_backup,
 ]
 
 
@@ -485,7 +679,13 @@ def format_human(report: DoctorReport, *, color: bool = True) -> str:
     for c in report.checks:
         by_cat.setdefault(c.category, []).append(c)
 
+    # Known categories first, in reading order; anything else after, rather
+    # than dropped. A fixed list silently swallowed the whole `archive`
+    # category once — its checks ran, counted toward the summary, and never
+    # printed, so the totals disagreed with what was on screen and the only
+    # way to see them was `--json`.
     order = ["python", "postgres", "adapters", "embeddings", "schedule"]
+    order += [c for c in by_cat if c not in order]
     for cat in order:
         if cat not in by_cat:
             continue

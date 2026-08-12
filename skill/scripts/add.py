@@ -33,7 +33,7 @@ VALID_CATEGORIES = (
 )
 
 DB = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -42,7 +42,7 @@ DB = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Add a memory chunk to the claude_memory DB.",
+        description="Add a memory chunk to the Throughline database.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--category", required=True, choices=VALID_CATEGORIES,

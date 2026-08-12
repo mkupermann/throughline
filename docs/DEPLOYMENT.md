@@ -16,7 +16,8 @@ Starts:
 - `postgres` — PostgreSQL 16 with pgvector. The schema in `sql/schema.sql` is
   applied automatically on first start of an empty volume. Data persists in the
   named volume `throughline_postgres_data`; do not delete it.
-- `web` — web UI + JSON API on `http://127.0.0.1:8787`.
+- `web` — web UI + JSON API on `http://127.0.0.1:8788`. The container listens
+  on 8787 internally; only the published host port differs.
 
 Host tool directories (`~/.claude`, `~/.cursor`, `~/.codex`, …) are mounted
 read-only under `/root` inside the containers, where the adapters expect them.

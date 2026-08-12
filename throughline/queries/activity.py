@@ -24,7 +24,11 @@ def conversations_per_day(conn, days: int = 14) -> list[Row]:
         """
         SELECT date_trunc('day', started_at)::date AS day, count(*) AS n
         FROM conversations
-        WHERE started_at >= now() - make_interval(days => %s)
+        -- Sessions a person had. Without this the chart counted the tool's own
+        -- `claude -p` calls: 523 conversations over 30 days against 120 real
+        -- ones, so the curve was mostly a record of Throughline running.
+        WHERE generated_by IS NULL
+          AND started_at >= now() - make_interval(days => %s)
         GROUP BY day
         ORDER BY day
         """,
@@ -71,7 +75,9 @@ def events_conversations(conn, cutoff: datetime | None = None) -> list[Row]:
         SELECT c.id, c.summary, c.project_name, c.model, c.message_count,
                c.started_at AS event_date, c.ended_at
         FROM conversations c
-        WHERE c.started_at IS NOT NULL
+        -- The event stream a reader browses; same rule as every other listing.
+        WHERE c.generated_by IS NULL
+          AND c.started_at IS NOT NULL
           AND (%s::timestamptz IS NULL OR c.started_at >= %s::timestamptz)
         ORDER BY c.started_at
         """,

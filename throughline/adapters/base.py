@@ -97,6 +97,10 @@ class IngestSummary:
     skipped: int = 0
     errors: int = 0
     messages_written: int = 0
+    #: Transcripts of Throughline's own `claude -p` calls, dropped at
+    #: ingest. Counted separately from `skipped` so a run says plainly
+    #: how much of a source is the tool's own exhaust.
+    self_referential: int = 0
 
 
 class Adapter(ABC):

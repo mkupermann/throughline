@@ -47,6 +47,7 @@ class Overview:
     attention: list[AttentionItem] = field(default_factory=list)
     activity: list[dict[str, Any]] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
+    categories: list[dict[str, Any]] = field(default_factory=list)
 
 
 #: An embedding coverage below this is worth surfacing; semantic search
@@ -85,6 +86,33 @@ def _build_overview(conn, settings: Settings) -> Overview:
                     "embedding are unavailable until it is reinstalled for this server "
                     "version."
                 ),
+                action="/operate",
+                action_label="Diagnostics",
+            )
+        )
+
+    # A schema the running code does not expect is the one fault that can damage
+    # the archive rather than merely degrade a query — and this database is the
+    # only surviving copy of most of what it holds, because the source CLIs
+    # rotate their transcripts away. Ranked directly below pgvector for that
+    # reason. `None` means the check could not run and is deliberately silent:
+    # claiming all-clear without looking is the failure this replaced.
+    pending_migrations = status.get("pending_migrations")
+    if pending_migrations:
+        verdict = "broken" if verdict == "broken" else "degraded"
+        attention.append(
+            AttentionItem(
+                id="pending-migrations",
+                severity="critical",
+                title="Schema migrations pending",
+                detail=(
+                    "The database schema is older than the code reading it: "
+                    + ", ".join(pending_migrations)
+                    + ". Apply them with `python3 scripts/migrate.py` before the next "
+                    "ingest — a migration left unapplied has already cost silently "
+                    "dropped messages once."
+                ),
+                count=len(pending_migrations),
                 action="/operate",
                 action_label="Diagnostics",
             )
@@ -221,10 +249,19 @@ def _build_overview(conn, settings: Settings) -> Overview:
     ]
 
     return Overview(
+        # The number and the words around it have to explain each other. This
+        # read "Memory chunks under management" over the figure 800, with
+        # "1,019 total, all statuses" beneath — three quantities, no stated
+        # relationship, and no way to tell why the big number was not the total.
+        # Now the label names what the figure counts and the sublabel says what
+        # the remainder is, so the two numbers account for each other.
         headline={
-            "label": "Memory chunks under management",
+            "label": "Active memory",
             "value": int(counts.get("active") or 0),
-            "sublabel": f"{int(counts.get('total') or 0):,} total, all statuses",
+            "sublabel": (
+                f"of {int(counts.get('total') or 0):,} stored — the rest is "
+                "superseded, expired or forgotten"
+            ),
         },
         verdict=verdict,
         verdict_reason=verdict_reason,
@@ -237,6 +274,15 @@ def _build_overview(conn, settings: Settings) -> Overview:
             "skills": int(totals.get("sk") or 0),
             "projects": int(status.get("projects_count") or 0),
         },
+        # What KIND of memory this is, not just how much. The headline says
+        # 977 chunks; this says whether they are decisions, errors solved, or
+        # contacts — the shape the Streamlit dashboard showed and the rebuild
+        # dropped. Sent with the rest of the payload rather than fetched
+        # separately: one screen, one request.
+        categories=[
+            {"category": r["category"] or "uncategorised", "n": int(r["n"])}
+            for r in Q.memory.category_counts(conn)
+        ],
     )
 
 

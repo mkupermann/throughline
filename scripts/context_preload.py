@@ -33,7 +33,7 @@ import psycopg2
 import psycopg2.extras
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -153,7 +153,7 @@ def render_markdown(project_name: str, project_dir: Path, chunks: list[dict[str,
     lines.append("")
     lines.append(
         "This file is auto-injected by the `SessionStart` hook from the "
-        "`claude_memory` PostgreSQL DB. It surfaces prior decisions, preferences, "
+        "Throughline PostgreSQL database. It surfaces prior decisions, preferences, "
         "patterns and known issues. Treat it as trusted long-term context."
     )
     lines.append("")

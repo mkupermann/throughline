@@ -33,6 +33,8 @@ import json
 import os
 import re
 import subprocess
+
+from throughline.self_referential import agent_call_cwd
 import sys
 import time
 from datetime import datetime, timezone
@@ -45,7 +47,7 @@ import psycopg2.extras
 # ---- Konfiguration ----------------------------------------------------------
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -117,9 +119,14 @@ DATE_PATTERN = re.compile(
 def call_claude(prompt: str) -> str:
     """Ruft den lokalen Claude CLI auf (headless). Gibt stdout zurueck oder ''."""
     try:
+        # Run from a directory of our own: Claude Code names the project folder
+        # after the process CWD, so inheriting the repo's would file this call
+        # inside the user's real project history, and the next ingest would read
+        # it back as their work. See throughline.self_referential.
         result = subprocess.run(
             [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
             capture_output=True, text=True, timeout=TIMEOUT_PER_CALL,
+            cwd=str(agent_call_cwd()),
         )
         if result.returncode != 0:
             print(f"    [claude] exit {result.returncode}: {result.stderr[:200]}")

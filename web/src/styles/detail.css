@@ -63,3 +63,123 @@
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
+
+/* ── Transcript ───────────────────────────────────────────────────────
+   A conversation as it happened: prose, the commands that ran, and what
+   they returned. The previous renderer showed `content` cut at 400
+   characters, which on a real session dropped every command and every
+   result — 772 of one 5,560-message session's assistant messages have no
+   `content` at all, because they are pure tool calls. */
+.tx {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.tx-msg {
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border-muted);
+}
+/* Who spoke, by position and colour of the rule — never colour alone, since
+   the role is also written out beside it. */
+.tx-user {
+  border-left-color: var(--accent);
+}
+.tx-assistant {
+  border-left-color: var(--border-strong);
+}
+.tx-tool_result {
+  border-left-color: var(--border-muted);
+}
+.tx-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.tx-role {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.tx-model {
+  font-family: var(--font-mono);
+}
+.tx-time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.tx-prose {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  /* Preserve the author's own line breaks; a transcript reflowed into one
+     paragraph loses the shape of what was written. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tx-tool {
+  margin-top: var(--space-2);
+}
+.tx-tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.tx-tool-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+/* The command itself, and any output. Monospace and scrollable in their own
+   box: a 200-character shell line must not widen the page. */
+.tx-arg,
+.tx-out {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-x: auto;
+  white-space: pre;
+}
+.tx-out {
+  color: var(--text-secondary);
+  max-height: 24em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.tx-collapse {
+  margin-top: var(--space-1);
+}
+.tx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.tx-caret {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.tx-caret.is-open {
+  transform: rotate(90deg);
+}
+.tx-empty {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}

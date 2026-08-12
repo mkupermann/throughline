@@ -18,7 +18,17 @@ from fastapi.staticfiles import StaticFiles
 from throughline import __version__
 
 from .deps import DatabaseUnavailable, close_pool, init_pool
-from .routers import console, curate, find, operate, overview, providers, timeline
+from .routers import (
+    ask,
+    console,
+    curate,
+    find,
+    operate,
+    overview,
+    projects,
+    providers,
+    timeline,
+)
 from .settings import Settings
 
 log = logging.getLogger("throughline.api")
@@ -70,6 +80,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(console.router, prefix="/api")
     app.include_router(providers.router, prefix="/api")
     app.include_router(timeline.router, prefix="/api")
+    app.include_router(ask.router, prefix="/api")
+    app.include_router(projects.router, prefix="/api")
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

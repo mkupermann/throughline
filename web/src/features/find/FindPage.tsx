@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, Info, LayoutList, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { Download, Info, LayoutList, MessageCircleQuestion, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
 
 import { findApi, type ApiError } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { FacetRail } from "./FacetRail";
-import { ResultList } from "./ResultList";
+import { ResultList, routeFor } from "./ResultList";
+import { AskPanel } from "./AskPanel";
+import { ResultPreview, previewTarget } from "./ResultPreview";
 import { ResultTable } from "./ResultTable";
 import { ResultGraph } from "./ResultGraph";
 import { toApiParams, useFindState } from "./useFindState";
@@ -55,6 +58,12 @@ export function FindPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  // ── Moving through results without leaving the page ──────────────────
+  // j/k (and the arrows, for readers who do not know the vi bindings) move the
+  // selection; Enter opens it in full. The preview follows the selection, so
+  // reading twenty results costs no navigation at all.
+  const [selected, setSelected] = useState(0);
+
   const params = toApiParams(state);
   const { data, isFetching, error } = useQuery({
     queryKey: ["find", params.toString()],
@@ -70,6 +79,64 @@ export function FindPage() {
 
   const terms = state.q.split(/\s+/).filter((t) => t.length > 1);
   const pageCount = data ? Math.ceil(data.total / state.perPage) : 0;
+
+  const items = data?.items ?? [];
+  const listMode = state.mode === "list";
+  const current = listMode && items.length > 0 ? (items[selected] ?? items[0]) : null;
+
+  // A new result set invalidates the old position. Snapping to the first row
+  // rather than clamping is deliberate: after changing the query, "where I
+  // was" is meaningless, and the top of the new list is what the reader is
+  // looking at.
+  useEffect(() => {
+    setSelected(0);
+  }, [params.toString()]);
+
+  // Prefetch the neighbours of whatever is selected. Without this, holding j
+  // is a series of round trips and the panel flashes empty between them — the
+  // difference between navigating and waiting. The keys match the preview's
+  // own query exactly, so a prefetched record is served from cache rather than
+  // refetched.
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!listMode) return;
+    for (const i of [selected + 1, selected - 1]) {
+      const neighbour = items[i];
+      if (!neighbour) continue;
+      const t = previewTarget(neighbour);
+      if (!t) continue;
+      void qc.prefetchQuery({
+        queryKey: ["detail", t.kind, t.id],
+        queryFn: () =>
+          t.kind === "project" ? findApi.projectByName(t.id) : findApi.detail(t.kind, t.id),
+        staleTime: 60_000,
+      });
+    }
+    // `items` is referenced by identity via the query key above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, listMode, params.toString()]);
+
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!listMode || items.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      // Never steal a key from a field the reader is typing in.
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelected((i) => Math.min(i + 1, items.length - 1));
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelected((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter" && current) {
+        e.preventDefault();
+        navigate(routeFor(current));
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [listMode, items.length, current, navigate]);
 
   return (
     <>
@@ -87,7 +154,25 @@ export function FindPage() {
           type="search"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Search everything…   (press / to focus)"
+          // The field is auto-focused, so j and k would otherwise be typed into
+          // the query rather than move the selection — the keyboard navigation
+          // was unreachable without first clicking somewhere else. Down-arrow
+          // hands over to the list (the pattern every search-first tool uses),
+          // and Escape lets go without moving.
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              e.currentTarget.blur();
+              setSelected(0);
+            } else if (e.key === "Escape") {
+              e.currentTarget.blur();
+            }
+          }}
+          placeholder={
+            state.mode === "ask"
+              ? "Ask a question about your history…"
+              : "Search everything…   (/ to focus, ↓ for results)"
+          }
           aria-label="Search"
           autoFocus
           className="searchbar-input"
@@ -122,6 +207,16 @@ export function FindPage() {
           >
             <Network size={14} aria-hidden /> Graph
           </button>
+          {/* Not a fourth view of the same rows — a different question. List,
+              Table and Graph all show what matched; Ask says what it means. */}
+          <button
+            type="button"
+            className={state.mode === "ask" ? "is-on" : ""}
+            onClick={() => update({ mode: "ask" })}
+            aria-pressed={state.mode === "ask"}
+          >
+            <MessageCircleQuestion size={14} aria-hidden /> Ask
+          </button>
         </div>
       </div>
 
@@ -136,7 +231,9 @@ export function FindPage() {
         />
 
         <div className="find-main">
-          {!state.q.trim() && activeFilterCount === 0 && (
+          {state.mode === "ask" && <AskPanel question={state.q} />}
+
+          {state.mode !== "ask" && !state.q.trim() && activeFilterCount === 0 && (
             <div className="empty-state">
               <Search size={22} aria-hidden />
               <h2>Search or browse your memory</h2>
@@ -148,7 +245,7 @@ export function FindPage() {
             </div>
           )}
 
-          {error && (
+          {state.mode !== "ask" && error && (
             <div className="empty-state">
               <OctagonAlert size={22} aria-hidden />
               <h2>Search failed</h2>
@@ -157,7 +254,7 @@ export function FindPage() {
             </div>
           )}
 
-          {data && (
+          {state.mode !== "ask" && data && (
             <>
               <div className="result-bar">
                 <span aria-live="polite">
@@ -228,7 +325,12 @@ export function FindPage() {
               ) : state.mode === "graph" ? (
                 <ResultGraph items={data.items} />
               ) : (
-                <ResultList items={data.items} terms={terms} />
+                <ResultList
+                  items={data.items}
+                  terms={terms}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
               )}
 
               {pageCount > 1 && (state.mode === "list" || state.mode === "table") && (
@@ -257,6 +359,10 @@ export function FindPage() {
             </>
           )}
         </div>
+
+        {/* Third column, list mode only. Table has its own row semantics and
+            Graph is a canvas — neither has a "current row" to preview. */}
+        {listMode && data && data.total > 0 && <ResultPreview item={current} />}
       </div>
     </>
   );

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Throughline mark. One unbroken stroke passing through three nodes: memory
+    scattered across nine separate CLIs is one continuous record, not nine
+    islands. The line runs past both edges because it is longer than the frame.
+
+    Standalone copy of web/src/components/Logo.tsx — a favicon cannot import a
+    React component. Geometry must be kept identical to that file; if you change
+    one, change both.
+
+    Colours are literal rather than CSS variables: a favicon renders outside the
+    document, so custom properties do not resolve. #4c8dd8 is a lightened
+    --accent (#0969da) that holds contrast against both a dark and a light
+    browser chrome, since the tab strip follows the browser theme, not ours.
+  -->
+  <rect width="32" height="32" rx="7" fill="#08090c"/>
+  <path d="M-2 24 C 6 24, 8 8, 16 8 S 26 20, 34 20"
+        stroke="#4c8dd8" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <circle cx="4.4" cy="20.4" r="3" fill="#08090c" stroke="#4c8dd8" stroke-width="2"/>
+  <circle cx="16" cy="8" r="3.4" fill="#08090c" stroke="#4c8dd8" stroke-width="2"/>
+  <circle cx="27.6" cy="18.6" r="3" fill="#08090c" stroke="#4c8dd8" stroke-width="2"/>
+</svg>

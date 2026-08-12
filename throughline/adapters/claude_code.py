@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
+from throughline.self_referential import is_agent_call_transcript
 
 # Sessions whose first user message starts with this marker are headless
 # `claude -p ...` calls issued by scripts/generate_titles.py. Each such call is
@@ -131,6 +132,17 @@ class ClaudeCodeAdapter(Adapter):
             rel = path
         if self.SUBAGENT_DIR in rel.parts:
             return "subagent transcript"
+
+        # Transcripts Claude Code wrote for Throughline's own `claude -p` calls.
+        # Checked by directory, which is a fact about where the call ran, rather
+        # than by prompt wording, which is a guess about text — and one that has
+        # already been wrong: the first version of the wording list missed 642
+        # transcripts written under an earlier phrasing. The wording check still
+        # runs later in the writer, because transcripts recorded before this
+        # existed were written from the old working directory and can only be
+        # recognised by what they say.
+        if is_agent_call_transcript(path):
+            return "throughline agent call"
 
         try:
             real_path = path.resolve(strict=True)

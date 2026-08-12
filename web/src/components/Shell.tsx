@@ -2,6 +2,7 @@ import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from
 import { useEffect, useRef, useState } from "react";
 import { Moon, Sun, Monitor, Command as CommandIcon } from "lucide-react";
 
+import { Logo } from "@/components/Logo";
 import { NAV } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
@@ -96,8 +97,8 @@ export function Shell() {
 
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden>
-            T
+          <div className="brand-mark">
+            <Logo size={28} title={null} />
           </div>
           <div className="brand-text">
             <div className="brand-title">Throughline</div>

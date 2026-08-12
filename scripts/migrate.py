@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS applied_migrations (
 
 def db_config() -> dict:
     return {
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),

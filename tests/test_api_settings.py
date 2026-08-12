@@ -52,7 +52,11 @@ def test_defaults_are_loopback(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     s = Settings.from_env()
     assert s.host in LOOPBACK_HOSTS
-    assert s.port == 8787
+    # 8790, not 8787: 8787 is claimed by an unrelated launchd agent on the
+    # author's machine and 8788 is the Docker publish mapping, so the native
+    # server and the container can run side by side. The value matters less
+    # than the three staying distinct — they reach different databases.
+    assert s.port == 8790
     assert s.redact is True
 
 

@@ -9,6 +9,8 @@ use_venv()
 
 import os
 import subprocess
+
+from throughline.self_referential import agent_call_cwd
 import sys
 import time
 from typing import Any
@@ -16,7 +18,7 @@ from typing import Any
 import psycopg2
 
 DB: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -108,9 +110,14 @@ def build_preview(messages: list[tuple[str, str | None]]) -> str:
 
 def call_claude(prompt: str) -> str:
     try:
+        # Run from a directory of our own: Claude Code names the project folder
+        # after the process CWD, so inheriting the repo's would file this call
+        # inside the user's real project history, and the next ingest would read
+        # it back as their work. See throughline.self_referential.
         r = subprocess.run(
             [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
-            capture_output=True, text=True, timeout=TIMEOUT
+            capture_output=True, text=True, timeout=TIMEOUT,
+            cwd=str(agent_call_cwd()),
         )
         if r.returncode != 0:
             return ""

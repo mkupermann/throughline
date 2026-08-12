@@ -329,7 +329,7 @@ export function OperatePage() {
 
       <section className="stack-top">
         <h2 className="section-label">Inventory</h2>
-        <dl className="totals">
+        <dl className="totals totals--metric">
           {Object.entries(data.counts).map(([k, v]) => (
             <div key={k} className="total">
               <dt>{k}</dt>

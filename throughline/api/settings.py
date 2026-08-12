@@ -42,7 +42,13 @@ class RemoteBindRefused(RuntimeError):
 @dataclass(frozen=True)
 class Settings:
     host: str = "127.0.0.1"
-    port: int = 8787
+    #: 8787 was the original default and is no longer usable here: a launchd
+    #: agent on the author's machine claims it and reclaims it the moment
+    #: anything releases it. 8788 is taken by the Docker publish mapping
+    #: (see docker-compose.yml), so the native server sits on 8790 and the two
+    #: can run side by side — which is useful, because they talk to different
+    #: databases. Override with THROUGHLINE_PORT or `serve --port`.
+    port: int = 8790
     #: Directory holding the built frontend. Absent during backend-only dev,
     #: in which case the API still serves and only the SPA routes 404.
     web_dist: Path | None = None
@@ -63,7 +69,7 @@ class Settings:
 
         return cls(
             host=os.environ.get("THROUGHLINE_HOST", "127.0.0.1"),
-            port=int(os.environ.get("THROUGHLINE_PORT", "8787")),
+            port=int(os.environ.get("THROUGHLINE_PORT", "8790")),
             web_dist=web_dist,
             pool_min=int(os.environ.get("THROUGHLINE_POOL_MIN", "1")),
             pool_max=int(os.environ.get("THROUGHLINE_POOL_MAX", "8")),

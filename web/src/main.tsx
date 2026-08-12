@@ -9,6 +9,7 @@ import "./styles/detail.css";
 import "./styles/curate.css";
 import "./styles/console.css";
 import "./styles/timeline.css";
+import "./styles/projects.css";
 import { App } from "./App";
 
 const el = document.getElementById("root");

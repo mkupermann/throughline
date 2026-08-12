@@ -328,3 +328,49 @@ def test_aggregate_unattributed_alone_does_not_pull_in_named_providers(mixed_att
     )
     assert "claude_code" not in {r["provider"] for r in agg}
     assert "hermes" not in {r["provider"] for r in agg}
+
+
+# ── A day opens on what a person recognises ─────────────────────────────────
+
+
+def test_day_detail_lists_conversations_before_messages(db_env):
+    """Ordering by time alone let messages fill the page.
+
+    Measured on a real day: 1,678 messages against 20 conversations, so the
+    first hundred rows were 99 messages and one memory chunk — and the
+    conversations the reader clicked the cell to find were not among them. The
+    panel said "showing 100 of 1,678", which was honest and still the wrong
+    hundred.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO conversations (session_id, project_path, model, entrypoint,
+                                           started_at, message_count, summary, source_tool)
+                VALUES (gen_random_uuid(), '/repo', 'm', 'cli',
+                        '2026-05-05T09:00:00Z', 3, 'a session', 'claude_code')
+                RETURNING id
+                """
+            )
+            conv_id = cur.fetchone()[0]
+            # Messages are later in time, so a time-only ordering puts every
+            # one of them ahead of the conversation.
+            for i in range(30):
+                cur.execute(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) "
+                    "VALUES (%s, 'user', %s, %s)",
+                    (conv_id, f"m{i}", f"2026-05-05T1{i % 9}:00:00Z"),
+                )
+        conn.commit()
+
+        rows = T.day_detail(conn, date(2026, 5, 5), kinds=[], providers=[], limit=5)
+        assert rows, "the day should not be empty"
+        assert rows[0]["kind"] == "conversation", (
+            f"a container must lead the list, got {rows[0]['kind']}"
+        )
+    finally:
+        conn.close()

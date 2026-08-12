@@ -186,10 +186,21 @@ def project_by_name(
     return {"kind": "project", "record": _jsonify(record), "related": {}}
 
 
+#: Messages returned per detail request. A long session runs to thousands —
+#: this one is 3,398 — and its transcript is 18 MB on disk, so the whole thing
+#: cannot come down in one response. The previous code took the first 500 and
+#: said nothing, which reads as a conversation that stops mid-sentence. The cap
+#: stays; what changes is that the response now carries the true total and an
+#: offset, so the reader knows there is more and can ask for it.
+MESSAGE_PAGE = 500
+
+
 @router.get("/detail/{kind}/{item_id}")
 def detail(
     kind: DetailKind,
     item_id: int,
+    msg_offset: int = Query(0, ge=0, description="First message to return."),
+    msg_limit: int = Query(MESSAGE_PAGE, ge=1, le=2000),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     from fastapi import HTTPException
@@ -197,8 +208,18 @@ def detail(
     with connection(settings) as conn:
         if kind == "conversation":
             record = Q.conversations.get_conversation(conn, item_id)
+            msgs = Q.conversations.messages_for(
+                conn, item_id, limit=msg_limit, offset=msg_offset
+            )
+            # message_count on the conversation row is the authority: it is what
+            # the writer stored, so it stays right even when this page is short.
+            total = int((record or {}).get("message_count") or 0)
             related = {
-                "messages": [_jsonify(m) for m in Q.conversations.messages_for(conn, item_id, limit=500)],
+                "messages": [_jsonify(m) for m in msgs],
+                "message_total": total,
+                "message_offset": msg_offset,
+                "message_returned": len(msgs),
+                "has_more": msg_offset + len(msgs) < total,
                 "chunks": [_jsonify(c) for c in Q.conversations.chunks_from_conversation(conn, item_id)],
             }
         elif kind == "memory":

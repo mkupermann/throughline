@@ -35,7 +35,12 @@ def pending_extraction_count(conn, min_messages: int = 3) -> int:
             conn,
             """
             SELECT count(*) FROM conversations c
-            WHERE NOT EXISTS (
+            -- Entity extraction costs a model call per conversation, so this
+            -- queue must not offer the tool's own `claude -p` sessions —
+            -- extracting the people and systems mentioned in a prompt asking
+            -- for entity extraction is work with no output.
+            WHERE c.generated_by IS NULL
+              AND NOT EXISTS (
                 SELECT 1 FROM entity_mentions em
                 WHERE em.source_type = 'conversation' AND em.source_id = c.id
             )

@@ -182,7 +182,7 @@ def _connect():
     cfg = {
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER") or "postgres"),
         "connect_timeout": int(os.environ.get("PGCONNECT_TIMEOUT", "3")),
     }

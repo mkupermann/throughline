@@ -1,4 +1,4 @@
-# memory_mcp — MCP server for claude-memory-db
+# memory_mcp — MCP server for Throughline
 
 Exposes the same query and write surface that `throughline/api/` uses, but over the
 Model Context Protocol so Claude Code (or any MCP client) can read and write
