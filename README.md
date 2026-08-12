@@ -7,9 +7,19 @@
 [![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-336791.svg)](sql/schema.sql)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
 
-**Throughline is a universal, vendor-agnostic memory layer for AI coding assistants.** Every AI CLI forgets everything between sessions; Throughline ingests the session history of all major AI CLIs — Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, and Vibe — into one local PostgreSQL database and feeds that unified memory back to whichever tool you use next.
+**Your AI assistant forgets you every time you close it. Throughline does not.**
 
-Storage, indexing, search and every listing are local: nothing is uploaded, and there is no account. The single exception is deliberate and worth stating in the first paragraph rather than a footnote — asking a question in plain language sends the retrieved excerpts to whichever model answers it. Point that at Ollama or any local server and the exception disappears; the tool probes local models first for exactly this reason.
+It is a universal, vendor-agnostic memory layer for AI coding assistants — no account, no telemetry, no cloud. Each of them remembers, at best, its own sessions, and none of them can see what you did in the others. Throughline ingests the session history of all major AI CLIs — Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, and Vibe — into one local PostgreSQL database and feeds that unified memory back to whichever tool you use next.
+
+Storage, indexing, search, and every listing happen on your machine. Three operations may call a model, and each is therefore a point where content could leave. They are named here rather than in a footnote:
+
+| Operation | Stays local when | Required? |
+|---|---|---|
+| **Embedding** (`throughline embed`) | the backend is Ollama — the default | needed for semantic search |
+| **Answering** (`throughline ask`) | the backend is local | optional |
+| **Extraction, titles, reflection** | the backend is local | optional |
+
+Each one defaults to a local backend, so on a machine running Ollama nothing you have stored leaves it and no setting had to be found first. That is a default, not an enforcement: `THROUGHLINE_ANSWER_BACKEND`, `THROUGHLINE_ANSWER_BASE_URL` and `OPENAI_API_KEY` deliberately let you route any of these to a hosted endpoint. Setting one changes that operation, and only that one — `throughline doctor` prints where each currently goes.
 
 Switch providers freely — Anthropic today, Mistral or OpenAI tomorrow — and your accumulated context, decisions, and preferences move with you. The memory belongs to you, not to a vendor.
 
@@ -21,7 +31,7 @@ Switch providers freely — Anthropic today, Mistral or OpenAI tomorrow — and 
 |---|---|
 | Each AI CLI keeps its own siloed, ephemeral history | One normalised store across all nine supported tools |
 | Vendor lock-in through accumulated context | Vendor-neutral schema; switch assistants without losing memory |
-| Cloud memory features raise data-governance questions | PostgreSQL on your machine, read-only source mounts, no account; the one egress path is named above and can be closed |
+| Cloud memory features raise data-governance questions | PostgreSQL on your machine, read-only source mounts, no account; every operation that can reach a network is named above, and each has a local option |
 | Raw transcripts are unsearchable | Structured memory chunks, semantic search (pgvector), knowledge graph |
 
 A longer discussion of the cross-tool memory problem is in [docs/why-cross-tool.md](docs/why-cross-tool.md).
@@ -53,14 +63,16 @@ Design details: [docs/architecture.md](docs/architecture.md) · measured perform
 | Tool | Vendor | Storage location | Format |
 |------|--------|------------------|--------|
 | Claude Code | Anthropic | `~/.claude/projects/<project>/*.jsonl` | JSONL transcripts |
-| Codex CLI | OpenAI | `~/.codex/sessions/<date>/rollout-*.jsonl` | JSONL rollouts |
-| Cursor | Anysphere | `~/.cursor/sessions/*.jsonl` | JSONL transcripts |
-| Zed | Zed Industries | `~/.zed/data/sessions/*.json` | JSON transcripts |
-| Vibe | Mistral AI | `~/.vibe/logs/session/session_*/` | Session directories |
-| Hermes | Community | `~/.hermes/sessions/*.json` | JSON transcripts |
-| Continue | Continue.dev | `~/.continue/sessions/*.json` | JSON transcripts |
 | Cline | Cline | VS Code `globalStorage/.../tasks/` | Per-task files |
+| Codex CLI | OpenAI | `~/.codex/sessions/<date>/rollout-*.jsonl` | JSONL rollouts |
+| Continue | Continue.dev | `~/.continue/sessions/*.json` | JSON transcripts |
+| Cursor | Anysphere | `~/.cursor/sessions/*.jsonl` | JSONL transcripts |
+| Hermes | Community | `~/.hermes/sessions/*.json` | JSON transcripts |
+| Vibe | Mistral AI | `~/.vibe/logs/session/session_*/` | Session directories |
 | Windsurf | Codeium/Cognition | `~/.windsurf/plans/*.md` | Markdown plans |
+| Zed | Zed Industries | `~/.zed/data/sessions/*.json` | JSON transcripts |
+
+Listed alphabetically. No adapter is privileged in the schema, the pipeline or the UI: a conversation carries a `source_tool` and nothing else distinguishes where it came from.
 
 Adapters degrade gracefully: a tool that is not installed is simply reported as "not present". Third-party adapters plug in through the `throughline.adapters` entry point without any changes to Throughline itself — see [docs/ADAPTER_DEVELOPMENT.md](docs/ADAPTER_DEVELOPMENT.md).
 
@@ -103,10 +115,8 @@ throughline serve
 ```
 
 The connection comes from the standard `PG*` variables, and a `.env` in the
-repository root is read automatically. Upgrading from before 0.3.0? The default
-database was named `claude_memory` then; set `PGDATABASE=claude_memory` to keep
-using it. The rename changes a default, not your data — nothing is moved or
-dropped.
+repository root is read automatically. Upgrading an existing install:
+[CHANGELOG.md](CHANGELOG.md) has the one-line step.
 
 Full instructions, including scheduled ingestion via launchd/systemd: [docs/INSTALLATION.md](docs/INSTALLATION.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
@@ -172,10 +182,11 @@ what lets the provider bar report honest coverage:
 - `discover_all()` — every candidate on disk, including ones ingestion skips; defaults to `discover()`, so an adapter with no exclusions writes no extra code
 - `excluded_reason(path)` — why a discovered file must not be ingested, or `None`
 
-Claude Code is the worked example below because it is the messiest case, not
-because it is the primary one: it searches `~/.claude/projects` recursively (older
-transcripts sit one level deeper than the flat layout assumed), then excludes
-subagent transcripts, which are machine-generated and would drown the corpus.
+The Claude Code adapter uses both, because it has the most awkward layout to
+work with: it searches `~/.claude/projects` recursively (older transcripts sit
+one level deeper than the flat layout assumed), then excludes subagent
+transcripts, which are machine-generated and would drown the corpus. Vibe needs
+neither hook and implements neither — the base class covers it in four lines.
 `is_present` is derived — a tool counts as present when `discover_all()` yields at
 least one file, so a tool whose directory exists but is empty is reported as
 absent rather than as silently contributing nothing.
@@ -187,7 +198,7 @@ Every adapter has its own test module built on a sample of that tool's real on-d
 ### Storage and retrieval
 
 - **PostgreSQL 16 + pgvector**: conversations, messages, and extracted memory chunks in a normalised schema (`sql/schema.sql`), with vector similarity search over embeddings and trigram search over content.
-- **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. This is the one pipeline still tied to a single vendor — it uses the Anthropic API or the `claude` CLI, and does not yet go through the swappable backend below. Ingestion, storage, search, and answering do not depend on it: skip extraction and everything else still works on the raw transcripts. Porting it is the next item on the roadmap, and it is named here rather than left for a reader to discover.
+- **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. It goes through the same swappable backend as everything else — as do title generation and the reflection engine, so a machine running Ollama fills its memory without a network call and without an API key.
 - **MCP server**: `memory_mcp` exposes the memory database to any MCP-capable client over stdio, so every supported CLI can query the shared memory at runtime.
 - **Bring your own model.** Embeddings and answers both run through whatever backend you point them at, chosen by probe with local first — a machine running Ollama never reaches the network and never had to be configured not to. Nothing here is tied to one vendor:
 
@@ -197,6 +208,7 @@ Every adapter has its own test module built on a sample of that tool's real on-d
   | `THROUGHLINE_ANSWER_MODEL` | model name for that backend |
   | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
   | `OPENAI_API_KEY` | only read by the `openai` backend |
+  | `THROUGHLINE_EXTRACT_MODEL` · `THROUGHLINE_TITLE_MODEL` · `THROUGHLINE_REFLECT_MODEL` | per-job model override, when one job wants a bigger model than the rest |
 
   `throughline doctor` reports which model will answer and whether it runs locally, and every answer in the UI says so on screen.
 

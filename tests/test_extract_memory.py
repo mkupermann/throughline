@@ -135,3 +135,49 @@ class TestExtractorContract:
     def test_parse_id_list_rejects_non_int(self):
         with pytest.raises(SystemExit):
             em._parse_id_list("1,abc,3")
+
+
+class TestBackendIsNotOneVendor:
+    """Extraction went through `claude -p` unconditionally.
+
+    That made the feature that fills memory — the point of the product —
+    require one vendor's CLI, inside a tool whose claim is that it does not.
+    It now goes through the same probe as everything else.
+    """
+
+    def test_the_call_goes_through_the_shared_backend(self, monkeypatch):
+        import extract_memory as em
+
+        seen = {}
+
+        def fake_complete(prompt, *, timeout, model=None, cwd=None):
+            seen.update(prompt=prompt, timeout=timeout, model=model, cwd=cwd)
+            return "[]", None
+
+        monkeypatch.setattr(em._llm, "complete", fake_complete)
+        assert em.call_model("extract this") == "[]"
+        assert seen["prompt"] == "extract this"
+        assert seen["timeout"] == em.TIMEOUT_PER_CALL
+
+    def test_a_failed_call_skips_one_conversation_rather_than_the_run(self, monkeypatch):
+        import extract_memory as em
+
+        monkeypatch.setattr(
+            em._llm, "complete",
+            lambda *a, **k: (None, "ollama timed out after 300s"),
+        )
+        assert em.call_model("anything") == ""
+
+    def test_the_call_runs_outside_the_users_project(self, monkeypatch):
+        """Claude Code files a transcript under the process CWD. Inheriting the
+        repo's put extraction runs into the user's own project history, where
+        the next ingest read them back as their work."""
+        import extract_memory as em
+
+        seen = {}
+        monkeypatch.setattr(
+            em._llm, "complete",
+            lambda p, **k: (seen.update(k), ("[]", None))[1],
+        )
+        em.call_model("x")
+        assert "agent-calls" in seen["cwd"]

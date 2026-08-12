@@ -44,10 +44,15 @@ MAX_RUNTIME_SECONDS = 60 * 60
 
 
 #: What a job needs from the environment before it can possibly succeed.
-#: Checked before the Run button is offered — several of these jobs shell out
-#: to the Claude CLI, which is deliberately absent from the container image
-#: (it carries host credentials), so in Docker they would fail every time.
-Requirement = Literal["claude", "embedding"]
+#: Checked before the Run button is offered, so a job that cannot work here
+#: says why instead of failing after the user commits to it.
+#:
+#: "model" is any answering backend `throughline.llm` can find — Ollama, an
+#: OpenAI-compatible server, the Claude CLI. It used to be "claude" for these
+#: jobs, which in the container meant no extraction, no titles and no
+#: reflection at all: the CLI carries host credentials and is deliberately not
+#: in the image. With a local backend they now run there.
+Requirement = Literal["model", "claude", "embedding"]
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,11 @@ def check_requirement(req: Requirement | None) -> str | None:
     """
     if req is None:
         return None
+    if req == "model":
+        from throughline import llm
+
+        info = llm.backend_info()
+        return None if info.available else info.detail
     if req == "claude":
         from throughline.config import get_claude_bin
 
@@ -118,7 +128,7 @@ JOBS: dict[str, JobSpec] = {
         "extract", "Extract memory",
         "Run the LLM extraction pass over conversations with no memory yet.",
         _cli("extract-memory"),
-        requires="claude",
+        requires="model",
     ),
     "embed": JobSpec(
         "embed", "Generate embeddings",
@@ -130,13 +140,13 @@ JOBS: dict[str, JobSpec] = {
         "titles", "Generate titles",
         "Summarise conversations that have no title.",
         _cli("generate-titles"),
-        requires="claude",
+        requires="model",
     ),
     "reflect": JobSpec(
         "reflect", "Run reflection",
         "Deduplicate, find contradictions, mark stale memory.",
         _cli("reflect"),
-        requires="claude",
+        requires="model",
     ),
     "doctor": JobSpec(
         "doctor", "Diagnostics",

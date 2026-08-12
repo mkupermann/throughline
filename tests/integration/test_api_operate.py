@@ -172,36 +172,67 @@ def test_output_buffer_is_bounded(monkeypatch):
 # ── Environment prerequisites ────────────────────────────────────────────────
 
 
+def _no_model(monkeypatch, detail="No model available. Start Ollama or set OPENAI_API_KEY."):
+    """Make every answering backend look unreachable.
+
+    Extraction, titling and reflection used to require the Claude CLI
+    specifically; they now take any backend `throughline.llm` can find, so the
+    prerequisite to stub is the probe, not one vendor's binary.
+    """
+    from throughline import llm
+
+    monkeypatch.setattr(
+        llm, "backend_info",
+        lambda: llm.LLMInfo(available=False, detail=detail),
+    )
+    return detail
+
+
 def test_unavailable_job_is_reported_before_it_is_offered(client, monkeypatch):
     """A job that cannot run must say so in /status, not fail after a click."""
-    from throughline import config
-
-    monkeypatch.setattr(config, "get_claude_bin", lambda: None)
+    detail = _no_model(monkeypatch)
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
-    assert jobs["extract"]["unavailable"], "extract needs the Claude CLI and should say so"
-    assert "Claude CLI" in jobs["extract"]["unavailable"]
+    assert jobs["extract"]["unavailable"], "extract needs a model and should say so"
+    assert detail in jobs["extract"]["unavailable"]
     # A job with no prerequisites stays runnable.
     assert jobs["doctor"]["unavailable"] is None
 
 
-def test_available_job_reports_no_obstacle(client, monkeypatch, tmp_path):
-    from throughline import config
+def test_available_job_reports_no_obstacle(client, monkeypatch):
+    from throughline import llm
 
-    fake = tmp_path / "claude"
-    fake.write_text("#!/bin/sh\n")
-    monkeypatch.setattr(config, "get_claude_bin", lambda: str(fake))
+    monkeypatch.setattr(
+        llm, "backend_info",
+        lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
+    )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
     assert jobs["extract"]["unavailable"] is None
 
 
+def test_a_local_model_makes_the_container_jobs_runnable(client, monkeypatch):
+    """The point of the port: these three used to be dead inside Docker.
+
+    The Claude CLI carries host credentials and is deliberately not in the
+    image, so extraction, titles and reflection could never run there. With a
+    local backend they can.
+    """
+    from throughline import llm
+
+    monkeypatch.setattr(
+        llm, "backend_info",
+        lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
+    )
+    jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
+    for name in ("extract", "titles", "reflect"):
+        assert jobs[name]["unavailable"] is None, f"{name} should run on a local model"
+
+
 def test_starting_an_unavailable_job_is_refused(client, monkeypatch):
     """Direct POST must not spawn a process guaranteed to fail."""
-    from throughline import config
-
-    monkeypatch.setattr(config, "get_claude_bin", lambda: None)
+    detail = _no_model(monkeypatch)
     r = client.post("/api/operate/run/extract")
     assert r.status_code == 409, "a well-formed request the environment cannot serve is a 409"
-    assert "Claude CLI" in r.json()["detail"]
+    assert detail in r.json()["detail"]
 
 
 def test_embedding_job_reports_the_backend_reason(client, monkeypatch):

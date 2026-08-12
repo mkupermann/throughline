@@ -32,8 +32,8 @@ import argparse
 import json
 import os
 import re
-import subprocess
 
+from throughline import llm as _llm
 from throughline.self_referential import agent_call_cwd
 import sys
 import time
@@ -69,31 +69,17 @@ def _connect() -> "psycopg2.extensions.connection":
         raise SystemExit(2) from e
 
 
-def _require_claude_bin() -> str:
-    """Resolve the Claude CLI binary or emit a clear error and exit."""
-    bin_path = _resolve_claude_bin()
-    from shutil import which
-    if which(bin_path) is None and not os.path.isfile(bin_path):
-        sys.stderr.write(
-            "ERROR: Claude CLI not found.\n"
-            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
-            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
-        )
+def _require_model() -> str:
+    """Confirm a model is reachable. `throughline.llm` composes the message."""
+    info = _llm.backend_info()
+    if not info.available:
+        sys.stderr.write(f"ERROR: no model available for reflection.\n  {info.detail}\n")
         raise SystemExit(2)
-    return bin_path
+    return str(info)
 
 
-def _resolve_claude_bin() -> str:
-    env = os.environ.get("CLAUDE_BIN")
-    if env:
-        return env
-    from shutil import which
-    found = which("claude")
-    return found or "claude"
-
-
-CLAUDE_BIN = _resolve_claude_bin()
-MODEL = "sonnet"
+#: Empty means "whatever the probe found".
+MODEL = os.environ.get("THROUGHLINE_REFLECT_MODEL", "").strip() or None
 TIMEOUT_PER_CALL = 90
 SLEEP_BETWEEN_CALLS = 1.0
 
@@ -116,31 +102,30 @@ DATE_PATTERN = re.compile(
 
 # ---- Utility ----------------------------------------------------------------
 
-def call_claude(prompt: str) -> str:
-    """Ruft den lokalen Claude CLI auf (headless). Gibt stdout zurueck oder ''."""
-    try:
+def call_model(prompt: str) -> str:
+    """Ask whichever backend the probe found. Returns "" on any failure.
+
+    A reflection pass compares many pairs; one failed call must cost one
+    comparison, not the run.
+    """
+    text, err = _llm.complete(
+        prompt,
+        timeout=TIMEOUT_PER_CALL,
+        model=MODEL,
         # Run from a directory of our own: Claude Code names the project folder
         # after the process CWD, so inheriting the repo's would file this call
-        # inside the user's real project history, and the next ingest would read
-        # it back as their work. See throughline.self_referential.
-        result = subprocess.run(
-            [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
-            capture_output=True, text=True, timeout=TIMEOUT_PER_CALL,
-            cwd=str(agent_call_cwd()),
-        )
-        if result.returncode != 0:
-            print(f"    [claude] exit {result.returncode}: {result.stderr[:200]}")
-            return ""
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        print(f"    [claude] timeout ({TIMEOUT_PER_CALL}s)")
+        # inside the user's real project history, and the next ingest would
+        # read it back as their work. See throughline.self_referential.
+        cwd=str(agent_call_cwd()),
+    )
+    if text is None:
+        print(f"    reflection call failed: {err}")
         return ""
-    except FileNotFoundError:
-        print(f"    [claude] Binary nicht gefunden: {CLAUDE_BIN}")
-        return ""
-    except Exception as e:
-        print(f"    [claude] exception: {e}")
-        return ""
+    return text
+
+
+#: Kept as an alias: the old name appears in other people's scripts.
+call_claude = call_model
 
 
 def parse_json_object(text: str) -> dict | None:
@@ -256,7 +241,7 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
             id_a=a["id"], date_a=str(a["created_at"])[:10], content_a=a["content"],
             id_b=b["id"], date_b=str(b["created_at"])[:10], content_b=b["content"],
         )
-        resp = call_claude(prompt)
+        resp = call_model(prompt)
         obj = parse_json_object(resp)
         if not obj or "duplicate" not in obj:
             print(f"  #{a['id']} vs #{b['id']}: kein Urteil")
@@ -279,7 +264,7 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
 
             # Merge
             merge_prompt = MERGE_PROMPT.format(content_a=a["content"], content_b=b["content"])
-            merge_resp = call_claude(merge_prompt)
+            merge_resp = call_model(merge_prompt)
             merge_obj = parse_json_object(merge_resp)
             merged_content = (merge_obj or {}).get("content") if merge_obj else None
             if not merged_content:
@@ -387,7 +372,7 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
             id_a=a["id"], date_a=str(a["created_at"])[:10], content_a=a["content"],
             id_b=b["id"], date_b=str(b["created_at"])[:10], content_b=b["content"],
         )
-        resp = call_claude(prompt)
+        resp = call_model(prompt)
         obj = parse_json_object(resp)
         if not obj or "contradicts" not in obj:
             stats["errors"] += 1
@@ -487,7 +472,7 @@ def mode_stale(cur, conn, limit: int, dry_run: bool) -> dict:
         prompt = STALE_PROMPT.format(
             content=r["content"], created_at=str(r["created_at"])[:10], today=today.isoformat(),
         )
-        resp = call_claude(prompt)
+        resp = call_model(prompt)
         obj = parse_json_object(resp)
         if not obj or "stale" not in obj:
             stats["errors"] += 1
@@ -599,7 +584,7 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
             f"[ID {i['id']}] {i['content']}" for i in items[:8]  # cap per cluster
         )
         prompt = CONSOLIDATE_PROMPT.format(items=items_text)
-        resp = call_claude(prompt)
+        resp = call_model(prompt)
         obj = parse_json_object(resp)
         if not obj or "content" not in obj:
             stats["errors"] += 1
@@ -664,7 +649,7 @@ def main() -> None:
                    help="Keine Writes, nur Analyse + Log")
     args = p.parse_args()
 
-    _require_claude_bin()
+    print(f"Model: {_require_model()}")
     conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 

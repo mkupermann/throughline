@@ -7,14 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading
+
+**The default database is now `throughline`, was `claude_memory`.** Only the
+default changed; no data is moved, copied or dropped. Pick one:
+
+```bash
+echo "PGDATABASE=throughline" >> .env                      # new install: nothing to do
+echo "PGDATABASE=claude_memory" >> .env                    # keep the old name
+psql -c 'ALTER DATABASE claude_memory RENAME TO throughline'   # adopt the new one
+```
+
+**Machine-generated conversations are now labelled and hidden by default.**
+Throughline calls a model to title, extract and answer; those calls are sessions
+on disk and were ingested as if they were yours. Run
+`python3 scripts/backfill_generated_by.py --dry-run` to see how many of your
+stored conversations are the tool talking to itself, then run it without the
+flag to label them. Nothing is deleted — every listing gains a
+`generated_by IS NULL` filter and each project page reports what it withheld.
+
 ### Added
 
+- **Extraction, titling and reflection now use any model backend.** All three
+  shelled out to the `claude` CLI unconditionally, which made the pipeline that
+  fills memory depend on one vendor — and made those jobs impossible inside the
+  Docker image, where that CLI deliberately does not exist. They now go through
+  `throughline.llm`, the same probe the answer feature uses: Ollama first, then
+  any OpenAI-compatible server, then the `claude` CLI, then hosted OpenAI.
+  Per-job overrides: `THROUGHLINE_EXTRACT_MODEL`, `THROUGHLINE_TITLE_MODEL`,
+  `THROUGHLINE_REFLECT_MODEL`.
+- **Projects surface.** Overview lists the projects you worked in over the last
+  seven days; a project page lists its sessions with newest/oldest sort and a
+  search that covers session titles and message bodies.
+- **Full transcripts.** Session views render `content_blocks` and `tool_calls`,
+  not only prose — the commands that ran and what they returned.
+- **`throughline ask`** — a cited answer assembled from your own records, with
+  retrieval fusing vector and lexical ranking.
 - **Vibe (Mistral AI) adapter.** New adapter in `throughline/adapters/vibe.py` 
   that ingests Vibe CLI sessions from `~/.vibe/logs/session/session_*/` directories.
   Supports parsing of `meta.json` and `messages.jsonl` files, ANSI code cleaning,
   tool call extraction, role mapping (user/assistant/system/tool), timestamp parsing,
   and full metadata preservation. Registered in the adapter system as `vibe` source.
   Includes comprehensive unit tests in `tests/test_adapter_vibe.py`.
+
+### Fixed
+
+- **`throughline ask --model` was ignored.** The flag was parsed and threaded
+  through `ask.answer` into `_call_model`, where it was dropped: `llm.complete()`
+  had no parameter to receive it.
+- `scripts/install.sh` pointed at a `gui/` directory removed in 0.2.0 and
+  printed German. `docs/USAGE.md` documented a 14-page Streamlit UI that no
+  longer exists.
 
 ### Changed
 
