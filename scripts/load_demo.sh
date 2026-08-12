@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loads the bundled demo data into a fresh claude_memory database.
+# Loads the bundled demo data into a fresh Throughline database.
 #
 # Usage:
 #   ./scripts/load_demo.sh                 # local Postgres, current user
@@ -15,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PGDATABASE="${PGDATABASE:-claude_memory}"
+PGDATABASE="${PGDATABASE:-throughline}"
 PGUSER="${PGUSER:-${USER:-postgres}}"
 PGHOST="${PGHOST:-localhost}"
 PGPORT="${PGPORT:-5432}"

@@ -4,7 +4,7 @@ One source of truth for three surfaces:
 
   * ``throughline status`` CLI subcommand (human + ``--json``)
   * ``memory.stats`` MCP tool
-  * Streamlit GUI Memory Health card
+  * the web UI (Overview verdict, Operate panel)
 
 Each surface formats the same dict; nobody re-implements the SQL.
 
@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 # Schema-derived constants — kept in lock-step with sql/schema.sql.
@@ -57,6 +58,23 @@ _CATEGORIES: tuple[str, ...] = (
     "workflow",
 )
 
+# ``memory_chunks.source_type`` values that mean "memory was derived from
+# something", as opposed to reorganised from memory that already existed.
+# 'reflection_merge' and 'consolidation' are deliberately absent: the reflection
+# job runs on its own schedule and would keep this timestamp looking fresh while
+# extraction had stalled for weeks.
+#
+# The column is plain ``text`` with no CHECK constraint, so a value that never
+# occurs produces no error anywhere — it silently matches nothing. Keep this
+# tuple in step with what actually writes chunks: scripts/extract_memory.py
+# ('conversation'), memory_mcp/server.py ('mcp_write'), and the manual path
+# ('manual'). test_status_extraction_source_types_exist guards the drift.
+_EXTRACTION_SOURCE_TYPES: tuple[str, ...] = (
+    "conversation",
+    "mcp_write",
+    "manual",
+)
+
 
 @dataclass
 class StatusPayload:
@@ -70,6 +88,9 @@ class StatusPayload:
     db_reachable: bool
     captured_at: str
     schema_version: str | None = None
+    #: None = could not be determined (no tracking table, or no source tree
+    #: to compare against); [] = checked, nothing pending. Never conflate.
+    pending_migrations: list[str] | None = None
     error: str | None = None
     table_row_counts: dict[str, int] = field(default_factory=dict)
     chunks_total: int = 0
@@ -91,6 +112,7 @@ class StatusPayload:
             "db_reachable": self.db_reachable,
             "captured_at": self.captured_at,
             "schema_version": self.schema_version,
+            "pending_migrations": self.pending_migrations,
             "error": self.error,
             "table_row_counts": dict(self.table_row_counts),
             "chunks_total": self.chunks_total,
@@ -133,7 +155,7 @@ def _connect():
     cfg = {
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER") or "postgres"),
         "connect_timeout": int(os.environ.get("PGCONNECT_TIMEOUT", "3")),
     }
@@ -141,7 +163,11 @@ def _connect():
     if pw:
         cfg["password"] = pw
     try:
-        return psycopg2.connect(**cfg)
+        conn = psycopg2.connect(**cfg)
+        # Autocommit: a swallowed query error must not leave the transaction
+        # aborted and poison every subsequent (read-only) query.
+        conn.autocommit = True
+        return conn
     except Exception:
         return None
 
@@ -175,17 +201,58 @@ def _parse_drift_count(reasoning: str | None, action: str | None) -> int:
 
 
 def _schema_version(cur) -> str | None:
-    """Best-effort schema version. Returns None if no migrations table."""
+    """The most recently applied migration, or None if nothing tracks them.
+
+    Reads ``applied_migrations`` — the table ``scripts/migrate.py`` actually
+    creates and writes (see sql/migrations/README.md). This asked for a
+    ``schema_migrations`` table with a ``version`` column until 2026-08-10.
+    No such table has ever existed, so a fully migrated database reported
+    "(no schema_migrations table)", which reads as *migrations are not tracked
+    here* — the opposite of the truth, and it hid a migration that had been
+    pending long enough to matter (001_message_dedup, whose absence let a
+    still-growing session lose its new messages).
+
+    Ordered by name, not ``applied_at``: a database migrated in one run gets
+    identical timestamps for every row, so ordering by time returns an
+    arbitrary member of that set.
+    """
     try:
-        cur.execute("SELECT to_regclass('public.schema_migrations') IS NOT NULL")
+        cur.execute("SELECT to_regclass('public.applied_migrations') IS NOT NULL")
         row = cur.fetchone()
         if not row or not row[0]:
             return None
-        cur.execute("SELECT version FROM public.schema_migrations " "ORDER BY applied_at DESC NULLS LAST LIMIT 1")
+        cur.execute(
+            "SELECT migration_name FROM public.applied_migrations "
+            "ORDER BY migration_name DESC LIMIT 1"
+        )
         row = cur.fetchone()
         return str(row[0]) if row else None
     except Exception:
         return None
+
+
+def _pending_migrations(cur) -> list[str] | None:
+    """Migration files on disk that ``applied_migrations`` does not record.
+
+    Returns None when the answer is unknowable — no tracking table, or the
+    repository's ``sql/migrations`` directory is not next to this package (an
+    installed wheel, a container without the source). None means "not checked";
+    an empty list means "checked, nothing pending". The caller must not collapse
+    the two, or a status report that could not look would claim all-clear.
+    """
+    migrations_dir = Path(__file__).resolve().parent.parent / "sql" / "migrations"
+    if not migrations_dir.is_dir():
+        return None
+    try:
+        cur.execute("SELECT to_regclass('public.applied_migrations') IS NOT NULL")
+        row = cur.fetchone()
+        if not row or not row[0]:
+            return None
+        cur.execute("SELECT migration_name FROM public.applied_migrations")
+        applied = {str(r[0]) for r in cur.fetchall()}
+    except Exception:
+        return None
+    return sorted(p.name for p in migrations_dir.glob("*.sql") if p.name not in applied)
 
 
 def collect_status(*, conn=None) -> dict[str, Any]:
@@ -214,6 +281,7 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                 chunks_by_category={c: 0 for c in _CATEGORIES},
             )
             payload.schema_version = _schema_version(cur)
+            payload.pending_migrations = _pending_migrations(cur)
             payload.chunks_total = payload.table_row_counts.get("memory_chunks", 0)
 
             try:
@@ -242,10 +310,23 @@ def collect_status(*, conn=None) -> dict[str, Any]:
             except Exception:
                 pass
 
+            # Chunks the extractor and the MCP write tool produced — i.e. memory
+            # that was *derived*, as opposed to merged or consolidated by the
+            # reflection job, which would otherwise make extraction look fresh
+            # while it had in fact stalled.
+            #
+            # This asked for source_type IN ('extraction', 'mcp_write') until
+            # 2026-08-10. Neither value has ever existed: the extractor writes
+            # 'conversation' and the manual path writes 'manual'. max() over an
+            # empty set is NULL, not an error, so the indicator read "—" on a
+            # database with 986 chunks — indistinguishable from "nothing
+            # extracted yet". The column is plain text with no constraint, so
+            # nothing rejected the typo. See _EXTRACTION_SOURCE_TYPES.
             try:
                 cur.execute(
                     "SELECT max(created_at) FROM public.memory_chunks "
-                    "WHERE source_type = 'extraction' OR source_type = 'mcp_write'"
+                    "WHERE source_type = ANY(%s)",
+                    (list(_EXTRACTION_SOURCE_TYPES),),
                 )
                 row = cur.fetchone()
                 if row and row[0]:
@@ -334,7 +415,18 @@ def format_human(payload: dict[str, Any]) -> str:
 
     lines.append("DB:       reachable")
     sv = payload.get("schema_version")
-    lines.append(f"Schema:   {sv if sv else '(no schema_migrations table)'}")
+    lines.append(f"Schema:   {sv if sv else '(migrations not tracked)'}")
+    # A pending migration is the one status line worth interrupting for: the
+    # database is the only copy of most of this history, and a schema the code
+    # does not expect is how that copy gets damaged. `None` means the check
+    # could not run, which is not the same as "nothing pending" and must not
+    # print as silence.
+    pending = payload.get("pending_migrations")
+    if pending:
+        lines.append(f"Pending:  {len(pending)} migration(s) — {', '.join(pending)}")
+        lines.append("          run: python3 scripts/migrate.py")
+    elif pending is None:
+        lines.append("Pending:  (not checked — no migrations directory beside the package)")
     lines.append("")
     lines.append("Table row counts:")
     for t, n in (payload.get("table_row_counts") or {}).items():

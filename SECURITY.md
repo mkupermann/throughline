@@ -11,23 +11,62 @@ security model.
 - PostgreSQL database running on `localhost:5432`
 - Python scripts reading/writing local files under `~/.claude/` and the
   repository directory
-- Streamlit GUI on `http://localhost:8501`
+- web UI on `http://127.0.0.1:8790` (native) or `:8788` (Docker)
 - launchd jobs that run as the logged-in user
 - API keys (optional) for OpenAI or Anthropic, stored in environment variables
 
 ### Out of scope
 
 - Multi-user deployments (the default `trust` auth is single-user only)
-- Network-exposed databases or UIs — running Streamlit on `0.0.0.0` is not
+- Network-exposed databases or UIs — running the web UI on `0.0.0.0` is not
   supported and not recommended
 - Shared CI/CD infrastructure
 
 ## Known Considerations
 
+### Where stored content can leave the machine
+
+Three places, all of them a model call:
+
+1. **Answering a question.** `throughline ask`, and the Ask panel in the UI,
+   send the retrieved excerpts to whichever model answers. With a local backend
+   (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine, and
+   `auto` probes local backends first for exactly this reason.
+   `throughline doctor` prints which model will answer and whether it is local;
+   the UI states it with every answer. `THROUGHLINE_REDACT_PROMPTS=1` runs the
+   excerpts through [`throughline/pii.py`](throughline/pii.py) first — off by
+   default, because this is your own history on your own machine.
+2. **Memory extraction, title generation and reflection.** These send
+   transcripts or chunk pairs to the same probed backend, local first.
+   Redaction is **on** by default for extraction;
+   `THROUGHLINE_REDACT_PII=0` disables it. All three are optional — skip them
+   and the rest of the tool still works.
+3. **Embeddings.** `throughline embed` uses Ollama by default and never leaves
+   the machine; it reaches the network only if you select the OpenAI backend.
+
+Retrieval, ranking, indexing, embeddings against a local backend, and every
+listing in the UI are entirely local. There is no telemetry and no account.
+
+### The API has no authentication
+
+`throughline serve` binds to loopback and the compose stack publishes only to
+`127.0.0.1`. There is no login, by design for a single-user local tool: anything
+that can reach the port can read everything, and the Console endpoint can run
+arbitrary read-only SQL. That is safe on a single-user machine and unsafe the
+moment the port is exposed — do not bind it to `0.0.0.0`, do not put it behind a
+tunnel, and treat shell access to the machine as full access to the database.
+
+### Encryption at rest
+
+There is none, beyond whatever the disk provides. The database is a normal
+PostgreSQL cluster and the backups are plain `pg_dump` output. On macOS,
+FileVault covers both; on Linux, use an encrypted volume if the corpus warrants
+it.
+
 ### Database access
 
 The default installation uses PostgreSQL's `trust` authentication — anyone with
-shell access to your machine can read the `claude_memory` database. If your
+shell access to your machine can read the Throughline database. If your
 machine is shared, switch to password auth or `scram-sha-256` and set
 `PGPASSWORD` in your environment.
 
@@ -40,13 +79,13 @@ Claude Code JSONL sessions may contain:
 - Tool-call arguments that may include paths or identifiers
 - Email addresses, user names, and project names mentioned in conversations
 
-Treat the `claude_memory` database as confidential by default. Do not commit
+Treat the Throughline database as confidential by default. Do not commit
 database dumps, do not share backups, do not upload to cloud storage without
 encryption.
 
 ### PII / secret redaction before extraction
 
-Before each conversation transcript is sent to Claude for memory extraction,
+Before each conversation transcript is sent to the extraction model,
 it runs through a heuristic redaction pass in [`throughline/pii.py`](throughline/pii.py).
 The pass replaces recognisable Anthropic / OpenAI / GitHub / AWS / Google /
 Slack / Stripe API-key shapes, JWTs, `Authorization: Bearer` headers, explicit
@@ -56,7 +95,7 @@ addresses, and home-directory usernames in file paths.
 Conservative by design — we prefer leaking an uncommon secret shape to
 destroying legitimate memory content. Override with the environment variable
 `THROUGHLINE_REDACT_PII=0` if you are processing synthetic data and want the
-raw transcript to reach Claude.
+raw transcript to reach the model.
 
 ### API keys
 
@@ -66,11 +105,12 @@ These must never be committed. `.env` files are gitignored — verify with
 
 ### Acceptable use
 
-Use of Claude via the Anthropic API or the Claude Code CLI remains subject to
-Anthropic's [Usage Policy](https://www.anthropic.com/legal/aup). Users are
-responsible for ensuring their own use of Throughline complies with it — for
-example, not feeding the extractor content you would not otherwise be permitted
-to send through Claude.
+Whichever model you point Throughline at, its provider's terms still apply —
+Anthropic's [Usage Policy](https://www.anthropic.com/legal/aup) for Claude,
+and the equivalent for OpenAI, Mistral or anyone else. A local model has no
+such terms, which is one more reason the probe order prefers it. Either way you
+are responsible for not feeding a hosted extractor content you are not
+permitted to send it.
 
 ### Backups
 

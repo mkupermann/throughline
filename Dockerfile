@@ -1,66 +1,49 @@
-# Throughline Dockerfile
-# Universal AI CLI memory layer
-# Supports: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
+# Throughline — universal AI CLI memory layer
+# Supported sources: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
 
-# Use official Python image with slim variant
 FROM python:3.12-slim
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies for PostgreSQL and common tools
+# postgresql-client for psql/pg_isready, libpq + build tools for psycopg2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # PostgreSQL client
     postgresql-client \
     libpq-dev \
-    # Build tools
     build-essential \
-    # Utilities
     curl \
-    git \
-    # Cleanup
     && rm -rf /var/lib/apt/lists/*
 
-# Create and set working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Requirements first to leverage the Docker layer cache
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire application
 COPY . .
-
-# Install Throughline in editable mode
 RUN pip install -e .
 
-# Create directories for vendor-specific data (mounted from host)
-RUN mkdir -p \
-    /claude-projects \
-    /cursor-sessions \
-    /zed-sessions \
-    /codex-sessions \
-    /hermes-sessions \
-    /continue-sessions \
-    /cline-tasks \
-    /windsurf-plans \
-    /vibe-sessions
+# No Node stage: the built frontend is committed at throughline/web/ and ships
+# inside the package, so the image never needs a JavaScript toolchain.
 
-# Expose ports
-EXPOSE 8501
-EXPOSE 8000
+# Adapters resolve their source directories from $HOME at import time.
+# docker-compose mounts the host tool directories under /root (read-only),
+# e.g. ~/.claude -> /root/.claude, so discovery works unchanged in-container.
 
-# Health check for GUI
+ENV THROUGHLINE_HOST=0.0.0.0 \
+    THROUGHLINE_PORT=8787
+# The API has no authentication, so binding a non-loopback address is refused
+# unless this is set. Inside a container it *must* bind 0.0.0.0 or published
+# ports cannot reach it — the isolation boundary is the container plus how the
+# port is published. docker-compose publishes on 127.0.0.1 only; if you change
+# that, put authentication in front of it first.
+ENV THROUGHLINE_ALLOW_REMOTE=1
+
+EXPOSE 8787
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-    CMD curl -sf http://localhost:8501/_stcore/health || exit 1
+    CMD curl -sf http://localhost:8787/api/health || exit 1
 
-# Default command: Run the Streamlit GUI
-CMD ["streamlit", "run", "gui/app.py", \
-     "--server.headless=true", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0"]
+CMD ["throughline", "serve"]

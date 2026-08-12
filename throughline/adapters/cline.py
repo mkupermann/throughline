@@ -182,7 +182,7 @@ def _parse_ui_messages(messages_raw: list, session_id: str) -> list[NormalisedMe
     return out
 
 
-def _parse_task_dir(task_dir: Path) -> NormalisedConversation | None:
+def _parse_task_dir(task_dir: Path, source_tool: str) -> NormalisedConversation | None:
     """Parse one Cline task directory into a NormalisedConversation."""
     meta_path = task_dir / "task_metadata.json"
     api_path = task_dir / "api_conversation_history.json"
@@ -242,6 +242,7 @@ def _parse_task_dir(task_dir: Path) -> NormalisedConversation | None:
         project_path="cline",
         model=model,
         entrypoint="cline",
+        source_tool=source_tool,
         started_at=started,
         ended_at=ended,
         summary=summary,
@@ -262,7 +263,18 @@ class ClineAdapter(Adapter):
     home = Path("~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks").expanduser()
 
     def is_present(self) -> bool:
-        return any(p.exists() for p in _candidate_task_roots())
+        """At least one task directory was found, across all candidate roots.
+
+        Was "any candidate root directory exists" — a Cline install with an
+        empty ``tasks/`` dir (e.g. the extension installed but never used)
+        reported present with nothing to ingest. Cline's data can live under
+        several historical roots (see ``_candidate_task_roots``), so this
+        can't just fall back to the base class's ``home``-based default —
+        that only checks one of them. Deriving from ``discover()`` (which
+        already walks every root) keeps the multi-root awareness while
+        matching the "at least one file discovered" contract from Task 5.
+        """
+        return any(True for _ in self.discover())
 
     def discover(self) -> Iterable[Path]:
         seen: set[Path] = set()
@@ -279,7 +291,7 @@ class ClineAdapter(Adapter):
         # idempotency on file-hash. Pick a stable file inside the dir to
         # hash. We override sha256_file below so the writer sees a hash
         # of the task's conversation file, not the directory itself.
-        return _parse_task_dir(path)
+        return _parse_task_dir(path, source_tool=self.name)
 
     @staticmethod
     def sha256_file(path: Path) -> str:

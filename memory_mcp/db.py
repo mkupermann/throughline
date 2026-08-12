@@ -15,7 +15,7 @@ def db_config() -> dict:
     cfg: dict = {
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", "mkupermann"),
     }
     pw = os.environ.get("PGPASSWORD")

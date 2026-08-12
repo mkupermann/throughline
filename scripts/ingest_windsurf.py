@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Windsurf-Ingestion: Liest Windsurf-Pläne (~/.windsurf/plans/*.md) als Conversations
-und schreibt sie in die claude_memory DB.
+Windsurf ingestion: reads Windsurf plans (~/.windsurf/plans/*.md) as conversations
+and writes them into the Throughline database.
 """
 from _bootstrap import use_venv  # noqa: E402
 use_venv()
@@ -20,7 +20,7 @@ import psycopg2
 from psycopg2.extras import Json
 
 DB: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -81,7 +81,7 @@ def ingest_plan(cursor: Any, filepath: Path) -> bool:
     ctime = datetime.fromtimestamp(filepath.stat().st_ctime, tz=timezone.utc)
     session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(filepath)))
 
-    # Conversation einfügen
+    # Insert the conversation
     cursor.execute("""
         INSERT INTO conversations
           (session_id, project_path, model, entrypoint, started_at, ended_at,
@@ -154,7 +154,7 @@ def main() -> None:
 
     print(f"\n{'=' * 60}")
     print(f"Ingestiert:   {ingested}")
-    print(f"Übersprungen: {skipped}")
+    print(f"Skipped: {skipped}")
     print(f"Fehler:       {errors}")
     print(f"{'=' * 60}")
 

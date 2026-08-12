@@ -4,7 +4,7 @@
 -- Realistic but entirely fictional data for demonstration purposes.
 -- No real names, no real companies. Safe to commit and share publicly.
 --
--- Load with:  psql -d claude_memory -f examples/demo_data.sql
+-- Load with:  psql -d throughline -f examples/demo_data.sql
 -- =============================================================================
 
 BEGIN;

@@ -25,7 +25,7 @@ Code's JSONL format.
 
 Not by default. Everything runs on localhost:
 - PostgreSQL on `localhost:5432`
-- Streamlit on `localhost:8501`
+- the web UI on `127.0.0.1:8790` (`throughline serve`) or `127.0.0.1:8788` (Docker)
 
 Optional network use, opt-in per feature:
 - OpenAI API for embeddings — only if you pick the `openai` backend
@@ -48,10 +48,10 @@ still matters for this workload.
 
 ### I'm on Linux / Windows. Does it work?
 
-- **Linux:** the core (Postgres, scripts, Streamlit) works fine. The
+- **Linux:** the core (Postgres, scripts, the web UI) works fine. The
   AppleScript hooks for Mail / Calendar do not. launchd does not exist
   — use systemd user services or cron instead.
-- **Windows:** untested. PostgreSQL, Python, and Streamlit all run on
+- **Windows:** untested. PostgreSQL, Python, and the web UI all run on
   Windows, so the core should work via WSL2 or natively. AppleScript
   and launchd do not exist.
 

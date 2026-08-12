@@ -120,7 +120,7 @@ def _get_project_path(session_dir: Path) -> str | None:
     return None
 
 
-def _parse_cursor_file(file_path: Path) -> NormalisedConversation | None:
+def _parse_cursor_file(file_path: Path, source_tool: str) -> NormalisedConversation | None:
     """Parse a single Cursor session JSONL file."""
     if not file_path.exists():
         return None
@@ -208,6 +208,7 @@ def _parse_cursor_file(file_path: Path) -> NormalisedConversation | None:
         project_path=project_path,
         model=model,
         entrypoint="cursor",
+        source_tool=source_tool,
         started_at=start_time,
         ended_at=end_time,
         messages=normalised_messages,
@@ -247,5 +248,5 @@ class CursorAdapter(Adapter):
         """Parse a Cursor session JSONL file."""
         if not path.is_file():
             return None
-        
-        return _parse_cursor_file(path)
+
+        return _parse_cursor_file(path, source_tool=self.name)

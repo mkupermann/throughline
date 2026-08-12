@@ -18,11 +18,43 @@ jobs:
       - name: Compile all Python files
         run: |
           set -e
-          for f in scripts/*.py gui/*.py skill/scripts/*.py; do
+          for f in scripts/*.py skill/scripts/*.py; do
             [ -f "$f" ] || continue
             echo "→ $f"
             python3 -m py_compile "$f"
           done
+
+  frontend:
+    name: Frontend build is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm --prefix web ci
+      - name: Typecheck
+        run: npm --prefix web run typecheck
+      - name: Unit tests
+        run: npm --prefix web run test
+      # throughline/web/ is committed so `pip install throughline` never needs
+      # Node. The cost of committing build output is that a source-only commit
+      # silently ships the previous UI — so rebuild and fail if the result
+      # differs from what is checked in.
+      - name: Rebuild
+        run: npm --prefix web run build
+      - name: Fail if the committed build is stale
+        run: |
+          if ! git diff --quiet -- throughline/web; then
+            echo "::error::throughline/web/ is out of date with web/src/."
+            echo "Run: npm --prefix web run build && git add throughline/web"
+            git diff --stat -- throughline/web
+            exit 1
+          fi
+          echo "Committed frontend matches source."
 
   python-imports:
     name: Verify required packages are declarable

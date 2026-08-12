@@ -4,7 +4,9 @@ The contract intentionally stays small. An adapter:
 
 - says whether the tool's data directory exists on this machine
   (``is_present``) — cheap, no parsing;
-- yields the files that look like conversations (``discover``);
+- ``discover`` yields the files that will be ingested; ``discover_all``
+  yields every candidate including excluded ones; ``excluded_reason``
+  explains an exclusion;
 - parses one file into a ``NormalisedConversation`` (``parse``).
 
 Everything else — DB connections, idempotency via ``ingestion_log``,
@@ -77,6 +79,11 @@ class NormalisedConversation:
     token_count_out: int | None = None
     summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: WHICH tool produced this conversation — the adapter's own ``name``.
+    #: Distinct from ``entrypoint``, which is HOW that tool was invoked.
+    #: Adapters must set this; leaving it None means "unattributed" and the
+    #: UI will render it as such rather than guessing.
+    source_tool: str | None = None
 
 
 @dataclass
@@ -90,6 +97,10 @@ class IngestSummary:
     skipped: int = 0
     errors: int = 0
     messages_written: int = 0
+    #: Transcripts of Throughline's own `claude -p` calls, dropped at
+    #: ingest. Counted separately from `skipped` so a run says plainly
+    #: how much of a source is the tool's own exhaust.
+    self_referential: int = 0
 
 
 class Adapter(ABC):
@@ -111,13 +122,42 @@ class Adapter(ABC):
     label: str
     home: Path
 
-    def is_present(self) -> bool:
-        """Cheap detection — does this tool's data dir exist on this box?"""
-        return self.home.expanduser().exists()
-
     @abstractmethod
     def discover(self) -> Iterable[Path]:
-        """Yield candidate conversation files. May be empty."""
+        """Yield the files ingestion will process. May be empty.
+
+        This must ALREADY exclude anything unsafe to ingest. An adapter that
+        widens its search must widen ``discover_all`` and narrow here — see
+        ``excluded_reason`` and the design spec §9.1.
+        """
+
+    def discover_all(self) -> Iterable[Path]:
+        """Every candidate file, including ones excluded from ingestion.
+
+        The *coverage* view: what exists on disk, for counting and reporting.
+        Defaults to ``discover()``, so an adapter with no exclusions needs no
+        extra code — and a third-party adapter published through the
+        ``throughline.adapters`` entry point keeps working untouched.
+        """
+        return self.discover()
+
+    def excluded_reason(self, path: Path) -> str | None:
+        """Why *path* is discovered but must not be ingested, or None.
+
+        Default: nothing is excluded.
+        """
+        return None
+
+    def is_present(self) -> bool:
+        """Does this tool have any data on this box?
+
+        Was "the directory exists", which reported `cline` as present while
+        it contributed nothing. Now: at least one candidate file was found.
+        """
+        home = self.home.expanduser()
+        if not home.exists():
+            return False
+        return any(True for _ in self.discover_all())
 
     @abstractmethod
     def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
@@ -139,6 +179,16 @@ class Adapter(ABC):
     @staticmethod
     def sha256_file(path: Path) -> str:
         h = hashlib.sha256()
+        if path.is_dir():
+            # Directory-based sources (e.g. Vibe session dirs): hash every
+            # file's relative path + content in sorted order so the digest
+            # changes iff the session content changes.
+            for fp in sorted(p for p in path.rglob("*") if p.is_file()):
+                h.update(str(fp.relative_to(path)).encode())
+                with open(fp, "rb") as f:
+                    for chunk in iter(lambda: f.read(8192), b""):
+                        h.update(chunk)
+            return h.hexdigest()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)

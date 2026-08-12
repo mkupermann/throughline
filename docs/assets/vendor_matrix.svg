@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-label="Throughline vendor integration matrix: nine supported AI CLIs with vendor, adapter module, storage location and format">
+  <title>Throughline vendor integration matrix</title>
+  <desc>A table of the nine supported AI CLI tools — Claude Code, Codex CLI, Cursor, Zed, Vibe, Hermes, Continue, Cline and Windsurf — showing each tool's vendor, Throughline adapter module, on-disk storage location and data format.</desc>
+  <defs>
+    <style>
+      .title   { font: 700 20px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .subtitle{ font: 400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .colh    { font: 700 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #5CA8FF; letter-spacing: 1.4px; }
+      .tool    { font: 600 13.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .vendor  { font: 400 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .adapter { font: 500 11px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #C9B8FF; }
+      .path    { font: 400 11px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #7E9CC4; }
+      .fmt     { font: 400 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .foot    { font: 400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #7E8FA8; }
+      .footcmd { font: 500 11.5px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #8FB8F2; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" fill="#0D1524"/>
+  <text x="40" y="38" class="title">Vendor integration matrix</text>
+  <text x="300" y="38" class="subtitle">nine tools · seven vendors · one adapter contract — discover() + parse()</text>
+
+  <!-- table frame -->
+  <rect x="40" y="60" width="1120" height="494" rx="10" fill="#121D31" stroke="#24344E"/>
+
+  <!-- column headers -->
+  <text x="64"  y="92" class="colh">TOOL</text>
+  <text x="240" y="92" class="colh">VENDOR</text>
+  <text x="430" y="92" class="colh">ADAPTER MODULE</text>
+  <text x="640" y="92" class="colh">STORAGE LOCATION</text>
+  <text x="1010" y="92" class="colh">FORMAT</text>
+  <line x1="56" y1="104" x2="1144" y2="104" stroke="#24344E"/>
+
+  <!-- rows -->
+  <g>
+    <!-- row separators (zebra) -->
+    <rect x="56" y="112" width="1088" height="44" rx="6" fill="#16233B"/>
+    <rect x="56" y="204" width="1088" height="44" rx="6" fill="#16233B"/>
+    <rect x="56" y="296" width="1088" height="44" rx="6" fill="#16233B"/>
+    <rect x="56" y="388" width="1088" height="44" rx="6" fill="#16233B"/>
+    <rect x="56" y="480" width="1088" height="44" rx="6" fill="#16233B"/>
+
+    <!-- 1 Claude Code -->
+    <text x="64"  y="139" class="tool">Claude Code</text>
+    <text x="240" y="139" class="vendor">Anthropic</text>
+    <text x="430" y="139" class="adapter">adapters/claude_code.py</text>
+    <text x="640" y="139" class="path">~/.claude/projects/&lt;project&gt;/*.jsonl</text>
+    <text x="1010" y="139" class="fmt">JSONL transcripts</text>
+
+    <!-- 2 Codex CLI -->
+    <text x="64"  y="185" class="tool">Codex CLI</text>
+    <text x="240" y="185" class="vendor">OpenAI</text>
+    <text x="430" y="185" class="adapter">adapters/codex.py</text>
+    <text x="640" y="185" class="path">~/.codex/sessions/&lt;date&gt;/rollout-*.jsonl</text>
+    <text x="1010" y="185" class="fmt">JSONL rollouts</text>
+
+    <!-- 3 Cursor -->
+    <text x="64"  y="231" class="tool">Cursor</text>
+    <text x="240" y="231" class="vendor">Anysphere</text>
+    <text x="430" y="231" class="adapter">adapters/cursor.py</text>
+    <text x="640" y="231" class="path">~/.cursor/sessions/*.jsonl</text>
+    <text x="1010" y="231" class="fmt">JSONL transcripts</text>
+
+    <!-- 4 Zed -->
+    <text x="64"  y="277" class="tool">Zed</text>
+    <text x="240" y="277" class="vendor">Zed Industries</text>
+    <text x="430" y="277" class="adapter">adapters/zed.py</text>
+    <text x="640" y="277" class="path">~/.zed/data/sessions/*.json</text>
+    <text x="1010" y="277" class="fmt">JSON transcripts</text>
+
+    <!-- 5 Vibe -->
+    <text x="64"  y="323" class="tool">Vibe</text>
+    <text x="240" y="323" class="vendor">Mistral AI</text>
+    <text x="430" y="323" class="adapter">adapters/vibe.py</text>
+    <text x="640" y="323" class="path">~/.vibe/logs/session/session_*/</text>
+    <text x="1010" y="323" class="fmt">Session directories</text>
+
+    <!-- 6 Hermes -->
+    <text x="64"  y="369" class="tool">Hermes</text>
+    <text x="240" y="369" class="vendor">Community</text>
+    <text x="430" y="369" class="adapter">adapters/hermes.py</text>
+    <text x="640" y="369" class="path">~/.hermes/sessions/*.json</text>
+    <text x="1010" y="369" class="fmt">JSON transcripts</text>
+
+    <!-- 7 Continue -->
+    <text x="64"  y="415" class="tool">Continue</text>
+    <text x="240" y="415" class="vendor">Continue.dev</text>
+    <text x="430" y="415" class="adapter">adapters/continue_dev.py</text>
+    <text x="640" y="415" class="path">~/.continue/sessions/*.json</text>
+    <text x="1010" y="415" class="fmt">JSON transcripts</text>
+
+    <!-- 8 Cline -->
+    <text x="64"  y="461" class="tool">Cline</text>
+    <text x="240" y="461" class="vendor">Cline</text>
+    <text x="430" y="461" class="adapter">adapters/cline.py</text>
+    <text x="640" y="461" class="path">VS Code globalStorage/…/tasks/</text>
+    <text x="1010" y="461" class="fmt">Per-task files</text>
+
+    <!-- 9 Windsurf -->
+    <text x="64"  y="507" class="tool">Windsurf</text>
+    <text x="240" y="507" class="vendor">Codeium/Cognition</text>
+    <text x="430" y="507" class="adapter">adapters/windsurf.py</text>
+    <text x="640" y="507" class="path">~/.windsurf/plans/*.md</text>
+    <text x="1010" y="507" class="fmt">Markdown plans</text>
+  </g>
+
+  <!-- footer -->
+  <text x="40" y="586" class="foot">Third-party adapters register via the</text>
+  <text x="253" y="586" class="footcmd">throughline.adapters</text>
+  <text x="392" y="586" class="foot">entry point — no core changes required.  Ingest everything present with</text>
+  <text x="817" y="586" class="footcmd">throughline ingest --all</text>
+</svg>

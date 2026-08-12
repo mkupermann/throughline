@@ -1,18 +1,21 @@
-# Runtime dependencies for claude-memory
+# Runtime dependencies for Throughline.
 # Use `>=` bounds so consumers can pick up security patches.
 
-# Required — core DB driver (all scripts)
+# Required — core DB driver (all scripts, the query layer, the API)
 psycopg2-binary>=2.9.9
 
-# Required — data + GUI stack
-streamlit>=1.32.0
-pandas>=2.0.0
-plotly>=5.18.0
+# Required — the web UI and its JSON API (`throughline serve`).
+# The built frontend ships inside the package (throughline/web), so nothing
+# here needs Node.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# Required — config and pipeline scripts
 pyyaml>=6.0
 
-# Required — Streamlit widgets used by gui/app.py
-streamlit-agraph>=0.0.45
-streamlit-calendar>=1.3.0
+# Required — MCP server (memory_mcp/server.py, `claude-memory-mcp` entry point)
+# Pinned to 1.x: the 2.0 SDK removed mcp.server.fastmcp
+mcp>=1.2.0,<2.0
 
 # Optional — semantic search via OpenAI or local Ollama
 # The scripts fall back gracefully if these are missing. Uncomment to install:

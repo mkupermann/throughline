@@ -1,0 +1,301 @@
+/* Throughline design tokens — the single place a colour is allowed to exist.
+ *
+ * Theming contract (three states, not two):
+ *   1. explicit light  -> <html data-theme="light">
+ *   2. explicit dark   -> <html data-theme="dark">
+ *   3. system (default)-> no attribute; prefers-color-scheme decides
+ *
+ * So the full light palette is defined on bare :root, the dark values are
+ * redefined twice — once under prefers-color-scheme guarded against an
+ * explicit light choice, once under [data-theme="dark"] — and no colour is
+ * ever defined *only* inside a media query.
+ *
+ * Surfaces keep the GitHub-dark ramp the Streamlit app used: it was the one
+ * part of the old UI that was genuinely good, and it is what the daily user
+ * already reads fluently.
+ */
+
+:root {
+  /* ── Surfaces & ink (LIGHT) ─────────────────────────────────────────── */
+  --surface-base: #ffffff;
+  --surface-raised: #f6f8fa;
+  --surface-hover: #eef1f4;
+  --surface-sunken: #f0f3f6;
+  --surface-overlay: #ffffff;
+
+  --border: #d0d7de;
+  --border-muted: #e4e8ec;
+  --border-strong: #afb8c1;
+
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-muted: #6b727a;
+  --text-inverted: #ffffff;
+
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --accent-ink: #ffffff;
+  /* Tinted fills for selected rows / active nav. Alpha, not a solid, so it
+     composites correctly over any surface in the ramp. */
+  --accent-wash: rgb(9 105 218 / 0.08);
+  --accent-wash-strong: rgb(9 105 218 / 0.16);
+
+  /* ── Status: reserved. Never reused as a chart series colour. ────────── */
+  --status-good: #1a7f37;
+  --status-warning: #9a6700;
+  --status-serious: #bc4c00;
+  --status-critical: #cf222e;
+  --status-good-wash: rgb(26 127 55 / 0.10);
+  --status-warning-wash: rgb(154 103 0 / 0.10);
+  --status-serious-wash: rgb(188 76 0 / 0.10);
+  --status-critical-wash: rgb(207 34 46 / 0.10);
+
+  /* ── Chart series ────────────────────────────────────────────────────
+   * Six slots, fixed order, never cycled. Validated with the dataviz
+   * six-check validator against BOTH surfaces (#FFFFFF and #0D1117):
+   *   lightness band, chroma floor, all-pairs CVD separation
+   *   (worst 9.6 ΔE protan), normal-vision floor (worst 17.4 ΔE),
+   *   contrast >= 3:1 — all PASS on both.
+   *
+   * Six is the ceiling, not a preference: an 8-slot search over the OKLCH
+   * gamut could not clear the CVD floor (7.6 ΔE) or the normal-vision floor
+   * (14.1 ΔE). A 7th category folds into --chart-other or the chart facets
+   * into small multiples. Substituting any hex here REQUIRES re-running
+   * scripts/validate_palette.js on both surfaces. Do not eyeball it.
+   */
+  --chart-1: #9634a6;
+  --chart-2: #d0365a;
+  --chart-3: #b88923;
+  --chart-4: #646506;
+  --chart-5: #00949d;
+  --chart-6: #9678f7;
+  --chart-other: #767e88;
+
+  /* Sequential ramp: one hue, light -> dark, single hue spread < 10 deg.
+     The light end must clear 2:1 against its own surface, or the first
+     bucket of a heatmap is invisible — validated with --ordinal. */
+  --seq-1: #6790ba;
+  --seq-2: #4e7caa;
+  --seq-3: #33689b;
+  --seq-4: #14548b;
+  --seq-5: #00407b;
+  --seq-6: #002c6b;
+
+  /* Diverging: two poles + a NEUTRAL grey midpoint (never a hue). */
+  --div-neg-2: #b3472f;
+  --div-neg-1: #dd9a86;
+  --div-mid: #d9d9d9;
+  --div-pos-1: #7fb2c4;
+  --div-pos-2: #1f6d87;
+
+  --grid-line: #e4e8ec;
+  --axis-line: #d0d7de;
+
+  /* ── Spacing / radius / elevation ───────────────────────────────────── */
+  /* The first three steps stay tight — they set padding inside badges, chips
+   * and table cells, where extra air just looks loose. The upper steps drive
+   * card padding and the rhythm between sections, and those were the ones that
+   * made the interface feel cramped next to the Streamlit design it replaced:
+   * the design system was generated with a density of 8 on a 1-10 scale, which
+   * targets dashboards packed with panels. This product is a reading surface. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 20px;   /* was 16 — card and control padding */
+  --space-5: 32px;   /* was 24 — gaps between cards */
+  --space-6: 48px;   /* was 32 — space above a section heading */
+  --space-7: 72px;   /* was 48 — separation between major blocks */
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Modal scrim. 45-55% is the band that isolates foreground content
+     without making the page behind it unreadable. */
+  --scrim: rgb(31 35 40 / 0.45);
+
+  --elev-1: 0 1px 2px rgb(31 35 40 / 0.06);
+  --elev-2: 0 4px 12px rgb(31 35 40 / 0.10);
+  --elev-3: 0 16px 40px rgb(31 35 40 / 0.16);
+
+  /* ── Type ───────────────────────────────────────────────────────────── */
+  /* System stack, self-hosted by definition — no runtime font fetch. The
+     old CSS pulled Inter from rsms.me on every load, which broke offline
+     and in air-gapped Docker. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  /* Exit shorter than enter (~65%) so dismissal feels responsive. */
+  --dur-exit: 120ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── Layering ───────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-drawer: 20;
+  --z-overlay: 40;
+  --z-modal: 100;
+  --z-toast: 1000;
+
+  color-scheme: light;
+}
+
+/* Dark values, applied when the viewer has chosen "system" and their OS is
+   dark. Guarded so an explicit light choice always wins. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Deeper than the GitHub-dark values these started from. The interface this
+     * replaced was hard-coded dark and sat nearer true black, which reads as
+     * more deliberate; a mid-grey dark theme looks like an unfinished light one.
+     * Every step down here RAISES contrast for the light text above it, so no
+     * text pair can fall below its previous ratio — verified after the change,
+     * not assumed. */
+    --surface-base: #08090c;
+    --surface-raised: #101318;
+    --surface-hover: #171b21;
+    --surface-sunken: #030406;
+    --surface-overlay: #171b21;
+
+    --border: #30363d;
+    --border-muted: #21262d;
+    --border-strong: #6e7681;
+
+    --text-primary: #c9d1d9;
+    --text-secondary: #8b949e;
+    --text-muted: #80878f;
+    --text-inverted: #0d1117;
+
+    --accent: #58a6ff;
+    --accent-hover: #79b8ff;
+    --accent-ink: #0d1117;
+    --accent-wash: rgb(88 166 255 / 0.12);
+    --accent-wash-strong: rgb(88 166 255 / 0.22);
+
+    /* Desaturated / lifted status hues — not inverted light-mode values. */
+    --status-good: #3fb950;
+    --status-warning: #d29922;
+    --status-serious: #db6d28;
+    --status-critical: #f85149;
+    --status-good-wash: rgb(63 185 80 / 0.14);
+    --status-warning-wash: rgb(210 153 34 / 0.14);
+    --status-serious-wash: rgb(219 109 40 / 0.14);
+    --status-critical-wash: rgb(248 81 73 / 0.14);
+
+    /* Same validated six — they pass on #0D1117 as well as #FFFFFF, so the
+       series keeps its identity when the viewer flips theme. */
+    --chart-1: #9634a6;
+    --chart-2: #d0365a;
+    --chart-3: #b88923;
+    --chart-4: #646506;
+    --chart-5: #00949d;
+    --chart-6: #9678f7;
+    --chart-other: #8b949e;
+
+    --seq-1: #004983;
+    --seq-2: #215b91;
+    --seq-3: #3b6d9f;
+    --seq-4: #5380ae;
+    --seq-5: #6b92bc;
+    --seq-6: #82a5ca;
+
+    --div-neg-2: #e06c4f;
+    --div-neg-1: #a75742;
+    --div-mid: #484f58;
+    --div-pos-1: #3f7f95;
+    --div-pos-2: #5fb3cd;
+
+    --grid-line: #21262d;
+    --axis-line: #30363d;
+
+    --scrim: rgb(1 4 9 / 0.55);
+
+    --elev-1: 0 1px 2px rgb(1 4 9 / 0.4);
+    --elev-2: 0 4px 12px rgb(1 4 9 / 0.5);
+    --elev-3: 0 16px 40px rgb(1 4 9 / 0.6);
+
+    color-scheme: dark;
+  }
+}
+
+/* The same dark values under an explicit choice, so the toggle wins in both
+   directions regardless of the OS setting. */
+:root[data-theme="dark"] {
+  --surface-base: #0d1117;
+  --surface-raised: #161b22;
+  --surface-hover: #1c2128;
+  --surface-sunken: #010409;
+  --surface-overlay: #1c2128;
+
+  --border: #30363d;
+  --border-muted: #21262d;
+  --border-strong: #6e7681;
+
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-muted: #80878f;
+  --text-inverted: #0d1117;
+
+  --accent: #58a6ff;
+  --accent-hover: #79b8ff;
+  --accent-ink: #0d1117;
+  --accent-wash: rgb(88 166 255 / 0.12);
+  --accent-wash-strong: rgb(88 166 255 / 0.22);
+
+  --status-good: #3fb950;
+  --status-warning: #d29922;
+  --status-serious: #db6d28;
+  --status-critical: #f85149;
+  --status-good-wash: rgb(63 185 80 / 0.14);
+  --status-warning-wash: rgb(210 153 34 / 0.14);
+  --status-serious-wash: rgb(219 109 40 / 0.14);
+  --status-critical-wash: rgb(248 81 73 / 0.14);
+
+  --chart-1: #9634a6;
+  --chart-2: #d0365a;
+  --chart-3: #b88923;
+  --chart-4: #646506;
+  --chart-5: #00949d;
+  --chart-6: #9678f7;
+  --chart-other: #6e7681;
+
+  --seq-1: #004983;
+  --seq-2: #215b91;
+  --seq-3: #3b6d9f;
+  --seq-4: #5380ae;
+  --seq-5: #6b92bc;
+  --seq-6: #82a5ca;
+
+  --div-neg-2: #e06c4f;
+  --div-neg-1: #a75742;
+  --div-mid: #484f58;
+  --div-pos-1: #3f7f95;
+  --div-pos-2: #5fb3cd;
+
+  --grid-line: #21262d;
+  --axis-line: #30363d;
+
+  --scrim: rgb(1 4 9 / 0.55);
+
+  --elev-1: 0 1px 2px rgb(1 4 9 / 0.4);
+  --elev-2: 0 4px 12px rgb(1 4 9 / 0.5);
+  --elev-3: 0 16px 40px rgb(1 4 9 / 0.6);
+
+  color-scheme: dark;
+}

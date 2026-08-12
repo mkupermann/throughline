@@ -123,9 +123,8 @@ python3 /path/to/claude-memory/scripts/ingest_sessions.py
 python3 /path/to/claude-memory/scripts/scan_skills.py
 python3 /path/to/claude-memory/scripts/extract_memory.py
 
-# Open the GUI
-cd /path/to/claude-memory/gui
-streamlit run app.py  # -> http://localhost:8501
+# Open the web UI
+throughline serve  # -> http://127.0.0.1:8787
 ```
 
 ## Best practices

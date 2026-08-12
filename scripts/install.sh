@@ -1,6 +1,12 @@
 #!/bin/bash
-# Claude Memory — Setup Script
-# Installiert PostgreSQL + pgvector, erstellt DB, deployed Schema, installiert launchd-Jobs.
+# Throughline — macOS setup script.
+#
+# Installs PostgreSQL 16 + pgvector via Homebrew, creates the database, applies
+# the schema, installs Python dependencies, and loads the launchd jobs that keep
+# ingestion current. Safe to re-run: every step checks before it acts.
+#
+# Linux users want docker compose (see docs/DEPLOYMENT.md) or the systemd units
+# in systemd/ — this script assumes Homebrew and launchd.
 
 set -e
 
@@ -8,24 +14,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PG_BIN="/opt/homebrew/opt/postgresql@16/bin"
 
+# The database name the CLI defaults to. Override by exporting PGDATABASE
+# before running, or by writing it into .env afterwards.
+DB_NAME="${PGDATABASE:-throughline}"
+
 echo "========================================="
-echo "Claude Memory — Installation"
+echo "Throughline — installation"
 echo "========================================="
 echo ""
 
-# 1. PostgreSQL 16 installieren
+# 1. PostgreSQL 16
 if ! command -v "$PG_BIN/psql" &> /dev/null; then
-    echo "→ Installiere PostgreSQL 16 via Homebrew..."
+    echo "→ Installing PostgreSQL 16 via Homebrew..."
     brew install postgresql@16
     brew services start postgresql@16
     sleep 3
 else
-    echo "✓ PostgreSQL 16 vorhanden"
+    echo "✓ PostgreSQL 16 present"
 fi
 
-# 2. pgvector installieren (selbst kompilieren für pg16)
+# 2. pgvector — built against this PostgreSQL, not the Homebrew default
 if ! ls "$PG_BIN/../share/postgresql@16/extension/vector.control" &> /dev/null; then
-    echo "→ Installiere pgvector (kompilieren für pg16)..."
+    echo "→ Installing pgvector (compiling against pg16)..."
     cd /tmp
     if [ ! -d pgvector ]; then
         git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
@@ -35,27 +45,29 @@ if ! ls "$PG_BIN/../share/postgresql@16/extension/vector.control" &> /dev/null; 
     make install PG_CONFIG="$PG_BIN/pg_config"
     cd "$PROJECT_DIR"
 else
-    echo "✓ pgvector vorhanden"
+    echo "✓ pgvector present"
 fi
 
-# 3. Datenbank erstellen
-if ! "$PG_BIN/psql" -lqt | cut -d \| -f 1 | grep -qw claude_memory; then
-    echo "→ Erstelle Datenbank claude_memory..."
-    "$PG_BIN/createdb" claude_memory
+# 3. Database
+if ! "$PG_BIN/psql" -lqt | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
+    echo "→ Creating database $DB_NAME..."
+    "$PG_BIN/createdb" "$DB_NAME"
 else
-    echo "✓ Datenbank claude_memory vorhanden"
+    echo "✓ Database $DB_NAME present"
 fi
 
-# 4. Schema deployen
-echo "→ Deploye Schema..."
-"$PG_BIN/psql" -d claude_memory < "$PROJECT_DIR/sql/schema.sql" > /dev/null 2>&1 || echo "  (Schema bereits deployed)"
+# 4. Schema
+echo "→ Applying schema..."
+"$PG_BIN/psql" -d "$DB_NAME" < "$PROJECT_DIR/sql/schema.sql" > /dev/null 2>&1 \
+    || echo "  (schema already applied)"
 
-# 5. Python-Dependencies
-echo "→ Installiere Python-Dependencies..."
+# 5. Python dependencies
+echo "→ Installing Python dependencies..."
 pip3 install --break-system-packages -r "$PROJECT_DIR/requirements.txt" 2>&1 | tail -3
+pip3 install --break-system-packages -e "$PROJECT_DIR" 2>&1 | tail -1
 
-# 6. launchd-Plists konfigurieren (Platzhalter ersetzen)
-echo "→ Konfiguriere launchd-Plists..."
+# 6. launchd jobs
+echo "→ Configuring launchd jobs..."
 LAUNCHD_DST="$HOME/Library/LaunchAgents"
 mkdir -p "$LAUNCHD_DST"
 
@@ -76,16 +88,16 @@ chmod +x "$PROJECT_DIR/scripts/"*.sh
 
 echo ""
 echo "========================================="
-echo "✓ Installation abgeschlossen"
+echo "✓ Installation complete"
 echo "========================================="
 echo ""
-echo "Nächste Schritte:"
-echo "  1. Erste Ingestion:    python3 $PROJECT_DIR/scripts/ingest_sessions.py"
-echo "  2. Skills scannen:     python3 $PROJECT_DIR/scripts/scan_skills.py"
-echo "  3. GUI starten:        cd $PROJECT_DIR/gui && streamlit run app.py"
-echo "  4. Memory extrahieren: python3 $PROJECT_DIR/scripts/extract_memory.py"
+echo "Next steps:"
+echo "  1. Ingest everything:  throughline ingest --all"
+echo "  2. Index your skills:  throughline scan-skills"
+echo "  3. Check the install:  throughline doctor"
+echo "  4. Open the UI:        throughline serve"
 echo ""
-echo "launchd-Jobs laufen automatisch:"
-echo "  - Ingest:  stündlich"
-echo "  - Extract: täglich 02:00"
-echo "  - Backup:  täglich 03:00"
+echo "The launchd jobs run on their own from here:"
+echo "  - ingest:  hourly"
+echo "  - extract: daily at 02:00"
+echo "  - backup:  daily at 03:00"

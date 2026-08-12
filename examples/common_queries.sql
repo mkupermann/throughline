@@ -2,10 +2,10 @@
 -- Common Queries for Claude Memory
 -- =============================================================================
 -- A collection of ready-to-run SQL queries for frequent use-cases.
--- All queries target the public schema of the claude_memory database.
+-- All queries target the public schema of the Throughline database.
 --
 -- Run individual queries in psql:
---   psql -d claude_memory -c "<query>"
+--   psql -d throughline -c "<query>"
 -- Or paste into the built-in SQL console in the Streamlit GUI.
 -- =============================================================================
 

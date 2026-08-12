@@ -1,7 +1,7 @@
 # Installation Guide
 
 Full setup for a fresh machine. macOS is the primary supported platform.
-Linux works for the core stack (Postgres, Python, Streamlit), but the
+Linux works for the core stack (Postgres, Python, the web UI), but the
 AppleScript-based mail and calendar hooks are macOS-only.
 
 ## 1. Prerequisites
@@ -139,11 +139,10 @@ Your numbers will vary.
 ## 8. Start the GUI
 
 ```bash
-cd gui
-streamlit run app.py
+throughline serve
 ```
 
-Open `http://localhost:8501`. You should land on the Dashboard with counts
+Open `http://127.0.0.1:8790`. You should land on the Dashboard with counts
 for conversations, messages, skills, and memory chunks.
 
 ## 9. Optional — enable the scheduler
@@ -241,7 +240,7 @@ as a whole. This covers all future Claude updates.
 
 Also add `/bin/bash` and `/usr/bin/osascript` there.
 
-### Streamlit shows `psycopg2.InterfaceError: connection already closed`
+### the web UI shows `psycopg2.InterfaceError: connection already closed`
 
 The shared connection died (often after a long idle period). Refresh the
 browser — the app has a reconnect-on-error fallback and will recover on the

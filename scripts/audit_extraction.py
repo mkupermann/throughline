@@ -48,7 +48,7 @@ import psycopg2.extras
 
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),

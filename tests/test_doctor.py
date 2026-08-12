@@ -74,7 +74,7 @@ def test_run_doctor_returns_one_result_per_check() -> None:
     for c in rep.checks:
         assert c.name
         assert c.status in {"pass", "warn", "fail"}
-        assert c.category in {"python", "postgres", "adapters", "embeddings", "schedule"}
+        assert c.category in {"python", "postgres", "adapters", "embeddings", "schedule", "archive"}
 
 
 def test_run_doctor_category_filter() -> None:
@@ -138,3 +138,85 @@ def test_cli_doctor_json_is_valid(tmp_path: Path) -> None:
     )
     payload = json.loads(result.stdout)
     assert all(c["category"] == "python" for c in payload["checks"])
+
+
+# --- archive category -------------------------------------------------------
+#
+# These checks exist because 91% of the transcripts this tool has ingested no
+# longer exist on disk: for those, the database is the only copy, so it has to
+# be checkable rather than merely present.
+
+
+def test_format_human_renders_unknown_categories() -> None:
+    """A new category must not vanish from the text report.
+
+    The renderer walked a hardcoded list of five categories, so the entire
+    `archive` category printed nothing while still counting toward the
+    summary — the totals disagreed with the screen, and `--json` was the only
+    way to see the checks at all. Silent omission is the worst failure mode a
+    diagnostic can have.
+    """
+    rep = DoctorReport(checks=[
+        CheckResult("known", "python", "pass", "fine"),
+        CheckResult("newish", "archive", "warn", "something drifted", remedy="fix it"),
+    ])
+    txt = format_human(rep, color=False)
+    assert "── archive ──" in txt
+    assert "something drifted" in txt
+    assert "1 pass · 1 warn · 0 fail" in txt
+
+
+def test_known_categories_keep_their_order() -> None:
+    """Unknown categories append; they must not reshuffle the familiar ones."""
+    rep = DoctorReport(checks=[
+        CheckResult("z", "archive", "pass", "a"),
+        CheckResult("a", "python", "pass", "b"),
+        CheckResult("m", "postgres", "pass", "c"),
+    ])
+    txt = format_human(rep, color=False)
+    assert txt.index("── python ──") < txt.index("── postgres ──") < txt.index("── archive ──")
+
+
+def test_backup_check_warns_when_directory_is_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CLAUDE_MEMORY_BACKUP_DIR", str(tmp_path / "nope"))
+    r = doctor.check_archive_backup()
+    assert r.status == "warn"
+    assert "install_backup_agent" in (r.remedy or "")
+
+
+def test_backup_check_ignores_empty_dumps(tmp_path, monkeypatch) -> None:
+    """A zero-byte file is a failed dump, not a backup.
+
+    An interrupted pg_dump leaves one behind, and counting it would report
+    "backed up" at exactly the moment the backup stopped working.
+    """
+    monkeypatch.setenv("CLAUDE_MEMORY_BACKUP_DIR", str(tmp_path))
+    (tmp_path / "claude_memory_2026-01-01_000000.sql.gz").write_bytes(b"")
+    r = doctor.check_archive_backup()
+    assert r.status == "warn"
+    assert "no usable dump" in r.message
+
+
+def test_backup_check_warns_on_a_stale_dump(tmp_path, monkeypatch) -> None:
+    """Older than two daily runs means a run was actually missed."""
+    import os
+    import time as _time
+
+    monkeypatch.setenv("CLAUDE_MEMORY_BACKUP_DIR", str(tmp_path))
+    old = tmp_path / "claude_memory_2026-01-01_000000.sql.gz"
+    old.write_bytes(b"not empty")
+    stale = _time.time() - 5 * 24 * 3600
+    os.utime(old, (stale, stale))
+
+    r = doctor.check_archive_backup()
+    assert r.status == "warn"
+    assert "days old" in r.message
+    assert r.details["age_hours"] > 48
+
+
+def test_backup_check_passes_on_a_fresh_dump(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CLAUDE_MEMORY_BACKUP_DIR", str(tmp_path))
+    (tmp_path / "claude_memory_2026-01-01_000000.sql.gz").write_bytes(b"x" * 2048)
+    r = doctor.check_archive_backup()
+    assert r.status == "pass"
+    assert r.details["count"] == 1

@@ -78,7 +78,12 @@ logs/
 tmp/
 temp/
 
+# Frontend source and toolchain.
+# The image serves the *built* frontend from throughline/web/, which is
+# committed. The source tree and its 135 MB of node_modules are build-time
+# only and must not enter the build context.
+web/
+
 # Project specific
 .k2a/
-gui/styles.css
 sql/migrations/

@@ -55,6 +55,7 @@ class WindsurfAdapter(Adapter):
             project_path="windsurf",
             model="windsurf-cascade",
             entrypoint="windsurf",
+            source_tool="windsurf",
             started_at=ctime,
             ended_at=mtime,
             summary=title,

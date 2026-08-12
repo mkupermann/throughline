@@ -95,6 +95,11 @@ SET default_table_access_method = heap;
 CREATE TABLE public.conversations (
     id bigint NOT NULL,
     session_id uuid NOT NULL,
+    -- Name of the script or scheduled tool that produced this conversation;
+    -- NULL when a person did. Every default listing filters on IS NULL: on the
+    -- corpus this was written against, 3,017 of 3,606 conversations were the
+    -- tool's own `claude -p` calls. See sql/migrations/004_generated_by.sql.
+    generated_by text,
     project_path text,
     project_name text GENERATED ALWAYS AS (
 CASE
@@ -114,7 +119,8 @@ END) STORED,
     tags text[] DEFAULT '{}'::text[],
     metadata jsonb DEFAULT '{}'::jsonb,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    source_tool text
 );
 
 
@@ -143,7 +149,10 @@ ALTER SEQUENCE public.conversations_id_seq OWNED BY public.conversations.id;
 
 CREATE TABLE public.embeddings (
     id bigint NOT NULL,
-    source_type text NOT NULL,
+    -- Closed vocabulary; see memory_chunks.source_type above.
+    source_type text NOT NULL
+        CONSTRAINT embeddings_source_type_check
+        CHECK (source_type IN ('memory_chunk', 'message')),
     source_id bigint NOT NULL,
     embedding_1536 public.vector(1536),
     model text DEFAULT 'text-embedding-3-small'::text,
@@ -280,7 +289,15 @@ ALTER SEQUENCE public.ingestion_log_id_seq OWNED BY public.ingestion_log.id;
 
 CREATE TABLE public.memory_chunks (
     id bigint NOT NULL,
-    source_type text NOT NULL,
+    -- Closed vocabulary. See sql/migrations/003_source_type_vocabularies.sql:
+    -- a status query once filtered on two spellings that had never been
+    -- written, matched nothing, and reported "no extraction yet" on a
+    -- database full of it. Adding a source type means editing this list and
+    -- writing a migration.
+    source_type text NOT NULL
+        CONSTRAINT memory_chunks_source_type_check
+        CHECK (source_type IN ('conversation', 'manual', 'mcp_write',
+                               'reflection_merge', 'consolidation')),
     source_id bigint,
     content text NOT NULL,
     category public.memory_category NOT NULL,
@@ -813,6 +830,13 @@ CREATE INDEX idx_conversations_project_name ON public.conversations USING btree 
 --
 
 CREATE INDEX idx_conversations_session_id ON public.conversations USING btree (session_id);
+
+
+--
+-- Name: idx_conversations_source_tool; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_conversations_source_tool ON public.conversations USING btree (source_tool);
 
 
 --

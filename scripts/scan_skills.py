@@ -19,7 +19,7 @@ import psycopg2
 from psycopg2.extras import Json
 
 DB_CONFIG: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -168,9 +168,13 @@ def main() -> None:
             else:
                 updated += 1
         except Exception as e:
+            # Roll back so one bad row doesn't abort the transaction and
+            # silently discard every following upsert.
+            conn.rollback()
             print(f"  ✗ {skill['name']}: {e}")
+        else:
+            conn.commit()
 
-    conn.commit()
     cursor.close()
     conn.close()
 

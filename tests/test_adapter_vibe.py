@@ -52,10 +52,17 @@ class TestVibeAdapter:
         a = VibeAdapter()
         assert a.home == Path("~/.vibe/logs/session").expanduser()
 
-    def test_is_present_when_dir_exists(self, tmp_path, monkeypatch):
-        # Create a fake vibe directory
+    def test_is_present_when_dir_exists_but_empty(self, tmp_path, monkeypatch):
+        # Spec §4.4: an existing-but-empty data dir must not report present.
         vibe_dir = tmp_path / ".vibe" / "logs" / "session"
         vibe_dir.mkdir(parents=True)
+        a = VibeAdapter()
+        monkeypatch.setattr(a, "home", vibe_dir)
+        assert a.is_present() is False
+
+    def test_is_present_when_a_session_dir_exists(self, tmp_path, monkeypatch):
+        vibe_dir = tmp_path / ".vibe" / "logs" / "session"
+        (vibe_dir / "session_20260115_100000_abc123").mkdir(parents=True)
         a = VibeAdapter()
         monkeypatch.setattr(a, "home", vibe_dir)
         assert a.is_present() is True
@@ -395,3 +402,26 @@ class TestVibeAdapter:
         assert conv.messages[1].is_sidechain is True
         assert conv.messages[1].metadata.get("injected") is True
         assert conv.messages[1].metadata.get("reasoning_message_id") == "reason_1"
+
+
+class TestSha256OnSessionDirs:
+    """Vibe discover() yields directories — the writer hashes them for
+    idempotency, so sha256_file must handle directories (regression:
+    ingestion previously failed with 'Is a directory' on every session)."""
+
+    def test_directory_hash_is_stable(self, tmp_path):
+        d = tmp_path / "session_20260101_000000_aaaaaaaa"
+        d.mkdir()
+        (d / "meta.json").write_text('{"session_id": "s1"}')
+        (d / "messages.jsonl").write_text('{"role": "user", "content": "hi"}\n')
+        h1 = VibeAdapter.sha256_file(d)
+        h2 = VibeAdapter.sha256_file(d)
+        assert h1 == h2
+
+    def test_directory_hash_changes_with_content(self, tmp_path):
+        d = tmp_path / "session_20260101_000000_bbbbbbbb"
+        d.mkdir()
+        (d / "messages.jsonl").write_text("one\n")
+        h1 = VibeAdapter.sha256_file(d)
+        (d / "messages.jsonl").write_text("one\ntwo\n")
+        assert VibeAdapter.sha256_file(d) != h1

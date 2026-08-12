@@ -23,14 +23,15 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 
 from .base import Adapter, IngestSummary, NormalisedConversation
+from throughline.self_referential import first_user_text, self_referential_reason
 
 
 def _db_config() -> dict[str, Any]:
     return {
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
@@ -58,13 +59,14 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
         INSERT INTO conversations
             (session_id, project_path, model, entrypoint, git_branch,
              started_at, ended_at, message_count,
-             token_count_in, token_count_out, summary, metadata)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             token_count_in, token_count_out, summary, metadata, source_tool)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (session_id) DO UPDATE
         SET ended_at      = EXCLUDED.ended_at,
             message_count = EXCLUDED.message_count,
             model         = COALESCE(EXCLUDED.model, conversations.model),
             metadata      = conversations.metadata || EXCLUDED.metadata,
+            source_tool   = COALESCE(EXCLUDED.source_tool, conversations.source_tool),
             updated_at    = NOW()
         RETURNING id
         """,
@@ -81,41 +83,65 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
             conv.token_count_out,
             conv.summary,
             Json(conv.metadata or {}),
+            conv.source_tool,
         ),
     )
     return cur.fetchone()[0]
 
 
+#: Rows per INSERT statement. 500 keeps the generated statement well inside
+#: any practical parameter limit while capturing nearly all of the win —
+#: measured against loopback Postgres, batching is ~5x faster than one
+#: execute() per message and the curve is flat well before this point:
+#:
+#:      messages     per-row     batched    speedup
+#:           200      71.6ms      13.3ms       5.4x
+#:         1,000     277.7ms      60.8ms       4.6x
+#:         5,000    1486.4ms     224.4ms       6.6x
+#:        20,000    5118.9ms     960.1ms       5.3x
+#:
+#: Both forms are linear in message count; this is a constant-factor
+#: round-trip saving, not an algorithmic fix.
+_MESSAGE_BATCH_SIZE = 500
+
+
 def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> int:
     cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
-    written = 0
-    for m in conv.messages:
-        cur.execute(
-            """
-            INSERT INTO messages
-                (conversation_id, uuid, parent_uuid, role, content,
-                 content_blocks, tool_calls, tool_name, is_sidechain,
-                 model, token_count, created_at, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                conv_id,
-                m.uuid,
-                m.parent_uuid,
-                m.role,
-                m.content,
-                Json(m.content_blocks) if m.content_blocks is not None else None,
-                Json(m.tool_calls) if m.tool_calls else None,
-                m.tool_name,
-                m.is_sidechain,
-                m.model,
-                m.token_count,
-                m.created_at or conv.started_at,
-                Json(m.metadata or {}),
-            ),
+    if not conv.messages:
+        return 0
+
+    rows = [
+        (
+            conv_id,
+            m.uuid,
+            m.parent_uuid,
+            m.role,
+            m.content,
+            Json(m.content_blocks) if m.content_blocks is not None else None,
+            Json(m.tool_calls) if m.tool_calls else None,
+            m.tool_name,
+            m.is_sidechain,
+            m.model,
+            m.token_count,
+            m.created_at or conv.started_at,
+            Json(m.metadata or {}),
         )
-        written += 1
-    return written
+        for m in conv.messages
+    ]
+
+    execute_values(
+        cur,
+        """
+        INSERT INTO messages
+            (conversation_id, uuid, parent_uuid, role, content,
+             content_blocks, tool_calls, tool_name, is_sidechain,
+             model, token_count, created_at, metadata)
+        VALUES %s
+        """,
+        rows,
+        page_size=_MESSAGE_BATCH_SIZE,
+    )
+    return len(rows)
 
 
 def _backfill_projects_from_observed(cur: Any) -> int:
@@ -148,6 +174,45 @@ def _backfill_projects_from_observed(cur: Any) -> int:
         [(n,) for n in missing],
     )
     return len(missing)
+
+
+def _record_decision(conn: Any, cur: Any, fp: Path, fhash: str) -> None:
+    """Log a file we deliberately declined to ingest, with ``record_count = 0``.
+
+    A file that parses to nothing — an empty transcript, or one this tool
+    recognises as its own ``claude -p`` call — used to be rolled back and
+    skipped without leaving any trace. Three consequences, all bad:
+
+    1. `pending` counts discovered files that have no ``ingestion_log`` row, so
+       these stayed pending forever, pinning the provider chip to an amber
+       "N pending" that no amount of ingesting could clear — and a warning that
+       cannot be cleared is one the user learns to ignore, including on the day
+       it means something real.
+    2. Every subsequent run re-read and re-parsed every one of them.
+    3. The decision was invisible: nothing recorded that the file was seen and
+       judged, so "we never looked at it" and "we looked and said no" were
+       indistinguishable after the fact.
+
+    ``record_count = 0`` distinguishes a decline from a real ingest, and the
+    ``(file_path, file_hash)`` key means a file that later grows gets a new hash
+    and is judged again rather than being written off permanently.
+
+    Rolls back first: the caller reaches here from an aborted parse, and on a
+    failed transaction PostgreSQL rejects every further statement until the
+    block ends.
+    """
+    conn.rollback()
+    try:
+        cur.execute(
+            "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
+            "VALUES (%s, %s, 0) ON CONFLICT DO NOTHING",
+            (str(fp), fhash),
+        )
+        conn.commit()
+    except Exception:
+        # Never let bookkeeping abort an ingest run: the next file matters more
+        # than recording this one's rejection.
+        conn.rollback()
 
 
 def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = True) -> IngestSummary:
@@ -204,13 +269,32 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
                 # (Hermes state.db SQLite) uniformly.
                 if parsed is None:
                     summary.skipped += 1
-                    conn.rollback()
+                    _record_decision(conn, cur, fp, fhash)
                     continue
                 convs = parsed if isinstance(parsed, list) else [parsed]
                 convs = [c for c in convs if c and c.messages]
+
+                # Drop transcripts that are Throughline calling `claude -p`
+                # itself. Claude Code records those calls as sessions, so
+                # without this every ingest sweeps the tool's own prompts back
+                # in as if they were the user's work — 81% of the author's
+                # corpus at the time this was added. They also crowd the
+                # extraction queue, which is ordered newest-first, and each one
+                # costs a `claude -p` call to learn it holds nothing.
+                kept = []
+                for c in convs:
+                    reason = self_referential_reason(first_user_text(c.messages))
+                    if reason:
+                        summary.self_referential += 1
+                        if verbose:
+                            print(f"    ~ {fp.name}: skipped ({reason} prompt)")
+                    else:
+                        kept.append(c)
+                convs = kept
+
                 if not convs:
                     summary.skipped += 1
-                    conn.rollback()
+                    _record_decision(conn, cur, fp, fhash)
                     continue
                 written = 0
                 for conv in convs:

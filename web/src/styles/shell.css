@@ -1,0 +1,409 @@
+/* Shell chrome: sidebar, nav, command palette, and the shared page furniture.
+ * Every colour here is a token — no literal hex below this line. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100dvh;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-3);
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border-muted);
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+}
+/* The mark is a drawn line, not a letter in a box. It therefore sits on the
+ * sidebar surface rather than on a filled tile — a tile would put a hard edge
+ * around a shape whose whole point is that it runs past its own boundary.
+ * `--brand-node-fill` tells the nodes what to punch out to, so the line reads
+ * as passing through them in either theme. */
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  --brand-node-fill: var(--surface-base);
+  flex-shrink: 0;
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+.brand-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.brand-sub {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-base);
+  font-weight: 500;
+  /* Colour only — never a size or position change, which would shift the
+     rest of the list on hover. */
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.nav-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.nav-link.is-active {
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-weight: 600;
+}
+.nav-kbd,
+.palette-kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.nav-link:hover .nav-kbd,
+.nav-link:focus-visible .nav-kbd {
+  opacity: 1;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  /* Anchor right and let the hint push from the left. `space-between` would
+     slide the toggle across the sidebar the moment the hint auto-hides — a
+     control must not move under the cursor. */
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.palette-nudge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.palette-nudge kbd,
+.palette-nudge-kbd {
+  font-family: var(--font-mono);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.icon-button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* ── Main ────────────────────────────────────────────────────────────── */
+.main {
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-7);
+  /* Was a hard 1200px, which left ~280px of dead gutter on a 1456px window
+   * while the cards inside were squeezed. Prose still gets a readable measure
+   * from the per-page `max-width: NNch` rules; this cap only stops the shell
+   * itself from stretching absurdly on an ultrawide display. */
+  max-width: 1600px;
+  width: 100%;
+}
+.main:focus {
+  outline: none;
+}
+
+.page-header {
+  margin-bottom: var(--space-5);
+}
+.page-title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+  margin: 0;
+}
+.page-subtitle {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+}
+
+/* Section heading, used on every surface.
+ *
+ * Was 11px uppercase with wide tracking in the muted ink — a micro-label. Four
+ * of them down one page (NEEDS ATTENTION / INVENTORY / ACTIVITY / MEMORY BY
+ * CATEGORY) all shouted at the same volume, which is the same as none: the
+ * reader got no order to read in, and uppercase at that size is measurably
+ * slower to read besides.
+ *
+ * Now a real heading — sentence case, secondary ink, sized just under the page
+ * title. Redefined here rather than replaced at each call site so all twelve
+ * uses across Operate, Detail, Find and Console follow, instead of Overview
+ * having its own private typography and the app carrying two competing
+ * conventions. */
+.section-label {
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Command palette ─────────────────────────────────────────────────── */
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  /* Scrim strong enough to isolate the dialog from the page behind it. */
+  background: var(--scrim);
+  animation: fade-in var(--dur-base) var(--ease-out);
+}
+.palette {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-modal);
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-3);
+  overflow: hidden;
+  animation: palette-in var(--dur-base) var(--ease-out);
+}
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.palette-input {
+  width: 100%;
+  padding: var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--border-muted);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  outline: none;
+}
+.palette-input::placeholder {
+  color: var(--text-muted);
+}
+
+.palette-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+.palette-group [cmdk-group-heading] {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+.palette-item[data-selected="true"] {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.palette-item[data-selected="true"] .palette-kbd,
+.palette-item[data-selected="true"] .palette-hint {
+  opacity: 1;
+}
+.palette-hint {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.palette-item .palette-kbd {
+  margin-left: var(--space-2);
+  opacity: 0;
+}
+.palette-empty {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+/* ── Provider bar ─────────────────────────────────────────────────────
+ * The provider scope, always on screen (except Console — see ProviderBar.tsx).
+ * A chip carries a text label and count; colour (the active/dot states) is
+ * never the only differentiator, since only six chart hues cover nine
+ * providers. */
+.provider-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  /* Lives inside .main, which already carries the horizontal page padding —
+     this only adds the gap before the page content below it. */
+  margin-bottom: var(--space-5);
+}
+
+.provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.provider-chip:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.provider-chip.is-active {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.provider-chip-label {
+  white-space: nowrap;
+}
+.provider-chip-count {
+  color: var(--text-muted);
+}
+.provider-chip.is-active .provider-chip-count {
+  color: var(--accent);
+}
+/* Pending-import indicator — paired with an aria-label on the dot itself
+   (see ProviderBar.tsx), so it is never colour-only. */
+.provider-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--status-warning);
+  flex-shrink: 0;
+}
+.provider-chip-clear {
+  border-style: dashed;
+  color: var(--text-muted);
+  background: transparent;
+}
+.provider-chip-clear:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+/* The "(unattributed)" row: informational only, not a scope toggle — see
+   ProviderBar.tsx. No pointer cursor, no hover state, so it doesn't look
+   clickable. */
+.provider-chip-static {
+  cursor: default;
+}
+.provider-chip-static:hover {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────
+ * Desktop-first by design (see the plan): this only keeps the app usable
+ * down to ~1024px, it is not a mobile layout. */
+@media (max-width: 1024px) {
+  .shell {
+    grid-template-columns: 64px 1fr;
+  }
+  .brand-text,
+  .nav-link span,
+  .nav-kbd,
+  .palette-nudge {
+    display: none;
+  }
+  .nav-link {
+    justify-content: center;
+  }
+  .main {
+    padding: var(--space-5) var(--space-4) var(--space-6);
+  }
+}
+
+/* Count of adapters omitted from the bar because they hold nothing here. Plain
+   text, not a chip: it is a footnote about the bar, not another scope. */
+.provider-bar-note {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}

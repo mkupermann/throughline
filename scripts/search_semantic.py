@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Semantic Search über claude_memory DB via pgvector cosine distance.
+Semantic search over the Throughline database via pgvector cosine distance.
 
 Usage:
     python3 search_semantic.py "pgvector postgres"
@@ -133,7 +133,7 @@ def main() -> None:
     conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Sanity: gibt es überhaupt Embeddings mit diesem Modell?
+    # Sanity check: are there any embeddings from this model at all?
     cur.execute("SELECT COUNT(*) AS n FROM embeddings WHERE model = %s", (backend.model,))
     n_total = cur.fetchone()["n"]
     if n_total == 0:

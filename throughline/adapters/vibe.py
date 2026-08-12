@@ -218,8 +218,14 @@ def _load_session_messages(session_dir: Path) -> list[dict[str, Any]]:
     return messages
 
 
-def _parse_session_dir(session_dir: Path) -> NormalisedConversation | None:
-    """Parse a single Vibe session directory into a NormalisedConversation."""
+def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
+    """Parse a single Vibe session directory into ``NormalisedConversation`` kwargs.
+
+    Returns a plain dict rather than a ``NormalisedConversation`` so the
+    caller (``VibeAdapter.parse``) supplies ``entrypoint`` and
+    ``source_tool`` itself — keeping those two provider-identity fields
+    visible at the adapter class, not buried in a module-level helper.
+    """
     # Load metadata
     meta = _load_session_metadata(session_dir)
     if not meta:
@@ -303,20 +309,19 @@ def _parse_session_dir(session_dir: Path) -> NormalisedConversation | None:
         "tools_available_count": len(meta.get("tools_available", [])),
     }
     
-    return NormalisedConversation(
-        session_id=session_uuid,
-        project_path=project_path,
-        model=model,
-        entrypoint="",  # Not available in Vibe
-        started_at=start_time,
-        ended_at=end_time,
-        messages=normalised_messages,
-        git_branch=meta.get("git_branch"),  # May be None
-        token_count_in=token_count_in,
-        token_count_out=token_count_out,
-        summary=title[:500] if title else None,
-        metadata=vibe_metadata,
-    )
+    return {
+        "session_id": session_uuid,
+        "project_path": project_path,
+        "model": model,
+        "started_at": start_time,
+        "ended_at": end_time,
+        "messages": normalised_messages,
+        "git_branch": meta.get("git_branch"),  # May be None
+        "token_count_in": token_count_in,
+        "token_count_out": token_count_out,
+        "summary": title[:500] if title else None,
+        "metadata": vibe_metadata,
+    }
 
 
 class VibeAdapter(Adapter):
@@ -351,5 +356,12 @@ class VibeAdapter(Adapter):
         """
         if not path.is_dir():
             return None
-        
-        return _parse_session_dir(path)
+
+        fields = _parse_session_dir(path)
+        if fields is None:
+            return None
+        return NormalisedConversation(
+            entrypoint="",  # Not available in Vibe
+            source_tool=self.name,
+            **fields,
+        )

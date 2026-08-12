@@ -1,0 +1,15 @@
+# Files graphify should not build a knowledge graph from.
+#
+# The vendored frontend bundle is generated output. It is committed on purpose —
+# `throughline serve` serves it without needing npm — but it is minified, so its
+# "entities" are identifiers like `tc`, `bm` and `cR`. In a graph built on the
+# 2026-08-10 corpus it produced 474 of 3,394 nodes (13%), was the single largest
+# source file, and accounted for every one of the 474 collapsed edges. Four of
+# the fourteen largest communities were pure bundle noise.
+#
+# The React/TypeScript source it is built from lives in web/src/ and IS indexed,
+# so excluding this loses no information — it removes a minified duplicate.
+throughline/web/assets/
+
+# Vite's incremental build stamp: churns on every build, carries no structure.
+web/tsconfig.tsbuildinfo

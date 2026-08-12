@@ -1,0 +1,673 @@
+/* Overview surface. Every colour is a token. */
+
+.page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.headline {
+  margin-bottom: var(--space-4);
+}
+.headline-value {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+.headline-sub {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+}
+
+/* ── Verdict ─────────────────────────────────────────────────────────── */
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-muted);
+  font-size: var(--text-md);
+  font-weight: 500;
+  margin-bottom: var(--space-5);
+}
+.verdict-ok {
+  color: var(--status-good);
+  background: var(--status-good-wash);
+  border-color: color-mix(in srgb, var(--status-good) 30%, transparent);
+}
+.verdict-degraded {
+  color: var(--status-warning);
+  background: var(--status-warning-wash);
+  border-color: color-mix(in srgb, var(--status-warning) 30%, transparent);
+}
+.verdict-broken {
+  color: var(--status-critical);
+  background: var(--status-critical-wash);
+  border-color: color-mix(in srgb, var(--status-critical) 30%, transparent);
+}
+
+/* ── Attention list ──────────────────────────────────────────────────── */
+.attn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.attn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.attn:hover {
+  border-color: var(--border);
+}
+.attn-critical {
+  border-left-color: var(--status-critical);
+}
+.attn-warning {
+  border-left-color: var(--status-warning);
+}
+.attn-info {
+  border-left-color: var(--border-strong);
+}
+.attn-critical .attn-icon {
+  color: var(--status-critical);
+}
+.attn-warning .attn-icon {
+  color: var(--status-warning);
+}
+.attn-info .attn-icon {
+  color: var(--text-muted);
+}
+.attn-icon {
+  display: grid;
+  place-items: center;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+.attn-body {
+  min-width: 0;
+  flex: 1;
+}
+.attn-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.attn-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.attn-count {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 1px var(--space-2);
+  background: var(--surface-hover);
+  border-radius: var(--radius-full);
+}
+.attn-detail {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  /* Keep the measure readable rather than running edge to edge. */
+  max-width: 68ch;
+}
+.attn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  align-self: center;
+  padding: var(--space-2) var(--space-3);
+  /* >= 44px hit area including padding, without changing the visual size. */
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.attn-action:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* ── Sparkline ───────────────────────────────────────────────────────── */
+.stack-top {
+  margin-top: var(--space-6);
+}
+/* Two-column grid: a narrow gutter for the y-axis labels, then the plot. The
+ * caption spans both, and the x-axis labels sit under the plot only — so the
+ * dates line up with the data rather than with the gutter. */
+.spark {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto auto;
+  column-gap: var(--space-3);
+}
+.spark-caption {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+.spark-total {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+/* Labels are distributed across the plot's height, so each one sits level with
+ * the gridline it names. The padding matches .spark-plot's so top and bottom
+ * ticks align with the lines rather than the card edge. */
+.spark-axis-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: calc(var(--space-2) + 8px) 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: right;
+  min-width: 3ch;
+}
+.spark-axis-x {
+  grid-column: 2;
+  position: relative;
+  height: 1.4em;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+/* Positioned by percentage to match the point they label. translateX(-50%)
+ * centres each on its tick; the first and last are nudged inward by the
+ * padding so they do not overhang the card. */
+.spark-axis-x span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.spark-axis-x span:first-child {
+  transform: none;
+}
+.spark-axis-x span:last-child {
+  transform: translateX(-100%);
+}
+.spark-plot {
+  position: relative;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+}
+.spark-plot svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+.spark-grid {
+  stroke: var(--border-muted);
+  stroke-width: 1;
+}
+.spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.spark-area {
+  fill: var(--accent-wash);
+  stroke: none;
+}
+.spark-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 3 3;
+}
+.spark-dot {
+  fill: var(--accent);
+  stroke: var(--surface-raised);
+  stroke-width: 2;
+}
+.spark-tip {
+  position: absolute;
+  top: -6px;
+  transform: translateX(-50%);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elev-2);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── Totals ──────────────────────────────────────────────────────────
+   Used by Operate (Overview has its own `.stock-figures` band). Same decision
+   as there, for the same reason: these were bordered cards on a
+   `minmax(210px, 1fr)` grid, so five environment values rendered 4 + 1 with
+   one box stranded on a second row, and eight inventory counts rendered 6 + 2.
+   The wrap looked accidental because it was, and thirteen boxes on one page is
+   chrome arguing with its own contents.
+
+   A flowing row groups them by space instead. Values wrap freely, nothing is
+   stranded, and the headings above them do the work of separating the groups. */
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5) var(--space-6);
+  margin: 0;
+}
+.total {
+  min-width: 0;
+}
+.total dt {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+/* Default: a size that suits a VALUE of any kind, including a string like
+ * "ollama/nomic-embed-text (768d)". Long values wrap rather than overflow. */
+.total dd {
+  margin: 2px 0 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  max-width: 32ch;
+}
+
+/* Opt in with `totals totals--metric` when every value is a NUMBER. The bigger
+ * numeral is what makes a count readable at a glance, and it is exactly wrong
+ * for text: applied globally it truncated "claude_memory" to "claude_memo" and
+ * wrapped the embedding backend across four lines. Scale is a claim about the
+ * content, so the markup has to say which kind it is. */
+.totals--metric .total dd {
+  font-size: var(--text-xl);
+  letter-spacing: -0.02em;
+}
+
+/* ── Category breakdown ──────────────────────────────────────────────── */
+/* Restores the horizontal bar chart the Streamlit dashboard had. One hue from
+ * the validated sequential ramp, not the eight arbitrary colours the old chart
+ * used — the category name is already written beside every bar, so colour has
+ * no work to do here beyond marking the bar as data. */
+.catbars {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+.catbar {
+  display: grid;
+  grid-template-columns: minmax(96px, 22%) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.catbar-name {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catbar-track {
+  height: 20px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.catbar-fill {
+  height: 100%;
+  background: var(--seq-5);
+  border-radius: var(--radius-sm);
+  min-width: 2px;
+}
+.catbar-value {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
+}
+
+/* ── Loading / empty / error ─────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 25%,
+    var(--surface-hover) 50%,
+    var(--surface-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius-md);
+}
+.skeleton-headline {
+  height: 72px;
+  margin-bottom: var(--space-4);
+  max-width: 280px;
+}
+.skeleton-row {
+  height: 64px;
+  margin-bottom: var(--space-2);
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+.empty-state h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+}
+.empty-state p {
+  margin: 0;
+  max-width: 60ch;
+}
+.empty-hint {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+.button:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.placeholder {
+  padding: var(--space-6);
+  background: var(--surface-raised);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  max-width: 70ch;
+}
+.placeholder h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+}
+.placeholder p {
+  margin: 0 0 var(--space-2);
+}
+
+/* Severity as a readable word beside the title. It lived in an `sr-only` span,
+   so the only cue a sighted reader had was the row's border hue — and hue
+   alone is exactly what this project does not rely on elsewhere. Uppercase and
+   small: it labels the row without competing with the title for it. */
+.attn-sev {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+}
+.attn-sev-critical {
+  color: var(--status-critical);
+}
+.attn-sev-warning {
+  color: var(--status-warning);
+}
+/* Muted rather than accented: an FYI badge in brand colour reads as a call to
+   action, which is the one thing this severity is not. */
+.attn-sev-info {
+  color: var(--text-muted);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Overview, second pass.
+
+   The first pass stacked four sections down a 1440px column, each announced
+   by an identical small-caps label, each item inside its own bordered box:
+   five cards for five integers, a border round the chart, a border round the
+   worklist row. Boxes inside boxes, and four headings at the same volume — so
+   nothing led, and the page read as a settings screen rather than as an
+   answer to a question.
+
+   What changed: grouping by space and baseline instead of by border, one
+   heading scale with real contrast between its steps, and a two-column band
+   for the charts so the page ends on one screen.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Worklist ─────────────────────────────────────────────────────────
+   The spine of the page. Its heading is the only one that competes with the
+   page title, because it is the only section the reader must not miss. */
+.worklist {
+  margin-bottom: var(--space-7);
+}
+.worklist-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+/* ── What is stored ───────────────────────────────────────────────────
+   The headline figure and the counts that qualify it, on one baseline. The
+   figure used to float alone between the worklist and a row of cards, tied
+   to neither; a number that large has to be attached to the words that say
+   what it counts. */
+.stock {
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border-muted);
+  margin-bottom: var(--space-6);
+}
+.stock-lead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.stock-value {
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+}
+.stock-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Sits on the numeral's baseline, so the pair reads as one phrase. */
+  padding-bottom: 2px;
+}
+.stock-label-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.stock-label-sub {
+  font-size: var(--text-base);
+  color: var(--text-muted);
+}
+
+/* Context figures: a quiet row, no cards. Five bordered boxes for five
+   integers was chrome competing with its own contents — and at 210px minimum
+   they wrapped 4 + 1, which read as an accident. Here they simply flow. */
+.stock-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin: var(--space-5) 0 0;
+}
+.stock-figure dt {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.stock-figure dd {
+  margin: 2px 0 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+/* ── Chart band ───────────────────────────────────────────────────────
+   Two panels abreast at desktop widths. Stacked, these two facts cost more
+   than a screen of scrolling and stretched a flat line across 1100px. */
+.panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+@media (min-width: 1100px) {
+  .panels {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-7);
+  }
+}
+.panel {
+  min-width: 0;
+}
+/* Same step as `.section-label` on every other surface — declared here only to
+   drop the default bottom margin inside a panel. Below `.worklist-title` in
+   weight and colour: these are supporting views, and the reader should be able
+   to see that rather than have to read it. */
+.panel-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-secondary);
+}
+/* The plot carried its own border and background inside an already-quiet
+   band, boxing a box. The gridlines are enough to bound it. */
+.panel .spark-plot {
+  background: transparent;
+  border: 0;
+  padding: var(--space-2) 0;
+}
+.panel .spark-plot svg {
+  height: 160px;
+}
+
+/* ── Recent projects ──────────────────────────────────────────────────
+   What the week was spent on, in the unit people think in: not 330
+   conversations but four projects with names. Rows, not cards — this is a
+   list to scan and click through, and boxing each entry would slow both. */
+.proj-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proj-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+  text-decoration: none;
+  color: inherit;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.proj-row:hover {
+  background: var(--surface-raised);
+}
+.proj-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.proj-tools {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.proj-when {
+  min-width: 9ch;
+  text-align: right;
+  color: var(--text-secondary);
+}
+.proj-go {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  /* The tool list is the first thing worth dropping: the counts and the date
+     answer more of the question. */
+  .proj-tools {
+    display: none;
+  }
+}

@@ -4,7 +4,7 @@ name: Release
 # every version tag (v0.x.y / vX.Y.Z). Lets users run throughline without a
 # git clone:
 #
-#   docker run -p 8501:8501 ghcr.io/mkupermann/throughline:v0.2.0
+#   docker run -p 127.0.0.1:8787:8787 ghcr.io/mkupermann/throughline:v0.2.0
 #
 # Manual dispatch is also supported for ad-hoc rebuilds.
 
@@ -56,7 +56,7 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
           labels: |
             org.opencontainers.image.title=throughline
-            org.opencontainers.image.description=Persistent long-term memory for Claude Code (Streamlit GUI + MCP server).
+            org.opencontainers.image.description=Persistent long-term memory across AI coding tools (web UI + MCP server).
             org.opencontainers.image.licenses=MIT
 
       - name: Build and push

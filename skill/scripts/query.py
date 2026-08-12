@@ -7,7 +7,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 DB = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -83,7 +83,7 @@ def cmd_project(name: str):
 
 
 def cmd_contact(name: str):
-    """Kontakt-Einträge."""
+    """Contact entries."""
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         print(f"\n=== Kontakt: {name} ===")
         cur.execute("""
@@ -148,7 +148,7 @@ Claude Memory — Query CLI
 Usage:
   query.py search <term>      Volltextsuche in Memory + Conversations
   query.py project <name>     Alle Erkenntnisse zu einem Projekt
-  query.py contact <name>     Kontakt-Einträge
+  query.py contact <name>     Contact entries
   query.py decisions          Alle Entscheidungen chronologisch
   query.py stats              DB-Statistiken
 """)

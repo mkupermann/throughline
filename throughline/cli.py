@@ -124,7 +124,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 0
 
     if args.all:
-        results = run_many([a for a in all_adapters() if a.is_present()])
+        present = [a for a in all_adapters() if a.is_present()]
+        if not present:
+            print("No sources present — nothing ingested. "
+                  "Run 'throughline ingest --list-sources' to see expected paths.")
+            return 1
+        results = run_many(present)
         return 0 if all(r.errors == 0 for r in results) else 1
 
     name = args.source
@@ -189,6 +194,62 @@ def cmd_search(args: argparse.Namespace) -> int:
     return _call_script_main("search_semantic", passthrough)
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Answer a question from the stored history, with citations."""
+    from throughline import ask as _ask
+    from throughline.status import _connect
+
+    conn = _connect()
+    if conn is None:
+        print("Cannot reach PostgreSQL. Try `throughline doctor --category postgres`.")
+        return 1
+    try:
+        result = _ask.answer(
+            conn,
+            args.question,
+            # None means "whatever the module's measured default is", so the
+            # CLI cannot drift from it silently.
+            top_k=args.top_k if args.top_k is not None else _ask.DEFAULT_TOP_K,
+            project=args.project,
+            model=args.model,
+        )
+    finally:
+        conn.close()
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return 0 if result.text else 1
+
+    if result.degraded and not result.text:
+        print(result.degraded)
+        # Sources without an answer still beat nothing: the reader can go and
+        # read them, which is what they would have done before this command
+        # existed.
+        if result.sources:
+            print()
+            _print_sources(result.sources)
+        return 1
+
+    print(result.text)
+    if result.cited:
+        print()
+        _print_sources(result.cited)
+    elif result.sources:
+        # An uncited answer is unverifiable, and silence about that would hide
+        # exactly the failure this command must not have.
+        print()
+        print("(no citations — treat this answer as unverified)")
+        _print_sources(result.sources[:3])
+    return 0
+
+
+def _print_sources(sources) -> None:
+    print("Sources:")
+    for s in sources:
+        where = s.project or "—"
+        print(f"  [{s.n}] {s.ref}  ·  {where}")
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     """Run the self-reflecting memory engine (dedup / contradictions / stale / consolidate)."""
     passthrough: list[str] = []
@@ -201,24 +262,27 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     return _call_script_main("reflect_memory", passthrough)
 
 
-def cmd_gui(args: argparse.Namespace) -> int:
-    """Launch the Streamlit GUI (`streamlit run gui/app.py`)."""
-    root = _ensure_scripts_on_path()
-    app = root / "gui" / "app.py"
-    if not app.is_file():
-        print(f"ERROR: GUI entrypoint not found: {app}", file=sys.stderr)
-        return 2
-    extra: list[str] = []
-    if args.port:
-        extra += ["--server.port", str(args.port)]
-    cmd = ["streamlit", "run", str(app), *extra]
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the web UI and its JSON API from one process on one port."""
     try:
-        return subprocess.call(cmd)
-    except FileNotFoundError:
+        from throughline.api.server import serve
+        from throughline.api.settings import RemoteBindRefused
+    except ImportError as exc:
         print(
-            "ERROR: `streamlit` not installed. Install with: " "pip install -e . (core deps include Streamlit).",
+            f"ERROR: the API server could not be imported ({exc}).\n"
+            "Reinstall with: pip install -e .",
             file=sys.stderr,
         )
+        return 2
+    try:
+        return serve(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_level=args.log_level,
+        )
+    except RemoteBindRefused as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
 
@@ -228,7 +292,7 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
-    """Run a one-shot backup of the claude_memory database."""
+    """Run a one-shot backup of the Throughline database."""
     return _run_shell_script("backup.sh", [])
 
 
@@ -330,6 +394,9 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     print(conflicts_format(report))
     if not report.db_reachable:
         return 2
+    if report.error and not report.conflicts:
+        # Every strategy failed — don't let that masquerade as a clean run.
+        return 2
     return 0 if not report.conflicts else 1
 
 
@@ -342,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="throughline",
         description=(
-            "Throughline — persistent long-term memory for Claude Code. "
+            "Throughline — one local memory layer for every AI coding CLI. "
             "Run `throughline <command> --help` for per-command options."
         ),
     )
@@ -465,6 +532,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None, help="Max number of results to return.")
     p.set_defaults(func=cmd_search)
 
+    # ask
+    p = sub.add_parser(
+        "ask",
+        help="Ask a question about your history and get a cited answer.",
+        description=(
+            "Retrieves the nearest records with pgvector, then has a model "
+            "answer from them and cite what it used. Needs embeddings "
+            "(`throughline embed`) and an answering model — Ollama, any "
+            "OpenAI-compatible server, or the `claude` CLI, whichever is "
+            "found first. `throughline doctor` reports which one that is."
+        ),
+    )
+    p.add_argument("question", help="A question, in any language.")
+    p.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="How many records to retrieve (default: throughline.ask.DEFAULT_TOP_K).",
+    )
+    p.add_argument("--project", default=None, help="Restrict retrieval to one project.")
+    p.add_argument(
+        "--model",
+        default=None,
+        help="Model for the answer. Default: whatever the configured backend resolves to.",
+    )
+    p.add_argument("--json", action="store_true", help="Emit the answer and sources as JSON.")
+    p.set_defaults(func=cmd_ask)
+
     # reflect
     p = sub.add_parser(
         "reflect",
@@ -480,13 +575,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None, help="Cap on pair-comparisons per mode.")
     p.set_defaults(func=cmd_reflect)
 
-    # gui
+    # serve
     p = sub.add_parser(
-        "gui",
-        help="Start the Streamlit GUI (requires `streamlit` on PATH).",
+        "serve",
+        help="Serve the web UI and JSON API on one port (default: 127.0.0.1:8790).",
     )
-    p.add_argument("--port", type=int, default=None, help="Port for the Streamlit server (default: 8501).")
-    p.set_defaults(func=cmd_gui)
+    p.add_argument(
+        "--host",
+        default=None,
+        help=(
+            "Bind address (default 127.0.0.1). Non-loopback is refused unless "
+            "THROUGHLINE_ALLOW_REMOTE=1 — the API has no authentication."
+        ),
+    )
+    p.add_argument("--port", type=int, default=None, help="Port (default: 8790).")
+    p.add_argument("--reload", action="store_true", help="Auto-reload on source changes (development).")
+    p.add_argument(
+        "--log-level",
+        default="info",
+        choices=["critical", "error", "warning", "info", "debug", "trace"],
+        help="uvicorn log level.",
+    )
+    p.set_defaults(func=cmd_serve)
 
     # install-hooks
     p = sub.add_parser(
@@ -498,7 +608,7 @@ def build_parser() -> argparse.ArgumentParser:
     # backup
     p = sub.add_parser(
         "backup",
-        help="Run a one-shot pg_dump backup of the claude_memory DB.",
+        help="Run a one-shot pg_dump backup of the Throughline database.",
     )
     p.set_defaults(func=cmd_backup)
 

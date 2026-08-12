@@ -1,0 +1,95 @@
+/* Project page: one project's sessions, sortable and searchable.
+ *
+ * Sessions, not messages. This project holds 7,461 messages across 28
+ * sessions and one session alone holds 5,560 — "the whole history" as a flat
+ * message list is a page that never finishes. A session row is the unit a
+ * person remembers: when it was, how long it ran, what it was about. */
+
+.proj-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+.proj-search {
+  flex: 1;
+  min-width: 240px;
+  margin-bottom: 0;
+}
+
+.proj-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proj-session {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+  text-decoration: none;
+  color: inherit;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.proj-session:hover {
+  background: var(--surface-raised);
+}
+.proj-session-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.proj-session-title {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-untitled {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.proj-session-meta {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.proj-branch {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+/* The message count is the one number worth aligning down the page — it is
+   how a reader spots the long session among the short ones. */
+.proj-session-count {
+  flex-shrink: 0;
+  min-width: 7ch;
+  text-align: right;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.proj-session-unit {
+  margin-left: 4px;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* What the list withholds, said out loud rather than left to be discovered. */
+.proj-hidden {
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-muted);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 72ch;
+}

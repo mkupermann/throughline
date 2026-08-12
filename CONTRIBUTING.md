@@ -32,7 +32,7 @@ Use a short prefix and a hyphenated description.
 | `fix/` | Bug fix | `fix/ingest-duplicate-sessions` |
 | `docs/` | Documentation only | `docs/installation-linux` |
 | `refactor/` | Internal cleanup, no behavior change | `refactor/split-app-py` |
-| `chore/` | Tooling, CI, dependencies | `chore/bump-streamlit` |
+| `chore/` | Tooling, CI, dependencies | `chore/bump-throughline serve` |
 | `test/` | Test additions or repairs | `test/reflect-memory-dedup` |
 
 Branch off `main`. Keep branches rebased, not merged.
@@ -87,8 +87,8 @@ the enclosing message had mixed content. We now inspect all blocks.
 Run locally:
 
 ```bash
-black scripts/ gui/ skill/
-ruff check scripts/ gui/ skill/
+black scripts/ web/ skill/
+ruff check scripts/ web/ skill/
 ```
 
 ### SQL
@@ -142,7 +142,7 @@ pytest tests/integration/ -v -m integration
 
 ```bash
 # Python syntax
-python3 -m py_compile scripts/*.py gui/*.py skill/scripts/*.py
+python3 -m py_compile scripts/*.py web/*.py skill/scripts/*.py
 
 # SQL syntax (requires psql)
 psql -d claude_memory -f sql/schema.sql --set ON_ERROR_STOP=1 --single-transaction --dry-run

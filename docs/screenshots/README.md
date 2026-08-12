@@ -18,18 +18,18 @@ Screenshots of the GUI are stored here.
 
 ## How to take screenshots
 
-Take screenshots at **1440 x 900** on a dark macOS terminal with the Streamlit
+Take screenshots at **1440 x 900** with the web UI
 GUI running locally:
 
 ```bash
-streamlit run gui/app.py
-# Open http://localhost:8501 in Chrome or Safari
+throughline serve
+# Open http://127.0.0.1:8787 in Chrome or Safari
 # Use macOS Screenshot (Cmd+Shift+4) or a tool like Shottr
 ```
 
 Preferred settings:
 - Dark mode (System Preference → Appearance → Dark)
-- Streamlit dark theme (already set in `gui/.streamlit/config.toml`)
+- Dark theme (the UI follows your system setting; force it from the ⌘K palette)
 - Browser zoom at 100%
 - No browser chrome visible (use full-screen or crop tightly)
 

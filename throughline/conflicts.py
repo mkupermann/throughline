@@ -30,7 +30,7 @@ This module finds three classes of cross-tool conflict:
    back. Not technically a contradiction, but worth seeing.
 
 All three return ``Conflict`` records with a stable schema so the CLI
-and the (future) Streamlit page can consume them.
+and the Curate surface can consume them.
 
 Public entry point: ``find_conflicts(conn=None, *, project=None,
 since_days=None, min_similarity=0.85) -> ConflictReport``.
@@ -58,7 +58,7 @@ class ConflictChunk:
     """One side of a conflict — a single memory chunk with its tool provenance."""
 
     chunk_id: int
-    tool: str                   # the conversations.entrypoint value (claude_code, codex, ...)
+    tool: str                   # the conversations.source_tool value (claude_code, codex, ...)
     project: str | None
     category: str
     content: str                # truncated to ~500 chars by the SQL
@@ -157,6 +157,18 @@ def _has_contradiction_marker(text: str) -> bool:
     return bool(_CONTRADICTION_RE.search(text or ""))
 
 
+# The same marker set as a POSIX regex for Postgres' case-insensitive `~*`.
+# Derived from _CONTRADICTION_MARKERS so the SQL predicate and the Python
+# predicate cannot drift apart — `test_sql_and_python_markers_agree` asserts
+# they classify identically.
+#
+# Why it exists: _semantic_conflicts used to apply the marker test in Python,
+# *after* the database had already materialised every high-similarity pair.
+# Pushing it into the join collapses an all-pairs self-join (|group|^2 vector
+# distance computations) down to |marker-bearing chunks| x |group|.
+_CONTRADICTION_SQL_RE = r"\m(" + "|".join(_CONTRADICTION_MARKERS) + r")\M"
+
+
 # ---------------------------------------------------------------------------
 # DB connect (mirrors throughline.status._connect so config stays consistent)
 # ---------------------------------------------------------------------------
@@ -170,7 +182,7 @@ def _connect():
     cfg = {
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+        "dbname": os.environ.get("PGDATABASE", "throughline"),
         "user": os.environ.get("PGUSER", os.environ.get("USER") or "postgres"),
         "connect_timeout": int(os.environ.get("PGCONNECT_TIMEOUT", "3")),
     }
@@ -178,7 +190,11 @@ def _connect():
     if pw:
         cfg["password"] = pw
     try:
-        return psycopg2.connect(**cfg)
+        conn = psycopg2.connect(**cfg)
+        # Autocommit: a swallowed query error must not leave the transaction
+        # aborted and poison every subsequent (read-only) query.
+        conn.autocommit = True
+        return conn
     except Exception:
         return None
 
@@ -189,13 +205,23 @@ def _connect():
 
 
 # The shared SELECT used to materialise a chunk side of a conflict. It joins
-# memory_chunks → messages → conversations to recover the originating tool.
+# memory_chunks straight to conversations to recover the originating tool:
+# memory_chunks.source_id IS conversations.id when source_type='conversation'
+# (see scripts/extract_memory.py, which inserts source_type='conversation',
+# source_id=conv_id). There is no messages table in this path — source_id is
+# a conversation id, not a message id. The join must be LEFT + guarded by
+# source_type='conversation', mirroring queries/find.py's
+# _provider_clause_via_conversation and queries/timeline.py's "memory"
+# source: an unguarded join risks a silent wrong-tool match whenever a
+# memory_chunk's source_id happens to also be a valid id in some other
+# table (it does not need to fail — a stray match is worse, because it
+# looks like a normal row and attributes the chunk to the wrong tool).
 # We use COALESCE(LEFT(content, 500), '') to keep payloads small for the
 # CLI / JSON output; the full content is one query away if a consumer
 # wants it.
 _CHUNK_FIELDS = """
     mc.id                                AS chunk_id,
-    COALESCE(c.entrypoint, 'unknown')    AS tool,
+    COALESCE(c.source_tool, 'unknown')   AS tool,
     mc.project_name                      AS project,
     mc.category::text                    AS category,
     LEFT(mc.content, 500)                AS content,
@@ -222,17 +248,17 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
             ab.created_at  AS b_created_at,
             ab.status      AS b_status
         FROM public.memory_chunks a
-        JOIN public.messages       am ON am.id = a.source_id
-        JOIN public.conversations  ca ON ca.id = am.conversation_id
+        LEFT JOIN public.conversations ca
+            ON ca.id = a.source_id AND a.source_type = 'conversation'
         JOIN LATERAL (
             SELECT {_CHUNK_FIELDS.replace('mc.', 'b.').replace('c.', 'cb.')}
             FROM public.memory_chunks b
-            JOIN public.messages       bm ON bm.id = b.source_id
-            JOIN public.conversations  cb ON cb.id = bm.conversation_id
+            LEFT JOIN public.conversations cb
+                ON cb.id = b.source_id AND b.source_type = 'conversation'
             WHERE b.id = a.superseded_by
         ) ab ON true
         WHERE a.superseded_by IS NOT NULL
-          AND ab.tool <> COALESCE(ca.entrypoint, 'unknown')
+          AND ab.tool <> COALESCE(ca.source_tool, 'unknown')
           {"AND a.project_name = %(project)s" if project else ""}
         ORDER BY a.superseded_at DESC NULLS LAST, a.id DESC
         LIMIT 500
@@ -296,11 +322,11 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
                     mc.content AS full_content,
                     mc.created_at,
                     mc.status,
-                    COALESCE(c.entrypoint, 'unknown') AS tool,
+                    COALESCE(c.source_tool, 'unknown') AS tool,
                     e.{vec_col} AS vec
                 FROM public.memory_chunks mc
-                JOIN public.messages       m  ON m.id = mc.source_id
-                JOIN public.conversations  c  ON c.id = m.conversation_id
+                LEFT JOIN public.conversations c
+                    ON c.id = mc.source_id AND mc.source_type = 'conversation'
                 JOIN public.embeddings     e  ON e.source_type = 'memory_chunk'
                                               AND e.source_id   = mc.id
                 WHERE mc.status = 'active'
@@ -314,18 +340,24 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
                 b.chunk_id, b.tool, b.project_name, b.category, b.content,
                 b.created_at, b.status, b.full_content,
                 1 - (a.vec <=> b.vec) AS cosine_sim
-            FROM chunk_vec a
-            JOIN chunk_vec b
+            FROM chunk_vec b
+            JOIN chunk_vec a
               ON a.project_name = b.project_name
              AND a.category     = b.category
              AND a.tool        <> b.tool
              AND a.chunk_id     < b.chunk_id      -- pair each unordered pair once
              AND a.created_at  <= b.created_at    -- a is the older side
-            WHERE 1 - (a.vec <=> b.vec) >= %(min_sim)s
+             AND 1 - (a.vec <=> b.vec) >= %(min_sim)s
+            -- The newer side must carry a contradiction marker. This used to
+            -- run in Python over every returned pair; as a join predicate it
+            -- shrinks the driving side to the few chunks that can possibly
+            -- produce a conflict, instead of computing a vector distance for
+            -- every pair in the project+category group.
+            WHERE b.full_content ~* %(marker_re)s
             ORDER BY cosine_sim DESC
             LIMIT 500
         """
-        params = {"min_sim": float(min_similarity)}
+        params = {"min_sim": float(min_similarity), "marker_re": _CONTRADICTION_SQL_RE}
         if project:
             params["project"] = project
         try:
@@ -380,10 +412,10 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
                 mc.created_at,
                 mc.status,
                 mc.access_count,
-                COALESCE(c.entrypoint, 'unknown') AS tool
+                COALESCE(c.source_tool, 'unknown') AS tool
             FROM public.memory_chunks mc
-            JOIN public.messages       m  ON m.id = mc.source_id
-            JOIN public.conversations  c  ON c.id = m.conversation_id
+            LEFT JOIN public.conversations c
+                ON c.id = mc.source_id AND mc.source_type = 'conversation'
             WHERE mc.status = 'active'
               {"AND mc.project_name = %(project)s" if project else ""}
         )
@@ -439,6 +471,21 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
 def _first_marker(text: str) -> str:
     m = _CONTRADICTION_RE.search(text or "")
     return m.group(0) if m else "?"
+
+
+def tools_in_use(conn) -> list[str]:
+    """Distinct providers that have contributed conversations.
+
+    Grouping moved from ``entrypoint`` to ``source_tool`` because the former
+    holds `cli` and `sdk-cli` for one and the same tool. Conflict counts will
+    move — probably down — and that is a correction, not a regression.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT source_tool FROM conversations "
+            "WHERE source_tool IS NOT NULL ORDER BY 1"
+        )
+        return [r[0] for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +593,11 @@ def format_human(report: ConflictReport) -> str:
         return f"Cannot reach the memory DB: {report.error or 'unknown error'}"
 
     if not report.conflicts:
+        if report.error:
+            return (
+                "Conflict scan incomplete — no results, but errors occurred:\n"
+                f"  {report.error}"
+            )
         return (
             "No cross-tool conflicts found"
             + (f" for project '{report.params.get('project')}'." if report.params.get("project") else ".")

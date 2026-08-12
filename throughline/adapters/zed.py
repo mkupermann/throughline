@@ -110,7 +110,7 @@ def _get_project_path(session_data: dict[str, Any]) -> str | None:
     return None
 
 
-def _parse_zed_session_file(file_path: Path) -> NormalisedConversation | None:
+def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConversation | None:
     """Parse a single Zed session JSON file."""
     if not file_path.exists():
         return None
@@ -182,6 +182,7 @@ def _parse_zed_session_file(file_path: Path) -> NormalisedConversation | None:
         project_path=project_path,
         model=model,
         entrypoint="zed",
+        source_tool=source_tool,
         started_at=start_time,
         ended_at=end_time,
         messages=normalised_messages,
@@ -223,5 +224,5 @@ class ZedAdapter(Adapter):
         """Parse a Zed session JSON file."""
         if not path.is_file():
             return None
-        
-        return _parse_zed_session_file(path)
+
+        return _parse_zed_session_file(path, source_tool=self.name)

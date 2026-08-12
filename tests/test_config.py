@@ -24,7 +24,7 @@ class TestDbConfig:
         monkeypatch.setenv("USER", "testuser")
         cfg = config.get_db_config()
         assert cfg == {
-            "dbname": "claude_memory",
+            "dbname": "throughline",
             "user": "testuser",
             "host": "localhost",
             "port": 5432,

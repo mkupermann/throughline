@@ -1,10 +1,42 @@
-# Throughline - Universal AI CLI Memory Layer
-# Docker Compose configuration for PostgreSQL + Throughline GUI
-# Supports ALL major AI CLIs: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
+# Throughline — universal AI CLI memory layer
+# PostgreSQL (pgvector) + web UI/API + optional MCP server / Ollama embeddings
+# Supported sources: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
+
+# Source mounts: every adapter resolves its data directory relative to $HOME,
+# which is /root inside the containers. Host tool directories are therefore
+# mounted read-only at the same relative location under /root. A missing host
+# directory is harmless — the adapter reports the source as "not present".
+
+x-source-mounts: &source-mounts
+  # Claude Code (Anthropic)
+  - ~/.claude:/root/.claude:ro
+  # Cursor (Anysphere)
+  - ~/.cursor:/root/.cursor:ro
+  # Zed (Zed Industries)
+  - ~/.zed:/root/.zed:ro
+  # Codex (OpenAI)
+  - ~/.codex:/root/.codex:ro
+  # Hermes (Community)
+  - ~/.hermes:/root/.hermes:ro
+  # Continue (Continue.dev)
+  - ~/.continue:/root/.continue:ro
+  # Windsurf (Codeium/Cognition)
+  - ~/.windsurf:/root/.windsurf:ro
+  # Vibe (Mistral AI)
+  - ~/.vibe:/root/.vibe:ro
+  # Cline (VS Code extension — macOS path; on Linux use ~/.config/Code/...)
+  - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/root/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
+
+x-pg-env: &pg-env
+  PGHOST: postgres
+  PGPORT: 5432
+  PGDATABASE: throughline
+  PGUSER: throughline
+  PGPASSWORD: throughline_dev_password
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL with pgvector (Core Database - PRESERVED)
+  # PostgreSQL with pgvector (core database)
   # ---------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
@@ -15,11 +47,13 @@ services:
       POSTGRES_USER: throughline
       POSTGRES_PASSWORD: throughline_dev_password
     ports:
-      - "5432:5432"
+      # Host port defaults to 5433 so a native PostgreSQL on 5432 is never
+      # shadowed. Containers talk to postgres:5432 internally regardless.
+      - "${THROUGHLINE_DB_PORT:-5433}:5432"
     volumes:
-      # Persistent database storage (KEEP THIS - contains your data)
+      # Persistent database storage — contains all memory data. Do not delete.
       - postgres_data:/var/lib/postgresql/data
-      # Initialize schema on first run
+      # Schema is applied automatically on first start of an empty volume
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
@@ -29,99 +63,62 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Throughline GUI (Streamlit)
+  # Throughline web UI + JSON API — http://127.0.0.1:8788
+  #
+  # Published on 8788 rather than 8787. 8787 is a popular default and is easily
+  # held by another local service — a service-managed one (launchd, systemd) will
+  # even reclaim it the instant a container releases it, so `up` fails with
+  # "address already in use" on every attempt. The container still listens on
+  # 8787 internally, which is why the healthcheck below is unchanged. Change only
+  # the left-hand side of the mapping if 8788 is taken on your machine too.
   # ---------------------------------------------------------------------------
-  gui:
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: throughline-gui
+    container_name: throughline-web
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      # PostgreSQL connection
-      PGHOST: postgres
-      PGPORT: 5432
-      PGDATABASE: throughline
-      PGUSER: throughline
-      PGPASSWORD: throughline_dev_password
-      # Optional: Configure default adapters
-      THROUGHLINE_DEFAULT_SOURCES: "claude_code,cursor,zed,codex,hermes,continue,cline,windsurf,vibe"
+      <<: *pg-env
     ports:
-      - "8501:8501"
-    volumes:
-      # Mount host directories for AI CLI data (REQUIRED for ingestion)
-      # Claude Code
-      - ~/.claude:/claude-host:ro
-      # Cursor
-      - ~/.cursor:/cursor-host:ro
-      # Zed
-      - ~/.zed:/zed-host:ro
-      # Codex
-      - ~/.codex:/codex-host:ro
-      # Hermes
-      - ~/.hermes:/hermes-host:ro
-      # Continue
-      - ~/.continue:/continue-host:ro
-      # Cline
-      - ~/.cline:/cline-host:ro
-      # Windsurf
-      - ~/.windsurf:/windsurf-host:ro
-      # Vibe (Mistral AI)
-      - ~/.vibe:/vibe-host:ro
-      # Local application code (for development)
-      - .:/app
-    command: ["streamlit", "run", "gui/app.py", 
-              "--server.headless=true", 
-              "--server.port=8501", 
-              "--server.address=0.0.0.0"]
+      # Published on loopback only: the API has no authentication, so the
+      # container must not be reachable from the rest of the network.
+      - "127.0.0.1:8788:8787"
+    volumes: *source-mounts
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # MCP Server (Optional - for AI CLI integration)
+  # MCP server (optional, profile "mcp")
+  # The server speaks MCP over stdio; AI CLI clients normally launch it
+  # themselves. This service exists for containerized clients:
+  #   docker compose run -i --rm mcp
   # ---------------------------------------------------------------------------
   mcp:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: throughline-mcp
-    restart: unless-stopped
+    stdin_open: true
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      PGHOST: postgres
-      PGPORT: 5432
-      PGDATABASE: throughline
-      PGUSER: throughline
-      PGPASSWORD: throughline_dev_password
-    ports:
-      - "8000:8000"
-    volumes:
-      # Mount same host directories as GUI
-      - ~/.claude:/claude-host:ro
-      - ~/.cursor:/cursor-host:ro
-      - ~/.zed:/zed-host:ro
-      - ~/.codex:/codex-host:ro
-      - ~/.hermes:/hermes-host:ro
-      - ~/.continue:/continue-host:ro
-      - ~/.cline:/cline-host:ro
-      - ~/.windsurf:/windsurf-host:ro
-      - ~/.vibe:/vibe-host:ro
-      - .:/app
-    command: ["python", "-m", "throughline.mcp"]
+      <<: *pg-env
+    volumes: *source-mounts
+    command: ["python", "-m", "memory_mcp.server"]
     profiles:
       - mcp
 
   # ---------------------------------------------------------------------------
-  # Ollama (Optional - for local embeddings)
+  # Ollama (optional, profile "embeddings") — local embedding generation
   # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
@@ -134,15 +131,9 @@ services:
     volumes:
       - ollama_data:/root/.ollama
 
-# ---------------------------------------------------------------------------
-# Volumes (Persistent Storage)
-# ---------------------------------------------------------------------------
 volumes:
-  # Database storage - THIS CONTAINS YOUR MEMORY DATA
-  # Do NOT delete this volume unless you want to lose all your data
+  # Database storage — this volume contains all ingested memory data.
   postgres_data:
     name: throughline_postgres_data
-  
-  # Ollama model storage
   ollama_data:
     name: throughline_ollama_data

@@ -8,7 +8,9 @@ use_venv()
 
 
 import os
-import subprocess
+
+from throughline import llm as _llm
+from throughline.self_referential import agent_call_cwd
 import sys
 import time
 from typing import Any
@@ -16,7 +18,7 @@ from typing import Any
 import psycopg2
 
 DB: dict[str, Any] = {
-    "dbname": os.environ.get("PGDATABASE", "claude_memory"),
+    "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -38,31 +40,18 @@ def _connect() -> "psycopg2.extensions.connection":
         raise SystemExit(2) from e
 
 
-def _resolve_claude_bin() -> str:
-    env = os.environ.get("CLAUDE_BIN")
-    if env:
-        return env
-    from shutil import which
-    found = which("claude")
-    return found or "claude"
-
-
-def _require_claude_bin() -> str:
-    """Resolve the Claude CLI binary or emit a clear error and exit."""
-    bin_path = _resolve_claude_bin()
-    from shutil import which
-    if which(bin_path) is None and not os.path.isfile(bin_path):
-        sys.stderr.write(
-            "ERROR: Claude CLI not found.\n"
-            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
-            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
-        )
+def _require_model() -> str:
+    """Confirm a model is reachable. `throughline.llm` composes the message."""
+    info = _llm.backend_info()
+    if not info.available:
+        sys.stderr.write(f"ERROR: no model available for titling.\n  {info.detail}\n")
         raise SystemExit(2)
-    return bin_path
+    return str(info)
 
 
-CLAUDE_BIN = _resolve_claude_bin()
-MODEL = "sonnet"
+#: Empty means "whatever the probe found" — the machine's configured model is
+#: a property of the machine, not of this script.
+MODEL = os.environ.get("THROUGHLINE_TITLE_MODEL", "").strip() or None
 MAX_PER_RUN = 50
 MAX_PREVIEW_CHARS = 4000
 SLEEP = 1.5
@@ -106,26 +95,32 @@ def build_preview(messages: list[tuple[str, str | None]]) -> str:
     return "\n".join(parts)[:MAX_PREVIEW_CHARS]
 
 
-def call_claude(prompt: str) -> str:
+def call_model(prompt: str) -> str:
+    """Ask whichever backend the probe found for one title. Never raises."""
     try:
-        r = subprocess.run(
-            [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
-            capture_output=True, text=True, timeout=TIMEOUT
+        text, err = _llm.complete(
+            prompt,
+            timeout=TIMEOUT,
+            model=MODEL,
+            # Run from a directory of our own: Claude Code names the project
+            # folder after the process CWD, so inheriting the repo's would file
+            # this call inside the user's real project history, and the next
+            # ingest would read it back as their work.
+            cwd=str(agent_call_cwd()),
         )
-        if r.returncode != 0:
+        if text is None:
+            print(f"  title call failed: {err}")
             return ""
-        # Bereinige Output
-        title = r.stdout.strip()
-        # Anführungszeichen entfernen
+        # Strip the wrapping a chat model adds around a one-line answer.
+        title = text.strip()
         title = title.strip('"').strip("'").strip("„").strip("«").strip("»").rstrip(".")
-        # Erste Zeile nehmen falls mehrere
+        # First line only, in case the model explained itself.
         title = title.split("\n")[0].strip()
-        # Max 80 Zeichen
         if len(title) > 80:
             title = title[:77] + "..."
         return title
     except Exception as e:
-        print(f"  Fehler: {e}")
+        print(f"  error: {e}")
         return ""
 
 
@@ -134,7 +129,7 @@ def main() -> None:
     print("Claude Memory — Titel-Generierung")
     print("=" * 60)
 
-    _require_claude_bin()
+    print(f"Model: {_require_model()}")
     conn = _connect()
     cursor = conn.cursor()
 
@@ -172,7 +167,7 @@ def main() -> None:
             continue
 
         prompt = PROMPT.replace("{TRANSCRIPT}", preview)
-        title = call_claude(prompt)
+        title = call_model(prompt)
 
         if not title:
             errors += 1
@@ -195,3 +190,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+#: Kept as an alias: the old name appears in other people's scripts.
+call_claude = call_model
