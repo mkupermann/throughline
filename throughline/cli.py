@@ -163,8 +163,21 @@ def cmd_extract_memory(args: argparse.Namespace) -> int:
 
 
 def cmd_generate_titles(args: argparse.Namespace) -> int:
-    """Generate concise titles for conversations that are missing one."""
-    return _call_script_main("generate_titles")
+    """Generate clear descriptions for conversations (start / work done / outcome)."""
+    passthrough: list[str] = []
+    if args.backend:
+        passthrough += ["--backend", args.backend]
+    if args.ollama_model:
+        passthrough += ["--ollama-model", args.ollama_model]
+    if args.force:
+        passthrough += ["--force"]
+    for conv_id in args.conversation or []:
+        passthrough += ["--conversation", str(conv_id)]
+    if args.project:
+        passthrough += ["--project", args.project]
+    if args.limit is not None:
+        passthrough += ["--limit", str(args.limit)]
+    return _call_script_main("generate_titles", passthrough)
 
 
 def cmd_embed(args: argparse.Namespace) -> int:
@@ -424,8 +437,18 @@ def build_parser() -> argparse.ArgumentParser:
     # generate-titles
     p = sub.add_parser(
         "generate-titles",
-        help="Generate concise titles for conversations missing a summary.",
+        help="Generate clear descriptions (start / work done / outcome) for conversations.",
     )
+    p.add_argument("--backend", choices=["auto", "ollama", "claude"], default="auto",
+                   help="Generation backend. auto = local Ollama first, Claude as fallback.")
+    p.add_argument("--ollama-model", default=None,
+                   help="Force a specific Ollama chat model (otherwise auto-detected).")
+    p.add_argument("--force", action="store_true",
+                   help="Also overwrite conversations that already have a description.")
+    p.add_argument("--conversation", type=int, action="append",
+                   help="Limit to these conversation id(s). Repeatable.")
+    p.add_argument("--project", help="Limit to one project (project_name).")
+    p.add_argument("--limit", type=int, default=None, help="Max conversations per run.")
     p.set_defaults(func=cmd_generate_titles)
 
     # embed
