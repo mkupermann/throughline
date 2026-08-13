@@ -136,3 +136,74 @@ class TestHermesJSONAdapter:
             HermesAdapter, "_hermes_root", property(lambda self: fake_root)
         )
         assert a.is_present() is True
+
+
+class TestTimestampsAreRealTimes:
+    """A whole transcript on one instant is not a chronology.
+
+    Reported from the UI: every message in every Hermes conversation showed
+    "Aug 10, 2026, 12:18 PM" — the moment ingestion ran. Two defects stacked.
+    `session_start` arrives as a unix number, `_parse_ts` only handled ISO
+    strings and swallowed the TypeError into `datetime.now()`, so the session
+    was dated to its import; then every message was stamped with that session
+    start rather than its own time.
+    """
+
+    def test_a_unix_session_start_is_not_read_as_now(self, tmp_path):
+        import datetime as dt
+
+        p = tmp_path / "session_20260511_160653_6f89a7.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "session_start": 1_700_000_000.0,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        conv = HermesAdapter().parse(p)
+        assert conv is not None
+        assert conv.started_at.year == 2023, (
+            f"expected the session's real date, got {conv.started_at}"
+        )
+        age = dt.datetime.now(dt.timezone.utc) - conv.started_at
+        assert age > dt.timedelta(days=1), "session was dated to the import"
+
+    def test_each_message_keeps_its_own_time(self, tmp_path):
+        p = tmp_path / "session_20260511_160654_6f89a8.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "session_id": "s2",
+                    "session_start": 1_700_000_000.0,
+                    "messages": [
+                        {"role": "user", "content": "one", "timestamp": 1_700_000_010},
+                        {"role": "assistant", "content": "two", "timestamp": 1_700_000_075},
+                        {"role": "user", "content": "three", "timestamp": 1_700_000_300},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        conv = HermesAdapter().parse(p)
+        times = [m.created_at for m in conv.messages]
+        assert len(set(times)) == 3, f"messages collapsed onto one instant: {times}"
+        assert times == sorted(times)
+
+    def test_messages_without_a_time_fall_back_to_the_session_start(self, tmp_path):
+        """Not every export carries per-message times; that must still import."""
+        p = tmp_path / "session_20260511_160655_6f89a9.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "session_id": "s3",
+                    "session_start": 1_700_000_000.0,
+                    "messages": [{"role": "user", "content": "no time here"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        conv = HermesAdapter().parse(p)
+        assert conv.messages[0].created_at == conv.started_at

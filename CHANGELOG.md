@@ -67,6 +67,22 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Fixed
 
+- **Every Hermes message carried the same timestamp — the moment of import.**
+  Two defects stacked. `session_start` arrives from Hermes JSON exports as a
+  unix number; `_parse_ts` only handled ISO strings, and `fromisoformat(float)`
+  raises a TypeError that the except clause swallowed into
+  `datetime.now()` — so a session exported in May was dated to the day it
+  happened to be ingested. The JSON path then stamped every message with that
+  session start instead of its own `timestamp`, which the SQLite path had
+  always read correctly. A whole transcript collapsed onto one instant, with no
+  chronology and a timeline that placed the conversation on the wrong day.
+  Both paths now read the message's own time and accept either timestamp shape.
+
+  Note for existing installs: conversations already stored this way cannot be
+  repaired, because the fix recovers the times from the source files and Hermes
+  has since rotated them away. Re-ingesting only helps for sessions still on
+  disk.
+
 - **"Last run" showed when the newest session started, not when the tool last
   imported.** The provider coverage used `max(started_at)`, so working inside
   one long-lived session for several days made every surface report a date

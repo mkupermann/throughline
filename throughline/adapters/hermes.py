@@ -52,16 +52,60 @@ _MSG_META_KEYS = (
 )
 
 
-def _parse_ts(s: str | None) -> datetime:
-    if not s:
+def _parse_ts(s: str | float | int | None) -> datetime:
+    """A timestamp from either shape Hermes writes, or now() as a last resort.
+
+    Hermes emits `session_start` as a unix number in its JSON exports and as an
+    ISO string elsewhere. This only handled the string: `fromisoformat(float)`
+    raises TypeError, which the except swallowed, and the function returned the
+    *current time* — so a session exported months ago was dated to the moment it
+    happened to be imported. Every message then inherited that, because the
+    JSON path stamped them all with the session start, and a whole transcript
+    collapsed onto one instant.
+
+    Falling back to now() at all is a compromise worth keeping — a session with
+    no usable date is still worth storing — but it must be the last branch, not
+    the one a well-formed number lands in.
+    """
+    if s is None or s == "":
         return datetime.now(timezone.utc)
+    if isinstance(s, (int, float)) and not isinstance(s, bool):
+        return _from_unix(s) or datetime.now(timezone.utc)
     try:
-        dt = datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(str(s))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
     except (ValueError, TypeError):
-        return datetime.now(timezone.utc)
+        # A bare number arriving as a string ("1700000000") is still a date.
+        try:
+            return _from_unix(float(s)) or datetime.now(timezone.utc)
+        except (TypeError, ValueError):
+            return datetime.now(timezone.utc)
+
+
+#: Keys Hermes has used for a message's own timestamp, in the order tried.
+_MSG_TIME_KEYS = ("timestamp", "created_at", "time", "ts")
+
+
+def _msg_time(msg: dict) -> datetime | None:
+    """A message's own timestamp, whichever key and shape it arrived in."""
+    for key in _MSG_TIME_KEYS:
+        raw = msg.get(key)
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            got = _from_unix(raw)
+        else:
+            try:
+                got = datetime.fromisoformat(str(raw))
+                if got.tzinfo is None:
+                    got = got.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                got = None
+        if got is not None:
+            return got
+    return None
 
 
 def _normalise_content(content: Any) -> tuple[str, Any]:
@@ -314,7 +358,13 @@ class HermesAdapter(Adapter):
                     role=role,
                     content=text,
                     content_blocks=blocks,
-                    created_at=started,
+                    # The message's own time when it has one. This read
+                    # `created_at=started` unconditionally, so every message in
+                    # a session shared a single timestamp — the transcript had
+                    # no chronology and the timeline placed the whole
+                    # conversation on one instant. The SQLite path opposite has
+                    # always done this correctly; only the JSON export did not.
+                    created_at=_msg_time(msg) or started,
                     model=model if role == "assistant" else None,
                     uuid=str(uuid.uuid5(_NS, f"hermes:{raw_session_id}:msg:{idx}")),
                     metadata=meta,
