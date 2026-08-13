@@ -210,7 +210,9 @@ absent rather than as silently contributing nothing.
 
 Everything else — database connections, idempotency via the ingestion log, project bucketing, error handling — lives in the shared writer, so adapters stay small and individually testable. Re-ingestion is idempotent: unchanged files are skipped, changed files are refreshed without duplicates.
 
-Every adapter has its own test module built on a sample of that tool's real on-disk format, and shared suites assert what must hold for all of them: each writes its own `source_tool`, and each is a registered provider. A separate end-to-end test drives ingestion into a live PostgreSQL and checks that re-running changes nothing while an edited file refreshes rather than duplicates — that one currently covers four of the nine sources, not all of them. `tests/test_adapter_*.py` and `tests/integration/test_adapter_e2e.py` are the files to read first if you doubt the nine-tool claim.
+Every adapter has its own test module built on a sample of that tool's real on-disk format, and shared suites assert what must hold for all of them: each writes its own `source_tool`, and each is a registered provider. An end-to-end test then drops a synthetic session for **all nine** into a live PostgreSQL, runs the real writer, and asserts per tool that rows landed, that re-running changes nothing, and that an edited file refreshes rather than duplicates. `tests/test_adapter_*.py` and `tests/integration/test_adapter_e2e.py` are the files to read first if you doubt the nine-tool claim.
+
+That test earned its keep the day it was written: extending it from three tools to nine found that Cursor, Zed and Vibe sessions could not be stored at all. Their message ids are not UUIDs, the column is, and PostgreSQL rejected every insert — so the writer discarded the whole session rather than importing it imperfectly. Parsing was fine, which is why unit tests had passed for months.
 
 ### Storage and retrieval
 
@@ -285,7 +287,7 @@ Contributions are welcome — new adapters especially. Read [CONTRIBUTING.md](CO
 
 Bugs and feature requests go to [GitHub Issues](https://github.com/mkupermann/throughline/issues); questions and ideas to [Discussions](https://github.com/mkupermann/throughline/discussions). Security reports have their own channel — see [SECURITY.md](SECURITY.md). Current version and what changed: [CHANGELOG.md](CHANGELOG.md).
 
-**Status: beta.** The schema is migration-tracked and `pytest` runs 746 tests, with a dedicated module for each of the nine adapters — but this has been run in earnest on one person's machine. Expect rough edges on setups unlike that one, and say so in an issue when you find them. The claims on this page are checked before publishing by an adversarial review run through a second vendor's model — the procedure, and what it has caught, are in [CONTRIBUTING.md](CONTRIBUTING.md#reviewing-user-facing-claims).
+**Status: beta.** The schema is migration-tracked and `pytest` runs 752 tests, including an end-to-end ingestion run through a live database for each of the nine adapters — but this has been run in earnest on one person's machine. Expect rough edges on setups unlike that one, and say so in an issue when you find them. The claims on this page are checked before publishing by an adversarial review run through a second vendor's model — the procedure, and what it has caught, are in [CONTRIBUTING.md](CONTRIBUTING.md#reviewing-user-facing-claims).
 
 ## License
 

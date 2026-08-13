@@ -18,6 +18,21 @@ from .base import Adapter, NormalisedConversation, NormalisedMessage
 # Stable namespace for UUID derivation
 _ZED_NS = uuid.UUID("8f4e2d1c-7b9a-4e3d-8c6b-1f2e3d4c5b6a")
 
+
+def _stable_uuid(ns, raw, fallback: str) -> str:
+    """See ``throughline.adapters.cursor._stable_uuid`` — identical problem.
+
+    A non-UUID message id went straight into a ``uuid`` column, Postgres
+    rejected the insert, and the session was dropped entirely rather than
+    imported imperfectly.
+    """
+    if raw:
+        try:
+            return str(uuid.UUID(str(raw)))
+        except (ValueError, AttributeError, TypeError):
+            return str(uuid.uuid5(ns, f"{fallback}:{raw}"))
+    return str(uuid.uuid5(ns, fallback))
+
 # Role mapping from Zed to Throughline
 _ROLE_MAP = {
     "user": "user",
@@ -137,6 +152,16 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
     model = session_data.get("model")
     start_time = _parse_timestamp(session_data.get("started_at"))
     end_time = _parse_timestamp(session_data.get("ended_at"))
+    if start_time is None:
+        # `conversations.started_at` is NOT NULL, so a session without a
+        # timestamp was not imported imperfectly — it was rejected outright and
+        # counted as an error. The file's mtime is the same fallback the Cursor
+        # adapter already used; it is approximate but it is a real time, and an
+        # approximate date beats a session nobody can find.
+        try:
+            start_time = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            start_time = datetime.now(tz=timezone.utc)
     project_path = _get_project_path(session_data)
     
     # Convert messages to NormalisedMessage
@@ -154,8 +179,15 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
             created_at=_parse_timestamp(msg.get("timestamp")),
             model=msg.get("model") or model,
             is_sidechain=msg.get("is_sidechain", False),
-            parent_uuid=msg.get("parent_message_id"),
-            uuid=msg.get("id"),
+            # Same fix as the Cursor adapter, for the same reason: Zed's
+            # message ids are not UUIDs, and the column is.
+            parent_uuid=(
+                _stable_uuid(_ZED_NS, msg.get("parent_message_id"), f"zed:{session_uuid}:msg")
+                if msg.get("parent_message_id") else None
+            ),
+            uuid=_stable_uuid(
+                _ZED_NS, msg.get("id"), f"zed:{session_uuid}:msg:{len(normalised_messages)}"
+            ),
             metadata={
                 "zed_message_type": msg.get("type"),
             },

@@ -19,6 +19,32 @@ from .base import Adapter, NormalisedConversation, NormalisedMessage
 # Stable namespace for UUID derivation
 _CURSOR_NS = uuid.UUID("5e3f7a8b-2c1d-4e9f-8a6b-0c5d2e4f3a7b")
 
+def _stable_uuid(ns, raw, fallback: str) -> str | None:
+    """A value the ``messages.uuid`` column will actually accept.
+
+    Cursor and Zed number their messages however they like — `msg_1`, `m1`, an
+    integer — and that identifier went straight into a `uuid` column. Postgres
+    rejected it, the writer counted an error, and the whole session was
+    dropped: not a degraded import, no import at all. Every other adapter had
+    already solved this by deriving a UUID5 from a per-tool namespace; these
+    two just never did, and no unit test noticed because none of them write to
+    a database.
+
+    A raw id that already is a UUID is kept, so ids stay stable for tools that
+    supply real ones. Anything else is hashed into the namespace, which is
+    deterministic: re-ingesting the same file yields the same uuid, which is
+    what the writer's idempotency depends on.
+    """
+    import uuid as _uuid
+
+    if raw:
+        try:
+            return str(_uuid.UUID(str(raw)))
+        except (ValueError, AttributeError, TypeError):
+            return str(_uuid.uuid5(ns, f"{fallback}:{raw}"))
+    return str(_uuid.uuid5(ns, fallback))
+
+
 # Role mapping from Cursor to Throughline
 _ROLE_MAP = {
     "user": "user",
@@ -186,8 +212,14 @@ def _parse_cursor_file(file_path: Path, source_tool: str) -> NormalisedConversat
             created_at=_parse_timestamp(msg.get("timestamp")),
             model=msg.get("model"),
             is_sidechain=False,
-            parent_uuid=msg.get("parent_message_id"),
-            uuid=msg.get("message_id"),
+            parent_uuid=(
+                _stable_uuid(_CURSOR_NS, msg.get("parent_message_id"),
+                             f"cursor:{session_uuid}:msg")
+                if msg.get("parent_message_id") else None
+            ),
+            uuid=_stable_uuid(
+                _CURSOR_NS, msg.get("message_id"), f"cursor:{session_uuid}:msg:{len(normalised_messages)}"
+            ),
             metadata={},
         )
         normalised_messages.append(normalised_msg)

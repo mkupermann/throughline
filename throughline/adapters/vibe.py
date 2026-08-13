@@ -22,6 +22,16 @@ from .base import Adapter, NormalisedConversation, NormalisedMessage
 # Stable namespace for UUID derivation
 _NS = uuid.UUID("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
 
+
+def _stable_uuid(ns, raw, fallback: str) -> str:
+    """See ``throughline.adapters.cursor._stable_uuid``."""
+    if raw:
+        try:
+            return str(uuid.UUID(str(raw)))
+        except (ValueError, AttributeError, TypeError):
+            return str(uuid.uuid5(ns, f"{fallback}:{raw}"))
+    return str(uuid.uuid5(ns, fallback))
+
 # Role mapping from Vibe to Throughline roles
 _ROLE_MAP = {
     "user": "user",
@@ -283,8 +293,16 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
             created_at=_parse_timestamp(msg.get("timestamp")),
             model=_get_model_from_message(msg),
             is_sidechain=msg.get("injected", False),  # Vibe uses "injected" for compaction context
-            parent_uuid=msg.get("parent_message_id"),
-            uuid=msg.get("message_id"),
+            # Vibe numbers its messages `msg_1`, `msg_2`, … and the column is
+            # a uuid. Same defect as the Cursor and Zed adapters, found the
+            # same way; see cursor._stable_uuid for why this is not cosmetic.
+            parent_uuid=(
+                _stable_uuid(_NS, msg.get("parent_message_id"), f"vibe:{session_uuid}:msg")
+                if msg.get("parent_message_id") else None
+            ),
+            uuid=_stable_uuid(
+                _NS, msg.get("message_id"), f"vibe:{session_uuid}:msg:{len(normalised_messages)}"
+            ),
             metadata={
                 "injected": msg.get("injected", False),
                 "reasoning_content": _clean_ansi_content(msg.get("reasoning_content", ""))[:2000],

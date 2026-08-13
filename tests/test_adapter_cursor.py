@@ -194,3 +194,48 @@ class TestCursorAdapter:
         a = CursorAdapter()
         monkeypatch.setattr(a, "home", missing_dir)
         assert a.is_present() is False
+
+
+class TestMessageIdsSurviveTheDatabase:
+    """`messages.uuid` is a uuid column; Cursor's message ids are not uuids.
+
+    The adapter passed `message_id` through verbatim, so Postgres rejected the
+    insert and the writer dropped the entire session — not a partial import, no
+    import at all. Every other adapter already derived a UUID5; these did not,
+    and no unit test noticed because parsing never touches a database.
+    """
+
+    def test_a_non_uuid_message_id_becomes_a_uuid(self, tmp_path):
+        import uuid as _uuid
+
+        _make_session(
+            tmp_path,
+            filename="session_x.jsonl",
+            messages=[{"role": "user", "content": "hi", "message_id": "msg_1"}],
+        )
+        conv = CursorAdapter().parse(tmp_path / "session_x.jsonl")
+        assert conv is not None
+        _uuid.UUID(conv.messages[0].uuid)  # raises if the column would reject it
+
+    def test_the_derived_id_is_stable_across_parses(self, tmp_path):
+        """The writer's idempotency depends on it: a second ingest of an
+        unchanged file must produce the same uuid, or every run duplicates."""
+        _make_session(
+            tmp_path,
+            filename="session_y.jsonl",
+            messages=[{"role": "user", "content": "hi", "message_id": "msg_1"}],
+        )
+        first = CursorAdapter().parse(tmp_path / "session_y.jsonl")
+        second = CursorAdapter().parse(tmp_path / "session_y.jsonl")
+        assert first.messages[0].uuid == second.messages[0].uuid
+
+    def test_a_real_uuid_is_kept_as_is(self, tmp_path):
+        """Tools that do supply proper ids keep them — no gratuitous rewriting."""
+        real = "6f1c2f9e-4a3b-4c5d-8e9f-0a1b2c3d4e5f"
+        _make_session(
+            tmp_path,
+            filename="session_z.jsonl",
+            messages=[{"role": "user", "content": "hi", "message_id": real}],
+        )
+        conv = CursorAdapter().parse(tmp_path / "session_z.jsonl")
+        assert conv.messages[0].uuid == real

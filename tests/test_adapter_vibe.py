@@ -425,3 +425,34 @@ class TestSha256OnSessionDirs:
         h1 = VibeAdapter.sha256_file(d)
         (d / "messages.jsonl").write_text("one\ntwo\n")
         assert VibeAdapter.sha256_file(d) != h1
+
+
+def test_non_uuid_message_ids_become_uuids(tmp_path):
+    """Vibe numbers messages `msg_1`; the column is a uuid.
+
+    This is the Mistral adapter — the one the project points at to show it is
+    not one vendor's tool — and until this fix it could not store a session
+    with realistic message ids.
+    """
+    import uuid as _uuid
+
+    session = _make_session(
+        tmp_path,
+        session_id="session_20260101_120000_abc123",
+        meta={
+            "session_id": "session_20260101_120000_abc123",
+            "start_time": "2026-01-01T12:00:00Z",
+            "environment": {"working_directory": "/repo/x"},
+        },
+        messages=[
+            {
+                "role": "user",
+                "content": "hi",
+                "message_id": "msg_1",
+                "timestamp": "2026-01-01T12:00:10Z",
+            }
+        ],
+    )
+    conv = VibeAdapter().parse(session)
+    assert conv is not None
+    _uuid.UUID(conv.messages[0].uuid)

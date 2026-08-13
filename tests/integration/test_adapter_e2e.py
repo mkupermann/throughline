@@ -28,6 +28,24 @@ pytestmark = pytest.mark.integration
 # --------------------------------------------------------------------------- #
 
 
+#: Minimum messages each adapter's fixture must produce end to end.
+#:
+#: Hermes is the odd one: its fixture is a state.db *and* a JSON export, so it
+#: writes two conversations. Windsurf ingests a plan document rather than a
+#: transcript, which is one message by design.
+EXPECTED_MESSAGES = {
+    "claude_code": 2,
+    "hermes": 4,
+    "codex": 2,
+    "cursor": 2,
+    "zed": 2,
+    "vibe": 2,
+    "continue": 2,
+    "cline": 2,
+    "windsurf": 1,
+}
+
+
 def _make_claude_code(root: Path) -> Path:
     """Build ~/.claude/projects/<slug>/*.jsonl style fixture."""
     proj = root / "-Users-acme-repo"
@@ -133,6 +151,131 @@ def _make_codex(root: Path) -> Path:
     return root
 
 
+
+def _make_cursor(root: Path) -> Path:
+    """~/.cursor/sessions/*.jsonl — one JSON object per line."""
+    f = root / "session_cursor1.jsonl"
+    msgs = [
+        {"role": "user", "content": "add a dark theme toggle", "message_id": "m1"},
+        {"role": "assistant", "content": "Adding a theme provider.", "message_id": "m2"},
+    ]
+    f.write_text("\n".join(json.dumps(m) for m in msgs) + "\n", encoding="utf-8")
+    return root
+
+
+def _make_zed(root: Path) -> Path:
+    """~/.zed/data/sessions/session_*.json — one object per session."""
+    f = root / "session_zed1.json"
+    f.write_text(
+        json.dumps(
+            {
+                "id": "zed-1",
+                "model": "zed-pro",
+                "messages": [
+                    {"role": "user", "content": "explain this trait"},
+                    {"role": "assistant", "content": "It is a marker trait."},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _make_vibe(root: Path) -> Path:
+    """~/.vibe/logs/session/session_<date>_<time>_<hex>/ — a directory per session.
+
+    The directory name has to match the adapter's pattern exactly; a session
+    called `session_1` is not discovered, which is the kind of thing only an
+    end-to-end run catches.
+    """
+    d = root / "session_20260101_120000_abc123"
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(
+        json.dumps(
+            {
+                "session_id": "session_20260101_120000_abc123",
+                "start_time": "2026-01-01T12:00:00Z",
+                "end_time": "2026-01-01T12:20:00Z",
+                "model": "mistral-large-2",
+                "environment": {"working_directory": "/repo/vibeproj"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    msgs = [
+        {
+            "role": "user",
+            "content": "why is the build slow",
+            "message_id": "msg_1",
+            "timestamp": "2026-01-01T12:00:10Z",
+        },
+        {
+            "role": "assistant",
+            "content": "The bundler re-reads node_modules each run.",
+            "message_id": "msg_2",
+            "timestamp": "2026-01-01T12:00:40Z",
+        },
+    ]
+    (d / "messages.jsonl").write_text(
+        "\n".join(json.dumps(m) for m in msgs) + "\n", encoding="utf-8"
+    )
+    return root
+
+
+def _make_continue(root: Path) -> Path:
+    """~/.continue/sessions/<id>.json — history under a `history` key."""
+    f = root / "cont-1.json"
+    f.write_text(
+        json.dumps(
+            {
+                "sessionId": "cont-1",
+                "title": "Extract the login helper",
+                "history": [
+                    {"role": "user", "content": "extract login()"},
+                    {"role": "assistant", "content": "Moved it into auth/session.py."},
+                ],
+                "lastUpdated": 1_700_000_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _make_cline(root: Path) -> Path:
+    """A Cline task directory: the unit of ingestion is the folder, not a file."""
+    d = root / "1700000000001"
+    d.mkdir(parents=True)
+    (d / "api_conversation_history.json").write_text(
+        json.dumps(
+            [
+                {"role": "user", "content": "rename the column"},
+                {"role": "assistant", "content": "Writing the migration."},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (d / "task_metadata.json").write_text(json.dumps({"cwd": "/repo/clineproj"}), encoding="utf-8")
+    return root
+
+
+def _make_windsurf(root: Path) -> Path:
+    """~/.windsurf/plans/*.md — a plan document, not a transcript.
+
+    Body must clear the adapter's 50-character floor or the file is skipped as
+    too thin to be worth storing.
+    """
+    f = root / "plan-ship-auth-a1b2c3.md"
+    f.write_text(
+        "# Ship the new auth flow\n\n"
+        "Migrate token storage off localStorage before the next release.\n"
+        "1. Spike the new endpoint.\n2. Wire the cookie path.\n",
+        encoding="utf-8",
+    )
+    return root
+
+
 def _patch_adapter_homes(monkeypatch, tmp_path: Path) -> dict[str, Path]:
     """Repoint every shipping adapter at a per-tool subdir under tmp_path.
 
@@ -205,25 +348,35 @@ def test_run_many_writes_every_source_end_to_end(tmp_path, db_env, monkeypatch):
     _make_claude_code(homes["claude_code"])
     _make_hermes(homes["hermes"])
     _make_codex(homes["codex"])
+    _make_cursor(homes["cursor"])
+    _make_zed(homes["zed"])
+    _make_vibe(homes["vibe"])
+    _make_continue(homes["continue"])
+    _make_cline(homes["cline"])
+    _make_windsurf(homes["windsurf"])
 
     present = [a for a in all_adapters() if a.is_present()]
     names = {a.name for a in present}
-    assert {"claude_code", "hermes", "codex"} <= names, (
-        f"setup bug: expected those 3 adapters present, got {names}"
+    # Every shipping adapter, not a representative sample. The README claims
+    # nine tools; a test covering three of them is not evidence for nine, and
+    # the six that were missing are exactly the ones whose on-disk shape nobody
+    # had exercised against a real database.
+    assert names == set(EXPECTED_MESSAGES), (
+        f"setup bug: expected every adapter present, got {sorted(names)}"
     )
 
     summaries = run_many(present, verbose=False)
     by_name = {s.adapter: s for s in summaries}
 
-    # Per-source expectations.
-    assert by_name["claude_code"].ingested == 1
-    assert by_name["claude_code"].messages_written == 2
-    # Hermes: state.db is one "file" with one session, plus one JSON export.
-    assert by_name["hermes"].ingested >= 1
-    assert by_name["hermes"].messages_written >= 4  # 2 from state.db + 2 from JSON
-    assert by_name["codex"].ingested == 1
-    assert by_name["codex"].messages_written == 2
-    assert all(s.errors == 0 for s in summaries)
+    # Per-source expectations. Asserted per adapter rather than as a total, so
+    # a failure names the tool that broke instead of a sum that moved.
+    for name, expected in EXPECTED_MESSAGES.items():
+        summary = by_name[name]
+        assert summary.ingested >= 1, f"{name}: nothing ingested"
+        assert summary.messages_written >= expected, (
+            f"{name}: {summary.messages_written} messages, expected at least {expected}"
+        )
+        assert summary.errors == 0, f"{name}: {summary.errors} error(s)"
 
     # DB-side checks: rows actually landed.
     conn = psycopg2.connect(**db_env)

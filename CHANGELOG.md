@@ -67,6 +67,17 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Fixed
 
+- **Cursor, Zed and Vibe sessions could not be ingested at all.** Those three
+  adapters passed the tool's own message id straight into `messages.uuid`, a
+  `uuid` column. Cursor numbers messages `msg_1`, Zed uses integers, Vibe uses
+  `msg_1` — PostgreSQL rejected the insert, the writer rolled back, and the
+  entire session was discarded rather than imported imperfectly. All three now
+  derive a deterministic UUID5 from a per-tool namespace, as every other adapter
+  already did, and keep a genuine UUID unchanged when one is supplied.
+- **A Zed session with no timestamp was dropped.** `conversations.started_at`
+  is NOT NULL and the adapter passed NULL through; it now falls back to the
+  file's mtime, the same fallback the Cursor adapter already used.
+
 - **`throughline ask --model` was ignored.** The flag was parsed and threaded
   through `ask.answer` into `_call_model`, where it was dropped: `llm.complete()`
   had no parameter to receive it.

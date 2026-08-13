@@ -277,3 +277,36 @@ class TestZedAdapter:
         a = ZedAdapter()
         monkeypatch.setattr(a, "home", missing_dir)
         assert a.is_present() is False
+
+
+def test_a_session_without_timestamps_still_gets_a_start(tmp_path):
+    """`conversations.started_at` is NOT NULL.
+
+    A Zed session with no `started_at` produced NULL, Postgres refused the row,
+    and the writer counted an error — the session was not imported at all. The
+    file's mtime is the fallback the Cursor adapter already used: approximate,
+    but a real time, and an approximate date beats a session nobody can find.
+    """
+    _make_session(
+        tmp_path,
+        filename="session_nots.json",
+        data={"id": "s", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    conv = ZedAdapter().parse(tmp_path / "session_nots.json")
+    assert conv is not None
+    assert conv.started_at is not None
+
+
+def test_non_uuid_message_ids_become_uuids(tmp_path):
+    import uuid as _uuid
+
+    _make_session(
+        tmp_path,
+        filename="session_ids.json",
+        data={
+            "id": "s",
+            "messages": [{"role": "user", "content": "hi", "id": 7}],
+        },
+    )
+    conv = ZedAdapter().parse(tmp_path / "session_ids.json")
+    _uuid.UUID(conv.messages[0].uuid)
