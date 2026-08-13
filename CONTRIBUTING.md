@@ -184,6 +184,37 @@ psql -d claude_memory -c "SELECT count(*) FROM conversations WHERE project_name 
 6. Respond to review comments with commits, not amend + force-push, until approval.
 7. After approval, a maintainer will squash-merge. Rebase-and-merge on request.
 
+## Reviewing user-facing claims
+
+Anything a reader will act on — the README, `SECURITY.md`, the surface
+descriptions, the screenshots — gets read by a second model before it ships,
+through a different vendor's CLI than the one that wrote it. Six personas, each
+asked for a verdict, quoted defects, and what would change its mind: a
+developer-experience lead, a security reviewer, a technical writer, a
+vendor-neutrality PM, a skeptical engineer, and an open-source maintainer.
+
+Two rules make the difference between a review and a rubber stamp:
+
+- **Submit the file, not a summary of it.** A reviewer handed your description
+  grades your description. The failure is silent — the review comes back
+  positive and the defect ships.
+- **The reviewer is not a vote.** Fix what is real, say plainly what you refused
+  to fix and why, and separate a defect in the text from a fact about the
+  project. "Needs multi-user validation" is true here and cannot be fixed by
+  editing.
+
+It is not a substitute for tests, review, or judgement, and it does not catch
+everything — a second model is simply one that cannot be persuaded by the
+reasoning that produced the work, because it never saw it. What it has caught
+so far was mostly not in the prose: three pipelines that still required one
+vendor's CLI inside a tool whose claim is that it does not, a privacy statement
+that contradicted itself two paragraphs later, and an absolute filesystem path
+rendered into a screenshot bound for a public repository.
+
+Any second model works. The runs behind the current docs used Mistral's `vibe`
+CLI; the mechanics only matter in that a reviewer must be able to open the file
+it is reviewing, and one that cannot is a void review, not a passing one.
+
 ## Architecture decisions
 
 Non-trivial design choices are documented as ADRs under `docs/adr/`.
