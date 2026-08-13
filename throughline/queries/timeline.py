@@ -293,5 +293,15 @@ def _detail_columns(kind: str) -> tuple[str, str, str]:
         "prompt": ("pr.id", "COALESCE(pr.name, '(prompt)')", "NULL::bigint"),
         "entity": ("e.id", "e.name", "NULL::bigint"),
         "reflection": ("mr.id", "mr.reflection_type", "NULL::bigint"),
-        "ingestion": ("il.id", "il.file_path", "NULL::bigint"),
+        # The file's own name, not its absolute path. A timeline row is a
+        # one-line label in a list, and an absolute path is both unreadable at
+        # that width — the distinguishing part is the tail, which is what gets
+        # ellipsised away — and a needless disclosure of the machine's layout,
+        # including the account name, in a view people screenshot and share.
+        # The full path is still one click away on the ingestion record.
+        "ingestion": (
+            "il.id",
+            "regexp_replace(il.file_path, '^.*/', '')",
+            "NULL::bigint",
+        ),
     }[kind]

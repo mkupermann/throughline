@@ -41,3 +41,15 @@ export function formatDay(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat(UI_LOCALE, { month: "short", day: "numeric" }).format(d);
 }
+
+/**
+ * `n` with a unit that agrees with it: "1 session", "2 sessions".
+ *
+ * Trivial, and worth having in one place: the counts on these pages are almost
+ * always plural, so "1 sessions" survives review by being rare enough that
+ * nobody hits it — until a screenshot of a one-session project puts it at the
+ * top of the README.
+ */
+export function pluralise(n: number, one: string, many = `${one}s`): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
+}

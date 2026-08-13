@@ -182,7 +182,7 @@ def pick_backend(choice: str) -> Backend:
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if choice in ("openai", "auto") and openai_key:
         if choice == "auto":
-            print("Backend: openai (OPENAI_API_KEY gefunden)")
+            print("Backend: openai (OPENAI_API_KEY found)")
         return OpenAIBackend(openai_key)
     if choice == "openai":
         sys.stderr.write(
@@ -203,10 +203,10 @@ def pick_backend(choice: str) -> Backend:
         )
         sys.exit(2)
     if not ollama_has_model(OLLAMA_MODEL):
-        print(f"Ollama-Modell '{OLLAMA_MODEL}' fehlt — ziehe es jetzt…")
+        print(f"Ollama model '{OLLAMA_MODEL}' is missing — pulling it now…")
         if not ollama_pull(OLLAMA_MODEL):
             sys.stderr.write(
-                f"FEHLER: konnte Modell '{OLLAMA_MODEL}' nicht ziehen.\n"
+                f"ERROR: could not pull model '{OLLAMA_MODEL}'.\n"
                 f"  Manuell:  ollama pull {OLLAMA_MODEL}\n"
             )
             sys.exit(2)
@@ -338,9 +338,9 @@ def main() -> None:
 
         done += len(meta)
         pct = 100.0 * done / total
-        print(f"  {done}/{total} ({pct:.1f}%) eingebettet")
+        print(f"  {done}/{total} ({pct:.1f}%) embedded")
 
-    print(f"\nFertig. done={done} errors={errors}")
+    print(f"\nDone. embedded={done} errors={errors}")
     cursor.close()
     conn.close()
 

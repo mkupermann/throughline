@@ -146,9 +146,11 @@ Usage guide with examples: [docs/USAGE.md](docs/USAGE.md).
 (default `http://127.0.0.1:8790`). Six surfaces in the navigation — Overview,
 Find, Timeline, Curate, Operate, Console — and two more you reach by following
 something rather than by navigating to it: a project's own page, and Ask, which
-sits beside the search box on Find. All of them are scoped by a provider bar
-that shows every supported tool, its conversation count, and whether it has
-material waiting to be ingested:
+sits beside the search box on Find. Most carry a provider bar showing each tool
+that has material here, its conversation count, and whether anything is waiting
+to be ingested — clicking a tool scopes the page to it. Overview and Console do
+without: one is a worklist about every tool at once, the other answers to SQL
+rather than to a filter.
 
 | Surface | What it is for |
 |---|---|
@@ -160,6 +162,21 @@ material waiting to be ingested:
 | **Curate** | Eight queues that keep memory trustworthy — contradictions, drift, superseded chains, low confidence, missing embeddings, expiring, never accessed, forgotten. Bulk actions, with a confirmation before anything is forgotten and an undo after. |
 | **Operate** | Pipeline state and the jobs that change it, with live streamed output. |
 | **Console** | Read-only SQL. Every statement runs in a `READ ONLY` transaction, so PostgreSQL rejects writes — not a keyword filter. |
+
+### What it looks like
+
+![Overview — the worklist, then the last seven days by project](docs/screenshots/overview.png)
+
+Overview answers "what should I deal with?" before it shows a single statistic:
+what needs doing, then the projects you actually worked in this week — with the
+tools each one spanned, which is the thing no per-tool interface can show you.
+
+![Ask — a cited answer assembled from your own records](docs/screenshots/ask.png)
+
+Ask answers in prose and cites the records it used, and says which model
+answered and whether it ran on your machine. Every screenshot here is generated
+from the bundled demo fixture by `npm run screenshots`; the rest are in
+[docs/screenshots/](docs/screenshots/).
 
 Press `⌘K` for the command palette, `/` to search, `g` then `o f t c p s` to jump
 between surfaces. Light and dark both supported; the theme follows your system

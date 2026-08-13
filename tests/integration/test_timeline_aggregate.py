@@ -374,3 +374,31 @@ def test_day_detail_lists_conversations_before_messages(db_env):
         )
     finally:
         conn.close()
+
+
+def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
+    """A timeline label is a one-line list entry that people screenshot.
+
+    The full path adds nothing readable at that width — the tail, which is the
+    part that identifies the file, is exactly what gets ellipsised — and it
+    discloses the machine's directory layout including the account name. This
+    was found by looking at a documentation screenshot: twenty rows of
+    `/Users/<real-name>/...`, headed for a public repository.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ingestion_log (file_path, file_hash, record_count, ingested_at)
+            VALUES (%s, 'h', 3, now())
+            """,
+            ("/Users/somebody/.claude/projects/-Users-somebody-work/abc123.jsonl",),
+        )
+    db_connection.commit()
+
+    rows = T.day_detail(
+        db_connection, date.today(), kinds=["ingestion"], providers=[], limit=50
+    )
+    labels = [r["title"] for r in rows]
+    assert labels, "expected the ingestion row back"
+    assert "abc123.jsonl" in labels
+    assert not any("/Users/" in (l or "") for l in labels), labels

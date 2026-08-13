@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 
 import { projectsApi } from "@/lib/api";
-import { formatCount } from "@/lib/format";
+import { pluralise } from "@/lib/format";
 
 /**
  * What the last week was spent on, by project.
@@ -64,8 +64,8 @@ export function RecentProjects() {
             <Link to={`/project/${encodeURIComponent(p.project)}`} className="proj-row">
               <span className="proj-name">{p.project}</span>
               <span className="proj-stats">
-                <span className="tabular">{formatCount(p.sessions)} sessions</span>
-                <span className="tabular">{formatCount(p.messages)} messages</span>
+                <span className="tabular">{pluralise(p.sessions, "session")}</span>
+                <span className="tabular">{pluralise(p.messages, "message")}</span>
                 {/* Which assistants were used. A project spanning two tools is
                     the thing this product exists to make visible, and it is
                     invisible in every per-tool interface. */}

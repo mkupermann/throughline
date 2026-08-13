@@ -90,9 +90,13 @@ SELECT setval('public.projects_id_seq', 5);
 -- CONVERSATIONS
 -- ---------------------------------------------------------------------------
 
+-- `source_tool` is what makes the provider bar — and with it the product's whole
+-- claim — visible: several assistants, one store, the same shape of record from
+-- each. A fixture that leaves it NULL demonstrates a single-tool memory layer.
 INSERT INTO public.conversations
   (id, session_id, project_path, model, git_branch, started_at, ended_at,
-   message_count, token_count_in, token_count_out, cost_usd, summary, tags)
+   message_count, token_count_in, token_count_out, cost_usd, summary, tags,
+   source_tool)
 VALUES
 (1,
  'a1b2c3d4-0001-0001-0001-000000000001',
@@ -102,7 +106,8 @@ VALUES
  '2026-03-10 09:15:00+01', '2026-03-10 10:42:00+01',
  18, 14200, 3100, 0.0420,
  'Set up JWT authentication for the ACME web portal. Discussed token refresh strategy and settled on 15-minute access tokens + 7-day refresh tokens stored in httpOnly cookies.',
- ARRAY['auth','jwt','security','acme-web']),
+ ARRAY['auth','jwt','security','acme-web'],
+ 'claude_code'),
 
 (2,
  'a1b2c3d4-0002-0002-0002-000000000002',
@@ -112,7 +117,8 @@ VALUES
  '2026-03-18 14:00:00+01', '2026-03-18 15:55:00+01',
  22, 18900, 4400, 0.0570,
  'Built reusable chart components using Recharts. Discovered a memoisation bug causing full re-renders on filter change — fixed with useMemo on dataset transformation.',
- ARRAY['react','recharts','performance','acme-web']),
+ ARRAY['react','recharts','performance','acme-web'],
+ 'cursor'),
 
 (3,
  'a1b2c3d4-0003-0003-0003-000000000003',
@@ -122,7 +128,8 @@ VALUES
  '2026-04-01 10:30:00+02', '2026-04-01 12:15:00+02',
  31, 27600, 6200, 0.0810,
  'Diagnosed and fixed a cascade timeout in the reconciliation endpoint. Root cause: N+1 query inside a loop over payment batches. Added bulk-fetch with IN clause and reduced p99 from 8.2s to 340ms.',
- ARRAY['performance','sql','n+1','fintech-api','bug-fix']),
+ ARRAY['performance','sql','n+1','fintech-api','bug-fix'],
+ 'claude_code'),
 
 (4,
  'a1b2c3d4-0004-0004-0004-000000000004',
@@ -132,19 +139,76 @@ VALUES
  '2026-04-08 08:00:00+02', '2026-04-08 09:30:00+02',
  14, 11500, 2800, 0.0590,
  'Reviewed nightly Airflow DAG for feature-store precompute. Added retry logic with exponential back-off after upstream data source started returning occasional 503s.',
- ARRAY['airflow','reliability','ml-pipeline','retry']),
+ ARRAY['airflow','reliability','ml-pipeline','retry'],
+ 'vibe'),
 
 (5,
  'a1b2c3d4-0005-0005-0005-000000000005',
  '/Users/dev/projects/project-aurora',
- 'claude-sonnet-4-6',
+ 'gpt-5-codex',
  'spike/iceberg-poc',
  '2026-04-12 13:00:00+02', '2026-04-12 15:40:00+02',
  27, 22400, 5100, 0.0680,
  'Evaluated Apache Iceberg vs Delta Lake for Team Neptune lakehouse. Iceberg wins on Trino compatibility and schema evolution semantics. Decision logged.',
- ARRAY['lakehouse','iceberg','delta-lake','project-aurora','architecture']);
+ ARRAY['lakehouse','iceberg','delta-lake','project-aurora','architecture'],
+ 'codex'),
 
-SELECT setval('public.conversations_id_seq', 5);
+(6,
+ 'a1b2c3d4-0006-0006-0006-000000000006',
+ '/Users/dev/projects/acme-web',
+ 'claude-sonnet-4-6',
+ 'fix/a11y-audit',
+ '2026-04-02 10:00:00+02', '2026-04-02 11:20:00+02',
+ 16, 11800, 2700, 0.0350,
+ 'Worked through the accessibility audit findings: focus traps in the modal, missing form labels, and a contrast failure on the muted text token. All three fixed and covered by tests.',
+ ARRAY['a11y','wcag','frontend','acme-web'],
+ 'zed'),
+
+(7,
+ 'a1b2c3d4-0007-0007-0007-000000000007',
+ '/Users/dev/projects/acme-web',
+ 'mistral-large-2',
+ 'chore/bundle-size',
+ '2026-04-04 15:30:00+02', '2026-04-04 16:25:00+02',
+ 12, 9400, 2100, 0.0280,
+ 'Bundle grew past 600 kB. Traced it to a date library imported in full for one format call; replaced with a 40-line helper and split the chart vendor chunk.',
+ ARRAY['performance','bundle','vite','acme-web'],
+ 'vibe'),
+
+(8,
+ 'a1b2c3d4-0008-0008-0008-000000000008',
+ '/Users/dev/projects/fintech-api',
+ 'claude-sonnet-4-6',
+ 'feat/idempotency-keys',
+ '2026-04-06 09:00:00+02', '2026-04-06 10:40:00+02',
+ 24, 17600, 4200, 0.0510,
+ 'Added idempotency keys to the payments endpoint so a retried request cannot double-charge. Settled on a 24-hour key TTL and a partial unique index over (key, client_id).',
+ ARRAY['payments','idempotency','postgres','fintech-api'],
+ 'claude_code'),
+
+(9,
+ 'a1b2c3d4-0009-0009-0009-000000000009',
+ '/Users/dev/projects/acme-web',
+ 'gpt-5-codex',
+ 'feat/csv-export',
+ '2026-04-09 11:00:00+02', '2026-04-09 12:05:00+02',
+ 15, 10900, 2400, 0.0310,
+ 'Built the CSV export for the reporting table. Streams rows instead of buffering, so a 200k-row export no longer holds the whole result set in memory.',
+ ARRAY['export','streaming','backend','acme-web'],
+ 'continue'),
+
+(10,
+ 'a1b2c3d4-0010-0010-0010-000000000010',
+ '/Users/dev/projects/fintech-api',
+ 'claude-sonnet-4-6',
+ 'ops/alert-tuning',
+ '2026-04-11 14:00:00+02', '2026-04-11 15:10:00+02',
+ 19, 13200, 3300, 0.0400,
+ 'Tuned the on-call alerts: the latency alert fired on every deploy because it measured cold-start p99. Added a five-minute warm-up exclusion and split the SLO burn-rate alert into fast and slow windows.',
+ ARRAY['observability','alerting','slo','fintech-api'],
+ 'cursor');
+
+SELECT setval('public.conversations_id_seq', 10);
 
 -- ---------------------------------------------------------------------------
 -- MESSAGES  (5-10 per conversation, illustrative sample)
@@ -193,9 +257,39 @@ VALUES
 (29, 5, gen_random_uuid(), 'user',      'What about schema evolution and time travel?', 14, NULL, NULL, '2026-04-12 13:05:00+02'),
 (30, 5, gen_random_uuid(), 'assistant', 'Both support both features. Iceberg''s schema evolution is more flexible — you can rename columns and add nested fields without full table rewrites. Time travel syntax is almost identical.', 54, 'claude-sonnet-4-6', 1100, '2026-04-12 13:06:00+02'),
 (31, 5, gen_random_uuid(), 'user',      'OK, we''re going with Iceberg. Log this decision.', 13, NULL, NULL, '2026-04-12 14:00:00+02'),
-(32, 5, gen_random_uuid(), 'assistant', 'Decision logged: "Adopt Apache Iceberg over Delta Lake for project-aurora lakehouse. Primary reasons: Trino compatibility and open-standard schema evolution semantics."', 48, 'claude-sonnet-4-6', 900, '2026-04-12 14:00:50+02');
+(32, 5, gen_random_uuid(), 'assistant', 'Decision logged: "Adopt Apache Iceberg over Delta Lake for project-aurora lakehouse. Primary reasons: Trino compatibility and open-standard schema evolution semantics."', 48, 'claude-sonnet-4-6', 900, '2026-04-12 14:00:50+02'),
 
-SELECT setval('public.messages_id_seq', 32);
+-- Conversation 6: accessibility audit
+(33, 6, gen_random_uuid(), 'user',      'The a11y audit flagged 3 issues on the settings modal. Where do I start?', 20, NULL, NULL, '2026-04-02 10:00:30+02'),
+(34, 6, gen_random_uuid(), 'assistant', 'Start with the focus trap — it is the one that makes the page unusable with a keyboard. When the modal opens, focus must move into it and Tab must cycle within it until it closes, then return to the trigger.', 62, 'claude-sonnet-4-6', 1180, '2026-04-02 10:01:20+02'),
+(35, 6, gen_random_uuid(), 'user',      'And the contrast failure on the muted text?', 13, NULL, NULL, '2026-04-02 10:30:00+02'),
+(36, 6, gen_random_uuid(), 'assistant', 'Your muted token is 3.9:1 against the surface; AA needs 4.5:1 for body text. Darken it one step rather than adding a new token — a second muted grey is how palettes rot.', 55, 'claude-sonnet-4-6', 1020, '2026-04-02 10:31:10+02'),
+
+-- Conversation 7: bundle size
+(37, 7, gen_random_uuid(), 'user',      'Bundle just went over 600 kB. What is in there?', 15, NULL, NULL, '2026-04-04 15:30:20+02'),
+(38, 7, gen_random_uuid(), 'assistant', 'Run the visualiser first, do not guess. In my experience the usual culprit is a date library pulled in whole for a single format call — that alone is often 70 kB gzipped.', 52, 'mistral-large-2', 1340, '2026-04-04 15:31:00+02'),
+(39, 7, gen_random_uuid(), 'user',      'That is exactly it. One formatDistance call.', 12, NULL, NULL, '2026-04-04 15:40:00+02'),
+(40, 7, gen_random_uuid(), 'assistant', 'Then write the helper. Relative time in one language is about forty lines and no dependency. Keep the library only if you need locales or parsing.', 44, 'mistral-large-2', 980, '2026-04-04 15:41:00+02'),
+
+-- Conversation 8: idempotency keys
+(41, 8, gen_random_uuid(), 'user',      'A client retried a payment request and got charged twice. How do I stop that?', 22, NULL, NULL, '2026-04-06 09:00:40+02'),
+(42, 8, gen_random_uuid(), 'assistant', 'Idempotency keys. The client sends a key per logical operation; you store it with the response and return the stored response on a repeat. The important part is that the key and the charge are written in the same transaction.', 68, 'claude-sonnet-4-6', 1420, '2026-04-06 09:02:00+02'),
+(43, 8, gen_random_uuid(), 'user',      'How long do I keep the keys?', 11, NULL, NULL, '2026-04-06 09:20:00+02'),
+(44, 8, gen_random_uuid(), 'assistant', '24 hours covers every realistic retry window, including a client queue draining after an outage. Add a partial unique index on (key, client_id) WHERE created_at > now() - interval ''24 hours'' and a nightly cleanup.', 58, 'claude-sonnet-4-6', 1240, '2026-04-06 09:21:30+02'),
+
+-- Conversation 9: CSV export
+(45, 9, gen_random_uuid(), 'user',      'The CSV export times out on the big reporting table.', 16, NULL, NULL, '2026-04-09 11:00:30+02'),
+(46, 9, gen_random_uuid(), 'assistant', 'You are building the whole file in memory before sending a byte. Stream it: a server-sent response with a generator that yields rows in batches of 1,000, so the client starts receiving immediately and memory stays flat.', 60, 'gpt-5-codex', 1300, '2026-04-09 11:01:40+02'),
+(47, 9, gen_random_uuid(), 'user',      'Does that work behind the proxy?', 10, NULL, NULL, '2026-04-09 11:30:00+02'),
+(48, 9, gen_random_uuid(), 'assistant', 'Yes, but disable response buffering for that route or the proxy will helpfully re-assemble the whole file and undo the streaming.', 38, 'gpt-5-codex', 890, '2026-04-09 11:31:00+02'),
+
+-- Conversation 10: alert tuning
+(49, 10, gen_random_uuid(), 'user',      'The latency alert fires on every single deploy. It is being ignored now.', 19, NULL, NULL, '2026-04-11 14:00:30+02'),
+(50, 10, gen_random_uuid(), 'assistant', 'An alert everyone ignores is worse than no alert. It is measuring cold-start p99 in the first minutes after a rollout. Exclude a five-minute warm-up window and it stops crying wolf.', 56, 'claude-sonnet-4-6', 1150, '2026-04-11 14:02:00+02'),
+(51, 10, gen_random_uuid(), 'user',      'Should the SLO alert stay as one rule?', 12, NULL, NULL, '2026-04-11 14:40:00+02'),
+(52, 10, gen_random_uuid(), 'assistant', 'Split it. A fast-burn window catches an outage in minutes and pages; a slow-burn window catches steady erosion over hours and opens a ticket. One threshold cannot serve both.', 54, 'claude-sonnet-4-6', 1080, '2026-04-11 14:41:20+02');
+
+SELECT setval('public.messages_id_seq', 52);
 
 -- ---------------------------------------------------------------------------
 -- MEMORY CHUNKS  (18 entries, all 8 categories covered)
@@ -529,7 +623,144 @@ VALUES
 
 SELECT setval('public.relationships_id_seq', 8);
 
+-- =============================================================================
+-- Curation queues
+-- =============================================================================
+-- Curate's whole job is to show what has gone wrong with stored memory, so a
+-- fixture where everything is healthy renders eight empty queues and teaches a
+-- reader nothing. These rows put one realistic item in each of the queues that
+-- can be seeded from data: a superseded chain, an expiring fact, two chunks
+-- that disagree, and one the extractor was unsure of.
+--
+-- Deliberately not seeded: missing embeddings (run `throughline embed` and it
+-- empties itself, which is the honest demonstration) and never-accessed, which
+-- is a function of how long the store has been running.
+
+-- A decision that was later reversed. The old chunk stays, marked superseded
+-- and pointing at the one that replaced it — this is the chain Curate shows.
+INSERT INTO public.memory_chunks
+  (id, source_type, source_id, content, category, tags, confidence, project_name,
+   status, superseded_by, superseded_at, created_at)
+VALUES
+(19, 'conversation', 3,
+ 'Rate-limit the reconciliation endpoint to 10 req/min per client. Prevents the timeout cascade seen in the April incident.',
+ 'decision', ARRAY['rate-limit','fintech-api','incident'], 0.88, 'fintech-api',
+ 'superseded', 20, '2026-04-06 09:00:00+02', '2026-02-10 11:00:00+01'),
+
+(20, 'conversation', 8,
+ 'Idempotency keys replace the rate limit on the reconciliation endpoint: the limit throttled legitimate batch clients and never addressed double-charging, which was the actual failure.',
+ 'decision', ARRAY['idempotency','fintech-api','payments'], 0.95, 'fintech-api',
+ 'active', NULL, NULL, '2026-04-06 10:30:00+02'),
+
+-- Something true only until a date. Curate surfaces it before it silently
+-- becomes wrong.
+(21, 'conversation', 4,
+ 'The feature-store precompute runs at 02:00 UTC to stay clear of the nightly batch window. Revisit once the batch job moves to the new cluster.',
+ 'project_context', ARRAY['airflow','ml-pipeline','schedule'], 0.82, 'ml-pipeline',
+ 'active', NULL, NULL, '2026-02-18 09:00:00+01'),
+
+-- The extractor was not sure. Below the 0.6 threshold, so it lands in
+-- low-confidence rather than being trusted silently.
+(22, 'conversation', 7,
+ 'The team may be moving the reporting UI off Recharts, possibly to visx — mentioned once in passing, not decided.',
+ 'insight', ARRAY['frontend','charts','uncertain'], 0.41, 'acme-web',
+ 'active', NULL, NULL, '2026-04-04 16:00:00+02');
+
+SELECT setval('public.memory_chunks_id_seq', 22);
+
+UPDATE public.memory_chunks SET expires_at = '2026-05-01 00:00:00+02' WHERE id = 21;
+
+-- Two chunks that disagree. Detection is an all-pairs comparison that must not
+-- run inside a request, so Curate reads the reflection the engine recorded —
+-- which means the fixture has to record one too.
+INSERT INTO public.memory_reflections
+  (reflection_type, action_taken, reasoning, confidence, affected_chunks, created_at)
+VALUES
+('contradiction', NULL,
+ 'Chunk 19 says the reconciliation endpoint is protected by a 10 req/min rate limit; chunk 20 says the rate limit was removed in favour of idempotency keys. Both are marked as decisions for fintech-api, six weeks apart. The newer one supersedes, but the older is still being retrieved.',
+ 0.91, ARRAY[19, 20], '2026-04-06 11:00:00+02'),
+('contradiction', NULL,
+ 'Two preferences disagree about SQL style: one prefers SQLAlchemy Core for performance-critical paths, the other prefers raw SQL everywhere for reviewability. Neither is scoped to a project, so both match every query.',
+ 0.74, ARRAY[10, 12], '2026-04-10 08:30:00+02');
+
 COMMIT;
+
+-- =============================================================================
+-- Re-base every timestamp onto today
+-- =============================================================================
+-- The dates above are fixed literals so this fixture stays readable and
+-- diffable. Loaded as-is they age, and several surfaces are explicitly
+-- time-bounded — Overview lists the projects of the last seven days, Timeline
+-- opens on the most recent day with activity. A fixture written in spring
+-- therefore renders those pages empty by summer, which is exactly the
+-- screenshot-of-an-empty-state that makes a working product look broken.
+--
+-- So the set is shifted as one block: the newest session lands early today and
+-- every other row keeps its exact distance from it. Relative spacing, ordering
+-- and duration are preserved; only the anchor moves. Load this on any date and
+-- the demo looks like someone has been working all week.
+DO $$
+DECLARE
+    rec           record;
+    -- Days ago for each session, oldest first. Chosen so that every project
+    -- appears inside Overview's seven-day window while the spacing still reads
+    -- like a work week rather than five sessions dumped on one afternoon.
+    days_ago      int[] := ARRAY[9, 8, 6, 5, 4, 3, 2, 1, 1, 0];
+    i             int := 0;
+    shift         interval;
+    global_shift  interval;
+BEGIN
+    -- Everything that is not a session moves as one block, anchored to the
+    -- newest session, so a memory chunk never predates the conversation it was
+    -- extracted from.
+    SELECT (date_trunc('day', now()) + interval '9 hours') - max(started_at)
+      INTO global_shift
+      FROM public.conversations;
+
+    -- Sessions move individually: a single shift would preserve the original
+    -- 33-day spread and leave Overview showing two projects out of five.
+    -- Shifting per session keeps each one internally intact — its messages
+    -- travel with it, so durations and gaps survive — while placing them all
+    -- inside the window the page actually looks at.
+    FOR rec IN SELECT id, started_at FROM public.conversations ORDER BY started_at LOOP
+        i := i + 1;
+        shift := (date_trunc('day', now())
+                  - make_interval(days => days_ago[i])
+                  + (rec.started_at - date_trunc('day', rec.started_at)))
+                 - rec.started_at;
+
+        UPDATE public.conversations
+           SET started_at = started_at + shift,
+               ended_at   = ended_at + shift,
+               created_at = created_at + shift,
+               updated_at = updated_at + shift
+         WHERE id = rec.id;
+        UPDATE public.messages
+           SET created_at = created_at + shift
+         WHERE conversation_id = rec.id;
+    END LOOP;
+
+    UPDATE public.memory_chunks   SET created_at    = created_at + global_shift,
+                                      expires_at    = expires_at + global_shift,
+                                      last_accessed = last_accessed + global_shift,
+                                      superseded_at = superseded_at + global_shift;
+    UPDATE public.projects        SET created_at = created_at + global_shift,
+                                      updated_at = updated_at + global_shift;
+    UPDATE public.skills          SET created_at    = created_at + global_shift,
+                                      updated_at    = updated_at + global_shift,
+                                      last_used     = last_used + global_shift,
+                                      file_created  = file_created + global_shift,
+                                      file_modified = file_modified + global_shift;
+    UPDATE public.prompts         SET created_at = created_at + global_shift,
+                                      updated_at = updated_at + global_shift;
+    UPDATE public.entities        SET first_seen = first_seen + global_shift,
+                                      last_seen  = last_seen + global_shift;
+    UPDATE public.entity_mentions SET created_at = created_at + global_shift;
+    UPDATE public.relationships   SET created_at  = created_at + global_shift,
+                                      valid_from  = valid_from + global_shift,
+                                      valid_until = valid_until + global_shift;
+END $$;
+
 
 -- =============================================================================
 -- Verification query — run after loading to confirm row counts

@@ -1,40 +1,78 @@
 # Screenshots
 
-Screenshots of the GUI are stored here.
+Every image here is generated, never taken by hand. The previous set was
+captured with Cmd+Shift+4 and survived two UI rewrites for exactly that reason —
+nobody was going to redo eleven images manually, so the documentation kept
+showing a Streamlit app that had been deleted. Regenerating now costs one
+command.
 
-## Available screenshots
+| File | Surface |
+|---|---|
+| `overview.png` | the worklist, then the last seven days by project |
+| `project.png` | one project's sessions, sortable and searchable |
+| `find.png` | one query across conversations, messages, memory, skills and prompts |
+| `ask.png` | a cited answer assembled from your own records |
+| `timeline.png` | one column per day, one lane per tool |
+| `curate.png` | the queues that keep memory trustworthy |
+| `operate.png` | pipeline state and the jobs that change it |
+| `console.png` | read-only SQL |
 
-- [x] `Dashboard.png` — Main dashboard overview
-- [x] `calendar.png` — Calendar month view
-- [x] `search.png` — Global search across all artifacts
-- [x] `conversations.png` — Recorded Claude Code sessions
-- [x] `memory.png` — Memory chunks grid with category filter
-- [x] `skills.png` — Registered skills catalog
-- [x] `knowledge-graph.png` — Entity / relationship graph
-- [x] `projects.png` — Tracked projects
-- [x] `prompts.png` — Reusable prompt library
-- [x] `ingestion.png` — Pipeline runner
-- [x] `sql-console.png` — Direct SQL access
+## Regenerating them
 
-## How to take screenshots
-
-Take screenshots at **1440 x 900** with the web UI
-GUI running locally:
+Three commands. The first two build a demo database; the third drives a
+headless browser against it.
 
 ```bash
-throughline serve
-# Open http://127.0.0.1:8787 in Chrome or Safari
-# Use macOS Screenshot (Cmd+Shift+4) or a tool like Shottr
+# 1. A database that is not yours, from the bundled fixture
+createdb throughline_demo
+psql -d throughline_demo -f sql/schema.sql
+psql -d throughline_demo -f examples/demo_data.sql
+PGDATABASE=throughline_demo throughline embed --backend ollama   # so Ask works
+
+# 2. Serve it, with HOME pointed somewhere synthetic
+HOME=/path/to/a/fake/home PGDATABASE=throughline_demo throughline serve --port 8791
+
+# 3. Capture
+cd web && npm run screenshots -- --url http://127.0.0.1:8791 --out ../docs/screenshots
 ```
 
-Preferred settings:
-- Dark mode (System Preference → Appearance → Dark)
-- Dark theme (the UI follows your system setting; force it from the ⌘K palette)
-- Browser zoom at 100%
-- No browser chrome visible (use full-screen or crop tightly)
+`examples/demo_data.sql` re-bases its own timestamps on load, so the seven-day
+and per-day views are populated whatever date you run it — see the comment at
+the bottom of that file.
 
-## Naming convention
+## Why HOME is redirected
 
-`<screen-name>.png` — lowercase, hyphenated, no version suffixes.
+The provider bar and the Operate page do not read the database for their
+"on disk" and "pending" columns — they scan the filesystem for each tool's
+session directory. Run the capture against your real `$HOME` and the screenshots
+publish how many sessions you personally have, and where. Point `HOME` at a
+directory holding a handful of synthetic session files instead:
 
-If you add a new major screen, add a checklist entry above before adding the file.
+```
+<fake-home>/.claude/projects/-Users-dev-projects-<name>/*.jsonl
+<fake-home>/.cursor/sessions/*.jsonl
+<fake-home>/.codex/sessions/<date>/rollout-*.jsonl
+<fake-home>/.vibe/logs/session/session_<YYYYMMDD>_<HHMMSS>_<hex>/
+<fake-home>/.zed/data/sessions/session_*.json
+```
+
+The names matter: several adapters match a pattern rather than an extension, so
+a file called `s1.json` is not discovered where `session_1.json` is.
+
+## Rules for a usable screenshot
+
+- **Nothing real.** No real names, paths, emails, tokens, project names, or
+  costs. The fixture is synthetic and the capture must stay pointed at it.
+- **Nothing empty.** A surface showing "nothing in this queue" documents
+  nothing. If a page comes out empty, the fixture is missing rows — fix the
+  fixture, not the screenshot.
+- **Dark theme, 1440×900, 2× scale.** Set by the script; the width is the
+  narrowest desktop the layout targets, so the images show it under pressure.
+- **Full page.** Several surfaces are taller than the viewport and the fold is
+  not a natural crop.
+
+## When they go stale
+
+Any change to a surface's layout, a route, or the fixture. The script fails
+loudly on a selector that no longer matches and still writes a
+`<name>.FAILED.png` so you can see what it found instead.
