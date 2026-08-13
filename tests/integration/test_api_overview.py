@@ -7,6 +7,8 @@ is the bug worth catching.
 
 from __future__ import annotations
 
+import datetime as _dt
+
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
@@ -144,3 +146,34 @@ def test_activity_is_json_safe(client, seeded):
 def test_unknown_api_route_is_404_not_spa(client):
     """/api/* must never fall through to the SPA handler."""
     assert client.get("/api/does-not-exist").status_code == 404
+
+
+def test_last_run_tracks_the_import_not_the_session_start(db_connection):
+    """A four-day-old session start read as "ingestion has stopped".
+
+    `last_run` was `max(started_at)`, so a session opened on Monday and still
+    being refreshed on Thursday reported Monday under a column headed "Last
+    run". Every file on disk was imported and `pending` was 0, but the one date
+    on screen said otherwise — and a user reasonably believed the date.
+    """
+    from throughline.queries import providers as P
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO conversations
+                (session_id, project_path, source_tool, started_at, updated_at, message_count)
+            VALUES (gen_random_uuid(), '/repo/x', 'claude_code',
+                    now() - interval '4 days', now(), 12)
+            """
+        )
+    db_connection.commit()
+
+    res = P.coverage(db_connection)
+    provs = res["providers"] if isinstance(res, dict) else res
+    cc = next(p for p in provs if p["name"] == "claude_code")
+    assert cc["last_run"] is not None
+    age = _dt.datetime.now(_dt.timezone.utc) - cc["last_run"]
+    assert age < _dt.timedelta(hours=1), (
+        f"last_run should follow the refresh, not the session start (got {cc['last_run']})"
+    )

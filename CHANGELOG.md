@@ -67,6 +67,14 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Fixed
 
+- **"Last run" showed when the newest session started, not when the tool last
+  imported.** The provider coverage used `max(started_at)`, so working inside
+  one long-lived session for several days made every surface report a date
+  several days old — while `pending` was 0 and every file on disk had in fact
+  been imported and refreshed hourly. It now uses `max(updated_at)`, which
+  moves whenever a row is written or refreshed, and the column is labelled
+  "Last import" because that is what it is.
+
 - **Cursor, Zed and Vibe sessions could not be ingested at all.** Those three
   adapters passed the tool's own message id straight into `messages.uuid`, a
   `uuid` column. Cursor numbers messages `msg_1`, Zed uses integers, Vibe uses

@@ -131,7 +131,20 @@ def coverage(conn) -> list[dict]:
             SELECT source_tool,
                    count(*) FILTER (WHERE generated_by IS NULL) AS ingested,
                    count(*) FILTER (WHERE generated_by IS NOT NULL) AS generated,
-                   max(started_at) FILTER (WHERE generated_by IS NULL) AS last_run
+                   -- When Throughline last WROTE something for this tool,
+                   -- not when the newest session happened to begin.
+                   --
+                   -- This was `max(started_at)`, which answers a different
+                   -- question and answers it misleadingly under a column
+                   -- headed "Last run": a long session keeps the start time it
+                   -- opened with, so someone working in the same session for
+                   -- four days sees a date four days old and concludes
+                   -- ingestion has stopped. It had not — every file on disk
+                   -- was imported and the session was being refreshed hourly.
+                   -- `updated_at` moves whenever a row is written or
+                   -- refreshed, which is what "did this tool import lately?"
+                   -- actually means.
+                   max(updated_at) FILTER (WHERE generated_by IS NULL) AS last_run
             FROM conversations
             GROUP BY source_tool
             """,

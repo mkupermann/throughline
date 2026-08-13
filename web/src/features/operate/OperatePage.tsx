@@ -15,7 +15,13 @@ const STATUS_LABEL: Record<ProviderCoverage["status"], string> = {
   unknown: "Unknown",
 };
 
-function fmtLastRun(v: string | null): string {
+/** When this tool last had a row written or refreshed — not when a job last ran.
+ *
+ * The distinction matters: a run that finds nothing changed does not move this,
+ * and a long-lived session keeps the start time it opened with. The column was
+ * headed "Last run" over a value that was neither.
+ */
+function fmtLastImport(v: string | null): string {
   return v ? v.slice(0, 16).replace("T", " ") : "—";
 }
 
@@ -57,7 +63,7 @@ function ProvidersTable({
               Excluded
             </th>
             <th scope="col">Ingested</th>
-            <th scope="col">Last run</th>
+            <th scope="col">Last import</th>
             <th scope="col">Status</th>
             <th scope="col">
               <span className="sr-only">Action</span>
@@ -79,7 +85,7 @@ function ProvidersTable({
                   {formatCount(p.excluded)}
                 </td>
                 <td className="tabular">{formatCount(p.ingested)}</td>
-                <td className="tabular">{fmtLastRun(p.last_run)}</td>
+                <td className="tabular">{fmtLastImport(p.last_run)}</td>
                 <td>
                   <span className={`status-pill status-${p.status}`}>
                     {STATUS_LABEL[p.status] ?? p.status}
