@@ -4,24 +4,11 @@ Pure-Python tests; no DB connection required. The DB write paths are
 covered by integration tests against a real Postgres.
 """
 
-import importlib.util
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-
-# Make scripts/_bootstrap importable so loading ingest_hermes.py succeeds
-# (it does `from _bootstrap import use_venv` at the top).
-sys.path.insert(0, str(ROOT / "scripts"))
-
-spec = importlib.util.spec_from_file_location(
-    "ingest_hermes", ROOT / "scripts" / "ingest_hermes.py"
-)
-ih = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ih)
+from throughline.jobs import ingest_hermes as ih
 
 
 class TestRoleMapping:

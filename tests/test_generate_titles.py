@@ -1,15 +1,7 @@
 """Tests for scripts/generate_titles.py — title cleanup and preview building."""
 
 import pytest
-import importlib.util
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "generate_titles", ROOT / "scripts" / "generate_titles.py"
-)
-gt = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gt)
+from throughline.jobs import generate_titles as gt
 
 
 class TestPreviewBuilding:

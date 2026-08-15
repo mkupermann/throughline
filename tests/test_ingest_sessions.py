@@ -3,15 +3,8 @@
 import json
 import hashlib
 import pytest
-import importlib.util
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "ingest_sessions", ROOT / "scripts" / "ingest_sessions.py"
-)
-ingest = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ingest)
+from throughline.jobs import ingest_sessions as ingest
 
 
 class TestContentExtraction:

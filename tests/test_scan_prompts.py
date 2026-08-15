@@ -1,15 +1,9 @@
 """Tests for scripts/scan_prompts.py — CLAUDE.md discovery, variable extraction, project name derivation."""
 
 import pytest
-import importlib.util
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "scan_prompts", ROOT / "scripts" / "scan_prompts.py"
-)
-sp = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sp)
+from throughline.jobs import scan_prompts as sp
 
 
 class TestVariableExtraction:

@@ -234,13 +234,12 @@ def _schema_version(cur) -> str | None:
 def _pending_migrations(cur) -> list[str] | None:
     """Migration files on disk that ``applied_migrations`` does not record.
 
-    Returns None when the answer is unknowable — no tracking table, or the
-    repository's ``sql/migrations`` directory is not next to this package (an
-    installed wheel, a container without the source). None means "not checked";
-    an empty list means "checked, nothing pending". The caller must not collapse
-    the two, or a status report that could not look would claim all-clear.
+    Returns None when the answer is unknowable — for example, when no tracking
+    table exists. None means "not checked"; an empty list means "checked,
+    nothing pending". The caller must not collapse the two, or a status report
+    that could not look would claim all-clear.
     """
-    migrations_dir = Path(__file__).resolve().parent.parent / "sql" / "migrations"
+    migrations_dir = Path(__file__).resolve().parent / "migrations"
     if not migrations_dir.is_dir():
         return None
     try:

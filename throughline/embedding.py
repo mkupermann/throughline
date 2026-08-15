@@ -1,6 +1,7 @@
 """Embedding-backend resolution, shared by every surface.
 
-``scripts/generate_embeddings.py`` owns the actual backends (Ollama, OpenAI).
+``throughline.jobs.generate_embeddings`` owns the actual backends (Ollama,
+OpenAI).
 This module is the thin, *fail-soft* front door to them: it never raises, never
 triggers a model pull, and never blocks a web request on a network call it
 cannot bound.
@@ -13,12 +14,10 @@ and not 500.
 from __future__ import annotations
 
 import os
-import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from throughline.config import repo_root
 
 _lock = threading.Lock()
 _resolved = False
@@ -27,12 +26,8 @@ _reason: str = ""
 
 
 def _load_module():
-    """Import ``scripts/generate_embeddings.py`` without polluting sys.path
-    permanently more than once."""
-    scripts = str(repo_root() / "scripts")
-    if scripts not in sys.path:
-        sys.path.insert(0, scripts)
-    import generate_embeddings  # type: ignore
+    """Return the installable embedding job implementation."""
+    from throughline.jobs import generate_embeddings
 
     return generate_embeddings
 

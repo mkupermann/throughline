@@ -1,15 +1,7 @@
 """Tests for scripts/extract_memory.py — JSON response parsing and transcript building."""
 
 import pytest
-import importlib.util
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "extract_memory", ROOT / "scripts" / "extract_memory.py"
-)
-em = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(em)
+from throughline.jobs import extract_memory as em
 
 
 class TestJSONResponseParsing:

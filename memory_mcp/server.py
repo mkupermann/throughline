@@ -17,26 +17,13 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import psycopg2.extras
 
-# Reuse existing helpers from scripts/. Retrieval itself comes from
-# throughline.queries, the same layer the CLI and the HTTP API use — the MCP
-# server previously imported `semantic_helper` out of the Streamlit `gui/`
-# package, which coupled the memory Claude Code reads to a UI that no longer
-# exists.
-_ROOT = Path(__file__).resolve().parent.parent
-for sub in ("scripts",):
-    p = str(_ROOT / sub)
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-from throughline import embedding as _embedding  # noqa: E402
-from throughline.queries import semantic as _semantic  # noqa: E402
-
-from forget import forget_chunks  # type: ignore  # noqa: E402
-from graph_query import resolve_entity  # type: ignore  # noqa: E402
+from throughline import embedding as _embedding
+from throughline.jobs.forget import forget_chunks
+from throughline.jobs.graph_query import resolve_entity
+from throughline.queries import semantic as _semantic
 
 
 def _semantic_search(conn, query: str, limit: int = 20, project: str | None = None) -> list[dict]:
@@ -61,9 +48,9 @@ def _semantic_search(conn, query: str, limit: int = 20, project: str | None = No
         project=project,
     )
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.fastmcp import FastMCP
 
-from .db import connect  # noqa: E402
+from .db import connect
 
 logger = logging.getLogger("memory-mcp")
 logging.basicConfig(
@@ -531,7 +518,16 @@ def stats() -> dict:
     return payload
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Start the stdio server, or describe the installed entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv in (["-h"], ["--help"]):
+        print("Memory MCP server (stdio transport).")
+        print("Run without arguments from an MCP client configuration.")
+        return
+    if argv:
+        raise SystemExit(f"Unknown argument: {argv[0]}")
     mcp.run()
 
 

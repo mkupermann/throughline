@@ -15,19 +15,7 @@ from typing import Any
 
 import pytest
 
-import importlib.util
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "audit_extraction", ROOT / "scripts" / "audit_extraction.py"
-)
-ae = importlib.util.module_from_spec(spec)
-# Register before exec so the @dataclass decorator's __module__ lookup
-# (sys.modules[cls.__module__].__dict__) doesn't return None.
-sys.modules["audit_extraction"] = ae
-spec.loader.exec_module(ae)
+from throughline.jobs import audit_extraction as ae
 
 
 class TestMeaningfulWords:

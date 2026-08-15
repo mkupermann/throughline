@@ -62,7 +62,7 @@ class _FakeConn:
 
 # ── Ingest token helpers ─────────────────────────────────────────────────────
 def test_first_cwd_returns_first_non_empty():
-    import ingest_sessions as ing
+    from throughline.jobs import ingest_sessions as ing
     entries = [
         {"type": "user", "cwd": ""},
         {"type": "user", "cwd": None},
@@ -74,13 +74,13 @@ def test_first_cwd_returns_first_non_empty():
 
 
 def test_first_cwd_returns_none_when_absent():
-    import ingest_sessions as ing
+    from throughline.jobs import ingest_sessions as ing
     entries = [{"type": "user"}, {"type": "user", "cwd": ""}]
     assert ing._first_cwd(entries) is None
 
 
 def test_per_message_total_sums_all_usage_categories():
-    import ingest_sessions as ing
+    from throughline.jobs import ingest_sessions as ing
     msg = {
         "role": "assistant",
         "usage": {
@@ -95,14 +95,14 @@ def test_per_message_total_sums_all_usage_categories():
 
 
 def test_per_message_total_handles_missing_usage():
-    import ingest_sessions as ing
+    from throughline.jobs import ingest_sessions as ing
     assert ing._per_message_total({"role": "user"}) is None
     assert ing._per_message_total({"role": "assistant", "usage": None}) is None
     assert ing._per_message_total({"role": "assistant", "usage": "weird"}) is None
 
 
 def test_sum_usage_aggregates_across_assistant_entries_only():
-    import ingest_sessions as ing
+    from throughline.jobs import ingest_sessions as ing
     entries = [
         {"message": {"role": "user"}},  # no usage block
         {"message": {"role": "assistant",
@@ -120,7 +120,7 @@ def test_sum_usage_aggregates_across_assistant_entries_only():
 
 # ── Repair: parse_jsonl ──────────────────────────────────────────────────────
 def test_parse_jsonl_extracts_cwd_session_id_and_tokens(tmp_path):
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
 
     f = tmp_path / "session.jsonl"
     f.write_text(
@@ -151,14 +151,14 @@ def test_parse_jsonl_extracts_cwd_session_id_and_tokens(tmp_path):
 
 
 def test_parse_jsonl_missing_file_returns_empty():
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
     cwd, t_in, t_out, sid = rep.parse_jsonl(Path("/nonexistent/path.jsonl"))
     assert (cwd, t_in, t_out, sid) == (None, 0, 0, None)
 
 
 # ── Repair: repair_session ───────────────────────────────────────────────────
 def test_repair_session_aggregates_across_files(tmp_path, monkeypatch):
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
 
     parent = tmp_path / "parent.jsonl"
     parent.write_text(
@@ -195,7 +195,7 @@ def test_repair_session_aggregates_across_files(tmp_path, monkeypatch):
 
 
 def test_repair_session_dry_run_does_not_write(tmp_path):
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
 
     f = tmp_path / "s.jsonl"
     f.write_text(
@@ -214,7 +214,7 @@ def test_repair_session_dry_run_does_not_write(tmp_path):
 
 
 def test_repair_session_no_change_when_already_correct(tmp_path):
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
 
     f = tmp_path / "s.jsonl"
     f.write_text(
@@ -233,7 +233,7 @@ def test_repair_session_no_change_when_already_correct(tmp_path):
 
 
 def test_repair_session_skipped_when_row_missing(tmp_path):
-    import repair_conversations as rep
+    from throughline.jobs import repair_conversations as rep
 
     f = tmp_path / "s.jsonl"
     f.write_text(

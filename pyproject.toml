@@ -79,7 +79,7 @@ exclude = ["tests*", "scripts*", "gui*", "docs*", "examples*", "skill*", "sql*",
 # web/** is the built frontend (vite writes here — see web/vite.config.ts).
 # It is committed and shipped so `pip install throughline` yields a working
 # UI without Node anywhere in the install path.
-throughline = ["py.typed", "web/**/*"]
+throughline = ["py.typed", "web/**/*", "migrations/*.sql", "shell/*.sh"]
 
 [tool.ruff]
 line-length = 120

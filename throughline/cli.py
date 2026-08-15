@@ -5,9 +5,8 @@ Usage::
     throughline <command> [options]
     python -m throughline <command> [options]
 
-Each subcommand is a thin wrapper around the matching script in
-``scripts/`` of the source repository. Python scripts are imported and
-their ``main()`` is called; shell scripts are invoked via ``subprocess``.
+Each subcommand is backed by an installable ``throughline.jobs`` module.
+Top-level scripts remain direct-execution compatibility wrappers.
 
 Run ``throughline --help`` for the full list of commands.
 """
@@ -15,51 +14,30 @@ Run ``throughline --help`` for the full list of commands.
 from __future__ import annotations
 
 import argparse
+import importlib
 import subprocess
 import sys
 from collections.abc import Callable
-from pathlib import Path
 
 from throughline import __version__
-from throughline.config import load_dotenv, repo_root
+from throughline.config import load_dotenv
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
 # --------------------------------------------------------------------------- #
 
 
-def _ensure_scripts_on_path() -> Path:
-    """Add ``<repo>/scripts`` to ``sys.path`` so scripts are importable.
-
-    Returns the resolved repo root so shell-script commands can find their
-    ``.sh`` files under ``scripts/``.
-    """
-    root = repo_root()
-    scripts_dir = root / "scripts"
-    if scripts_dir.is_dir():
-        s = str(scripts_dir)
-        if s not in sys.path:
-            sys.path.insert(0, s)
-    return root
-
-
 def _call_script_main(module_name: str, argv: list[str] | None = None) -> int:
-    """Import a script module and invoke its ``main()`` function.
+    """Import a packaged job module and invoke its ``main()`` function.
 
     ``argv`` replaces ``sys.argv[1:]`` for the duration of the call so the
     script's own argparse usage works as if it had been invoked directly.
     Returns the exit code from the script (or 0 if it returns ``None``).
     """
-    _ensure_scripts_on_path()
     try:
-        module = __import__(module_name)
+        module = importlib.import_module(f"throughline.jobs.{module_name}")
     except ImportError as e:
         print(f"ERROR: Could not import {module_name!r}: {e}", file=sys.stderr)
-        print(
-            "Make sure you are running from a Throughline source checkout "
-            "(editable install) or that the scripts/ directory is present.",
-            file=sys.stderr,
-        )
         return 2
 
     if not hasattr(module, "main"):
@@ -83,8 +61,9 @@ def _call_script_main(module_name: str, argv: list[str] | None = None) -> int:
 
 def _run_shell_script(script_name: str, args: list[str]) -> int:
     """Execute a ``scripts/<script_name>`` shell script with the given args."""
-    root = _ensure_scripts_on_path()
-    script_path = root / "scripts" / script_name
+    from importlib.resources import files
+
+    script_path = files("throughline") / "shell" / script_name
     if not script_path.is_file():
         print(f"ERROR: Shell script not found: {script_path}", file=sys.stderr)
         return 2

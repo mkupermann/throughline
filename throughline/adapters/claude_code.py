@@ -8,9 +8,7 @@ behaviour.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -50,18 +48,10 @@ def _is_title_generator_session(entries: list[dict[str, Any]]) -> bool:
 
 
 def _load_legacy() -> Any:
-    """Import scripts/ingest_sessions.py as a module without running its main()."""
-    root = Path(__file__).resolve().parents[2]
-    scripts_dir = root / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    spec = importlib.util.spec_from_file_location(
-        "_throughline_legacy_ingest_sessions",
-        scripts_dir / "ingest_sessions.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Return the packaged session-ingestion helpers."""
+    from throughline.jobs import ingest_sessions
+
+    return ingest_sessions
 
 
 class ClaudeCodeAdapter(Adapter):

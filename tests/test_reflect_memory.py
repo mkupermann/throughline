@@ -4,7 +4,7 @@ These exercise the JSON-parsing and row-unwrapping logic that every reflection
 mode depends on, with no database required.
 """
 
-import reflect_memory as rm
+from throughline.jobs import reflect_memory as rm
 
 
 class TestParseJsonObject:

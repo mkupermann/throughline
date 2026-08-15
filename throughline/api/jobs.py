@@ -32,8 +32,6 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Iterator, Literal
 
-from throughline.config import repo_root
-
 class JobUnavailable(RuntimeError):
     """A job's environment prerequisites are not met."""
 
@@ -266,7 +264,7 @@ class JobRunner:
         try:
             proc = subprocess.Popen(
                 spec.args,
-                cwd=str(repo_root()),
+                cwd=None,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

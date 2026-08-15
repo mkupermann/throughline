@@ -75,7 +75,7 @@ class _FakeConn:
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 def test_collect_observed_default_uses_memory_chunks_only():
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(
         mc_names=["alpha", "beta", "gamma"],
@@ -87,7 +87,7 @@ def test_collect_observed_default_uses_memory_chunks_only():
 
 
 def test_collect_observed_with_conversations_unions_dedups_and_sorts():
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(
         mc_names=["alpha", "beta", "gamma"],
@@ -99,7 +99,7 @@ def test_collect_observed_with_conversations_unions_dedups_and_sorts():
 
 
 def test_existing_project_names_returns_a_set():
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(mc_names=[], conv_names=[], existing=["proj-x", "proj-y"])
     out = bp.existing_project_names(_FakeConn(cur))
@@ -107,7 +107,7 @@ def test_existing_project_names_returns_a_set():
 
 
 def test_insert_missing_executes_with_active_status_and_commits():
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(mc_names=[], conv_names=[], existing=[])
     conn = _FakeConn(cur)
@@ -123,7 +123,7 @@ def test_insert_missing_executes_with_active_status_and_commits():
 
 
 def test_insert_missing_noop_on_empty_list():
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(mc_names=[], conv_names=[], existing=[])
     conn = _FakeConn(cur)
@@ -133,7 +133,7 @@ def test_insert_missing_noop_on_empty_list():
 
 
 def test_main_dry_run_does_not_write(monkeypatch, capsys):
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(
         mc_names=["alpha", "beta"],
@@ -155,7 +155,7 @@ def test_main_dry_run_does_not_write(monkeypatch, capsys):
 
 
 def test_main_real_run_inserts_and_commits(monkeypatch, capsys):
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     cur = _FakeCursor(
         mc_names=["alpha", "beta"],
@@ -177,7 +177,7 @@ def test_main_real_run_inserts_and_commits(monkeypatch, capsys):
 
 
 def test_main_db_connect_failure_returns_1(monkeypatch, capsys):
-    import backfill_projects as bp
+    from throughline.jobs import backfill_projects as bp
 
     def _raise(**_kw):
         raise RuntimeError("boom")

@@ -1,15 +1,9 @@
 """Tests for scripts/scan_skills.py — SKILL.md frontmatter parsing and trigger extraction."""
 
 import pytest
-import importlib.util
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location(
-    "scan_skills", ROOT / "scripts" / "scan_skills.py"
-)
-scan = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(scan)
+from throughline.jobs import scan_skills as scan
 
 
 class TestSkillMDParsing:
