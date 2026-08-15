@@ -69,7 +69,7 @@ Changelog = "https://github.com/mkupermann/throughline/blob/main/CHANGELOG.md"
 
 [project.scripts]
 throughline = "throughline.cli:main"
-claude-memory-mcp = "memory_mcp.server:main"
+claude-memory-mcp = "memory_mcp.entrypoint:main"
 
 [tool.setuptools.packages.find]
 include = ["throughline*", "memory_mcp*"]

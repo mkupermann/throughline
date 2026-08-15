@@ -423,7 +423,7 @@ def format_human(payload: dict[str, Any]) -> str:
     pending = payload.get("pending_migrations")
     if pending:
         lines.append(f"Pending:  {len(pending)} migration(s) — {', '.join(pending)}")
-        lines.append("          run: python3 scripts/migrate.py")
+        lines.append("          run: throughline migrate")
     elif pending is None:
         lines.append("Pending:  (not checked — no migrations directory beside the package)")
     lines.append("")

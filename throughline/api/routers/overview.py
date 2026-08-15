@@ -108,7 +108,7 @@ def _build_overview(conn, settings: Settings) -> Overview:
                 detail=(
                     "The database schema is older than the code reading it: "
                     + ", ".join(pending_migrations)
-                    + ". Apply them with `python3 scripts/migrate.py` before the next "
+                    + ". Apply them with `throughline migrate` before the next "
                     "ingest — a migration left unapplied has already cost silently "
                     "dropped messages once."
                 ),

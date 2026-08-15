@@ -43,9 +43,18 @@ def test_wheel_contains_runtime_jobs_for_cli_and_mcp(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel) as artifact:
         contents = set(artifact.namelist())
 
-    assert "throughline/jobs/generate_embeddings.py" in contents
-    assert "throughline/jobs/forget.py" in contents
-    assert "throughline/jobs/graph_query.py" in contents
+    expected_jobs = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "throughline" / "jobs").glob("*.py")
+        if path.name != "__init__.py"
+    }
+    expected_migrations = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "throughline" / "migrations").glob("*.sql")
+    }
+
+    assert expected_jobs <= contents
+    assert expected_migrations <= contents
     assert "throughline/shell/backup.sh" in contents
     assert "throughline/shell/install_hooks.sh" in contents
 
@@ -54,7 +63,9 @@ def test_clean_install_runs_throughline_entry_point_outside_checkout(tmp_path: P
     """A non-editable wheel runs its CLI from an unrelated working directory."""
     wheel = _build_wheel(tmp_path)
     env = tmp_path / "venv"
-    subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", str(env)], check=True)
+    subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
+    config = (env / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert "include-system-site-packages = false" in config
     python = env / "bin" / "python"
     subprocess.run([str(python), "-m", "pip", "install", "--no-deps", str(wheel)], check=True)
 
@@ -94,3 +105,35 @@ def test_source_script_wrapper_remains_directly_executable() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "--backend" in result.stdout
+
+
+def test_source_wrapper_bootstraps_before_importing_optional_dependencies(tmp_path: Path) -> None:
+    """A bare interpreter delegates to the project's dependency-bearing venv."""
+    bare_env = tmp_path / "bare-python"
+    subprocess.run([sys.executable, "-m", "venv", str(bare_env)], check=True)
+    result = subprocess.run(
+        [str(bare_env / "bin" / "python"), str(ROOT / "scripts" / "generate_embeddings.py"), "--help"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--backend" in result.stdout
+
+
+def test_packaged_hook_uses_the_throughline_interpreter(tmp_path: Path) -> None:
+    """The installed hook remains tied to the interpreter that installed it."""
+    home = tmp_path / "home"
+    result = subprocess.run(
+        ["bash", str(ROOT / "throughline" / "shell" / "install_hooks.sh")],
+        env={"HOME": str(home), "THROUGHLINE_PYTHON": sys.executable},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    settings = (home / ".claude" / "settings.json").read_text(encoding="utf-8")
+    assert f"{sys.executable} -m throughline.jobs.context_preload" in settings

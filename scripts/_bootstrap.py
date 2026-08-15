@@ -50,16 +50,14 @@ def use_venv() -> None:
     # Find the repo root by walking up from this file.
     repo_root = Path(__file__).resolve().parent.parent
 
-    try:
-        current = Path(sys.executable).resolve()
-    except OSError:
-        return
-
     for cand in _candidate_interpreters(repo_root):
         if not cand.exists():
             continue
         try:
-            if cand.resolve() == current:
+            # Virtualenv interpreters are often symlinks to the same base
+            # Python. Comparing executable targets would therefore mistake a
+            # dependency-incomplete venv for the project's venv.
+            if Path(sys.prefix).resolve() == cand.parent.parent.resolve():
                 return  # already running under the venv
         except OSError:
             continue

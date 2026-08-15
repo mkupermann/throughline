@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -69,7 +70,7 @@ def _run_shell_script(script_name: str, args: list[str]) -> int:
         return 2
     cmd = ["bash", str(script_path), *args]
     try:
-        return subprocess.call(cmd)
+        return subprocess.call(cmd, env={**os.environ, "THROUGHLINE_PYTHON": sys.executable})
     except FileNotFoundError:
         print("ERROR: bash not available on this system.", file=sys.stderr)
         return 2
@@ -239,6 +240,16 @@ def cmd_reflect(args: argparse.Namespace) -> int:
     if args.limit is not None:
         passthrough += ["--limit", str(args.limit)]
     return _call_script_main("reflect_memory", passthrough)
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Apply packaged SQL migrations, or report their status."""
+    passthrough: list[str] = []
+    if args.status:
+        passthrough.append("--status")
+    if args.dry_run:
+        passthrough.append("--dry-run")
+    return _call_script_main("migrate", passthrough)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -553,6 +564,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="Don't write any changes to the database.")
     p.add_argument("--limit", type=int, default=None, help="Cap on pair-comparisons per mode.")
     p.set_defaults(func=cmd_reflect)
+
+    # migrate
+    p = sub.add_parser("migrate", help="Apply packaged database migrations.")
+    p.add_argument("--status", action="store_true", help="List applied and pending migrations.")
+    p.add_argument("--dry-run", action="store_true", help="List pending migrations without applying them.")
+    p.set_defaults(func=cmd_migrate)
 
     # serve
     p = sub.add_parser(

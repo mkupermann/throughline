@@ -158,6 +158,21 @@ def test_collect_status_db_unreachable_returns_safe_payload(monkeypatch):
     json.dumps(payload)
 
 
+def test_status_remedy_uses_the_packaged_migration_command():
+    from throughline.status import format_human
+
+    report = format_human(
+        {
+            "db_reachable": True,
+            "pending_migrations": ["001_example.sql"],
+            "table_row_counts": {},
+        }
+    )
+
+    assert "throughline migrate" in report
+    assert "scripts/migrate.py" not in report
+
+
 def test_collect_status_with_fake_conn_populates_fields():
     from throughline import status as st
 

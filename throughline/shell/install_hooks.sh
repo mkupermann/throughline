@@ -19,7 +19,10 @@ if [[ ! -f "$SETTINGS" ]]; then
   echo "{}" > "$SETTINGS"
 fi
 
-PY="$(command -v python3 || true)"
+PY="${THROUGHLINE_PYTHON:-}"
+if [[ -z "$PY" ]]; then
+  PY="$(command -v python3 || true)"
+fi
 if [[ -z "$PY" ]]; then
   echo "FEHLER: python3 nicht gefunden" >&2
   exit 1
