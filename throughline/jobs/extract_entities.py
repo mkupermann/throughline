@@ -16,6 +16,8 @@ import argparse
 from typing import Any
 
 import psycopg2
+
+from throughline.message_derivations import lock_and_revalidate_conversation
 import psycopg2.extras
 
 from throughline.pii import count_redactions, redact
@@ -277,6 +279,9 @@ def insert_mention(cursor, entity_id: int, source_type: str, source_id: int,
 
 
 def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> tuple:
+    if not lock_and_revalidate_conversation(cursor, conv_id):
+        return (0, 0)
+
     cursor.execute("""
         SELECT role::text, content
         FROM messages

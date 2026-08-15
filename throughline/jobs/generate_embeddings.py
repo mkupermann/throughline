@@ -36,6 +36,8 @@ from typing import Any, List, Sequence
 
 import psycopg2
 
+from throughline.message_derivations import lock_and_revalidate_messages
+
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
@@ -242,7 +244,10 @@ def fetch_pending(cursor: Any, backend: Backend, limit: int | None) -> list[tupl
     return cursor.fetchall()
 
 
-def upsert_embedding(cursor: Any, backend: Backend, source_type: str, source_id: int, vector: list[float]) -> None:
+def upsert_embedding(cursor: Any, backend: Backend, source_type: str, source_id: int, vector: list[float]) -> bool:
+    if source_type == "message" and source_id not in lock_and_revalidate_messages(cursor, [source_id]):
+        return False
+
     vec_literal = "[" + ",".join(f"{v:.7f}" for v in vector) + "]"
     # INSERT … ON CONFLICT auf (source_type, source_id, model)
     sql = f"""
@@ -253,6 +258,7 @@ def upsert_embedding(cursor: Any, backend: Backend, source_type: str, source_id:
                       created_at = now()
     """
     cursor.execute(sql, (source_type, source_id, backend.model, vec_literal))
+    return True
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -320,9 +326,14 @@ def main() -> None:
             continue
 
         try:
-            for (stype, sid), vec in zip(meta, vectors):
+            current_message_ids = lock_and_revalidate_messages(
+                cursor, [sid for stype, sid in meta if stype == "message"]
+            )
+            for (stype, sid), vec in zip(meta, vectors, strict=True):
                 if len(vec) != backend.dim:
                     print(f"  WARN: dim mismatch {len(vec)} != {backend.dim} bei {stype}#{sid}")
+                    continue
+                if stype == "message" and sid not in current_message_ids:
                     continue
                 upsert_embedding(cursor, backend, stype, sid, vec)
             conn.commit()

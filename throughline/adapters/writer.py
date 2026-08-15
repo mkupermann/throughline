@@ -26,6 +26,7 @@ from typing import Any
 import psycopg2
 from psycopg2.extras import Json, execute_values
 
+from throughline.message_derivations import lock_conversations
 from throughline.self_referential import first_user_text, self_referential_reason
 
 from .base import Adapter, IngestSummary, NormalisedConversation
@@ -115,6 +116,7 @@ _MESSAGE_BATCH_SIZE = 500
 
 
 def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> int:
+    lock_conversations(cur, [conv_id])
     # Message IDs are replaced below. Remove rows keyed to those IDs first so
     # semantic search and graph views cannot retain orphaned derivations.
     cur.execute(
@@ -128,10 +130,11 @@ def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> i
     cur.execute(
         """
         DELETE FROM entity_mentions
-        WHERE source_type = 'message'
-          AND source_id IN (SELECT id FROM messages WHERE conversation_id = %s)
+        WHERE (source_type = 'message'
+               AND source_id IN (SELECT id FROM messages WHERE conversation_id = %s))
+           OR (source_type = 'conversation' AND source_id = %s)
         """,
-        (conv_id,),
+        (conv_id, conv_id),
     )
     cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
     if not conv.messages:
