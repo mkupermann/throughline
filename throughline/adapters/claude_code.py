@@ -18,18 +18,47 @@ from typing import Any, Iterable
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 from throughline.self_referential import is_agent_call_transcript
 
-# Sessions whose first user message starts with this marker are headless
-# `claude -p ...` calls issued by scripts/generate_titles.py. Each such call is
-# itself logged as a Claude Code session, then re-ingested here — producing
-# hundreds of indistinguishable "Session-Titel-Generator" rows. Skip them at
-# the adapter boundary so they never enter the DB.
-_TITLE_GENERATOR_MARKER = (
+# Sessions whose first user message starts with any of these markers are
+# headless `claude -p ...` calls issued by the throughline pipeline scripts
+# themselves (title generation, entity/memory extraction, memory reflection).
+# Each such call is logged by Claude Code as its own JSONL session; without
+# filtering, they get re-ingested on every sync and pollute the DB with
+# hundreds of indistinguishable meta rows.
+#
+# When adding a script that shells out via `claude -p ...`, add its unique
+# prompt prefix here.
+_INTERNAL_PIPELINE_PROMPT_PREFIXES: tuple[str, ...] = (
+    # scripts/generate_titles.py — PROMPT
     "Du bekommst einen Auszug aus einer Claude Code Session. "
-    "Generiere einen prägnanten deutschen Titel"
+    "Generiere einen prägnanten deutschen Titel",
+    # scripts/extract_entities.py — PROMPT_TEMPLATE
+    "Du analysierst ein Session-Transcript und extrahierst strukturierte "
+    "Entitäten",
+    # scripts/extract_memory.py — PROMPT_TEMPLATE (current + older phrasing
+    # that still lingers in ~/.claude/projects on machines that ran earlier
+    # versions of the script).
+    "Du analysierst eine Entwickler-Session (Claude Code, Codex, Hermes",
+    "Du analysierst eine Claude Code Entwickler-Session und extrahierst",
+    # scripts/reflect_memory.py — DEDUP_PROMPT
+    "Du bekommst zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank",
+    # scripts/reflect_memory.py — MERGE_PROMPT
+    "Du bekommst zwei Memory-Chunks die denselben Sachverhalt beschreiben",
+    # scripts/reflect_memory.py — CONTRA_PROMPT
+    "Zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank",
+    # scripts/reflect_memory.py — STALE_PROMPT
+    "Ein Memory-Chunk aus einer persoenlichen Wissensdatenbank",
+    # scripts/reflect_memory.py — CONSOLIDATE_PROMPT
+    "Du bekommst mehrere Memory-Chunks zum gleichen Thema",
 )
 
 
-def _is_title_generator_session(entries: list[dict[str, Any]]) -> bool:
+def _is_internal_pipeline_session(entries: list[dict[str, Any]]) -> bool:
+    """True if the session's first user message is a throughline pipeline prompt.
+
+    Only the first user message is inspected — sessions that merely quote a
+    pipeline prompt later (e.g. while editing scripts/*.py) are still
+    ingested.
+    """
     for e in entries:
         msg = e.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user":
@@ -43,9 +72,13 @@ def _is_title_generator_session(entries: list[dict[str, Any]]) -> bool:
                 if isinstance(block, dict) and block.get("type") == "text":
                     text = block.get("text")
                     break
-        if text and text.lstrip().startswith(_TITLE_GENERATOR_MARKER):
-            return True
-        return False
+        if not text:
+            return False
+        stripped = text.lstrip()
+        return any(
+            stripped.startswith(prefix)
+            for prefix in _INTERNAL_PIPELINE_PROMPT_PREFIXES
+        )
     return False
 
 
@@ -180,7 +213,7 @@ class ClaudeCodeAdapter(Adapter):
         if not msg_entries:
             return None
 
-        if _is_title_generator_session(msg_entries):
+        if _is_internal_pipeline_session(msg_entries):
             return None
 
         # cwd from the JSONL is the authoritative project_path.

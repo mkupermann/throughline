@@ -139,18 +139,44 @@ class TestClaudeCodeAdapter:
         assert conv is not None
         assert conv.session_id == real_sid
 
-    def test_skips_title_generator_echo_sessions(self, tmp_path):
-        # Each headless `claude -p` call issued by scripts/generate_titles.py
-        # gets logged as its own Claude Code session. Without this filter the
-        # ingest re-imports them, producing hundreds of duplicate
-        # "Session-Titel-Generator" rows. The adapter must drop them.
+    @pytest.mark.parametrize(
+        "first_user_prompt",
+        [
+            # generate_titles.py
+            "Du bekommst einen Auszug aus einer Claude Code Session. "
+            "Generiere einen prägnanten deutschen Titel (max 60 Zeichen) …",
+            # extract_entities.py
+            "Du analysierst ein Session-Transcript und extrahierst "
+            "strukturierte Entitäten + Beziehungen als JSON. …",
+            # extract_memory.py (current phrasing)
+            "Du analysierst eine Entwickler-Session (Claude Code, Codex, "
+            "Hermes, Continue, Windsurf, Cline) und extrahierst …",
+            # extract_memory.py (older phrasing still present in ~/.claude)
+            "Du analysierst eine Claude Code Entwickler-Session und "
+            "extrahierst verwertbare Erkenntnisse …",
+            # reflect_memory.py — DEDUP
+            "Du bekommst zwei Memory-Chunks aus einer persoenlichen "
+            "Wissensdatenbank. …",
+            # reflect_memory.py — MERGE
+            "Du bekommst zwei Memory-Chunks die denselben Sachverhalt "
+            "beschreiben. …",
+            # reflect_memory.py — CONTRA
+            "Zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank …",
+            # reflect_memory.py — STALE
+            "Ein Memory-Chunk aus einer persoenlichen Wissensdatenbank: …",
+            # reflect_memory.py — CONSOLIDATE
+            "Du bekommst mehrere Memory-Chunks zum gleichen Thema. …",
+        ],
+    )
+    def test_skips_internal_pipeline_echo_sessions(self, tmp_path, first_user_prompt):
+        # Every headless `claude -p` call issued by scripts/*.py is itself
+        # logged as its own Claude Code session. Without this filter the
+        # ingest re-imports them, producing hundreds of duplicate meta rows.
+        # The adapter must drop them — covering title-gen, entity extraction,
+        # memory extraction, and every reflect-memory prompt shape.
         sid = str(uuid.uuid4())
         ts = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc).isoformat()
         path = tmp_path / f"{sid}.jsonl"
-        prompt = (
-            "Du bekommst einen Auszug aus einer Claude Code Session. "
-            "Generiere einen prägnanten deutschen Titel (max 60 Zeichen) ..."
-        )
         _write_jsonl(
             path,
             [
@@ -158,7 +184,7 @@ class TestClaudeCodeAdapter:
                     "type": "user",
                     "uuid": str(uuid.uuid4()),
                     "isSidechain": False,
-                    "message": {"role": "user", "content": prompt},
+                    "message": {"role": "user", "content": first_user_prompt},
                     "timestamp": ts,
                     "sessionId": sid,
                     "cwd": "/repo/throughline",
@@ -170,7 +196,7 @@ class TestClaudeCodeAdapter:
                     "message": {
                         "role": "assistant",
                         "model": "claude-sonnet-4-6",
-                        "content": [{"type": "text", "text": "Some title"}],
+                        "content": [{"type": "text", "text": "response"}],
                     },
                     "timestamp": ts,
                     "sessionId": sid,
