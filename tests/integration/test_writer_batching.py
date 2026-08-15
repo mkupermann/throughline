@@ -12,12 +12,12 @@ introduces are not about speed:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from throughline.adapters import writer
 from throughline.adapters.base import NormalisedConversation, NormalisedMessage
-
-from datetime import datetime, timezone
 
 pytestmark = pytest.mark.integration
 
@@ -117,3 +117,97 @@ def test_empty_message_list_clears_and_returns_zero(db_connection):
     with db_connection.cursor() as cur:
         cur.execute("SELECT count(*) FROM messages WHERE conversation_id = %s", (conv_id,))
         assert cur.fetchone()[0] == 0
+
+
+def test_refresh_replaces_every_normalised_conversation_field(db_connection):
+    """A changed transcript must clear stale values instead of preserving them."""
+    sid = "55555555-5555-5555-5555-555555555555"
+    original = _conversation(3, sid)
+    original.token_count_in = 7
+    original.token_count_out = 8
+    original.source_tool = "initial-adapter"
+    _write(db_connection, original)
+    refreshed = NormalisedConversation(
+        session_id=sid,
+        project_path="/repo/refreshed",
+        model=None,
+        entrypoint="scheduled-import",
+        git_branch=None,
+        started_at=datetime(2026, 2, 3, 4, 5, tzinfo=timezone.utc),
+        ended_at=None,
+        messages=_conversation(1, sid).messages,
+        token_count_in=123,
+        token_count_out=None,
+        summary=None,
+        metadata={"current": "only"},
+        source_tool=None,
+    )
+
+    conv_id, _ = _write(db_connection, refreshed)
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT project_path, model, entrypoint, git_branch, started_at, ended_at,
+                   message_count, token_count_in, token_count_out, summary, metadata, source_tool
+            FROM conversations WHERE id = %s
+            """,
+            (conv_id,),
+        )
+        row = cur.fetchone()
+
+    assert row == (
+        "/repo/refreshed",
+        None,
+        "scheduled-import",
+        None,
+        datetime(2026, 2, 3, 4, 5, tzinfo=timezone.utc),
+        None,
+        1,
+        123,
+        None,
+        None,
+        {"current": "only"},
+        None,
+    )
+
+
+def test_message_replacement_removes_message_derived_rows(db_connection):
+    """Embeddings and mentions for replaced message ids must not become orphans."""
+    sid = "66666666-6666-6666-6666-666666666666"
+    conv_id, _ = _write(db_connection, _conversation(2, sid))
+    with db_connection.cursor() as cur:
+        cur.execute("SELECT id FROM messages WHERE conversation_id = %s ORDER BY id", (conv_id,))
+        old_message_ids = [row[0] for row in cur.fetchall()]
+        cur.executemany(
+            "INSERT INTO embeddings (source_type, source_id) VALUES ('message', %s)",
+            [(message_id,) for message_id in old_message_ids],
+        )
+        cur.executemany(
+            """
+            INSERT INTO entity_mentions (source_type, source_id, context_snippet)
+            VALUES ('message', %s, 'old message')
+            """,
+            [(message_id,) for message_id in old_message_ids],
+        )
+    db_connection.commit()
+
+    _write(db_connection, _conversation(1, sid))
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM embeddings WHERE source_type = 'message' AND source_id = ANY(%s)",
+            (old_message_ids,),
+        )
+        embedding_count = cur.fetchone()[0]
+        cur.execute(
+            "SELECT count(*) FROM entity_mentions WHERE source_type = 'message' AND source_id = ANY(%s)",
+            (old_message_ids,),
+        )
+        mention_count = cur.fetchone()[0]
+        cur.execute("SELECT content FROM messages WHERE conversation_id = %s", (conv_id,))
+        replacement_content = [row[0] for row in cur.fetchall()]
+
+    assert embedding_count == 0
+    assert mention_count == 0
+    assert replacement_content == ["message 0"]

@@ -19,14 +19,16 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import psycopg2
 from psycopg2.extras import Json, execute_values
 
-from .base import Adapter, IngestSummary, NormalisedConversation
 from throughline.self_referential import first_user_text, self_referential_reason
+
+from .base import Adapter, IngestSummary, NormalisedConversation
 
 
 def _db_config() -> dict[str, Any]:
@@ -38,7 +40,7 @@ def _db_config() -> dict[str, Any]:
     }
 
 
-def _connect() -> "psycopg2.extensions.connection":
+def _connect() -> psycopg2.extensions.connection:
     cfg = _db_config()
     try:
         return psycopg2.connect(**cfg)
@@ -62,12 +64,19 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
              token_count_in, token_count_out, summary, metadata, source_tool)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (session_id) DO UPDATE
-        SET ended_at      = EXCLUDED.ended_at,
-            message_count = EXCLUDED.message_count,
-            model         = COALESCE(EXCLUDED.model, conversations.model),
-            metadata      = conversations.metadata || EXCLUDED.metadata,
-            source_tool   = COALESCE(EXCLUDED.source_tool, conversations.source_tool),
-            updated_at    = NOW()
+        SET project_path    = EXCLUDED.project_path,
+            model           = EXCLUDED.model,
+            entrypoint      = EXCLUDED.entrypoint,
+            git_branch      = EXCLUDED.git_branch,
+            started_at      = EXCLUDED.started_at,
+            ended_at        = EXCLUDED.ended_at,
+            message_count   = EXCLUDED.message_count,
+            token_count_in  = EXCLUDED.token_count_in,
+            token_count_out = EXCLUDED.token_count_out,
+            summary         = EXCLUDED.summary,
+            metadata        = EXCLUDED.metadata,
+            source_tool     = EXCLUDED.source_tool,
+            updated_at      = NOW()
         RETURNING id
         """,
         (
@@ -106,6 +115,24 @@ _MESSAGE_BATCH_SIZE = 500
 
 
 def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> int:
+    # Message IDs are replaced below. Remove rows keyed to those IDs first so
+    # semantic search and graph views cannot retain orphaned derivations.
+    cur.execute(
+        """
+        DELETE FROM embeddings
+        WHERE source_type = 'message'
+          AND source_id IN (SELECT id FROM messages WHERE conversation_id = %s)
+        """,
+        (conv_id,),
+    )
+    cur.execute(
+        """
+        DELETE FROM entity_mentions
+        WHERE source_type = 'message'
+          AND source_id IN (SELECT id FROM messages WHERE conversation_id = %s)
+        """,
+        (conv_id,),
+    )
     cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
     if not conv.messages:
         return 0
