@@ -65,7 +65,8 @@ def test_pending_migration_appears_as_critical(db_env, client):
     assert item is not None, "a pending migration did not reach the worklist"
     assert item["severity"] == "critical"
     assert item["count"] >= 1
-    assert "migrate.py" in item["detail"], "the item must say how to fix it"
+    assert "throughline migrate" in item["detail"], "the item must name the installed remediation command"
+    assert "migrate.py" not in item["detail"], "the API must not require a source checkout"
     assert payload["verdict"] in ("degraded", "broken")
 
 
