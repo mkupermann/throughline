@@ -10,7 +10,7 @@ NNN_short_description.sql
 ```
 
 - `NNN` — zero-padded sequential number (`000`, `001`, `002`, ...). New migrations always
-  get the next free number; never reuse or re-order.
+  get the next free number; never reuse or re-order. The runner rejects duplicate ordinals.
 - `short_description` — lowercase, underscore-separated, terse but meaningful
   (`add_project_priorities`, `drop_legacy_mentions_index`, ...).
 - `.sql` — always plain SQL (no templating, no `psql` meta-commands that require a shell).
@@ -46,9 +46,14 @@ python3 scripts/migrate.py --dry-run    # show what would run, without running i
 The runner:
 
 1. Ensures `applied_migrations` exists.
-2. Lists every file matching `sql/migrations/*.sql` in lexicographic order.
+2. Validates every file matching `throughline/migrations/NNN_*.sql` and applies it in ordinal order.
 3. For each file not in `applied_migrations`, runs it in a single transaction and records
    the name on success.
+
+The historical duplicate `001_widen_conversation_token_counts.sql` was
+renumbered to `005_widen_conversation_token_counts.sql`. Databases that already
+recorded the former name treat `005` as applied; the runner never rewrites or
+deletes migration history.
 
 ## Baseline
 

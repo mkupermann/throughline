@@ -203,8 +203,8 @@ def _parse_drift_count(reasoning: str | None, action: str | None) -> int:
 def _schema_version(cur) -> str | None:
     """The most recently applied migration, or None if nothing tracks them.
 
-    Reads ``applied_migrations`` — the table ``scripts/migrate.py`` actually
-    creates and writes (see sql/migrations/README.md). This asked for a
+    Reads ``applied_migrations`` — the table ``throughline migrate`` actually
+    creates and writes (see ``throughline/migrations/README.md``). This asked for a
     ``schema_migrations`` table with a ``version`` column until 2026-08-10.
     No such table has ever existed, so a fully migrated database reported
     "(no schema_migrations table)", which reads as *migrations are not tracked
@@ -221,12 +221,16 @@ def _schema_version(cur) -> str | None:
         row = cur.fetchone()
         if not row or not row[0]:
             return None
-        cur.execute(
-            "SELECT migration_name FROM public.applied_migrations "
-            "ORDER BY migration_name DESC LIMIT 1"
-        )
-        row = cur.fetchone()
-        return str(row[0]) if row else None
+        cur.execute("SELECT migration_name FROM public.applied_migrations")
+        from throughline.jobs.migrate import LEGACY_MIGRATION_NAMES
+
+        current_name_for_legacy = {
+            legacy_name: current_name
+            for current_name, legacy_names in LEGACY_MIGRATION_NAMES.items()
+            for legacy_name in legacy_names
+        }
+        applied = [current_name_for_legacy.get(str(row[0]), str(row[0])) for row in cur.fetchall()]
+        return max(applied, default=None)
     except Exception:
         return None
 
@@ -251,7 +255,9 @@ def _pending_migrations(cur) -> list[str] | None:
         applied = {str(r[0]) for r in cur.fetchall()}
     except Exception:
         return None
-    return sorted(p.name for p in migrations_dir.glob("*.sql") if p.name not in applied)
+    from throughline.jobs.migrate import is_applied
+
+    return sorted(p.name for p in migrations_dir.glob("*.sql") if not is_applied(p, applied))
 
 
 def collect_status(*, conn=None) -> dict[str, Any]:

@@ -17,8 +17,8 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 
@@ -118,6 +118,40 @@ def test_db(_pg_available) -> Iterator[dict]:
 
 
 @pytest.fixture
+def empty_test_db(_pg_available) -> Iterator[dict]:
+    """Create a database with no schema, for migration lifecycle tests."""
+    db_name = f"tl_migration_{uuid.uuid4().hex[:12]}"
+
+    admin = psycopg2.connect(**_admin_dsn())
+    admin.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+    with admin.cursor() as cur:
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+    admin.close()
+
+    conn_info = {
+        "dbname": db_name,
+        "user": _admin_dsn()["user"],
+        "password": _admin_dsn()["password"],
+        "host": _admin_dsn()["host"],
+        "port": _admin_dsn()["port"],
+    }
+
+    try:
+        yield conn_info
+    finally:
+        admin = psycopg2.connect(**_admin_dsn())
+        admin.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        with admin.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (db_name,),
+            )
+            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
+        admin.close()
+
+
+@pytest.fixture
 def db_env(monkeypatch, test_db) -> dict:
     """
     Wire the PG* env vars that scripts pick up, pointing at ``test_db``.
@@ -133,7 +167,7 @@ def db_env(monkeypatch, test_db) -> dict:
 
 
 @pytest.fixture
-def db_connection(test_db) -> Iterator["psycopg2.extensions.connection"]:
+def db_connection(test_db) -> Iterator[psycopg2.extensions.connection]:
     """A plain psycopg2 connection to the freshly created test DB."""
     conn = psycopg2.connect(**test_db)
     try:

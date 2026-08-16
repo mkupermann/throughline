@@ -10,7 +10,7 @@ from throughline import providers as P
 
 pytestmark = pytest.mark.integration
 
-MIGRATION = Path(__file__).resolve().parents[2] / "sql" / "migrations" / "002_source_tool.sql"
+MIGRATION = Path(__file__).resolve().parents[2] / "throughline" / "migrations" / "002_source_tool.sql"
 
 
 def _apply(conn):

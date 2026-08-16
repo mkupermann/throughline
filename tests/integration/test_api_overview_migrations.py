@@ -77,7 +77,7 @@ def test_fully_migrated_database_says_nothing(db_env, client):
 
     migrations = sorted(
         p.name
-        for p in (pathlib.Path(__file__).resolve().parents[2] / "sql" / "migrations").glob("*.sql")
+        for p in (pathlib.Path(__file__).resolve().parents[2] / "throughline" / "migrations").glob("*.sql")
     )
     conn = psycopg2.connect(**db_env)
     try:

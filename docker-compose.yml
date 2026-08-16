@@ -53,14 +53,25 @@ services:
     volumes:
       # Persistent database storage — contains all memory data. Do not delete.
       - postgres_data:/var/lib/postgresql/data
-      # Schema is applied automatically on first start of an empty volume
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 10s
+
+  # Applies the packaged, versioned migrations to new and persistent volumes.
+  # Application processes wait for this service to finish successfully.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *pg-env
+    command: ["throughline", "migrate"]
 
   # ---------------------------------------------------------------------------
   # Throughline web UI + JSON API — http://127.0.0.1:8788
@@ -81,6 +92,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       <<: *pg-env
     ports:
@@ -110,6 +123,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       <<: *pg-env
     volumes: *source-mounts

@@ -3,21 +3,20 @@
 -- cache-creation and cache-read tokens, easily into the billions on a
 -- long-lived session) fit without an out-of-range exception.
 --
--- The original ingest never populated these columns, so the only
--- existing values are zeros — a widening cast is therefore lossless.
--- The repair script `scripts/repair_conversations.py` then back-fills
--- correct totals from the JSONL `usage` blocks.
+-- This file was originally released as
+-- 001_widen_conversation_token_counts.sql, which duplicated the ordinal of
+-- 001_message_dedup.sql. The migration runner preserves that historic name as
+-- an applied alias; never rename rows in applied_migrations.
 --
--- ALTER COLUMN ... TYPE refuses to run while a view depends on the
--- column, so v_conversation_stats is dropped and re-created in the
--- same transaction. The view definition is unchanged.
+-- ALTER COLUMN ... TYPE refuses to run while a view depends on the column, so
+-- v_conversation_stats is dropped and re-created in the same transaction.
 
 BEGIN;
 
 DROP VIEW IF EXISTS public.v_conversation_stats;
 
 ALTER TABLE public.conversations
-    ALTER COLUMN token_count_in  TYPE bigint USING token_count_in::bigint;
+    ALTER COLUMN token_count_in TYPE bigint USING token_count_in::bigint;
 
 ALTER TABLE public.conversations
     ALTER COLUMN token_count_out TYPE bigint USING token_count_out::bigint;

@@ -73,6 +73,21 @@ def test_ordering_is_by_name_not_by_timestamp(db_env):
         conn.close()
 
 
+def test_legacy_migration_name_reports_its_current_ordinal(db_env):
+    """A safe filename alias must not make a fully upgraded schema look old."""
+    conn = psycopg2.connect(**db_env)
+    try:
+        _apply(
+            conn,
+            "000_baseline.sql",
+            "004_generated_by.sql",
+            "001_widen_conversation_token_counts.sql",
+        )
+        assert collect_status(conn=conn)["schema_version"] == "005_widen_conversation_token_counts.sql"
+    finally:
+        conn.close()
+
+
 def test_untracked_database_reports_none(db_env):
     """No tracking table must not masquerade as a version."""
     conn = psycopg2.connect(**db_env)
