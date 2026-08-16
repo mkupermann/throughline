@@ -41,9 +41,10 @@ import shutil
 import socket
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -206,7 +207,9 @@ def check_postgres_reachable() -> CheckResult:
             f"cannot connect to Postgres at {host}:{port}/{db}",
             remedy=(
                 "start Postgres (e.g. `pg_ctl start` / `brew services start postgresql@16`) "
-                "or `docker compose up -d`; check PGHOST/PGPORT/PGDATABASE env vars"
+                "or `docker compose up -d`; check PGHOST/PGPORT/PGDATABASE env vars. "
+                "After changing credentials on an existing Compose volume, run the "
+                "credential-rotate command in docs/DEPLOYMENT.md before restarting web."
             ),
             details={"host": host, "port": port, "db": db},
         )

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 import psycopg2
 from psycopg2.pool import PoolError, ThreadedConnectionPool
@@ -80,7 +80,7 @@ def _get_or_create_pool(settings: Settings) -> ThreadedConnectionPool:
 
 
 @contextmanager
-def connection(settings: Settings) -> Iterator["psycopg2.extensions.connection"]:
+def connection(settings: Settings) -> Iterator[psycopg2.extensions.connection]:
     """Yield a pooled connection, returning it on the way out.
 
     A connection that has gone stale (server restarted, laptop slept) is
@@ -96,9 +96,9 @@ def connection(settings: Settings) -> Iterator["psycopg2.extensions.connection"]
     broken = False
     try:
         yield conn
-    except psycopg2.Error:
+    except psycopg2.Error as exc:
         broken = True
-        raise
+        raise DatabaseUnavailable(str(exc)) from exc
     finally:
         try:
             if broken or conn.closed:

@@ -8,6 +8,8 @@ beyond localhost.
 ## 1. Docker Compose (recommended)
 
 ```bash
+python3 scripts/init_compose_env.py
+docker compose config --quiet
 docker compose up -d
 ```
 
@@ -19,10 +21,16 @@ Starts:
 - `web` — web UI + JSON API on `http://127.0.0.1:8788`. The container listens
   on 8787 internally; only the published host port differs.
 
+`scripts/init_compose_env.py` creates or updates the ignored `.env` with a
+random database password plus your numeric UID/GID. The image remains
+unprivileged, and that matching identity can read 0600 source files on Linux
+and Docker Desktop for macOS. Re-run it after moving the checkout to another
+user, then rebuild with `docker compose build`.
+
 Host tool directories (`~/.claude`, `~/.cursor`, `~/.codex`, …) are mounted
-read-only under `/root` inside the containers, where the adapters expect them.
-A directory that does not exist on the host is simply reported as
-"not present" — no configuration needed.
+read-only under `/home/throughline`, which is the application user's `$HOME`
+and therefore the path the adapters resolve. A directory that does not exist
+on the host is simply reported as "not present" — no configuration needed.
 
 Optional profiles:
 
@@ -37,7 +45,7 @@ containerized client, use `docker compose run -i --rm mcp`.
 Running an ingest inside the stack:
 
 ```bash
-docker compose exec gui throughline ingest --all
+docker compose exec web throughline ingest --all
 ```
 
 Note for Linux hosts: the Cline mount in `docker-compose.yml` uses the macOS
@@ -77,9 +85,12 @@ backup daily.
 Run only PostgreSQL in Docker and everything else natively:
 
 ```bash
+python3 scripts/init_compose_env.py
 docker compose up -d postgres
-export PGHOST=127.0.0.1 PGPORT=5433 PGDATABASE=throughline \
-       PGUSER=throughline PGPASSWORD=throughline_dev_password
+export PGHOST=127.0.0.1 PGPORT=5433
+export PGDATABASE="$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)"
+export PGUSER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"
+export PGPASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
 throughline ingest --all
 ```
 
@@ -103,13 +114,33 @@ Restore into an empty database with `psql < backup.sql`. Source session files
 remain owned by their respective tools; Throughline never modifies them
 (read-only mounts in Docker, read-only access natively).
 
+## Existing Compose volume: rotate a legacy password
+
+PostgreSQL only applies `POSTGRES_PASSWORD` while initializing an empty data
+directory. If this checkout used the old fixed Compose password and you now
+set a new one in `.env`, rotate the existing role before starting migration-
+gated services:
+
+```bash
+python3 scripts/init_compose_env.py
+docker compose up -d postgres
+THROUGHLINE_LEGACY_DB_PASSWORD='the-old-password' \
+  docker compose --profile credential-rotate run --rm credential-rotate
+docker compose up -d
+```
+
+The one-off service connects using only the supplied legacy password and
+updates `CURRENT_USER` to the password in `.env`; it does not run during normal
+startup. Use `THROUGHLINE_LEGACY_DB_USER` as well if the legacy role was not
+`throughline`. If `throughline doctor` reports an authentication failure after
+a Compose credential change, run this command before retrying `docker compose
+up -d`.
+
 ## What not to do
 
 - Do not expose PostgreSQL or the GUI beyond localhost without adding
   authentication and TLS; neither ships with any.
 - Do not run one shared Throughline database for multiple users — the schema
   and threat model are single-user by design.
-- Do not change the default database password in `docker-compose.yml` alone —
-  it is a development credential; if the port must be reachable from other
-  machines, treat the whole deployment as out of scope of the current threat
-  model.
+- Do not expose PostgreSQL or the GUI beyond localhost. A random local
+  password is not a substitute for authentication and TLS on a network.

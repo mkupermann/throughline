@@ -67,6 +67,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
+        THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,6 +91,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
+        THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
     container_name: throughline-web
     restart: unless-stopped
     depends_on:
@@ -122,6 +128,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
+        THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
     container_name: throughline-mcp
     stdin_open: true
     depends_on:
@@ -135,6 +144,30 @@ services:
     command: ["python", "-m", "memory_mcp.server"]
     profiles:
       - mcp
+
+  # One-off, explicit upgrade aid for a volume created with the former
+  # password. It never starts automatically: supply the old password only for
+  # the rotation invocation documented in docs/DEPLOYMENT.md.
+  credential-rotate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
+        THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: "${POSTGRES_DB:-throughline}"
+      PGUSER: "${THROUGHLINE_LEGACY_DB_USER:-throughline}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example first)}"
+      THROUGHLINE_LEGACY_DB_PASSWORD: "${THROUGHLINE_LEGACY_DB_PASSWORD:-}"
+    command: ["sh", "/app/throughline/shell/rotate_compose_credentials.sh"]
+    profiles:
+      - credential-rotate
 
   # ---------------------------------------------------------------------------
   # Ollama (optional, profile "embeddings") — local embedding generation

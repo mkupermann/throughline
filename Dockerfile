@@ -3,6 +3,9 @@
 
 FROM python:3.12-slim
 
+ARG THROUGHLINE_UID=1000
+ARG THROUGHLINE_GID=1000
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -14,7 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
     curl \
-    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin throughline \
+    && (getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline) \
+    && useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID" \
+        --shell /usr/sbin/nologin throughline \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

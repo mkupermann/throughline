@@ -132,3 +132,54 @@ def test_health_endpoint_reports_database_unavailable(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["error"] == "database_unavailable"
+
+
+def test_health_maps_a_real_psycopg_error_to_database_unavailable(monkeypatch):
+    """A SELECT failure must reach the 503 handler, not escape as a 500."""
+    pytest.importorskip("fastapi")
+    import psycopg2
+    from fastapi.testclient import TestClient
+
+    from throughline.api import app as api_app
+    from throughline.api import deps
+
+    class BrokenCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _query: str) -> None:
+            raise psycopg2.OperationalError("server closed the connection")
+
+    class BrokenConnection:
+        closed = False
+
+        def cursor(self) -> BrokenCursor:
+            return BrokenCursor()
+
+        def rollback(self) -> None:
+            pass
+
+    class Pool:
+        def __init__(self):
+            self.returned_closed = False
+
+        def getconn(self) -> BrokenConnection:
+            return BrokenConnection()
+
+        def putconn(self, _conn: BrokenConnection, *, close: bool = False) -> None:
+            self.returned_closed = close
+
+    pool = Pool()
+    monkeypatch.setattr(api_app, "init_pool", lambda _settings: None)
+    monkeypatch.setattr(api_app, "close_pool", lambda: None)
+    monkeypatch.setattr(deps, "_pool", pool)
+
+    with TestClient(api_app.create_app(Settings(web_dist=None))) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "database_unavailable"
+    assert pool.returned_closed is True

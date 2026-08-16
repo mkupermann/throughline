@@ -9,7 +9,7 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 |------|----------|---------|
 | `throughline-ingest.timer`  | hourly           | `scripts/ingest_sessions.py` — pull new Claude Code JSONL sessions into Postgres |
 | `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
-| `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `claude_memory` database                    |
+| `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
 
 All three services are `Type=oneshot`: they run, finish, and exit. The timer units keep
 them on schedule.
@@ -18,7 +18,7 @@ them on schedule.
 
 - Linux with `systemd --user` support (any mainstream distro from the last five years).
 - `python3` available at `/usr/bin/python3` (adjust the `ExecStart` line if yours differs).
-- A running `postgres` with the `claude_memory` database and the schema from `sql/schema.sql`
+- A running `postgres` with the `throughline` database and the schema from `sql/schema.sql`
   applied. Either run it locally, or start the container from `docker-compose.yml`.
 - Your checkout of Throughline at `~/.local/share/throughline/` (or update the paths in each
   unit file — `%h` expands to `$HOME`, `%u` to your username).
@@ -81,6 +81,14 @@ Environment="PGPASSWORD=changeme"
 ```
 
 Drop-ins are preserved across updates to the shipped unit file.
+
+The shipped default is `PGDATABASE=throughline`. To keep a legacy
+`claude_memory` database instead, add this to the same drop-in:
+
+```ini
+[Service]
+Environment="PGDATABASE=claude_memory"
+```
 
 ## Uninstall
 

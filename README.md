@@ -90,12 +90,22 @@ supported and both are tested; Windows works under WSL2 and is not tested.
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
+python3 scripts/init_compose_env.py
 docker compose up -d
-docker compose exec gui throughline ingest --all   # first run only
+docker compose exec web throughline ingest --all   # first run only
 # Web UI: http://127.0.0.1:8788
 ```
 
-The compose stack starts PostgreSQL 16 with pgvector (schema applied automatically) and the web UI. Ingestion is not automatic on first boot — run it once, then schedule it. The port is published on loopback only — the API has no authentication, by design for a single-user local tool. Host tool directories are mounted read-only into the container, so ingestion works out of the box. Optional profiles: `--profile mcp` (adds the MCP server so assistants can query memory mid-session) and `--profile embeddings` (adds a local Ollama container, so embeddings never need an API key).
+The initialization command creates/updates ignored `.env` with a random database
+password and your numeric UID/GID. It keeps the application unprivileged while
+letting it read your 0600 local source files on Linux and Docker Desktop for
+macOS. The compose stack starts PostgreSQL 16 with pgvector and the web UI.
+Ingestion is not automatic on first boot — run it once, then schedule it. The
+port is published on loopback only — the API has no authentication, by design
+for a single-user local tool. Host tool directories are mounted read-only into
+the container. Optional profiles: `--profile mcp` (adds the MCP server so
+assistants can query memory mid-session) and `--profile embeddings` (adds a
+local Ollama container, so embeddings never need an API key).
 
 The container publishes **8788**; a native `throughline serve` listens on **8790**. Different ports on purpose, so both can run at once.
 
