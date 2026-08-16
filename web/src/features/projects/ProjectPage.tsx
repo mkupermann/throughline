@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, Search, X } from "lucide-react";
 
-import { projectsApi } from "@/lib/api";
+import { ApiError, projectsApi } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 
 /**
@@ -63,7 +63,7 @@ export function ProjectPage() {
   const [draft, setDraft] = useState(q);
   const [offset, setOffset] = useState(0);
 
-  const { data, isPending } = useQuery({
+  const { data, isPending, error, refetch } = useQuery({
     queryKey: ["project-sessions", project, order, q, offset, includeGenerated],
     queryFn: () =>
       projectsApi.sessions(project, {
@@ -87,6 +87,28 @@ export function ProjectPage() {
   }
 
   const sessions = data?.sessions ?? [];
+
+  if (error) {
+    const e = error as ApiError;
+    return (
+      <>
+        <header className="page-header">
+          <Link to="/" className="backlink">
+            ← Overview
+          </Link>
+          <h1 className="page-title">{project}</h1>
+        </header>
+        <div className="empty-state">
+          <h2>Could not load project history</h2>
+          <p>{e.message}</p>
+          {e.hint && <p className="empty-hint">{e.hint}</p>}
+          <button type="button" className="button" onClick={() => refetch()}>
+            Try again
+          </button>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

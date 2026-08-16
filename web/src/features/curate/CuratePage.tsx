@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from "lucide-react";
 
-import { curateApi, type ActResult, type CurateItem, type QueueSummary } from "@/lib/api";
+import { ApiError, curateApi, type ActResult, type CurateItem, type QueueSummary } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
 import { NewChunkForm } from "./NewChunkForm";
@@ -50,7 +50,10 @@ export function CuratePage() {
   const toast = useToast();
   const qc = useQueryClient();
 
-  const { data: queues } = useQuery({ queryKey: ["curate", "queues"], queryFn: curateApi.queues });
+  const { data: queues, error: queuesError, refetch: refetchQueues } = useQuery({
+    queryKey: ["curate", "queues"],
+    queryFn: curateApi.queues,
+  });
 
   // An explicit ?queue= always wins — that is the user's own choice, and a
   // shared or bookmarked link must land where it says.
@@ -75,7 +78,7 @@ export function CuratePage() {
   // fallback happens to be, then re-fetches the real one — one wasted request
   // and a visible flash of the wrong queue's contents. With an explicit
   // ?queue= there is nothing to wait for, so it fetches immediately.
-  const { data: queue, isPending } = useQuery({
+  const { data: queue, isPending, error: queueError, refetch: refetchQueue } = useQuery({
     queryKey: ["curate", "queue", active],
     queryFn: () => curateApi.queue(active),
     enabled: resolved !== undefined,
@@ -206,6 +209,20 @@ export function CuratePage() {
   ) : null;
 
   const body = useMemo(() => {
+    if (queueError) {
+      const e = queueError as ApiError;
+      return (
+        <div className="empty-state">
+          <OctagonAlert size={22} aria-hidden />
+          <h2>Cannot load this queue</h2>
+          <p>{e.message}</p>
+          {e.hint && <p className="empty-hint">{e.hint}</p>}
+          <button type="button" className="button" onClick={() => refetchQueue()}>
+            Try again
+          </button>
+        </div>
+      );
+    }
     if (isPending) return <div className="skeleton skeleton-row" />;
     if (!items.length) {
       return (
@@ -234,7 +251,46 @@ export function CuratePage() {
         ))}
       </ul>
     );
-  }, [isPending, items, queue, selected]);
+  }, [isPending, items, queue, queueError, refetchQueue, selected]);
+
+  if (queuesError) {
+    const e = queuesError as ApiError;
+    return (
+      <>
+        <header className="page-header">
+          <h1 className="page-title">Curate</h1>
+        </header>
+        <div className="empty-state">
+          <OctagonAlert size={22} aria-hidden />
+          <h2>Cannot load curation queues</h2>
+          <p>{e.message}</p>
+          {e.hint && <p className="empty-hint">{e.hint}</p>}
+          <button type="button" className="button" onClick={() => refetchQueues()}>
+            Try again
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (queues && queues.queues.length === 0) {
+    return (
+      <>
+        <header className="page-header">
+          <h1 className="page-title">Curate</h1>
+          <p className="page-subtitle">Every queue is clear.</p>
+        </header>
+        <div className="curate-toolbar">
+          <NewChunkForm />
+        </div>
+        <div className="empty-state">
+          <CheckCircle2 size={22} aria-hidden />
+          <h2>Nothing to curate</h2>
+          <p>There are no curation queues on this database.</p>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

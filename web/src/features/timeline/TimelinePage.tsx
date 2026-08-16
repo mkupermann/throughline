@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { OctagonAlert, RefreshCw } from "lucide-react";
 
-import { providersApi, timelineApi } from "@/lib/api";
+import { ApiError, providersApi, timelineApi } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { readProviders } from "@/lib/providerScope";
 
@@ -123,7 +124,7 @@ export function TimelinePage() {
     return p;
   }, [range.since, range.until, providers.join(",")]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["timeline", qs.toString()],
     queryFn: () => timelineApi.range(qs),
   });
@@ -241,8 +242,16 @@ export function TimelinePage() {
     for (const [key, n] of totals) {
       if (n <= 0) continue;
       const [lane, day] = key.split("|");
-      // Latest day wins; within a day, the lane that saw the most of it.
-      if (!bestDay || day > bestDay || (day === bestDay && n > (totals.get(`${bestLane}|${bestDay}`) ?? 0))) {
+      // Latest day wins; within a day, the busiest lane wins. Equal totals
+      // need a stable final key too: SQL row order is not a UI decision, and
+      // otherwise reloading the same timeline could open a different lane.
+      const bestCount = bestLane && bestDay ? totals.get(`${bestLane}|${bestDay}`) ?? 0 : 0;
+      if (
+        !bestDay ||
+        day > bestDay ||
+        (day === bestDay &&
+          (n > bestCount || (n === bestCount && lane.localeCompare(bestLane ?? "") < 0)))
+      ) {
         bestLane = lane;
         bestDay = day;
       }
@@ -272,7 +281,20 @@ export function TimelinePage() {
 
       {isLoading && <p className="muted">Loading…</p>}
 
-      {!isLoading && lanes.length === 0 && (
+      {error && (
+        <div className="empty-state">
+          <OctagonAlert size={22} aria-hidden />
+          <h2>Cannot load the timeline</h2>
+          <p>{(error as ApiError).message}</p>
+          {(error as ApiError).hint && <p className="empty-hint">{(error as ApiError).hint}</p>}
+          <button type="button" className="button" onClick={() => refetch()}>
+            <RefreshCw size={14} aria-hidden />
+            Try again
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !error && lanes.length === 0 && (
         <p className="empty-state">No activity in this range.</p>
       )}
 

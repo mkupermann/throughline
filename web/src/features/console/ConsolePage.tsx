@@ -39,7 +39,10 @@ export function ConsolePage() {
   const [showSchema, setShowSchema] = useState(true);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
-  const { data: schema } = useQuery({ queryKey: ["console", "schema"], queryFn: consoleApi.schema });
+  const { data: schema, error: schemaError } = useQuery({
+    queryKey: ["console", "schema"],
+    queryFn: consoleApi.schema,
+  });
 
   const run = useMutation({
     mutationFn: (text: string) => consoleApi.query(text),
@@ -216,6 +219,10 @@ export function ConsolePage() {
                 </ul>
               </details>
             ))}
+
+          {showSchema && schemaError && (
+            <p className="empty-hint">Schema unavailable: {(schemaError as Error).message}</p>
+          )}
 
           <div className="section-label" style={{ marginTop: "var(--space-4)" }}>
             Starting points

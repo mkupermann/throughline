@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TimelineRange, TimelineDayItem } from "@/lib/api";
 import { TimelinePage } from "./TimelinePage";
@@ -72,6 +72,15 @@ function renderAt(path = "/timeline") {
 }
 
 describe("TimelinePage", () => {
+  beforeEach(() => {
+    range.mockClear();
+    day.mockClear();
+    providersList.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("renders one lane per provider present in the range, labelled from the registry", async () => {
     // Fix: lane labels used to bypass the registry and show the raw
     // source_tool value ("claude_code") while the provider chips showed the
@@ -321,6 +330,36 @@ describe("TimelinePage", () => {
     // to.
     expect(await screen.findByText("Latest thing")).toBeTruthy();
     expect(day.mock.calls.at(-1)?.[0]).toBe("2026-02-01");
+  });
+
+  it("deterministically opens the latest active day and lane", async () => {
+    // This is the production path: the default range is derived from now and
+    // the latest day has two equally busy lanes. Before the tie-breaker, the
+    // response row order chose the open lane, so the first request could
+    // change without any user action.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T12:00:00Z"));
+    range.mockResolvedValueOnce({
+      since: "2026-05-18",
+      until: "2026-08-16",
+      bucket: "day",
+      cells: [
+        { bucket: "2026-08-16", provider: "hermes", kind: "conversation", n: 4 },
+        { bucket: "2026-08-16", provider: "claude_code", kind: "conversation", n: 4 },
+        { bucket: "2026-08-15", provider: "claude_code", kind: "conversation", n: 99 },
+      ],
+    });
+    day.mockResolvedValue({ day: "2026-08-16", items: [] });
+
+    renderAt();
+    // Freeze only construction of the initial range. Testing Library's async
+    // polling uses timers too, so let it use the real clock afterwards.
+    vi.useRealTimers();
+
+    await screen.findByRole("region", { name: /events on 2026-08-16/i });
+    expect(String(range.mock.calls.at(-1)?.[0] ?? "")).toContain("until=2026-08-16");
+    expect(day.mock.calls.at(-1)?.[0]).toBe("2026-08-16");
+    expect(String(day.mock.calls.at(-1)?.[1] ?? "")).toBe("provider=claude_code");
   });
 
   it("stays closed once dismissed, rather than reopening itself", async () => {
