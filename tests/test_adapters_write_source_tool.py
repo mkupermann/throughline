@@ -25,12 +25,12 @@ def test_normalised_conversation_carries_source_tool():
 def test_adapter_sets_source_tool_to_its_own_name(adapter):
     """Bar 3: no adapter may leave provider identity to chance."""
     src = inspect.getsource(type(adapter))
-    assert "source_tool=" in src, (
-        f"{adapter.name} never sets source_tool; provider identity would be NULL for everything it ingests"
-    )
-    assert f'source_tool="{adapter.name}"' in src or "source_tool=self.name" in src, (
-        f"{adapter.name} must write its own registered name"
-    )
+    assert (
+        "source_tool=" in src
+    ), f"{adapter.name} never sets source_tool; provider identity would be NULL for everything it ingests"
+    assert (
+        f'source_tool="{adapter.name}"' in src or "source_tool=self.name" in src
+    ), f"{adapter.name} must write its own registered name"
 
 
 @pytest.mark.parametrize("adapter", all_adapters(), ids=lambda a: a.name)

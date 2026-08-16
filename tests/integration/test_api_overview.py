@@ -39,15 +39,13 @@ def client(db_env, monkeypatch):
 @pytest.fixture()
 def seeded(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, model, entrypoint, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/repo/alpha', 'claude', 'claude-code',
                     now() - interval '1 day', 9, 'seed')
             RETURNING id
-            """
-        )
+            """)
         conv = cur.fetchone()[0]
         cur.execute(
             """
@@ -185,14 +183,12 @@ def test_last_run_tracks_the_import_not_the_session_start(db_connection):
     from throughline.queries import providers as P
 
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, source_tool, started_at, updated_at, message_count)
             VALUES (gen_random_uuid(), '/repo/x', 'claude_code',
                     now() - interval '4 days', now(), 12)
-            """
-        )
+            """)
     db_connection.commit()
 
     res = P.coverage(db_connection)
@@ -200,6 +196,6 @@ def test_last_run_tracks_the_import_not_the_session_start(db_connection):
     cc = next(p for p in provs if p["name"] == "claude_code")
     assert cc["last_run"] is not None
     age = _dt.datetime.now(_dt.timezone.utc) - cc["last_run"]
-    assert age < _dt.timedelta(hours=1), (
-        f"last_run should follow the refresh, not the session start (got {cc['last_run']})"
-    )
+    assert age < _dt.timedelta(
+        hours=1
+    ), f"last_run should follow the refresh, not the session start (got {cc['last_run']})"

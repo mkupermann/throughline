@@ -154,8 +154,7 @@ def aggregate(
             provider_expr = f"COALESCE({provider_col}, '{UNATTRIBUTED}')"
             provider_filter = _provider_filter(provider_col, providers, named_providers, include_null)
 
-        parts.append(
-            f"""
+        parts.append(f"""
             SELECT date_trunc(%(bucket)s, {ts})::date AS bucket,
                    {provider_expr} AS provider,
                    '{kind}' AS kind,
@@ -166,8 +165,7 @@ def aggregate(
               {provider_filter}
               {human_filter}
             GROUP BY 1, 2
-            """
-        )
+            """)
 
     if not parts:
         return []
@@ -212,8 +210,7 @@ def day_detail(
             provider_expr = f"COALESCE({provider_col}, '{UNATTRIBUTED}')"
             provider_filter = _provider_filter(provider_col, providers, named_providers, include_null)
 
-        parts.append(
-            f"""
+        parts.append(f"""
             SELECT {id_expr} AS id,
                    '{kind}' AS kind,
                    {provider_expr} AS provider,
@@ -225,8 +222,7 @@ def day_detail(
               AND {ts} < (%(day)s::date + interval '1 day')
               {human_filter}
               {provider_filter}
-            """
-        )
+            """)
 
     if not parts:
         return []
@@ -244,10 +240,7 @@ def day_detail(
     #
     # Wrapped in a subquery because Postgres allows only result column names in
     # an ORDER BY that follows UNION ALL, never an expression.
-    sql = (
-        "SELECT * FROM (\n"
-        + " UNION ALL ".join(parts)
-        + """
+    sql = "SELECT * FROM (\n" + " UNION ALL ".join(parts) + """
         ) u
         ORDER BY CASE u.kind
                    WHEN 'conversation' THEN 0
@@ -260,7 +253,6 @@ def day_detail(
                  u.ts DESC, u.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """
-    )
     return rows(conn, sql, params)
 
 

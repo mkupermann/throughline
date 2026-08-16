@@ -26,15 +26,13 @@ FILLER = (
 @pytest.fixture()
 def corpus(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, model, entrypoint, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/repo/alpha', 'claude', 'claude-code',
                     now() - interval '2 days', 4, 'Postgres migration notes')
             RETURNING id
-            """
-        )
+            """)
         conv = cur.fetchone()[0]
 
         # The term sits AFTER the ranking prefix, so it can only be found if
@@ -101,9 +99,9 @@ def test_finds_a_term_buried_past_the_ranking_prefix(corpus):
     """A match beyond RANK_PREFIX still has to appear in the result set."""
     res = F.find(corpus, "pgvector", filters=F.FindFilters(kinds=["message"]), limit=100)
     snippets = [(r["snippet"] or "") for r in res.items]
-    assert any(s.startswith("This is a long assistant message") for s in snippets), (
-        "the long message whose match sits past the prefix was dropped"
-    )
+    assert any(
+        s.startswith("This is a long assistant message") for s in snippets
+    ), "the long message whose match sits past the prefix was dropped"
 
 
 def test_prominent_match_outranks_buried_match(corpus):
@@ -144,9 +142,9 @@ def test_result_shape_is_uniform_across_kinds(corpus):
 def test_lexical_only_when_no_backend_and_says_so(corpus):
     res = F.find(corpus, "pgvector", limit=10)
     assert res.modes == ["lexical"]
-    assert any("Semantic search is off" in n for n in res.notes), (
-        "a degraded search must explain itself, not silently return less"
-    )
+    assert any(
+        "Semantic search is off" in n for n in res.notes
+    ), "a degraded search must explain itself, not silently return less"
 
 
 def test_empty_query_returns_nothing(corpus):

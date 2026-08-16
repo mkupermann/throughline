@@ -34,15 +34,13 @@ def client(db_env, monkeypatch):
 @pytest.fixture()
 def corpus(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, model, entrypoint, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/repo/alpha', 'claude', 'claude-code',
                     now() - interval '1 day', 2, 'A pgvector conversation')
             RETURNING id
-            """
-        )
+            """)
         conv = cur.fetchone()[0]
         cur.execute(
             "INSERT INTO messages (conversation_id, role, content, created_at) "
@@ -151,8 +149,7 @@ def provider_corpus(db_connection):
     something to keep — and a fourth (cursor) with no rows at all, to prove a
     provider-with-no-data case returns empty rather than everything."""
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, source_tool, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/p', 'claude_code', now(), 1, 'alpha'),
@@ -160,8 +157,7 @@ def provider_corpus(db_connection):
                    (gen_random_uuid(), '/p', 'hermes',      now(), 1, 'gamma'),
                    (gen_random_uuid(), '/p', 'windsurf',    now(), 1, 'delta')
             RETURNING id, source_tool
-            """
-        )
+            """)
         by_provider: dict[str, list[int]] = {}
         for conv_id, tool in cur.fetchall():
             by_provider.setdefault(tool, []).append(conv_id)

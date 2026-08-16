@@ -107,9 +107,11 @@ def scan_directory(skills_dir: Path, skill_type: str) -> list[dict[str, Any]]:
                 "path": str(skill_path),
                 "triggers": meta.get("triggers", []),
                 "skill_type": skill_type,
-                "file_created": datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc)
-                if hasattr(stat, "st_birthtime")
-                else datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
+                "file_created": (
+                    datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc)
+                    if hasattr(stat, "st_birthtime")
+                    else datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
+                ),
                 "file_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
             }
         )

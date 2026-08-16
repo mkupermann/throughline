@@ -306,14 +306,16 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
                 else None
             ),
             uuid=_stable_uuid(_NS, msg.get("message_id"), f"vibe:{session_uuid}:msg:{len(normalised_messages)}"),
-            metadata={
-                "injected": msg.get("injected", False),
-                "reasoning_content": _clean_ansi_content(msg.get("reasoning_content", ""))[:2000],
-                "reasoning_message_id": msg.get("reasoning_message_id"),
-                "tool_call_id": msg.get("tool_call_id"),
-            }
-            if msg.get("injected")
-            else {},
+            metadata=(
+                {
+                    "injected": msg.get("injected", False),
+                    "reasoning_content": _clean_ansi_content(msg.get("reasoning_content", ""))[:2000],
+                    "reasoning_message_id": msg.get("reasoning_message_id"),
+                    "tool_call_id": msg.get("tool_call_id"),
+                }
+                if msg.get("injected")
+                else {}
+            ),
         )
         normalised_messages.append(normalised_msg)
 

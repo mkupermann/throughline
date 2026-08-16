@@ -19,20 +19,16 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def corpus(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations (session_id, project_path, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/repo/registered', now(), 1, 'x'),
                    (gen_random_uuid(), '/repo/unregistered', now(), 1, 'y')
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             INSERT INTO memory_chunks (source_type, content, category, project_name)
             VALUES ('manual', 'a note about registered',   'insight', 'registered'),
                    ('manual', 'a note about unregistered', 'insight', 'unregistered')
-            """
-        )
+            """)
         # Only one of the two projects has a registry row.
         cur.execute(
             "INSERT INTO projects (name, description, status) VALUES ('registered', 'has a registry row', 'active')"

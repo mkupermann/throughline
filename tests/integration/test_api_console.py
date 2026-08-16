@@ -47,12 +47,10 @@ def client(db_env):
 @pytest.fixture()
 def seeded(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO memory_chunks (source_type, content, category, confidence)
             SELECT 'manual', 'row ' || g, 'insight', 0.8 FROM generate_series(1, 25) g
-            """
-        )
+            """)
     db_connection.commit()
     return db_connection
 

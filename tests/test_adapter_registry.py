@@ -45,6 +45,6 @@ def test_adapter_homes_use_user_directory():
 
     home = os.path.expanduser("~")
     for a in all_adapters():
-        assert str(a.home).startswith(home), (
-            f"{a.name}.home={a.home!r} is not under {home!r} — did you forget to .expanduser()?"
-        )
+        assert str(a.home).startswith(
+            home
+        ), f"{a.name}.home={a.home!r} is not under {home!r} — did you forget to .expanduser()?"

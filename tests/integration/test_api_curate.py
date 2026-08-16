@@ -41,12 +41,10 @@ def client(db_env, monkeypatch):
 @pytest.fixture()
 def chunks(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations (session_id, project_path, started_at, message_count)
             VALUES (gen_random_uuid(), '/repo/alpha', now(), 1) RETURNING id
-            """
-        )
+            """)
         conv = cur.fetchone()[0]
         cur.execute(
             """

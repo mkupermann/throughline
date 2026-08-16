@@ -13,15 +13,13 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def corpus(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, model, entrypoint, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/repo/alpha', 'claude', 'claude-code',
                     now() - interval '3 days', 3, 'alpha work')
             RETURNING id
-            """
-        )
+            """)
         conv = cur.fetchone()[0]
         cur.execute(
             "INSERT INTO messages (conversation_id, role, content, created_at) "
@@ -109,9 +107,9 @@ def test_browse_respects_filters(corpus, db_connection):
 
 def test_browse_warns_when_capped(corpus, db_connection):
     res = F.browse(db_connection, F.FindFilters(kinds=["memory"]), limit=2)
-    assert any("most recent" in n for n in res.notes), (
-        "a capped listing must say so rather than presenting a partial total as complete"
-    )
+    assert any(
+        "most recent" in n for n in res.notes
+    ), "a capped listing must say so rather than presenting a partial total as complete"
 
 
 def test_graph_is_limited_to_the_given_sources(corpus, db_connection):

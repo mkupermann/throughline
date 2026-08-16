@@ -48,8 +48,7 @@ def main() -> int:
     cur = conn.cursor()
     # LATERAL rather than a correlated subquery per row: one pass over the
     # messages index instead of one query per conversation.
-    cur.execute(
-        """
+    cur.execute("""
         SELECT c.id, c.generated_by, m.content
         FROM conversations c
         LEFT JOIN LATERAL (
@@ -57,8 +56,7 @@ def main() -> int:
             WHERE conversation_id = c.id AND role = 'user'
             ORDER BY id LIMIT 1
         ) m ON true
-        """
-    )
+        """)
     rows = cur.fetchall()
 
     changes: list[tuple[str | None, int]] = []

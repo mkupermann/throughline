@@ -23,8 +23,7 @@ def _apply(conn):
 def corpus(db_connection):
     with db_connection.cursor() as cur:
         cur.execute("ALTER TABLE conversations DROP COLUMN IF EXISTS source_tool")
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, entrypoint, started_at, message_count, metadata)
             VALUES
@@ -35,8 +34,7 @@ def corpus(db_connection):
                 (gen_random_uuid(), '/e', 'zed',          now(), 1, '{}'::jsonb),
                 (gen_random_uuid(), '/f', '',             now(), 1, '{}'::jsonb),
                 (gen_random_uuid(), '/g', NULL,           now(), 1, '{}'::jsonb)
-            """
-        )
+            """)
     db_connection.commit()
     return db_connection
 

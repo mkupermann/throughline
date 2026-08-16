@@ -201,9 +201,9 @@ def test_pushdown_matches_python_filter(seeded):
     new = {(a, b) for a, b, _full_b, _sim in _run(seeded, NEW_SQL, marker_re=conflicts._CONTRADICTION_SQL_RE)}
 
     assert legacy, "fixture produced no conflicts — it cannot discriminate"
-    assert new == legacy, (
-        f"pushdown changed the result set: missing={sorted(legacy - new)[:10]} extra={sorted(new - legacy)[:10]}"
-    )
+    assert (
+        new == legacy
+    ), f"pushdown changed the result set: missing={sorted(legacy - new)[:10]} extra={sorted(new - legacy)[:10]}"
 
 
 def test_pushdown_examines_fewer_pairs(seeded):

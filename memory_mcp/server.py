@@ -493,16 +493,14 @@ def preload_summary() -> dict:
     conn = connect()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT id, reflection_type, affected_chunks, action_taken,
                        reasoning, confidence, created_at
                 FROM memory_reflections
                 WHERE reflection_type = 'preload'
                 ORDER BY created_at DESC
                 LIMIT 1
-                """
-            )
+                """)
             row = cur.fetchone()
     finally:
         conn.close()

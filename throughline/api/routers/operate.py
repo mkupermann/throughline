@@ -54,12 +54,14 @@ def status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
             "pgvector_usable": vector_ok,
             # The catalogue can list pgvector while its library is missing —
             # exactly what a Homebrew major-version bump does. Say which.
-            "note": None
-            if vector_ok
-            else (
-                "pgvector is registered but its shared library cannot be loaded. "
-                "Every query touching a vector column fails. Reinstall pgvector "
-                "for this PostgreSQL major version."
+            "note": (
+                None
+                if vector_ok
+                else (
+                    "pgvector is registered but its shared library cannot be loaded. "
+                    "Every query touching a vector column fails. Reinstall pgvector "
+                    "for this PostgreSQL major version."
+                )
             ),
         },
         "embedding": {

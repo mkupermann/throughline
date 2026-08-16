@@ -12,15 +12,13 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def corpus(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, source_tool, started_at, message_count, summary)
             VALUES (gen_random_uuid(), '/p', 'claude_code', now(), 1, 'zebrafish study'),
                    (gen_random_uuid(), '/p', 'hermes',      now(), 1, 'zebrafish study'),
                    (gen_random_uuid(), '/p', NULL,          now(), 1, 'zebrafish study')
-            """
-        )
+            """)
     db_connection.commit()
     return db_connection
 

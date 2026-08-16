@@ -18,15 +18,13 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def two_claude_sessions(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO conversations
                 (session_id, project_path, entrypoint, source_tool, started_at, message_count)
             VALUES (gen_random_uuid(), '/repo/x', 'cli',     'claude_code', now(), 1),
                    (gen_random_uuid(), '/repo/x', 'sdk-cli', 'claude_code', now(), 1)
             RETURNING id
-            """
-        )
+            """)
     db_connection.commit()
     return db_connection
 

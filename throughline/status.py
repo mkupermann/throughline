@@ -300,14 +300,12 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                 pass
 
             try:
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT
                         (SELECT count(*) FROM public.memory_chunks) AS chunks,
                         (SELECT count(*) FROM public.embeddings
                             WHERE source_type = 'memory_chunk') AS embedded
-                    """
-                )
+                    """)
                 row = cur.fetchone()
                 if row and row[0]:
                     chunks, embedded = int(row[0]), int(row[1] or 0)
@@ -371,8 +369,7 @@ def collect_status(*, conn=None) -> dict[str, Any]:
             # ``action_taken`` distinguishes drift-flagged runs from clean ones.
             # ``reasoning`` carries the parseable counts ("… N drifted.").
             try:
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT created_at, action_taken,
                            COALESCE(array_length(affected_chunks, 1), 0) AS sampled,
                            reasoning
@@ -380,8 +377,7 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                     WHERE reflection_type = 'audit'
                     ORDER BY created_at DESC NULLS LAST
                     LIMIT 1
-                    """
-                )
+                    """)
                 row = cur.fetchone()
                 if row:
                     when, action, sampled, reasoning = row

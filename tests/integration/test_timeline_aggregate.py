@@ -385,15 +385,13 @@ def test_day_detail_lists_conversations_before_messages(db_env):
     conn = psycopg2.connect(**db_env)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            cur.execute("""
                 INSERT INTO conversations (session_id, project_path, model, entrypoint,
                                            started_at, message_count, summary, source_tool)
                 VALUES (gen_random_uuid(), '/repo', 'm', 'cli',
                         '2026-05-05T09:00:00Z', 3, 'a session', 'claude_code')
                 RETURNING id
-                """
-            )
+                """)
             conv_id = cur.fetchone()[0]
             # Messages are later in time, so a time-only ordering puts every
             # one of them ahead of the conversation.

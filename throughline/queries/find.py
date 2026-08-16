@@ -645,8 +645,7 @@ def _semantic(
 
     parts = []
     if mem_ok:
-        parts.append(
-            f"""
+        parts.append(f"""
             SELECT 'memory'::text AS kind, mc.id AS id, NULL::text AS title,
                    left(mc.content, 400) AS snippet, mc.project_name AS project,
                    mc.created_at AS occurred_at, mc.category::text AS category,
@@ -659,11 +658,9 @@ def _semantic(
             WHERE e.source_type = 'memory_chunk' AND e.model = %(model)s
               AND e.{col} IS NOT NULL
               {mem_clauses}
-            """
-        )
+            """)
     if msg_ok:
-        parts.append(
-            f"""
+        parts.append(f"""
             SELECT 'message'::text AS kind, m.id AS id, c.summary AS title,
                    left(m.content, 400) AS snippet, c.project_name AS project,
                    m.created_at AS occurred_at, m.role::text AS category,
@@ -677,8 +674,7 @@ def _semantic(
               AND e.{col} IS NOT NULL
               {msg_clauses}
               {msg_proj}
-            """
-        )
+            """)
 
     sql = " UNION ALL ".join(parts)
     return rows(

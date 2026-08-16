@@ -180,16 +180,14 @@ def _backfill_projects_from_observed(cur: Any) -> int:
     Idempotent. ON CONFLICT DO NOTHING so manually-edited rows are never
     clobbered. Returns the number of rows actually inserted.
     """
-    cur.execute(
-        """
+    cur.execute("""
         SELECT DISTINCT project_name
         FROM (
             SELECT project_name FROM memory_chunks WHERE project_name IS NOT NULL AND project_name <> ''
             UNION ALL
             SELECT project_name FROM conversations  WHERE project_name IS NOT NULL AND project_name <> ''
         ) o
-        """
-    )
+        """)
     observed = [r[0] for r in cur.fetchall()]
     if not observed:
         return 0

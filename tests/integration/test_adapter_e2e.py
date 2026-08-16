@@ -83,8 +83,7 @@ def _make_hermes(root: Path) -> Path:
     sessions.mkdir(parents=True)
     # state.db: one session, two messages.
     conn = sqlite3.connect(root / "state.db")
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE sessions (
             id TEXT PRIMARY KEY, source TEXT NOT NULL, model TEXT, title TEXT,
             started_at REAL NOT NULL, ended_at REAL, system_prompt TEXT,
@@ -99,8 +98,7 @@ def _make_hermes(root: Path) -> Path:
             timestamp REAL NOT NULL, token_count INTEGER, finish_reason TEXT,
             reasoning TEXT, reasoning_content TEXT, reasoning_details TEXT
         );
-        """
-    )
+        """)
     conn.execute(
         "INSERT INTO sessions (id, source, model, title, started_at, ended_at, message_count) "
         "VALUES ('hermes-S1', 'cli', 'claude-opus-4-7', 'DB-only session', 1700000000.0, 1700000600.0, 2)"
@@ -368,9 +366,9 @@ def test_run_many_writes_every_source_end_to_end(tmp_path, db_env, monkeypatch):
     for name, expected in EXPECTED_MESSAGES.items():
         summary = by_name[name]
         assert summary.ingested >= 1, f"{name}: nothing ingested"
-        assert summary.messages_written >= expected, (
-            f"{name}: {summary.messages_written} messages, expected at least {expected}"
-        )
+        assert (
+            summary.messages_written >= expected
+        ), f"{name}: {summary.messages_written} messages, expected at least {expected}"
         assert summary.errors == 0, f"{name}: {summary.errors} error(s)"
 
     # DB-side checks: rows actually landed.

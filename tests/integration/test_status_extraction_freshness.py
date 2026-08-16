@@ -66,8 +66,8 @@ def test_reflection_output_does_not_count_as_extraction(db_env):
         _insert_chunk(conn, "reflection_merge")
         _insert_chunk(conn, "consolidation")
 
-        assert collect_status(conn=conn).get("last_extraction_at") is None, (
-            "reflection/consolidation output must not register as extraction"
-        )
+        assert (
+            collect_status(conn=conn).get("last_extraction_at") is None
+        ), "reflection/consolidation output must not register as extraction"
     finally:
         conn.close()

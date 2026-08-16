@@ -108,8 +108,7 @@ STALE_TRIGGERS = [
     "kw ",
 ]
 DATE_PATTERN = re.compile(
-    r"\b(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?|\d{4}-\d{2}-\d{2}|"
-    r"q[1-4]/\d{2,4}|kw\s?\d{1,2})\b",
+    r"\b(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?|\d{4}-\d{2}-\d{2}|" r"q[1-4]/\d{2,4}|kw\s?\d{1,2})\b",
     re.IGNORECASE,
 )
 
@@ -618,10 +617,7 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
     stats = {"clusters": len(clusters), "consolidated": 0, "errors": 0}
     for key, items in clusters:
         ids = [i["id"] for i in items]
-        items_text = "\n\n".join(
-            f"[ID {i['id']}] {i['content']}"
-            for i in items[:8]  # cap per cluster
-        )
+        items_text = "\n\n".join(f"[ID {i['id']}] {i['content']}" for i in items[:8])  # cap per cluster
         prompt = CONSOLIDATE_PROMPT.format(items=items_text, LANG=_prompts.output_language())
         resp = call_model(prompt)
         obj = parse_json_object(resp)

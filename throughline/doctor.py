@@ -569,8 +569,7 @@ def check_archive_consistency() -> CheckResult:
         return CheckResult("archive_consistency", "archive", "warn", "skipped (Postgres not reachable)")
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT
                   (SELECT count(*) FROM messages m
                      WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = m.conversation_id)),
@@ -582,8 +581,7 @@ def check_archive_consistency() -> CheckResult:
                       LEFT JOIN messages m ON m.conversation_id = c.id
                       GROUP BY c.id, c.message_count
                       HAVING c.message_count IS DISTINCT FROM count(m.id)) t)
-                """
-            )
+                """)
             orphan_messages, dangling_chunks, count_drift = (int(v) for v in cur.fetchone())
     finally:
         conn.close()
