@@ -34,10 +34,14 @@ ln -sfn "$PWD" ~/.local/share/throughline      # or copy, if you prefer
 mkdir -p ~/.config/systemd/user
 cp systemd/*.service systemd/*.timer ~/.config/systemd/user/
 
-# 3) Tell systemd about the new units.
+# 3) Install one shared database configuration for all three jobs.
+mkdir -p ~/.config/throughline
+install -m 600 systemd/throughline.env ~/.config/throughline/throughline.env
+
+# 4) Tell systemd about the new units.
 systemctl --user daemon-reload
 
-# 4) Enable + start the three timers.
+# 5) Enable + start the three timers.
 systemctl --user enable --now \
     throughline-ingest.timer \
     throughline-extract.timer \
@@ -65,29 +69,29 @@ journalctl --user -u throughline-ingest.service -f
 
 ## Configuration
 
-Each `.service` file sets a handful of `Environment=` lines (`PGDATABASE`, `PGUSER`,
-`PGHOST`, `PGPORT`). Override these by creating a drop-in:
+All three services read `~/.config/throughline/throughline.env`, which owns
+`PGDATABASE`, `PGHOST`, and `PGPORT`. `PGUSER` remains the systemd user. Add
+`PGPASSWORD` to the shared file when password authentication is required:
 
 ```bash
-systemctl --user edit throughline-ingest.service
+nano ~/.config/throughline/throughline.env
 ```
 
-and adding:
+For example:
 
 ```ini
-[Service]
-Environment="PGHOST=db.example.internal"
-Environment="PGPASSWORD=changeme"
+PGHOST=db.example.internal
+PGPASSWORD=changeme
 ```
 
-Drop-ins are preserved across updates to the shipped unit file.
+The shared file is not overwritten by unit updates.
 
 The shipped default is `PGDATABASE=throughline`. To keep a legacy
-`claude_memory` database instead, add this to the same drop-in:
+`claude_memory` database instead, change the one shared file; all ingest,
+extract, and backup jobs then use it:
 
 ```ini
-[Service]
-Environment="PGDATABASE=claude_memory"
+PGDATABASE=claude_memory
 ```
 
 ## Uninstall

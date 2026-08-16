@@ -42,13 +42,15 @@ def initialise(env_file: Path) -> bool:
         lines = _upsert(lines, "POSTGRES_PASSWORD", secrets.token_urlsafe(32))
         changed = True
 
-    for key, value in (
-        ("POSTGRES_DB", "throughline"),
-        ("POSTGRES_USER", "throughline"),
-        ("THROUGHLINE_UID", str(os.getuid())),
-        ("THROUGHLINE_GID", str(os.getgid())),
-    ):
+    for key, value in (("POSTGRES_DB", "throughline"), ("POSTGRES_USER", "throughline")):
         if not values.get(key):
+            lines = _upsert(lines, key, value)
+            changed = True
+
+    # Host identity is intentionally refreshed, unlike the database secret:
+    # a checkout can move from macOS to Linux or between local user accounts.
+    for key, value in (("THROUGHLINE_UID", str(os.getuid())), ("THROUGHLINE_GID", str(os.getgid()))):
+        if values.get(key) != value:
             lines = _upsert(lines, key, value)
             changed = True
 

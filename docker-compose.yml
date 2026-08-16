@@ -163,8 +163,12 @@ services:
       PGPORT: 5432
       PGDATABASE: "${POSTGRES_DB:-throughline}"
       PGUSER: "${THROUGHLINE_LEGACY_DB_USER:-throughline}"
+      POSTGRES_DB: "${POSTGRES_DB:-throughline}"
+      POSTGRES_USER: "${POSTGRES_USER:-throughline}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example first)}"
       THROUGHLINE_LEGACY_DB_PASSWORD: "${THROUGHLINE_LEGACY_DB_PASSWORD:-}"
+      THROUGHLINE_LEGACY_DB_USER: "${THROUGHLINE_LEGACY_DB_USER:-throughline}"
+      THROUGHLINE_LEGACY_DB_NAME: "${THROUGHLINE_LEGACY_DB_NAME:-throughline}"
     command: ["sh", "/app/throughline/shell/rotate_compose_credentials.sh"]
     profiles:
       - credential-rotate

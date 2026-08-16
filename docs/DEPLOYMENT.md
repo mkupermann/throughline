@@ -132,9 +132,13 @@ docker compose up -d
 The one-off service connects using only the supplied legacy password and
 updates `CURRENT_USER` to the password in `.env`; it does not run during normal
 startup. Use `THROUGHLINE_LEGACY_DB_USER` as well if the legacy role was not
-`throughline`. If `throughline doctor` reports an authentication failure after
-a Compose credential change, run this command before retrying `docker compose
-up -d`.
+`throughline`, and `THROUGHLINE_LEGACY_DB_NAME` if its database name was not
+`throughline`. `POSTGRES_USER` and `POSTGRES_DB` are immutable once a volume
+exists: keep their `.env` values equal to the existing role/database. The
+rotator refuses a mismatch before connecting, rather than claiming it renamed
+anything. If `throughline doctor` reports an authentication failure after a
+Compose credential change, run this command before retrying `docker compose up
+-d`.
 
 ## What not to do
 

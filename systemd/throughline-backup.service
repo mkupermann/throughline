@@ -8,10 +8,8 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=%h/.local/share/throughline
 ExecStart=/bin/bash %h/.local/share/throughline/scripts/backup.sh
-Environment="PGDATABASE=throughline"
+EnvironmentFile=%h/.config/throughline/throughline.env
 Environment="PGUSER=%u"
-Environment="PGHOST=localhost"
-Environment="PGPORT=5432"
 # Allow enough time for a full pg_dump on large memories.
 TimeoutStartSec=1h
 StandardOutput=journal

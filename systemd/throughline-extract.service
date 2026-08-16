@@ -8,10 +8,8 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=%h/.local/share/throughline
 ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/extract_memory.py
-Environment="PGDATABASE=throughline"
+EnvironmentFile=%h/.config/throughline/throughline.env
 Environment="PGUSER=%u"
-Environment="PGHOST=localhost"
-Environment="PGPORT=5432"
 # Extraction can invoke Claude CLI or Anthropic API, which may take several minutes.
 TimeoutStartSec=30min
 StandardOutput=journal

@@ -10,10 +10,8 @@ Type=oneshot
 # %h expands to the user's home directory, %u to the username.
 WorkingDirectory=%h/.local/share/throughline
 ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/ingest_sessions.py
-Environment="PGDATABASE=throughline"
+EnvironmentFile=%h/.config/throughline/throughline.env
 Environment="PGUSER=%u"
-Environment="PGHOST=localhost"
-Environment="PGPORT=5432"
 # Keep stdout/stderr in the journal; inspect with: journalctl --user -u throughline-ingest.service
 StandardOutput=journal
 StandardError=journal

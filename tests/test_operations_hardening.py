@@ -108,6 +108,27 @@ def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: 
     )
 
 
+def test_compose_bootstrap_refreshes_stale_identity_without_rotating_secret(tmp_path: Path) -> None:
+    """Moving a checkout to another user must not leave 0600 mounts unreadable."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "POSTGRES_PASSWORD=preserve-this-secret\nTHROUGHLINE_UID=99999\nTHROUGHLINE_GID=99999\n",
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/init_compose_env.py"), "--env-file", str(env_file)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    values = dict(line.split("=", 1) for line in env_file.read_text(encoding="utf-8").splitlines())
+    assert values["POSTGRES_PASSWORD"] == "preserve-this-secret"
+    assert values["THROUGHLINE_UID"] == str(os.getuid())
+    assert values["THROUGHLINE_GID"] == str(os.getgid())
+
+
 def test_credential_rotation_uses_legacy_connection_and_never_exposes_new_secret_in_argv(
     tmp_path: Path,
 ) -> None:
@@ -124,6 +145,9 @@ def test_credential_rotation_uses_legacy_connection_and_never_exposes_new_secret
         "ROTATION_CAPTURE": str(received),
         "THROUGHLINE_LEGACY_DB_PASSWORD": "old-password",
         "THROUGHLINE_LEGACY_DB_USER": "throughline",
+        "THROUGHLINE_LEGACY_DB_NAME": "throughline",
+        "POSTGRES_USER": "throughline",
+        "POSTGRES_DB": "throughline",
         "POSTGRES_PASSWORD": "new'password",
         "PGHOST": "postgres",
         "PGPORT": "5432",
@@ -143,6 +167,34 @@ def test_credential_rotation_uses_legacy_connection_and_never_exposes_new_secret
     assert statement == "ALTER ROLE CURRENT_USER PASSWORD 'new''password';"
 
 
+def test_credential_rotation_refuses_to_rename_an_existing_role_or_database(tmp_path: Path) -> None:
+    """Password rotation must not claim to migrate immutable Postgres names."""
+    fake_psql = tmp_path / "psql"
+    fake_psql.write_text("#!/bin/sh\nexit 99\n")
+    fake_psql.chmod(0o755)
+    env = {
+        **os.environ,
+        "PSQL_BIN": str(fake_psql),
+        "THROUGHLINE_LEGACY_DB_PASSWORD": "old-password",
+        "THROUGHLINE_LEGACY_DB_USER": "throughline",
+        "THROUGHLINE_LEGACY_DB_NAME": "throughline",
+        "POSTGRES_USER": "renamed-user",
+        "POSTGRES_DB": "renamed-database",
+        "POSTGRES_PASSWORD": "new-password",
+    }
+
+    result = subprocess.run(
+        ["sh", str(ROOT / "throughline/shell/rotate_compose_credentials.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "POSTGRES_USER is immutable" in result.stderr
+    assert "POSTGRES_DB is immutable" in result.stderr
+
+
 def test_compose_exposes_an_explicit_credential_rotation_service(compose: dict) -> None:
     """The old-volume path must be runnable before migration-gated services start."""
     rotate = compose["services"]["credential-rotate"]
@@ -150,6 +202,8 @@ def test_compose_exposes_an_explicit_credential_rotation_service(compose: dict) 
     assert rotate["depends_on"]["postgres"]["condition"] == "service_healthy"
     assert rotate["profiles"] == ["credential-rotate"]
     assert rotate["environment"]["THROUGHLINE_LEGACY_DB_PASSWORD"] == "${THROUGHLINE_LEGACY_DB_PASSWORD:-}"
+    assert rotate["environment"]["POSTGRES_USER"] == "${POSTGRES_USER:-throughline}"
+    assert rotate["environment"]["POSTGRES_DB"] == "${POSTGRES_DB:-throughline}"
     assert rotate["command"] == ["sh", "/app/throughline/shell/rotate_compose_credentials.sh"]
 
 
@@ -230,11 +284,14 @@ def test_configured_container_uid_reads_a_private_source_mount(tmp_path: Path) -
 
 
 def test_systemd_services_default_to_the_current_database() -> None:
-    """Stale unit defaults otherwise send scheduled work to an old database."""
+    """Every job reads the same DB defaults, so one override reaches all of them."""
+    shared = ROOT / "systemd" / "throughline.env"
+    assert shared.read_text(encoding="utf-8").splitlines()[0] == "PGDATABASE=throughline"
+
     for unit in (ROOT / "systemd").glob("*.service"):
         text = unit.read_text(encoding="utf-8")
-        assert 'Environment="PGDATABASE=throughline"' in text
-        assert "claude_memory" not in text
+        assert "EnvironmentFile=%h/.config/throughline/throughline.env" in text
+        assert "PGDATABASE=" not in text
 
 
 @pytest.mark.parametrize("script", ["scripts/backup.sh", "throughline/shell/backup.sh"])
