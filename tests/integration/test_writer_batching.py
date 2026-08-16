@@ -87,13 +87,43 @@ class _RefreshAdapter(Adapter):
     def parse(self, path: Path):
         conv = _conversation(1, self.session_id)
         if path.read_text(encoding="utf-8") == "invalid":
+            conv.project_path = "/repo/invalid-refresh"
+            conv.model = "invalid-refresh-model"
+            conv.entrypoint = "invalid-refresh-entrypoint"
+            conv.git_branch = "invalid-refresh-branch"
+            conv.started_at = datetime(2026, 3, 4, 5, 6, tzinfo=timezone.utc)
+            conv.ended_at = None
+            conv.token_count_in = 333
+            conv.token_count_out = 444
+            conv.summary = "invalid refresh summary"
+            conv.metadata = {"invalid": "refresh"}
+            conv.source_tool = "invalid-refresh-adapter"
             conv.messages[0].role = "not-a-message-role"
+            conv.messages.append(
+                NormalisedMessage(
+                    role="user",
+                    content="a second invalid-refresh message",
+                    created_at=conv.started_at,
+                )
+            )
         return conv
 
 
 class _EmbeddingBackend:
     model = "refresh-lock-test"
     column = "embedding_768"
+
+
+def _conversation_row(cursor, conversation_id: int):
+    cursor.execute(
+        """
+        SELECT project_path, model, entrypoint, git_branch, started_at, ended_at,
+               message_count, token_count_in, token_count_out, summary, metadata, source_tool
+        FROM conversations WHERE id = %s
+        """,
+        (conversation_id,),
+    )
+    return cursor.fetchone()
 
 
 def test_writes_every_row_across_multiple_pages(db_connection):
@@ -354,6 +384,7 @@ def test_run_adapter_rolls_back_refresh_and_ingestion_log_after_late_failure(tmp
     with db_connection.cursor() as cur:
         cur.execute("SELECT id FROM conversations WHERE session_id = %s", (sid,))
         conversation_id = cur.fetchone()[0]
+        original_conversation = _conversation_row(cur, conversation_id)
         cur.execute("SELECT id FROM messages WHERE conversation_id = %s", (conversation_id,))
         old_message_id = cur.fetchone()[0]
         cur.execute("INSERT INTO embeddings (source_type, source_id) VALUES ('message', %s)", (old_message_id,))
@@ -364,10 +395,16 @@ def test_run_adapter_rolls_back_refresh_and_ingestion_log_after_late_failure(tmp
     db_connection.commit()
 
     path.write_text("invalid", encoding="utf-8")
+    invalid_refresh = adapter.parse(path)
+    assert invalid_refresh.project_path != original_conversation[0]
+    assert invalid_refresh.model != original_conversation[1]
+    assert invalid_refresh.metadata != original_conversation[10]
+    assert len(invalid_refresh.messages) != original_conversation[6]
     failed = writer.run_adapter(adapter, conn=db_connection, verbose=False)
 
     assert failed.errors == 1
     with db_connection.cursor() as cur:
+        assert _conversation_row(cur, conversation_id) == original_conversation
         cur.execute("SELECT id FROM messages WHERE conversation_id = %s", (conversation_id,))
         assert cur.fetchone() == (old_message_id,)
         cur.execute(
