@@ -23,8 +23,7 @@ and gives Claude a skill to query its own past.
 ### Core pipeline
 - Automatic ingestion of Claude Code JSONL sessions with SHA256
   deduplication
-- Memory extraction via two backends: the Anthropic API
-  (`ANTHROPIC_API_KEY`) or the Claude Code CLI in headless mode
+- Memory extraction via the Claude Code CLI in headless mode
 - Skill scanner for `~/.claude/skills/`
 - Prompt scanner for `CLAUDE.md` files in your git repos
 

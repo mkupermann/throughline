@@ -76,6 +76,55 @@ def test_application_uid_and_gid_are_build_time_configuration(compose: dict) -> 
     assert build_args["THROUGHLINE_GID"] == "${THROUGHLINE_GID:-1000}"
 
 
+def test_dockerfile_handles_an_existing_gid_without_assuming_its_group_name() -> None:
+    """macOS GID 20 already exists in Debian-based images under another name."""
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert '(getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline)' in dockerfile
+    assert 'useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID"' in dockerfile
+    assert 'install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups' in dockerfile
+    assert 'install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups' not in dockerfile
+
+
+@pytest.mark.integration
+def test_docker_build_accepts_a_colliding_host_gid() -> None:
+    """The application image must build for the common macOS numeric GID 20."""
+    if shutil.which("docker") is None:
+        pytest.skip("Docker CLI is not installed")
+    probe = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    if probe.returncode:
+        pytest.skip("Docker daemon is not available to this test user")
+
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "--build-arg",
+            "THROUGHLINE_UID=10001",
+            "--build-arg",
+            "THROUGHLINE_GID=20",
+            "--tag",
+            "throughline-gid-collision-test",
+            ".",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_current_outbound_templates_do_not_advertise_an_unused_anthropic_key() -> None:
+    """A key documented as consumed changes the user's data-egress assessment."""
+    for path in (ROOT / ".env.example", ROOT / "SECURITY.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "ANTHROPIC_API_KEY" not in text
+        assert "OPENAI_API_KEY" in text
+
+    assert "embed --backend auto` whenever it is set" in (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "auto` selects hosted OpenAI" in (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+
+
 def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> None:
     """A container-only backup path disappears when the web container is replaced."""
     web = compose["services"]["web"]
@@ -84,7 +133,7 @@ def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> No
     assert web["environment"]["CLAUDE_MEMORY_BACKUP_DIR"] == "/var/lib/throughline/backups"
     assert "backup_data:/var/lib/throughline/backups" in web["volumes"]
     assert compose["volumes"]["backup_data"]["name"] == "throughline_backup_data"
-    assert "install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups" in dockerfile
+    assert "install -d -m 700 -o throughline -g \"$THROUGHLINE_GID\" /var/lib/throughline/backups" in dockerfile
 
 
 def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: Path) -> None:

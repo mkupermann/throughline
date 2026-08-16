@@ -11,7 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# postgresql-client for psql/pg_isready, libpq + build tools for psycopg2
+# postgresql-client for psql/pg_isready, libpq + build tools for psycopg2.
+# Host GIDs may already exist under distribution-owned names (for example macOS
+# GID 20), so later ownership uses the numeric primary group rather than a name.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     libpq-dev \
@@ -20,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && (getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline) \
     && useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID" \
         --shell /usr/sbin/nologin throughline \
-    && install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups \
+    && install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

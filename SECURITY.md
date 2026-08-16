@@ -113,18 +113,15 @@ raw transcript to reach the model.
 
 ### API keys
 
-Throughline reads `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment.
-These must never be committed. `.env` files are gitignored — verify with
+Throughline reads `OPENAI_API_KEY` from the environment. It must never be
+committed. `.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 
 ### Acceptable use
 
-Whichever model you point Throughline at, its provider's terms still apply —
-Anthropic's [Usage Policy](https://www.anthropic.com/legal/aup) for Claude,
-and the equivalent for OpenAI, Mistral or anyone else. A local model has no
-such terms, which is one more reason the probe order prefers it. Either way you
-are responsible for not feeding a hosted extractor content you are not
-permitted to send it.
+Whichever model you point Throughline at, its provider's terms still apply.
+Either way you are responsible for not feeding a hosted model content you are
+not permitted to send it.
 
 ### Backups
 

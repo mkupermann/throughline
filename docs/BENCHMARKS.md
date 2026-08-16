@@ -59,8 +59,8 @@ small batches.
 The historical `scripts/ingest_sessions.py` command walked
 `~/.claude/projects/`, hashed each JSONL file with SHA-256, skipped if already
 in `ingestion_log`, parsed
-line-by-line with `json.loads`, and batch-inserts into `conversations`
-+ `messages`.
+line-by-line with `json.loads`, inserted messages one at a time, and committed
+once per source file.
 
 Dominant costs: file I/O, JSON parsing, Postgres round-trips.
 
@@ -145,10 +145,9 @@ and inserts into `memory_chunks`.
 | Total daily extraction time | 2 – 5 min |
 | Sleep between calls (avoid local rate limit) | 2 s |
 
-**Cost:** depends on which of the two extraction backends is configured.
-The `api` backend bills per token on the Anthropic API. The `cli` backend
-shells out to the user's existing Claude Code CLI and inherits its
-authentication and configured model.
+**Cost:** this historical run used the user's existing Claude Code CLI and
+inherited its authentication and configured model. It is not a current backend
+configuration guide.
 
 ---
 
