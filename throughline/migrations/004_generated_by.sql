@@ -20,8 +20,6 @@
 -- deleted: this database is the only surviving copy of most of what it holds,
 -- and a label lets a view fold the machinery away while leaving it openable.
 
-BEGIN;
-
 ALTER TABLE public.conversations
     ADD COLUMN IF NOT EXISTS generated_by text;
 
@@ -37,5 +35,3 @@ COMMENT ON COLUMN public.conversations.generated_by IS
 CREATE INDEX IF NOT EXISTS idx_conversations_human
     ON public.conversations (started_at DESC)
     WHERE generated_by IS NULL;
-
-COMMIT;

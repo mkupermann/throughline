@@ -34,8 +34,6 @@
 -- real fix needs the column split by referent, which is a larger change than
 -- this migration.
 
-BEGIN;
-
 ALTER TABLE public.memory_chunks
     DROP CONSTRAINT IF EXISTS memory_chunks_source_type_check;
 ALTER TABLE public.memory_chunks
@@ -48,5 +46,3 @@ ALTER TABLE public.embeddings
 ALTER TABLE public.embeddings
     ADD CONSTRAINT embeddings_source_type_check
     CHECK (source_type IN ('memory_chunk', 'message'));
-
-COMMIT;

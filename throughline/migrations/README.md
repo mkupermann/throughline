@@ -29,9 +29,11 @@ Examples:
   `CREATE INDEX IF NOT EXISTS`. Destructive changes (`DROP COLUMN`, `DROP TABLE`) need a
   migration of their own and a note in `CHANGELOG.md`.
 - **One logical change per migration.** If you are tempted to add a second, start a new file.
-- **Wrap in a transaction** unless you need something that cannot run inside one
-  (`CREATE INDEX CONCURRENTLY`, for example). `scripts/migrate.py` will apply the file as-is;
-  add `BEGIN;` / `COMMIT;` explicitly if you want transactional safety.
+- **The runner owns the transaction.** Migration files must not contain `BEGIN`,
+  `COMMIT`, `ROLLBACK`, or other transaction-control statements. A migration and
+  its `applied_migrations` record are committed together; work that cannot run
+  inside a transaction (`CREATE INDEX CONCURRENTLY`, for example) needs an
+  explicit runner capability before it can be introduced.
 - **Idempotent helpers are nice** but not required — each migration only runs once.
 - **Never edit an already-applied migration.** Add a new one that patches the state.
 

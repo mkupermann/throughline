@@ -108,6 +108,13 @@ def _has_existing_schema(cursor) -> bool:
     return bool(row and row[0])
 
 
+def _tracking_exists(cursor) -> bool:
+    """Return whether the migration ledger already exists without creating it."""
+    cursor.execute("SELECT to_regclass('public.applied_migrations') IS NOT NULL")
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
 def _bootstrap_existing_schema(cursor, applied: set[str], migrations: list[Path]) -> set[str]:
     """Record only the baseline for a schema initialized before migrations ran."""
     if not migrations:
@@ -156,11 +163,21 @@ def cmd_status(conn) -> int:
 
 def cmd_migrate(conn, dry_run: bool) -> int:
     all_migrations = discover_migrations()
-    with conn.cursor() as cur:
-        cur.execute(TRACKING_DDL)
-        done = applied_set(cur)
-        done = _bootstrap_existing_schema(cur, done, all_migrations)
-        conn.commit()
+    if dry_run:
+        with conn.cursor() as cur:
+            done = applied_set(cur) if _tracking_exists(cur) else set()
+            if all_migrations and all_migrations[0].name not in done and _has_existing_schema(cur):
+                done.add(all_migrations[0].name)
+                print(f"Existing Throughline schema detected; would record {all_migrations[0].name} as the baseline.")
+        # Even a read-only plan opens a PostgreSQL transaction; end it without
+        # committing so callers can rely on --dry-run never changing database state.
+        conn.rollback()
+    else:
+        with conn.cursor() as cur:
+            cur.execute(TRACKING_DDL)
+            done = applied_set(cur)
+            done = _bootstrap_existing_schema(cur, done, all_migrations)
+            conn.commit()
 
     pending = [m for m in all_migrations if not is_applied(m, done)]
     if not pending:

@@ -11,8 +11,6 @@
 -- ALTER COLUMN ... TYPE refuses to run while a view depends on the column, so
 -- v_conversation_stats is dropped and re-created in the same transaction.
 
-BEGIN;
-
 DROP VIEW IF EXISTS public.v_conversation_stats;
 
 ALTER TABLE public.conversations
@@ -30,5 +28,3 @@ CREATE OR REPLACE VIEW public.v_conversation_stats AS
  FROM   conversations
  GROUP  BY project_name
  ORDER  BY count(*) DESC;
-
-COMMIT;

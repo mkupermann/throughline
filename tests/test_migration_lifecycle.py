@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
 from throughline.jobs import migrate
+
+TRANSACTION_CONTROL = re.compile(
+    r"^\s*(?:BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION)\s*;\s*$", re.MULTILINE | re.IGNORECASE
+)
 
 
 def test_discovery_rejects_duplicate_ordinals(tmp_path: Path) -> None:
@@ -24,6 +29,17 @@ def test_renumbered_migration_honours_its_recorded_legacy_filename() -> None:
     migration = migrate.MIGRATIONS_DIR / "005_widen_conversation_token_counts.sql"
 
     assert migrate.is_applied(migration, {"001_widen_conversation_token_counts.sql"})
+
+
+def test_packaged_migrations_do_not_control_the_runner_transaction() -> None:
+    """The runner owns transaction boundaries and can roll a migration back."""
+    offenders = [
+        path.name
+        for path in migrate.discover_migrations()
+        if TRANSACTION_CONTROL.search(path.read_text(encoding="utf-8"))
+    ]
+
+    assert offenders == []
 
 
 def test_compose_waits_for_migrations_before_starting_application_services() -> None:
