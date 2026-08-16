@@ -26,7 +26,9 @@ Optional but recommended:
 
 ## 2. Docker Compose
 
-Docker with Compose v2 needs no native Python or PostgreSQL installation:
+Docker with Compose v2 needs no native PostgreSQL installation. It does require
+Python 3 to run the supplied Compose bootstrap script; the application itself
+runs in the container:
 
 ```bash
 git clone https://github.com/mkupermann/throughline.git
@@ -130,7 +132,10 @@ cp .env.example .env
 
 Set `PGDATABASE=throughline` for the new default, or retain
 `PGDATABASE=claude_memory` when upgrading an existing installation. Set the
-other `PG*` variables if your PostgreSQL requires them.
+other `PG*` variables if your PostgreSQL requires them. Leave `PGUSER` unset
+for a local native database unless it differs from your login user: Throughline
+then resolves the actual login user. Do not put `PGUSER=$USER` in `.env`;
+dotenv files do not expand shell variables.
 
 ## 8. First ingestion run
 

@@ -160,10 +160,10 @@ the writer materialises missing rows in `projects` with `ON CONFLICT DO NOTHING`
 manually curated rows untouched.
 
 **Generated sessions.** Throughline's own model calls can create source sessions. The writer
-labels those rows with `conversations.generated_by` instead of dropping them. Listings,
-search, charts, and answers exclude generated rows by default; a project view can show their
-withheld count and include them on request. This keeps an audit trail without letting
-self-generated content dominate retrieval.
+recognizes the known self-referential prompts, drops those source files before any conversation
+is written, and records a zero-row decision in `ingestion_log`. `conversations.generated_by`
+is retained for legacy rows imported before that guard; `backfill_generated_by` labels those
+rows, which listings, search, charts, and answers exclude by default.
 
 ---
 
@@ -177,13 +177,14 @@ positive one — greetings, mechanical tool calls and restatements of general kn
 discarded. The judgement being bought is "is this worth remembering", which is not
 expressible as a rule, which is why an LLM does it.
 
-Two backends are supported and chosen at runtime: the Anthropic API when
-`ANTHROPIC_API_KEY` is set, otherwise the Claude Code CLI in headless mode, which inherits
-the user's existing authentication and requires no key of its own. Transcripts pass through
-`throughline/pii.py` first, which redacts API-key shapes, bearer tokens, private-key
-headers, credential assignments and email addresses. Redaction is on by default and
-disabled only with `THROUGHLINE_REDACT_PII=0`. It is deliberately conservative: a missed
-secret is bad, but a chunk whose content has been hollowed out is useless.
+Extraction, title generation, reflection, and answers are model operations. A
+selected hosted endpoint or the Claude CLI can receive the relevant transcript,
+excerpt, or chunk pair; choose a local backend only where that boundary is
+acceptable. Transcripts pass through `throughline/pii.py` first, which redacts
+API-key shapes, bearer tokens, private-key headers, credential assignments and
+email addresses. Redaction is on by default and disabled only with
+`THROUGHLINE_REDACT_PII=0`. It is deliberately conservative: a missed secret
+is bad, but a chunk whose content has been hollowed out is useless.
 
 A separate packaged job, `python -m throughline.jobs.extract_entities`, populates
 `entities`, `entity_mentions` and `relationships`, producing the

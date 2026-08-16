@@ -92,6 +92,17 @@ class TestRepoRoot:
 
 
 class TestLoadDotenv:
+    def test_native_example_uses_the_resolved_login_user(self, monkeypatch):
+        """dotenv has no shell expansion, so a literal $USER would break auth."""
+        monkeypatch.setenv("USER", "native-test-user")
+        monkeypatch.delenv("PGUSER", raising=False)
+
+        template = config.repo_root() / ".env.example"
+        applied = config.load_dotenv(template)
+
+        assert "PGUSER" not in applied
+        assert config.get_db_config()["user"] == "native-test-user"
+
     def test_sets_vars_from_file(self, monkeypatch, tmp_path):
         monkeypatch.delenv("TL_TEST_KEY", raising=False)
         env = tmp_path / ".env"

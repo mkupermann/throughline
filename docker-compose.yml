@@ -106,11 +106,25 @@ services:
       # The image deliberately has no remote-bind bypass. Docker networking
       # requires 0.0.0.0 in the container; the port mapping below is loopback.
       THROUGHLINE_ALLOW_REMOTE: "1"
+      # This path is a named volume initialized with 0700 ownership in the
+      # image, so backups survive web-container replacement without becoming
+      # readable by other container users.
+      CLAUDE_MEMORY_BACKUP_DIR: /var/lib/throughline/backups
     ports:
       # Published on loopback only: the API has no authentication, so the
       # container must not be reachable from the rest of the network.
       - "127.0.0.1:${THROUGHLINE_WEB_PORT:-8788}:8787"
-    volumes: *source-mounts
+    volumes:
+      - ~/.claude:/home/throughline/.claude:ro
+      - ~/.cursor:/home/throughline/.cursor:ro
+      - ~/.zed:/home/throughline/.zed:ro
+      - ~/.codex:/home/throughline/.codex:ro
+      - ~/.hermes:/home/throughline/.hermes:ro
+      - ~/.continue:/home/throughline/.continue:ro
+      - ~/.windsurf:/home/throughline/.windsurf:ro
+      - ~/.vibe:/home/throughline/.vibe:ro
+      - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
+      - backup_data:/var/lib/throughline/backups
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8787/api/health"]
       interval: 30s
@@ -191,5 +205,8 @@ volumes:
   # Database storage — this volume contains all ingested memory data.
   postgres_data:
     name: throughline_postgres_data
+  # Private logical database dumps created by `throughline backup` in web.
+  backup_data:
+    name: throughline_backup_data
   ollama_data:
     name: throughline_ollama_data

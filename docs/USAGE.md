@@ -84,11 +84,11 @@ questions. Those calls are themselves sessions on disk, so ingestion collects
 them like any other: on the corpus this was written against, 3,017 of 3,606
 stored conversations were the tool talking to itself.
 
-They are labelled at ingest — `conversations.generated_by` names the script
-that produced them — and every listing, chart, search and answer excludes them
-by default. Nothing is deleted: a project page reports how many it is
-withholding and shows them on request, and the column is there to query in
-Console.
+The writer recognizes those known prompts and drops the source file at ingest;
+it records a zero-row decision in `ingestion_log` and creates no conversation.
+`conversations.generated_by` is for rows already stored before this guard
+existed. Listings, charts, search, and answers exclude those legacy labelled
+rows by default.
 
 If you upgraded from a version before this existed, label what is already
 stored:
@@ -110,27 +110,29 @@ throughline ask "which tools do I actually use" --json
 cite. `--top-k` widens or narrows retrieval; recall@24 measured 75% against
 recall@12's 60% on this corpus, which is why 24 is the default.
 
-Retrieval is entirely local. The one moment stored content leaves your machine
-is the prompt sent to a *remote* answering model — so point it at a local one
-and it never does:
+Retrieval is entirely local. Content can leave the machine when a hosted model
+is selected for embedding, answering, extraction, titles, or reflection:
 
 | Variable | Purpose |
 |---|---|
 | `THROUGHLINE_ANSWER_BACKEND` | `auto` (default), `ollama`, `openai`, `claude` |
 | `THROUGHLINE_ANSWER_MODEL` | model name for that backend |
 | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
-| `OPENAI_API_KEY` | read only by the `openai` backend |
+| `OPENAI_API_KEY` | makes embedding `auto` use hosted OpenAI; also enables the OpenAI model backend |
 
-These apply to answering, extraction, titling and reflection alike — one probe,
-one order, no per-feature configuration. `THROUGHLINE_MEMORY_LANG` forces the
-language extracted memory and generated titles are written in; left unset they
-follow the session, so German sessions produce German memory and English ones
-English.
+These variables control answering. Extraction, titling, and reflection are also
+model operations and can send their respective content to a hosted provider;
+use their documented local configuration where content must remain on the
+machine. `THROUGHLINE_MEMORY_LANG` forces the language extracted memory and
+generated titles are written in; left unset they follow the session, so German
+sessions produce German memory and English ones English.
 
-`auto` probes Ollama first, so a machine running a local model never makes a
-network call and never had to be configured not to. `throughline doctor` prints
-which model will answer and whether it runs locally; the UI says so on screen
-with every answer. `--model` overrides the model for a single question.
+For embeddings, `auto` chooses OpenAI when `OPENAI_API_KEY` is set, otherwise
+Ollama. Answering can select a configured remote OpenAI-compatible endpoint,
+the Claude CLI, or hosted OpenAI; other model operations can also use hosted
+providers. `throughline doctor` prints which model will answer and whether it
+runs locally; the UI says so on screen with every answer. `--model` overrides
+the model for a single question.
 
 `THROUGHLINE_REDACT_PROMPTS=1` strips secrets from the excerpts before they are
 sent. It is off by default, deliberately: this is your own history on your own

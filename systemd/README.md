@@ -7,22 +7,23 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 
 | Unit | Schedule | Purpose |
 |------|----------|---------|
-| `throughline-ingest.timer`  | hourly           | `scripts/ingest_sessions.py` — pull available local-tool sessions into Postgres |
+| `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres |
 | `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
 
 All three services are `Type=oneshot`: they run, finish, and exit. The timer units keep
 them on schedule.
 
-The shipped units serve a source checkout and invoke its compatibility wrappers.
-Those wrappers dispatch into the packaged `throughline.jobs` implementations;
-interactive or installed use should prefer `throughline ingest --all`,
-`throughline extract-memory`, and `throughline backup`.
+The ingest unit invokes the packaged `throughline ingest --all` command through
+the shared environment. The extract and backup units retain source-checkout
+compatibility wrappers; installed and interactive use should prefer
+`throughline extract-memory` and `throughline backup`.
 
 ## Prerequisites
 
 - Linux with `systemd --user` support (any mainstream distro from the last five years).
-- `python3` available at `/usr/bin/python3` (adjust the `ExecStart` line if yours differs).
+- Throughline installed for the systemd user, with its console script on
+  `~/.local/bin` or another path available to `/usr/bin/env`.
 - A running PostgreSQL with the `throughline` database. Run `throughline migrate`
   once after creating a native database; Docker Compose does this automatically.
 - Your checkout of Throughline at `~/.local/share/throughline/` (or update the paths in each
@@ -98,6 +99,10 @@ extract, and backup jobs then use it:
 ```ini
 PGDATABASE=claude_memory
 ```
+
+The packaged backup resolves `pg_dump` from `PATH` on Linux. Set `PG_DUMP_BIN`
+to a full executable path, or `PG_BIN` to a directory containing PostgreSQL
+tools, when a distribution keeps them outside the service `PATH`.
 
 ## Uninstall
 

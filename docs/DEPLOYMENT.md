@@ -93,6 +93,7 @@ export PGHOST=127.0.0.1 PGPORT=5433
 export PGDATABASE="$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)"
 export PGUSER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"
 export PGPASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+throughline migrate
 throughline ingest --all
 ```
 
@@ -103,7 +104,10 @@ shadowed. This is also the setup the integration test suite expects.
 ## Backup and restore
 
 The only state worth backing up is the PostgreSQL database. The packaged backup
-command creates its directory and dump files with owner-only permissions:
+command creates its directory and dump files with owner-only permissions. In
+Compose, dumps live in the persistent named volume `throughline_backup_data`
+at `/var/lib/throughline/backups` in the `web` container, so replacing the web
+container does not discard them:
 
 ```bash
 # Docker
@@ -113,9 +117,13 @@ docker compose exec web throughline backup
 throughline backup
 ```
 
-For a manual dump, use `pg_dump` with a private destination. Restore into an
-empty database with `psql < backup.sql`, then run `throughline migrate` to
-ensure the schema is current. Source session files
+The logical dumps are gzip-compressed SQL. Restore into an empty database with
+`gzip -dc backup.sql.gz | psql`, then run `throughline migrate` to ensure the
+schema is current. `throughline backup` finds `pg_dump` on `PATH`; set
+`PG_DUMP_BIN` to an explicit executable or `PG_BIN` to its directory on unusual
+native installations. Use the corresponding `pg_restore` from `PATH`,
+`PG_RESTORE_BIN`, or `PG_BIN` for custom-format dumps made outside Throughline.
+Source session files
 remain owned by their respective tools; Throughline never modifies them
 (read-only mounts in Docker, read-only access natively).
 

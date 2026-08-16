@@ -1,8 +1,9 @@
 # Throughline Benchmarks
 
-Honest, reproducible numbers from a real developer laptop. Nothing
-here is a synthetic stress test — these are the figures that matter
-when you run Throughline against your own `~/.claude/projects/`.
+Historical, reproducible numbers from a real developer laptop. Nothing here is
+a synthetic stress test — every measurement was made against the author's
+Claude Code corpus in `~/.claude/projects/` before the multi-adapter runtime.
+They are not claims about the current nine-adapter ingest command.
 
 ## Test Rig
 
@@ -17,7 +18,7 @@ when you run Throughline against your own `~/.claude/projects/`.
 | Anthropic CLI | current stable `claude` binary (headless mode) |
 | Disk | internal SSD |
 
-Measurements taken on 2026-04-18 against a warm database of
+Measurements taken on 2026-04-18 against a warm Claude Code-only database of
 ~100 conversations / ~3,000 messages, unless otherwise stated.
 Numbers below are *measured* (marked ✓) or *derived from upstream
 references* (marked ~) when the local DB was unavailable at
@@ -55,8 +56,9 @@ small batches.
 
 ## Ingestion
 
-`throughline ingest --all` walks the available source directories, hashes each
-JSONL file with SHA-256, skips if already in `ingestion_log`, parses
+The historical `scripts/ingest_sessions.py` command walked
+`~/.claude/projects/`, hashed each JSONL file with SHA-256, skipped if already
+in `ingestion_log`, parsed
 line-by-line with `json.loads`, and batch-inserts into `conversations`
 + `messages`.
 
@@ -131,7 +133,7 @@ X?" from inside a session.
 
 ## Memory Extraction
 
-`throughline extract-memory` sends a conversation window to the
+The historical `scripts/extract_memory.py` command sent a conversation window to the
 `claude` CLI in headless mode (`claude -p`), parses JSON out of stdout,
 and inserts into `memory_chunks`.
 
@@ -152,7 +154,7 @@ authentication and configured model.
 
 ## Self-Reflection
 
-`scripts/reflect_memory.py` pairs candidate chunks via cosine
+The historical `scripts/reflect_memory.py` command paired candidate chunks via cosine
 similarity, asks Claude whether to `KEEP_A` / `KEEP_B` / `MERGE`, and
 writes every action to `memory_reflections`.
 
@@ -192,7 +194,7 @@ The embeddings table is the biggest single component at scale
 
 ```bash
 # 1. Ingestion throughput
-time throughline ingest --all
+time python3 scripts/ingest_sessions.py
 
 # 2. Embeddings (single-call)
 time curl -s http://localhost:11434/api/embeddings \
@@ -208,7 +210,7 @@ psql -d claude_memory -c "\timing on" -c "
 "
 
 # 4. Blended search end-to-end
-time throughline search "HNSW tuning"
+time python3 scripts/search_semantic.py "HNSW tuning"
 
 # 5. Storage
 psql -d claude_memory -c \

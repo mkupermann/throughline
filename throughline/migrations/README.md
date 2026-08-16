@@ -77,14 +77,3 @@ If an older installation was created from `sql/schema.sql`, simply run
 and then applies later migrations. Use `throughline migrate --dry-run` first
 if you want to inspect that plan without changing the database. Manual edits
 to `applied_migrations` are unnecessary.
-
-```bash
-psql -d claude_memory -c "
-  CREATE TABLE IF NOT EXISTS applied_migrations (
-      migration_name TEXT PRIMARY KEY,
-      applied_at TIMESTAMPTZ DEFAULT now()
-  );
-  INSERT INTO applied_migrations (migration_name) VALUES ('000_baseline.sql')
-  ON CONFLICT DO NOTHING;
-"
-```

@@ -32,19 +32,22 @@ Three places, all of them a model call:
 
 1. **Answering a question.** `throughline ask`, and the Ask panel in the UI,
    send the retrieved excerpts to whichever model answers. With a local backend
-   (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine, and
-   `auto` probes local backends first for exactly this reason.
+   (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine.
+   The selected backend can be a configured remote endpoint, the Claude CLI,
+   or hosted OpenAI.
    `throughline doctor` prints which model will answer and whether it is local;
    the UI states it with every answer. `THROUGHLINE_REDACT_PROMPTS=1` runs the
    excerpts through [`throughline/pii.py`](throughline/pii.py) first — off by
    default, because this is your own history on your own machine.
 2. **Memory extraction, title generation and reflection.** These send
-   transcripts or chunk pairs to the same probed backend, local first.
+   transcripts or chunk pairs to their configured model backend; they can
+   therefore leave the machine when it resolves to a hosted provider.
    Redaction is **on** by default for extraction;
    `THROUGHLINE_REDACT_PII=0` disables it. All three are optional — skip them
    and the rest of the tool still works.
-3. **Embeddings.** `throughline embed` uses Ollama by default and never leaves
-   the machine; it reaches the network only if you select the OpenAI backend.
+3. **Embeddings.** `throughline embed --backend auto` selects hosted OpenAI
+   when `OPENAI_API_KEY` is set; otherwise it uses Ollama. Select
+   `--backend ollama` explicitly when embedding content must remain local.
 
 Retrieval, ranking, indexing, embeddings against a local backend, and every
 listing in the UI are entirely local. There is no telemetry and no account.
@@ -126,8 +129,9 @@ permitted to send it.
 ### Backups
 
 The backup script writes `pg_dump` output to
-`~/.local/share/claude-memory/backups/` by default. These files are
-unencrypted. If you back them up to cloud storage, encrypt them first
+`~/.local/share/claude-memory/backups/` by default. Compose instead stores
+owner-only dumps in the persistent named volume `throughline_backup_data`.
+These files are unencrypted. If you back them up to cloud storage, encrypt them first
 (for example, with `age` or `gpg`).
 
 ### AppleScript automation

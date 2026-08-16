@@ -19,7 +19,32 @@ BACKUP_DIR="${CLAUDE_MEMORY_BACKUP_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/cla
 RETENTION_DAYS=30
 DB_NAME="${PGDATABASE:-throughline}"
 DB_USER="${PGUSER:-$USER}"
-PG_BIN="${PG_BIN:-/opt/homebrew/opt/postgresql@16/bin}"
+
+# ``pg_dump`` is normally on PATH on Linux, Docker, and current Homebrew
+# installs. PG_BIN remains a convenient directory override for legacy setups;
+# PG_DUMP_BIN and PG_RESTORE_BIN allow an explicit binary path when needed.
+resolve_pg_tool() {
+    local tool="$1"
+    local explicit="$2"
+    local configured="${!explicit:-}"
+    if [ -n "$configured" ]; then
+        printf '%s\n' "$configured"
+    elif [ -n "${PG_BIN:-}" ]; then
+        printf '%s/%s\n' "$PG_BIN" "$tool"
+    else
+        command -v "$tool" || true
+    fi
+}
+
+PG_DUMP_BIN="$(resolve_pg_tool pg_dump PG_DUMP_BIN)"
+# Keep explicit restore-tool configuration symmetric with the documented
+# restore workflow. Logical SQL dumps themselves are validated below with gzip
+# and COPY checks, so pg_restore is not invoked for this dump format.
+PG_RESTORE_BIN="$(resolve_pg_tool pg_restore PG_RESTORE_BIN)"
+[ -n "$PG_DUMP_BIN" ] && [ -x "$PG_DUMP_BIN" ] || {
+    echo "[$(date)] FEHLER: pg_dump nicht gefunden (PATH, PG_BIN oder PG_DUMP_BIN prüfen)" >&2
+    exit 1
+}
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
@@ -39,7 +64,7 @@ fail() {
     exit 1
 }
 
-if ! "$PG_BIN/pg_dump" -U "$DB_USER" -d "$DB_NAME" | gzip > "$BACKUP_FILE"; then
+if ! "$PG_DUMP_BIN" -U "$DB_USER" -d "$DB_NAME" | gzip > "$BACKUP_FILE"; then
     fail "pg_dump fehlgeschlagen"
 fi
 

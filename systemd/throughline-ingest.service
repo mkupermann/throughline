@@ -1,17 +1,18 @@
 [Unit]
-Description=Throughline - ingest Claude Code sessions into throughline
+Description=Throughline - ingest available local-tool sessions into throughline
 Documentation=https://github.com/mkupermann/Throughline
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Adjust the path below if you cloned Throughline elsewhere.
 # %h expands to the user's home directory, %u to the username.
 WorkingDirectory=%h/.local/share/throughline
-ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/ingest_sessions.py
+# The package command keeps systemd on the same adapter set as interactive use.
+ExecStart=/usr/bin/env throughline ingest --all
 EnvironmentFile=%h/.config/throughline/throughline.env
 Environment="PGUSER=%u"
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 # Keep stdout/stderr in the journal; inspect with: journalctl --user -u throughline-ingest.service
 StandardOutput=journal
 StandardError=journal

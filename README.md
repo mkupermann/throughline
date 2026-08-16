@@ -15,11 +15,16 @@ Storage, indexing, search, and every listing happen on your machine. Three opera
 
 | Operation | Stays local when | Required? |
 |---|---|---|
-| **Embedding** (`throughline embed`) | the backend is Ollama — the default | needed for semantic search |
+| **Embedding** (`throughline embed`) | Ollama is selected explicitly, or `auto` runs without an OpenAI key | needed for semantic search |
 | **Answering** (`throughline ask`) | the backend is local | optional |
 | **Extraction, titles, reflection** | the backend is local | optional |
 
-Each one defaults to a local backend, so on a machine running Ollama nothing you have stored leaves it and no setting had to be found first. That is a default, not an enforcement: `THROUGHLINE_ANSWER_BACKEND`, `THROUGHLINE_ANSWER_BASE_URL` and `OPENAI_API_KEY` deliberately let you route any of these to a hosted endpoint. Setting one changes that operation, and only that one — `throughline doctor` prints where each currently goes.
+Embedding `auto` selects hosted OpenAI whenever `OPENAI_API_KEY` is present;
+select `--backend ollama` to keep embeddings local. Answering, extraction,
+titles, and reflection can likewise send excerpts or transcripts to a hosted
+OpenAI-compatible endpoint or the Claude CLI when their automatic probe selects
+one. Set an explicit local backend when content must remain on the machine;
+`throughline doctor` reports the selected answer backend.
 
 Switch providers freely — Anthropic today, Mistral or OpenAI tomorrow — and your accumulated context, decisions, and preferences move with you. The memory belongs to you, not to a vendor.
 
@@ -230,14 +235,19 @@ That test earned its keep the day it was written: extending it from three tools 
 - **PostgreSQL 16 + pgvector**: conversations, messages, and extracted memory chunks in a normalised schema (`sql/schema.sql`), with vector similarity search over embeddings and trigram search over content.
 - **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. It goes through the same swappable backend as everything else — as do title generation and the reflection engine, so a machine running Ollama fills its memory without a network call and without an API key. Memory comes back in the language the session was held in, so a bilingual corpus stays bilingual instead of being translated one conversation at a time; `THROUGHLINE_MEMORY_LANG` forces a single language when that is what you want.
 - **MCP server**: `memory_mcp` exposes the memory database to any MCP-capable client over stdio, so every supported CLI can query the shared memory at runtime.
-- **Bring your own model.** Embeddings and answers both run through whatever backend you point them at, chosen by probe with local first — a machine running Ollama never reaches the network and never had to be configured not to. Nothing here is tied to one vendor:
+- **Bring your own model.** Embeddings use hosted OpenAI in `auto` mode when
+  `OPENAI_API_KEY` exists, otherwise Ollama. Answers, extraction, title
+  generation, and reflection share a separate probe that prefers an available
+  local Ollama generation model but may select a configured remote
+  OpenAI-compatible endpoint, the Claude CLI, or hosted OpenAI. Nothing here is
+  tied to one vendor:
 
   | Variable | Purpose |
   |---|---|
   | `THROUGHLINE_ANSWER_BACKEND` | `auto` (default), `ollama`, `openai`, `claude` |
   | `THROUGHLINE_ANSWER_MODEL` | model name for that backend |
   | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
-  | `OPENAI_API_KEY` | only read by the `openai` backend |
+  | `OPENAI_API_KEY` | makes embedding `auto` use hosted OpenAI; also enables the OpenAI model backend |
   | `THROUGHLINE_EXTRACT_MODEL` · `THROUGHLINE_TITLE_MODEL` · `THROUGHLINE_REFLECT_MODEL` | per-job model override, when one job wants a bigger model than the rest |
   | `THROUGHLINE_MEMORY_LANG` | force the language memory is written in; by default it follows the session |
 
@@ -245,14 +255,18 @@ That test earned its keep the day it was written: extending it from three tools 
 
 - **A tool that reads its own output must not count it.** Throughline calls a
   model to title conversations, extract memory, and answer questions. Those
-  calls are themselves sessions on disk, so ingestion picks them up: on the
-  corpus this was written against, 3,017 of 3,606 stored conversations were the
-  tool talking to itself, which is why every listing read as noise. They are
-  labelled at ingest (`conversations.generated_by`) rather than dropped —
-  nothing is deleted and the count stays available — and every listing, chart,
-  search and answer excludes them by default. A project page reports how many it
-  is withholding and shows them on request.
-- **Privacy**: sources are mounted read-only. The one point at which stored content leaves the machine is a question sent to a *remote* answering model — pick a local one and it never does. `THROUGHLINE_REDACT_PROMPTS=1` strips secrets from those excerpts, off by default because a memory tool that hides your own credentials from you is failing at its job. PII scanning utilities are included (`throughline/pii.py`).
+  calls are themselves sessions on disk. The writer recognizes those known
+  prompts and drops their source file at ingest, recording a zero-row decision
+  in `ingestion_log`. Existing rows from versions that predate that guard can be
+  labelled by `backfill_generated_by`; listings, charts, search, and answers
+  exclude those legacy labelled rows by default.
+- **Privacy**: sources are mounted read-only. Content can leave the machine for
+  embedding, answering, extraction, title generation, or reflection whenever a
+  selected model backend is hosted. Select local backends where that boundary is
+  unacceptable. `THROUGHLINE_REDACT_PROMPTS=1` strips secrets from answer
+  excerpts, off by default because a memory tool that hides your own credentials
+  from you is failing at its job. PII scanning utilities are included
+  (`throughline/pii.py`).
 - **The database outlives its sources.** Assistant CLIs rotate their transcripts away: on a corpus measured while writing this, 91% of the Claude Code sessions Throughline had ingested no longer existed on disk. For those the database is not an index over files you still have, it is the only copy. Schema changes are packaged as ordered migrations: use `throughline migrate --status` to inspect them and `throughline migrate` to apply them. Compose applies them automatically before it starts the web UI or MCP service. `throughline doctor --category archive` reports the store's consistency and whether a recent backup exists. `throughline backup` creates a private local dump.
 
 > **About the numbers in this section.** Every measurement quoted here — the

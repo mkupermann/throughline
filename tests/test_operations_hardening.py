@@ -76,6 +76,17 @@ def test_application_uid_and_gid_are_build_time_configuration(compose: dict) -> 
     assert build_args["THROUGHLINE_GID"] == "${THROUGHLINE_GID:-1000}"
 
 
+def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> None:
+    """A container-only backup path disappears when the web container is replaced."""
+    web = compose["services"]["web"]
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert web["environment"]["CLAUDE_MEMORY_BACKUP_DIR"] == "/var/lib/throughline/backups"
+    assert "backup_data:/var/lib/throughline/backups" in web["volumes"]
+    assert compose["volumes"]["backup_data"]["name"] == "throughline_backup_data"
+    assert "install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups" in dockerfile
+
+
 def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: Path) -> None:
     """A fresh checkout needs a generated secret and matching host identity."""
     env_file = tmp_path / ".env"
@@ -294,6 +305,15 @@ def test_systemd_services_default_to_the_current_database() -> None:
         assert "PGDATABASE=" not in text
 
 
+def test_systemd_ingest_uses_the_packaged_cli_and_shared_environment() -> None:
+    """Timers must follow the supported installed command, not a source wrapper."""
+    text = (ROOT / "systemd" / "throughline-ingest.service").read_text(encoding="utf-8")
+
+    assert "ExecStart=/usr/bin/env throughline ingest --all" in text
+    assert "scripts/ingest_sessions.py" not in text
+    assert "EnvironmentFile=%h/.config/throughline/throughline.env" in text
+
+
 @pytest.mark.parametrize("script", ["scripts/backup.sh", "throughline/shell/backup.sh"])
 def test_backup_creates_owner_only_dump_files(script: str, tmp_path: Path) -> None:
     """A permissive umask would leak a full database dump to local users."""
@@ -318,3 +338,28 @@ def test_backup_creates_owner_only_dump_files(script: str, tmp_path: Path) -> No
     assert len(dumps) == 1
     assert stat.S_IMODE(dumps[0].stat().st_mode) == 0o600
     assert stat.S_IMODE(backup_dir.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("script", ["scripts/backup.sh", "throughline/shell/backup.sh"])
+def test_backup_discovers_pg_dump_on_path_without_a_homebrew_location(script: str, tmp_path: Path) -> None:
+    """Packaged backup must work on Linux and non-Homebrew installations."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    pg_dump = fake_bin / "pg_dump"
+    pg_dump.write_text("#!/bin/sh\nprintf 'COPY public.demo (value) FROM stdin;\\nrow\\n\\\\.\\n'\n")
+    pg_dump.chmod(0o755)
+
+    backup_dir = tmp_path / "private" / "backups"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PG_BIN": "",
+        "PG_DUMP_BIN": "",
+        "PGDATABASE": "throughline",
+        "PGUSER": "test-user",
+        "CLAUDE_MEMORY_BACKUP_DIR": str(backup_dir),
+        "CLAUDE_MEMORY_BACKUP_MIN_BYTES": "1",
+    }
+    subprocess.run(["bash", str(ROOT / script)], check=True, env=env, capture_output=True, text=True)
+
+    assert len(list(backup_dir.glob("throughline_*.sql.gz"))) == 1

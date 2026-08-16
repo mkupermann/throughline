@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && (getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline) \
     && useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID" \
         --shell /usr/sbin/nologin throughline \
+    && install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

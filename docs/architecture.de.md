@@ -72,11 +72,12 @@ der Writer fehlende Projekte, ohne manuell gepflegte Daten zu überschreiben.
 ## Generierte Sitzungen
 
 Titelgenerierung, Memory Extraction und Antworten können selbst wieder lokale
-Sitzungen erzeugen. Der Writer löscht diese Sessions nicht. Er markiert sie mit
-`conversations.generated_by`. Listings, Suche, Charts und Antworten schließen
-sie standardmäßig aus. Eine Projektansicht kann den zurückgehaltenen Bestand
-anzeigen und ihn auf Wunsch einbeziehen. Damit bleibt der Audit Trail erhalten,
-ohne dass das System seine eigenen Inhalte bevorzugt.
+Sitzungen erzeugen. Der Writer erkennt die bekannten selbstreferenziellen
+Prompts, verwirft deren Quelldatei vor dem Schreiben und protokolliert eine
+Zero-Row-Entscheidung im `ingestion_log`. `conversations.generated_by` bleibt
+für Altbestand aus Versionen vor dieser Sperre: `backfill_generated_by`
+markiert diese Rows, die Listings, Suche, Charts und Antworten standardmäßig
+ausblenden.
 
 ## Migrationen
 
@@ -147,6 +148,9 @@ Alle modelbasierten Operationen können Inhalte an den gewählten Model Provider
 senden. Lokale Backends halten sie auf dem Rechner. Für Remote Antworten kann
 `THROUGHLINE_REDACT_PROMPTS=1` die Exzerpte redigieren. Die Extraction verwendet
 standardmäßig die Heuristik in `throughline/pii.py`.
+Die Embedding-Automatik wählt bei vorhandenem `OPENAI_API_KEY` das gehostete
+OpenAI-Backend, sonst Ollama; für eine strikt lokale Verarbeitung ist daher
+`throughline embed --backend ollama` erforderlich.
 
 ## Qualitätssicherung
 
