@@ -102,6 +102,40 @@ describe("route API states", () => {
     expect(await screen.findByText("No activity in this range.")).toBeTruthy();
   });
 
+  it("shows a day-detail failure instead of claiming the selected day has no events", async () => {
+    reply({
+      "/api/providers": json({ providers: [] }),
+      "/api/timeline?": json({
+        since: "2026-08-16", until: "2026-08-16", bucket: "day",
+        cells: [{ bucket: "2026-08-16", provider: "hermes", kind: "conversation", n: 1 }],
+      }),
+      "/api/timeline/day/2026-08-16?": new TypeError("network down"),
+    });
+    renderRoute(<TimelinePage />, "/timeline");
+
+    expect(await screen.findByRole("heading", { name: "Cannot load events for this day" })).toBeTruthy();
+    expect(screen.queryByText(/No events on 2026-08-16/)).toBeNull();
+  });
+
+  it("shows Find's initial loading state before an active query returns", async () => {
+    let release!: (response: Response) => void;
+    const pendingSearch = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    reply({
+      "/api/find/facets": json({ kinds: [], categories: [], statuses: [], projects: [], tags: [] }),
+      "/api/find?": pendingSearch,
+    });
+    renderRoute(<FindPage />, "/find?q=postgres");
+
+    expect(await screen.findByText("Searching…")).toBeTruthy();
+    release(json({
+      query: "postgres", items: [], total: 0, limit: 50, offset: 0,
+      modes: ["lexical"], notes: [], backend: { available: true, label: "text" },
+    }));
+    expect(await screen.findByRole("heading", { name: /No results for “postgres”/ })).toBeTruthy();
+  });
+
   it("shows Curate's unavailable state instead of claiming an empty queue", async () => {
     reply({ "/api/curate/queues": new TypeError("network down") });
     renderRoute(
@@ -115,8 +149,19 @@ describe("route API states", () => {
     expect(screen.queryByText("Nothing in this queue")).toBeNull();
   });
 
-  it("shows a real empty state when the queue index has no queues", async () => {
-    reply({ "/api/curate/queues": json({ queues: [], total: 0 }) });
+  it("shows the selected zero-count queue as empty", async () => {
+    reply({
+      "/api/curate/queues": json({
+        queues: [
+          { name: "contradictions", title: "Contradictions", description: "Potential conflicts", count: 0, severity: "warning", actions: [] },
+          { name: "low-confidence", title: "Low confidence", description: "Needs review", count: 0, severity: "info", actions: [] },
+        ],
+        total: 0,
+      }),
+      "/api/curate/queue/contradictions": json({
+        name: "contradictions", title: "Contradictions", description: "Potential conflicts", count: 0, severity: "warning", actions: [], items: [],
+      }),
+    });
     renderRoute(
       <ToastProvider>
         <CuratePage />
@@ -124,8 +169,8 @@ describe("route API states", () => {
       "/curate",
     );
 
-    expect(await screen.findByRole("heading", { name: "Nothing to curate" })).toBeTruthy();
-    expect(screen.queryByText("Nothing in this queue")).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Nothing in this queue" })).toBeTruthy();
+    expect(screen.getAllByText("Potential conflicts")).toHaveLength(2);
   });
 
   it("shows a project-unavailable state instead of an empty history", async () => {
@@ -162,6 +207,29 @@ describe("route API states", () => {
 
     expect(await screen.findByText("pgvector extension is unavailable")).toBeTruthy();
     expect(screen.getByText("Ollama is offline")).toBeTruthy();
+  });
+
+  it("shows provider coverage as unavailable when its dependency fails", async () => {
+    reply({
+      "/api/providers": new TypeError("network down"),
+      "/api/operate/status": json({
+        counts: {},
+        database: { reachable: true, tables: {}, dbname: "throughline" },
+        extensions: { pgvector_usable: true, note: null },
+        embedding: { backend: "ollama", available: true, reason: null, coverage: { total: 0, embedded: 0 }, by_model: [] },
+        pending: { extraction: 0, titles: 0 },
+        ingestion: [], jobs: [], history: [],
+      }),
+    });
+    renderRoute(
+      <ToastProvider>
+        <OperatePage />
+      </ToastProvider>,
+      "/operate",
+    );
+
+    expect(await screen.findByRole("heading", { name: "Provider coverage unavailable" })).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
   });
 
   it("keeps Console usable but names an unavailable schema endpoint", async () => {

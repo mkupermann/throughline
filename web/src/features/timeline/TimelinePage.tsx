@@ -145,7 +145,7 @@ export function TimelinePage() {
     return p;
   }, [selectedLane]);
 
-  const { data: dayData, isLoading: dayLoading } = useQuery({
+  const { data: dayData, isLoading: dayLoading, error: dayError } = useQuery({
     queryKey: ["timeline-day", selectedDay, dayQs.toString()],
     queryFn: () => timelineApi.day(selectedDay as string, dayQs),
     enabled: selectedDay !== null,
@@ -384,6 +384,7 @@ export function TimelinePage() {
           total={selectedTotal}
           data={dayData}
           isLoading={dayLoading}
+          error={dayError}
           onClose={() => {
             chosenByUser.current = true;
             setSelectedDay(null);

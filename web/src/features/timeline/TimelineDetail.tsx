@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
+import { OctagonAlert } from "lucide-react";
 
-import type { TimelineDayItem } from "@/lib/api";
+import { ApiError, type TimelineDayItem } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 
 /** Where a timeline row opens.
@@ -49,6 +50,7 @@ export function TimelineDetail({
   total,
   data,
   isLoading,
+  error,
   onClose,
 }: {
   day: string;
@@ -61,6 +63,7 @@ export function TimelineDetail({
   total: number | undefined;
   data: { day: string; items: TimelineDayItem[] } | undefined;
   isLoading: boolean;
+  error: unknown;
   onClose: () => void;
 }) {
   const items = data?.items ?? [];
@@ -82,7 +85,16 @@ export function TimelineDetail({
 
       {isLoading && <p className="muted">Loading…</p>}
 
-      {!isLoading && items.length === 0 && (
+      {error ? (
+        <div className="empty-state">
+          <OctagonAlert size={22} aria-hidden />
+          <h3>Cannot load events for this day</h3>
+          <p>{(error as ApiError).message}</p>
+          {(error as ApiError).hint && <p className="empty-hint">{(error as ApiError).hint}</p>}
+        </div>
+      ) : null}
+
+      {!isLoading && !error && items.length === 0 && (
         <p className="empty-state">
           No events on {day}
           {providers.length > 0 ? " for the current provider scope." : "."}

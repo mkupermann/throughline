@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
 
-import { operateApi, providersApi, type JobSummary, type ProviderCoverage } from "@/lib/api";
+import { ApiError, operateApi, providersApi, type JobSummary, type ProviderCoverage } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
 
@@ -235,7 +235,7 @@ export function OperatePage() {
 
   // Same queryKey as ProviderBar — one shared cache entry, not a second
   // request for the same data.
-  const { data: providersData } = useQuery({
+  const { data: providersData, error: providersError } = useQuery({
     queryKey: ["providers"],
     queryFn: () => providersApi.list(),
     staleTime: 60_000,
@@ -355,6 +355,15 @@ export function OperatePage() {
             jobs={data.jobs}
             onIngest={(name) => runJob.mutate(`ingest_${name}`)}
           />
+        ) : providersError ? (
+          <div className="empty-state">
+            <OctagonAlert size={22} aria-hidden />
+            <h3>Provider coverage unavailable</h3>
+            <p>{(providersError as ApiError).message}</p>
+            {(providersError as ApiError).hint && (
+              <p className="empty-hint">{(providersError as ApiError).hint}</p>
+            )}
+          </div>
         ) : (
           <div className="skeleton skeleton-row" />
         )}

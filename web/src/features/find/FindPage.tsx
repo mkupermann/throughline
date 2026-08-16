@@ -65,12 +65,13 @@ export function FindPage() {
   const [selected, setSelected] = useState(0);
 
   const params = toApiParams(state);
-  const { data, isFetching, error } = useQuery({
+  const hasActiveQuery = state.q.trim().length > 0 || activeFilterCount > 0;
+  const { data, isFetching, isPending, error } = useQuery({
     queryKey: ["find", params.toString()],
     queryFn: () => findApi.search(params),
     // Browsing counts as a query: with filters set and no text, the API
     // returns a time-ordered listing rather than nothing.
-    enabled: state.q.trim().length > 0 || activeFilterCount > 0,
+    enabled: hasActiveQuery,
     // Keep the previous page on screen while the next one loads — a list that
     // blanks on every keystroke is unreadable.
     placeholderData: keepPreviousData,
@@ -232,6 +233,10 @@ export function FindPage() {
 
         <div className="find-main">
           {state.mode === "ask" && <AskPanel question={state.q} />}
+
+          {state.mode !== "ask" && hasActiveQuery && isPending && (
+            <p className="muted">Searching…</p>
+          )}
 
           {state.mode !== "ask" && !state.q.trim() && activeFilterCount === 0 && (
             <div className="empty-state">

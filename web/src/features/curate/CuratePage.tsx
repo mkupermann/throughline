@@ -273,25 +273,6 @@ export function CuratePage() {
     );
   }
 
-  if (queues && queues.queues.length === 0) {
-    return (
-      <>
-        <header className="page-header">
-          <h1 className="page-title">Curate</h1>
-          <p className="page-subtitle">Every queue is clear.</p>
-        </header>
-        <div className="curate-toolbar">
-          <NewChunkForm />
-        </div>
-        <div className="empty-state">
-          <CheckCircle2 size={22} aria-hidden />
-          <h2>Nothing to curate</h2>
-          <p>There are no curation queues on this database.</p>
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <header className="page-header">
