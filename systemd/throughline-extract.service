@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=%h/.local/share/throughline
 ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/extract_memory.py
-Environment="PGDATABASE=claude_memory"
+Environment="PGDATABASE=throughline"
 Environment="PGUSER=%u"
 Environment="PGHOST=localhost"
 Environment="PGPORT=5432"

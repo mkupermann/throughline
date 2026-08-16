@@ -7,6 +7,8 @@ carefully as anything that touches data.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 
 from throughline.api.settings import (
@@ -68,3 +70,65 @@ def test_env_overrides(monkeypatch, tmp_path):
     s = Settings.from_env()
     assert (s.host, s.port, s.redact) == ("::1", 9999, False)
     assert s.web_dist == tmp_path.resolve()
+
+
+def test_health_endpoint_requires_a_successful_database_query(monkeypatch):
+    """Returning OK without SELECT 1 would make the container ready too early."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from throughline.api import app as api_app
+
+    calls: list[str] = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query: str) -> None:
+            calls.append(query)
+
+    class Connection:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    @contextmanager
+    def ready_database(_settings):
+        yield Connection()
+
+    monkeypatch.setattr(api_app, "init_pool", lambda _settings: None)
+    monkeypatch.setattr(api_app, "close_pool", lambda: None)
+    monkeypatch.setattr(api_app.deps, "connection", ready_database)
+
+    with TestClient(api_app.create_app(Settings(web_dist=None))) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert calls == ["SELECT 1"]
+
+
+def test_health_endpoint_reports_database_unavailable(monkeypatch):
+    """Readiness must fail rather than report a live-but-unusable process."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from throughline.api import app as api_app
+    from throughline.api.deps import DatabaseUnavailable
+
+    @contextmanager
+    def unavailable_database(_settings):
+        raise DatabaseUnavailable("connection refused")
+        yield
+
+    monkeypatch.setattr(api_app, "init_pool", lambda _settings: None)
+    monkeypatch.setattr(api_app, "close_pool", lambda: None)
+    monkeypatch.setattr(api_app.deps, "connection", unavailable_database)
+
+    with TestClient(api_app.create_app(Settings(web_dist=None))) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "database_unavailable"

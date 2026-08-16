@@ -1,5 +1,5 @@
 [Unit]
-Description=Throughline - ingest Claude Code sessions into claude_memory
+Description=Throughline - ingest Claude Code sessions into throughline
 Documentation=https://github.com/mkupermann/Throughline
 After=network-online.target
 Wants=network-online.target
@@ -10,7 +10,7 @@ Type=oneshot
 # %h expands to the user's home directory, %u to the username.
 WorkingDirectory=%h/.local/share/throughline
 ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/ingest_sessions.py
-Environment="PGDATABASE=claude_memory"
+Environment="PGDATABASE=throughline"
 Environment="PGUSER=%u"
 Environment="PGHOST=localhost"
 Environment="PGPORT=5432"

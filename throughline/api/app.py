@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from throughline import __version__
 
+from . import deps
 from .deps import DatabaseUnavailable, close_pool, init_pool
 from .routers import (
     ask,
@@ -85,12 +86,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
-        """Liveness only — deliberately does not touch the database.
-
-        A health check that fails when Postgres is down would take the whole
-        server out of rotation for a condition every endpoint already reports
-        as 503 with a useful message.
-        """
+        """Readiness: only report healthy after PostgreSQL accepts a query."""
+        with deps.connection(settings) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
         return {"status": "ok", "version": __version__}
 
     _mount_frontend(app, settings.web_dist)

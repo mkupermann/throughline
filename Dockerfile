@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
     curl \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin throughline \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -29,17 +30,14 @@ RUN pip install -e .
 # inside the package, so the image never needs a JavaScript toolchain.
 
 # Adapters resolve their source directories from $HOME at import time.
-# docker-compose mounts the host tool directories under /root (read-only),
-# e.g. ~/.claude -> /root/.claude, so discovery works unchanged in-container.
+# docker-compose mounts the host tool directories under /home/throughline
+# (read-only), e.g. ~/.claude -> /home/throughline/.claude.
 
-ENV THROUGHLINE_HOST=0.0.0.0 \
+ENV HOME=/home/throughline \
+    THROUGHLINE_HOST=0.0.0.0 \
     THROUGHLINE_PORT=8787
-# The API has no authentication, so binding a non-loopback address is refused
-# unless this is set. Inside a container it *must* bind 0.0.0.0 or published
-# ports cannot reach it — the isolation boundary is the container plus how the
-# port is published. docker-compose publishes on 127.0.0.1 only; if you change
-# that, put authentication in front of it first.
-ENV THROUGHLINE_ALLOW_REMOTE=1
+
+USER throughline
 
 EXPOSE 8787
 

@@ -66,11 +66,29 @@ def seeded(db_connection):
     return db_connection
 
 
-def test_health_does_not_require_the_database(client):
-    """Liveness must not depend on Postgres — see the docstring in app.py."""
+def test_health_reports_ready_after_a_database_query(client):
+    """Readiness is only true once the database accepts a real query."""
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_health_returns_database_unavailable_when_postgres_cannot_connect(client, monkeypatch):
+    """A liveness-only response would make Compose mark a broken app ready."""
+    from contextlib import contextmanager
+
+    from throughline.api import deps
+
+    @contextmanager
+    def unavailable(_settings):
+        raise deps.DatabaseUnavailable("connection refused")
+        yield
+
+    monkeypatch.setattr(deps, "connection", unavailable)
+
+    response = client.get("/api/health")
+    assert response.status_code == 503
+    assert response.json()["error"] == "database_unavailable"
 
 
 def test_overview_shape(client, seeded):

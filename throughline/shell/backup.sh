@@ -9,6 +9,10 @@ set -e
 # a backup. pipefail makes the pipeline fail when pg_dump does.
 set -o pipefail
 
+# Dumps contain the complete memory database. New directories and files must
+# be private even when this script is launched from a permissive login shell.
+umask 077
+
 # Default backup location is OUTSIDE the repo (XDG-style).
 # Override with the CLAUDE_MEMORY_BACKUP_DIR environment variable.
 BACKUP_DIR="${CLAUDE_MEMORY_BACKUP_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/claude-memory/backups}"
@@ -18,6 +22,7 @@ DB_USER="${PGUSER:-$USER}"
 PG_BIN="${PG_BIN:-/opt/homebrew/opt/postgresql@16/bin}"
 
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 
 TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
 BACKUP_FILE="$BACKUP_DIR/${DB_NAME}_${TIMESTAMP}.sql.gz"

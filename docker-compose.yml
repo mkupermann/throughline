@@ -3,36 +3,37 @@
 # Supported sources: Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, Vibe
 
 # Source mounts: every adapter resolves its data directory relative to $HOME,
-# which is /root inside the containers. Host tool directories are therefore
-# mounted read-only at the same relative location under /root. A missing host
-# directory is harmless — the adapter reports the source as "not present".
+# which is /home/throughline inside the unprivileged application containers.
+# Host tool directories are therefore mounted read-only at the same relative
+# location. A missing host directory is harmless — the adapter reports the
+# source as "not present".
 
 x-source-mounts: &source-mounts
   # Claude Code (Anthropic)
-  - ~/.claude:/root/.claude:ro
+  - ~/.claude:/home/throughline/.claude:ro
   # Cursor (Anysphere)
-  - ~/.cursor:/root/.cursor:ro
+  - ~/.cursor:/home/throughline/.cursor:ro
   # Zed (Zed Industries)
-  - ~/.zed:/root/.zed:ro
+  - ~/.zed:/home/throughline/.zed:ro
   # Codex (OpenAI)
-  - ~/.codex:/root/.codex:ro
+  - ~/.codex:/home/throughline/.codex:ro
   # Hermes (Community)
-  - ~/.hermes:/root/.hermes:ro
+  - ~/.hermes:/home/throughline/.hermes:ro
   # Continue (Continue.dev)
-  - ~/.continue:/root/.continue:ro
+  - ~/.continue:/home/throughline/.continue:ro
   # Windsurf (Codeium/Cognition)
-  - ~/.windsurf:/root/.windsurf:ro
+  - ~/.windsurf:/home/throughline/.windsurf:ro
   # Vibe (Mistral AI)
-  - ~/.vibe:/root/.vibe:ro
+  - ~/.vibe:/home/throughline/.vibe:ro
   # Cline (VS Code extension — macOS path; on Linux use ~/.config/Code/...)
-  - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/root/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
+  - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
 
 x-pg-env: &pg-env
   PGHOST: postgres
   PGPORT: 5432
-  PGDATABASE: throughline
-  PGUSER: throughline
-  PGPASSWORD: throughline_dev_password
+  PGDATABASE: "${POSTGRES_DB:-throughline}"
+  PGUSER: "${POSTGRES_USER:-throughline}"
+  PGPASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example first)}"
 
 services:
   # ---------------------------------------------------------------------------
@@ -43,18 +44,18 @@ services:
     container_name: throughline-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: throughline
-      POSTGRES_USER: throughline
-      POSTGRES_PASSWORD: throughline_dev_password
+      POSTGRES_DB: "${POSTGRES_DB:-throughline}"
+      POSTGRES_USER: "${POSTGRES_USER:-throughline}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example first)}"
     ports:
       # Host port defaults to 5433 so a native PostgreSQL on 5432 is never
       # shadowed. Containers talk to postgres:5432 internally regardless.
-      - "${THROUGHLINE_DB_PORT:-5433}:5432"
+      - "127.0.0.1:${THROUGHLINE_DB_PORT:-5433}:5432"
     volumes:
       # Persistent database storage — contains all memory data. Do not delete.
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -96,10 +97,13 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *pg-env
+      # The image deliberately has no remote-bind bypass. Docker networking
+      # requires 0.0.0.0 in the container; the port mapping below is loopback.
+      THROUGHLINE_ALLOW_REMOTE: "1"
     ports:
       # Published on loopback only: the API has no authentication, so the
       # container must not be reachable from the rest of the network.
-      - "127.0.0.1:8788:8787"
+      - "127.0.0.1:${THROUGHLINE_WEB_PORT:-8788}:8787"
     volumes: *source-mounts
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8787/api/health"]
@@ -142,7 +146,7 @@ services:
     profiles:
       - embeddings
     ports:
-      - "11434:11434"
+      - "127.0.0.1:${THROUGHLINE_OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
 
