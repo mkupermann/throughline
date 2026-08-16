@@ -55,7 +55,7 @@ small batches.
 
 ## Ingestion
 
-`scripts/ingest_sessions.py` walks `~/.claude/projects/`, hashes each
+`throughline ingest --all` walks the available source directories, hashes each
 JSONL file with SHA-256, skips if already in `ingestion_log`, parses
 line-by-line with `json.loads`, and batch-inserts into `conversations`
 + `messages`.
@@ -131,7 +131,7 @@ X?" from inside a session.
 
 ## Memory Extraction
 
-`scripts/extract_memory.py` sends a conversation window to the
+`throughline extract-memory` sends a conversation window to the
 `claude` CLI in headless mode (`claude -p`), parses JSON out of stdout,
 and inserts into `memory_chunks`.
 
@@ -192,7 +192,7 @@ The embeddings table is the biggest single component at scale
 
 ```bash
 # 1. Ingestion throughput
-time python3 scripts/ingest_sessions.py
+time throughline ingest --all
 
 # 2. Embeddings (single-call)
 time curl -s http://localhost:11434/api/embeddings \
@@ -208,7 +208,7 @@ psql -d claude_memory -c "\timing on" -c "
 "
 
 # 4. Blended search end-to-end
-time python3 scripts/search_semantic.py "HNSW tuning"
+time throughline search "HNSW tuning"
 
 # 5. Storage
 psql -d claude_memory -c \

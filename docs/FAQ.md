@@ -4,203 +4,122 @@
 
 ### Who is this for?
 
-Developers who use Claude Code daily and want their past sessions to
-inform future sessions without copy-pasting context every time. If you
-have dozens of active projects, this tool keeps each one's history
-queryable instead of buried in JSONL files.
+Developers who use several local AI coding tools and want one searchable memory
+layer across their session histories.
 
-### Is it a replacement for Claude's built-in memory?
+### Is it a replacement for an assistant's built-in memory?
 
-No — Claude's built-in memory is per-session and per-project. This tool
-is the cross-session, cross-project layer underneath.
+No. Throughline is a local cross-session, cross-project store. It can ingest
+Claude Code, Codex, Cursor, Zed, Hermes, Continue, Cline, Windsurf, and Vibe.
 
 ### Can I use it without Claude Code?
 
-The database schema and GUI work standalone. You can insert memory
-chunks manually, edit them in the GUI, and query them via SQL or
-semantic search. But the ingestion pipeline is specific to Claude
-Code's JSONL format.
+Yes. The UI, CLI, MCP server, and database do not require Claude Code. Each
+adapter only reads its own tool's on-disk format; `throughline ingest
+--list-sources` shows which sources are present.
 
 ### Does it send data anywhere?
 
-Not by default. Everything runs on localhost:
-- PostgreSQL on `localhost:5432`
-- the web UI on `127.0.0.1:8790` (`throughline serve`) or `127.0.0.1:8788` (Docker)
+Not by default. PostgreSQL runs on a native local port, normally
+`localhost:5432`, or on the Docker loopback port, normally `127.0.0.1:5433`.
+The web UI listens on `127.0.0.1:8790` natively or `127.0.0.1:8788` in Docker.
 
-Optional network use, opt-in per feature:
-- OpenAI API for embeddings — only if you pick the `openai` backend
-  (default is local Ollama)
-- Memory extraction sends conversation windows to whichever backend you
-  configured — the Anthropic API (`ANTHROPIC_API_KEY`) or the local Claude
-  Code CLI in headless mode
+Answers, extraction, titles, reflection, and embeddings can call a model.
+Choose a local backend to keep content on the machine. A hosted backend receives
+the relevant excerpts or transcripts. [SECURITY.md](../SECURITY.md) describes
+the boundaries and redaction controls.
 
 ## Installation
 
-### Why PostgreSQL and not SQLite?
+### Why PostgreSQL instead of SQLite?
 
-- `pgvector` — mature, high-performance vector search
-- `jsonb` — schemaless columns for flexible metadata
-- Concurrent writes — multiple scripts can ingest in parallel
-- `tsvector` / `pg_trgm` — full-text and trigram search for free
+Throughline uses pgvector, JSONB, full-text/trigram indexes, and transactions
+that protect concurrent ingestion and derived data. PostgreSQL provides those
+in the same database as the sessions and memory.
 
-SQLite's `sqlite-vec` extension is catching up, but the feature delta
-still matters for this workload.
+### Does Linux or Windows work?
 
-### I'm on Linux / Windows. Does it work?
+Linux supports the core stack and ships user-level systemd timers for ingest,
+extraction, and backup. AppleScript integrations are macOS only. Windows under
+WSL2 is not tested, and no Windows scheduler integration is supplied.
 
-- **Linux:** the core (Postgres, scripts, the web UI) works fine. The
-  AppleScript hooks for Mail / Calendar do not. launchd does not exist
-  — use systemd user services or cron instead.
-- **Windows:** untested. PostgreSQL, Python, and the web UI all run on
-  Windows, so the core should work via WSL2 or natively. AppleScript
-  and launchd do not exist.
+### Do I need Homebrew?
 
-Contributions to add Linux systemd units and a Windows task-scheduler
-equivalent are welcome.
+Only for the native macOS route that uses Homebrew's PostgreSQL packages. The
+Docker route does not. With another PostgreSQL installation, create the database
+and run `throughline migrate`.
 
-### Why do I need Homebrew?
+## Operations
 
-Only because the installer uses `brew install postgresql@16 pgvector`.
-If you install those some other way (from source, MacPorts, Postgres.app),
-just skip the install script and run the SQL schema manually.
+### How do schema upgrades work?
 
-## Usage
+Run `throughline migrate --status`, then `throughline migrate`. The migrations
+are packaged with the installed wheel. Docker Compose runs the same command
+automatically and waits for it before starting the web or MCP service. Do not
+initialize a new database by applying `sql/schema.sql` directly.
 
 ### The scheduler ran but no memory chunks were extracted
 
-Three common causes:
+Check that a model backend is available and that the selected conversations are
+eligible for extraction. Run `throughline doctor`, then start a foreground
+`throughline extract-memory` to see the error. Do not delete database rows as a
+troubleshooting shortcut.
 
-1. **No Claude CLI and no `ANTHROPIC_API_KEY`** — the extraction script
-   requires one of them. Check with `which claude` and `echo $ANTHROPIC_API_KEY`.
+### How do I back up and restore the database?
 
-2. **Conversations have fewer than 5 messages** — the default threshold
-   skips trivially short sessions. Lower it in
-   `scripts/extract_memory.py` if you want them processed.
-
-3. **Conversations already processed** — the script tracks per-source
-   processing. Force re-extraction with
-   `DELETE FROM memory_chunks WHERE source_id = <id>` then re-run.
-
-### I want to delete a memory chunk permanently
-
-Open the chunk in the GUI (Memory page → click the card) and use the
-Delete button. The row is hard-deleted. If you want to preserve audit
-history, use the `status` column instead — set it to `superseded` or
-`archived` so the row stays queryable but does not show up in active
-views.
-
-### Why are all my skills showing today's date in the calendar?
-
-First scan — `scan_skills.py` stores `file_modified` from the
-filesystem's `mtime`. If you just cloned the repo or copied skills
-between machines, all `mtime` values will be recent. Re-scan after
-letting the skills settle, or accept that scan-time is "good enough"
-for the calendar.
-
-### How do I back up the database?
-
-The `backup.sh` script runs daily via launchd and writes compressed
-dumps to `~/.local/share/claude-memory/backups/` with 30-day retention.
-Manually:
+Run `throughline backup` for the configured private local dump path. To restore
+a manual dump into an empty native database:
 
 ```bash
-pg_dump claude_memory | gzip > ~/backup.sql.gz
+createdb throughline
+psql throughline < backup.sql
+throughline migrate
 ```
 
-To restore:
+Source session files remain owned by their AI tools. Throughline never modifies
+them.
 
-```bash
-dropdb claude_memory
-createdb claude_memory
-gunzip -c ~/backup.sql.gz | psql claude_memory
-```
+### Can I run Docker after changing the Compose password?
 
-### Can I edit a memory chunk by hand?
+For a new volume, run `python3 scripts/init_compose_env.py` before
+`docker compose up -d`. An existing PostgreSQL volume retains its role and
+database name. Its password must be rotated with the explicit
+`credential-rotate` profile in [DEPLOYMENT.md](DEPLOYMENT.md); changing
+`POSTGRES_USER` or `POSTGRES_DB` does not rename either one.
 
-Yes. In the GUI, open the chunk and edit in-place. Content, tags,
-confidence, category — all editable. Changes write immediately.
-
-## Data Model
+## Data and privacy
 
 ### What is the difference between a message and a memory chunk?
 
-- **message** — one turn in a Claude conversation, stored verbatim
-- **memory chunk** — a distilled fact extracted from one or many
-  messages, with a category, confidence, and optional expiration
+A message is a stored turn from a session. A memory chunk is a distilled fact
+with a category, confidence, tags, and source reference. Messages keep the
+original context; chunks make durable information easier to retrieve.
 
-A conversation might have 500 messages that produce only 3–4 memory
-chunks. Messages are preserved so you can always look up the original
-context; chunks are the distilled knowledge layer on top.
+### Can I edit or remove a memory chunk?
 
-### Why are there two places for skills — the filesystem and the database?
+Use Curate in the web UI or the MCP tools. Forgetting is an explicit destructive
+operation, so it asks for confirmation and preserves an audit record where the
+schema permits it.
 
-The filesystem (`~/.claude/skills/`) is Claude's source of truth — that
-is where Claude actually reads skills from. The database is a
-denormalized index of them, with use counts and timestamps, so the GUI
-and calendar have something to query against. `scan_skills.py` keeps
-the two in sync.
+### What sensitive data can be stored?
 
-### What are entities and relationships?
+AI-tool sessions can include file paths, source code, output containing API
+keys, email addresses, project names, and contacts. Treat the database and its
+backups as confidential. Use disk encryption and encrypt any backup that leaves
+the machine.
 
-The knowledge graph tables. Entities are people, projects,
-technologies, decisions, concepts, and organizations that Claude
-mentions in conversations. Relationships connect them ("Jane works on
-Project Alpha", "Project Alpha depends on pgvector"). The graph is
-built by `scripts/extract_entities.py` running Claude over each
-conversation.
+### Does Throughline redact secrets before model calls?
 
-## Privacy and security
+Extraction uses the heuristic redaction pass in `throughline/pii.py` by default.
+It recognises common API-key shapes, JWTs, bearer tokens, explicit credential
+assignments, private-key blocks, email addresses, and home-directory usernames.
+`THROUGHLINE_REDACT_PII=0` disables this for extraction. `THROUGHLINE_REDACT_PROMPTS=1`
+redacts answer excerpts sent to a remote answering model.
 
-### What sensitive data could end up in my database?
-
-Claude Code sessions can include file paths, source code snippets, API
-keys printed by debug tools, email addresses, project names, contacts
-mentioned in chat. Treat the database as confidential.
-
-See `SECURITY.md` for the full threat model and hardening recommendations.
-
-### Does anything scrub secrets before they get sent to Claude for extraction?
-
-Yes. Every transcript runs through a heuristic redaction pass
-(`throughline/pii.py`) before it is sent to Claude. API keys, JWTs, bearer
-tokens, `password=` / `secret=` / `token=` assignments, private-key blocks,
-email addresses, and home-directory usernames are all replaced with short
-`<REDACTED_*>` markers. On by default; disable with
-`THROUGHLINE_REDACT_PII=0` (or `memory.redact_pii: false` in `config.yaml`).
-
-### Should I encrypt the database?
-
-For a single-user local setup: probably not required if your disk is
-FileVault-encrypted (macOS) or LUKS-encrypted (Linux). The entire
-PostgreSQL data directory sits inside that encrypted volume.
-
-For backups to cloud storage: yes, always encrypt. `age` is the simplest
-tool — `age -e -r $(cat ~/.config/age/recipient) backup.sql.gz > backup.sql.gz.age`.
-
-## Contributing and support
+## Support
 
 ### How do I report a bug?
 
-Open a GitHub issue with:
-- The command you ran
-- The full traceback (for Python) or stderr (for scripts)
-- Your OS and Postgres version
-- Whether the same command worked before
-
-For security bugs, use GitHub's private advisory form (see SECURITY.md).
-
-### Can I fork this?
-
-Yes, MIT license. If you publish a fork, a link back is appreciated but
-not required.
-
-### What is on the roadmap?
-
-- MCP server integration so Claude can query memory via the MCP
-  protocol, not just the skill
-- Linux systemd equivalents of the launchd jobs
-- Multi-user schemas (each user gets a schema namespace)
-- Export adapters for Obsidian and Notion
-- Web-first deployment mode (for self-hosting on a home server)
-
-If you want one of these, open an issue.
+Open an issue with the command, full stderr or traceback, OS, PostgreSQL version,
+Python version, and installation route. For security issues, use GitHub's private
+security advisory flow described in [SECURITY.md](../SECURITY.md).

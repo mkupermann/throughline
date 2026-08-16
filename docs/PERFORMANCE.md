@@ -29,7 +29,7 @@ setup handles comfortably.
   SET hnsw.ef_search = 100;   -- default 40; higher = better recall, slower
   ```
 
-- Embedding generation (`scripts/generate_embeddings.py`) is the expensive
+- Embedding generation (`throughline embed`) is the expensive
   step, not search. Run it as a background job; freshly inserted chunks are
   usable immediately and picked up by the next embedding pass.
 - Local embeddings via Ollama (`docker compose --profile embeddings`) avoid

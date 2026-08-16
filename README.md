@@ -3,7 +3,7 @@
 ![Throughline — one memory layer for every AI CLI on your laptop](docs/assets/hero.svg)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-336791.svg)](sql/schema.sql)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
 
@@ -81,7 +81,7 @@ Adapters degrade gracefully: a tool that is not installed is simply reported as 
 ## Quick start
 
 **Requirements.** Docker route: Docker with Compose v2, and 2 GB of free disk
-for the image and database. Native route: Python 3.11+, PostgreSQL 16 with the
+for the image and database. Native route: Python 3.10+, PostgreSQL 16 with the
 pgvector extension, and the `psql`/`createdb` client tools. macOS and Linux are
 supported and both are tested; Windows works under WSL2 and is not tested.
 
@@ -118,15 +118,16 @@ pip install -r requirements.txt
 pip install -e .
 
 createdb throughline
-psql throughline < sql/schema.sql
+throughline migrate
 
 throughline ingest --all
 throughline serve
 ```
 
 The connection comes from the standard `PG*` variables, and a `.env` in the
-repository root is read automatically. Upgrading an existing install:
-[CHANGELOG.md](CHANGELOG.md) has the one-line step.
+repository root is read automatically. `throughline migrate` uses the versioned
+migrations shipped in the installed package. Run it after upgrading a native
+install; the Compose stack runs it automatically before web or MCP starts.
 
 Full instructions, including scheduled ingestion via launchd/systemd: [docs/INSTALLATION.md](docs/INSTALLATION.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
@@ -252,7 +253,7 @@ That test earned its keep the day it was written: extending it from three tools 
   search and answer excludes them by default. A project page reports how many it
   is withholding and shows them on request.
 - **Privacy**: sources are mounted read-only. The one point at which stored content leaves the machine is a question sent to a *remote* answering model — pick a local one and it never does. `THROUGHLINE_REDACT_PROMPTS=1` strips secrets from those excerpts, off by default because a memory tool that hides your own credentials from you is failing at its job. PII scanning utilities are included (`throughline/pii.py`).
-- **The database outlives its sources.** Assistant CLIs rotate their transcripts away: on a corpus measured while writing this, 91% of the Claude Code sessions Throughline had ingested no longer existed on disk. For those the database is not an index over files you still have — it is the only copy. Two consequences worth knowing before you rely on it: schema changes are tracked in `sql/migrations/` and applied with `python3 scripts/migrate.py` (`--status` lists what is pending), and `throughline doctor --category archive` reports the store's own consistency and whether a recent backup exists. `scripts/install_backup_agent.sh` schedules a verified nightly dump.
+- **The database outlives its sources.** Assistant CLIs rotate their transcripts away: on a corpus measured while writing this, 91% of the Claude Code sessions Throughline had ingested no longer existed on disk. For those the database is not an index over files you still have, it is the only copy. Schema changes are packaged as ordered migrations: use `throughline migrate --status` to inspect them and `throughline migrate` to apply them. Compose applies them automatically before it starts the web UI or MCP service. `throughline doctor --category archive` reports the store's consistency and whether a recent backup exists. `throughline backup` creates a private local dump.
 
 > **About the numbers in this section.** Every measurement quoted here — the
 > 3,017, the 91%, the recall figures — comes from one real corpus: the author's
@@ -297,7 +298,7 @@ Contributions are welcome — new adapters especially. Read [CONTRIBUTING.md](CO
 
 Bugs and feature requests go to [GitHub Issues](https://github.com/mkupermann/throughline/issues); questions and ideas to [Discussions](https://github.com/mkupermann/throughline/discussions). Security reports have their own channel — see [SECURITY.md](SECURITY.md). Current version and what changed: [CHANGELOG.md](CHANGELOG.md).
 
-**Status: beta.** The schema is migration-tracked and `pytest` runs 752 tests, including an end-to-end ingestion run through a live database for each of the nine adapters — but this has been run in earnest on one person's machine. Expect rough edges on setups unlike that one, and say so in an issue when you find them. The claims on this page are checked before publishing by an adversarial review run through a second vendor's model — the procedure, and what it has caught, are in [CONTRIBUTING.md](CONTRIBUTING.md#reviewing-user-facing-claims).
+**Status: beta.** The schema is migration-tracked. CI runs 111 frontend tests and 229 PostgreSQL-backed integration tests, including an end-to-end ingestion run through a live database for each of the nine adapters. It has still been used in earnest on one person's machine, so report setup-specific rough edges in an issue. The claims on this page are checked before publishing by an adversarial review run through a second vendor's model, the procedure and its findings are in [CONTRIBUTING.md](CONTRIBUTING.md#reviewing-user-facing-claims).
 
 ## License
 

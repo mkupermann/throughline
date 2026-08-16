@@ -15,9 +15,11 @@ docker compose up -d
 
 Starts:
 
-- `postgres` — PostgreSQL 16 with pgvector. The schema in `sql/schema.sql` is
-  applied automatically on first start of an empty volume. Data persists in the
-  named volume `throughline_postgres_data`; do not delete it.
+- `postgres` — PostgreSQL 16 with pgvector. Data persists in the named volume
+  `throughline_postgres_data`; do not delete it.
+- `migrate` — runs the packaged `throughline migrate` command after PostgreSQL
+  is ready. Both `web` and the optional `mcp` service wait for it to finish
+  successfully, on a fresh or existing volume.
 - `web` — web UI + JSON API on `http://127.0.0.1:8788`. The container listens
   on 8787 internally; only the published host port differs.
 
@@ -58,7 +60,7 @@ VS Code path (`~/Library/Application Support/Code/...`). On Linux, change it to
 pip install -r requirements.txt
 pip install -e .
 createdb throughline
-psql throughline < sql/schema.sql
+throughline migrate
 throughline ingest --all
 ```
 
@@ -100,17 +102,20 @@ shadowed. This is also the setup the integration test suite expects.
 
 ## Backup and restore
 
-The only state worth backing up is the PostgreSQL database:
+The only state worth backing up is the PostgreSQL database. The packaged backup
+command creates its directory and dump files with owner-only permissions:
 
 ```bash
 # Docker
-docker compose exec postgres pg_dump -U throughline throughline > backup.sql
+docker compose exec web throughline backup
 
 # Native
-pg_dump throughline > backup.sql
+throughline backup
 ```
 
-Restore into an empty database with `psql < backup.sql`. Source session files
+For a manual dump, use `pg_dump` with a private destination. Restore into an
+empty database with `psql < backup.sql`, then run `throughline migrate` to
+ensure the schema is current. Source session files
 remain owned by their respective tools; Throughline never modifies them
 (read-only mounts in Docker, read-only access natively).
 

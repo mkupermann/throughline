@@ -1,6 +1,6 @@
 # Throughline Architecture
 
-**Status:** current reference (supersedes the German design draft in [architecture.de.md](architecture.de.md))
+**Status:** current reference. A German version is available in [architecture.de.md](architecture.de.md).
 **Stack:** PostgreSQL 16 + pgvector + pg_trgm | Python 3.10+ | the web UI | MCP
 
 ---
@@ -19,11 +19,10 @@ Design goals:
   Zed, Vibe, Hermes, Continue.dev, Cline and Windsurf all enter through the same adapter
   contract and land in the same tables. Support for a tenth tool is a new adapter, not a
   schema change.
-- **Local-first.** The database runs on `localhost` and is reachable only from the
-  machine that owns the data. Ingestion, search, the GUI and the MCP server all work with
-  no network access. Only two optional steps leave the machine — LLM-based memory
-  extraction and OpenAI embeddings — and both have local substitutes (the Claude Code CLI
-  in headless mode, and Ollama).
+- **Local-first.** Native services bind to loopback. Compose maps PostgreSQL, the web UI,
+  and optional Ollama to loopback host ports. Ingestion, search, the GUI, and MCP work with
+  no network access when local model backends are selected. A hosted model receives only
+  the excerpt or transcript for the operation that uses it.
 - **Idempotent, restartable pipelines.** Every stage can be re-run at any time. Unchanged
   inputs are no-ops; changed inputs are replaced, never duplicated.
 - **One store, several access paths.** Relational queries, full-text/substring matching
@@ -39,12 +38,11 @@ Design goals:
 The system is a linear pipeline with a fan-out of consumers at the end.
 
 **Adapters** (`throughline/adapters/`) know one thing each: where a given tool keeps its
-sessions and how to read that format. They are pure readers — no database access, no
-transaction handling. The contract in `throughline/adapters/base.py` has three members:
-`is_present()` (cheap existence check on the tool's data directory), `discover()` (yield
-candidate files) and `parse()` (turn one file into `NormalisedConversation` objects). An
-adapter that needs to emit several conversations from a single file — a SQLite state
-database, for example — returns a list, and the writer handles each independently.
+sessions and how to read that format. They are pure readers, with no database access or
+transaction handling. `discover()` yields ingestible files and `parse()` converts one file
+to `NormalisedConversation` objects. `discover_all()` and `excluded_reason()` let an adapter
+report candidates that are intentionally excluded. An adapter that needs to emit several
+conversations from one source returns a list, and the writer handles each independently.
 
 **The adapter registry** (`throughline/adapters/registry.py`) lists the nine built-ins
 explicitly and then loads any third-party adapters published under the
@@ -63,30 +61,35 @@ embeddings and the ingestion ledger. `pgvector` supplies the vector type and HNS
 
 **Consumers** read from the same schema:
 
-- **CLI** (`throughline/cli.py`) — 17 subcommands covering ingestion (`ingest`,
+- **CLI** (`throughline/cli.py`) — packaged commands covering ingestion (`ingest`,
   `scan-skills`, `scan-prompts`), enrichment (`extract-memory`, `embed`,
   `generate-titles`, `reflect`), query (`search`, `conflicts`), operations (`status`,
-  `doctor`, `backup`, `backfill-projects`, `repair-conversations`, `install-hooks`) and
-  `serve` / `version`.
+  `doctor`, `backup`, `backfill-projects`, `repair-conversations`, `install-hooks`,
+  `migrate`) and `serve` / `version`. Direct `scripts/*.py` files remain compatibility
+  wrappers; installed users run `throughline <command>`.
 - **MCP server** (`memory_mcp/server.py`) — a FastMCP stdio server exposing nine tools:
   `search`, `recall_entity`, `write`, `supersede`, `forget`, `list_projects`,
   `recent_reflections`, `preload_summary` and `stats`. This is how an agent reads and
   writes memory at runtime. Results are project-scoped by default, derived from
   `CLAUDE_PROJECT_DIR`; setting `THROUGHLINE_PROJECT_SCOPE_STRICT` forbids the
   cross-project opt-out entirely.
-- **GUI** (`throughline/api/`) — a the web UI application with fourteen pages: Dashboard,
-  Calendar, Search, Semantic, Conversations, Memory, Memory Health, Skills, Knowledge
-  Graph, Projects, Prompts, Scheduler, Ingestion and SQL. Page bodies live in
-  `web/src/features/`.
+- **GUI** (`throughline/api/` and `web/src/`) — one FastAPI process serves the JSON API and
+  built React SPA. It has eight route components: Overview, Find, Timeline, Curate, Project,
+  Detail, Operate, and Console. Overview, Find, Timeline, Curate, Operate, and Console are
+  in the main navigation; project and detail routes open from records.
 - **Scheduled jobs** — launchd plists (`launchd/`) on macOS and systemd timers
   (`systemd/`) on Linux run ingestion, memory extraction and `pg_dump` backups
   unattended.
 
 ---
 
-## 3. Data model
+## 3. Data model and migrations
 
-Schema of record: `sql/schema.sql`. Three enum types constrain the vocabulary:
+The versioned schema lives in packaged `throughline/migrations/NNN_*.sql` files.
+`throughline migrate` applies them in ordinal order and records each successful
+file in `public.applied_migrations`. `sql/schema.sql` remains a schema snapshot
+for inspection and CI validation, not the new-installation path. Three enum
+types constrain the vocabulary:
 `memory_category` (decision, pattern, insight, preference, contact, error_solution,
 project_context, workflow), `message_role` (user, assistant, system, tool_result) and
 `project_status`.
@@ -109,6 +112,11 @@ project_context, workflow), `message_role` (user, assistant, system, tool_result
 The view `v_conversation_stats` aggregates sessions, messages, average tokens and cost per
 project.
 
+Compose waits for PostgreSQL readiness, runs `throughline migrate`, then starts web and MCP
+only when migration succeeds. On a native installation, run `throughline migrate` after
+`createdb` and every upgrade. An older schema initialized from `sql/schema.sql` is detected
+and baselined before later migrations apply; migration history is never rewritten.
+
 ---
 
 ## 4. Ingestion pipeline
@@ -130,10 +138,12 @@ project.
 3. **Parse.** The adapter converts the file into one or more `NormalisedConversation`
    objects, each holding `NormalisedMessage` records with roles mapped to the
    `message_role` enum.
-4. **Write.** The conversation is upserted on `session_id`; its messages are deleted and
-   re-inserted as a block. That replace-per-conversation strategy is what makes
-   append-heavy transcripts safe: a growing JSONL file re-ingests cleanly instead of
-   accumulating duplicate turns.
+4. **Write.** The conversation is upserted on `session_id`; every normalised field is
+   replaced, including nullable values, and its messages are replaced as a block. Before the
+   replacement, message-derived embeddings and entity mentions for that conversation are
+   removed in the same transaction. Advisory locks prevent a concurrent derived-data producer
+   from writing against messages that have just been replaced. A growing transcript therefore
+   refreshes cleanly instead of accumulating duplicate or stale data.
 5. **Record.** The file hash and message count go into `ingestion_log`, and the transaction
    commits. Errors roll back that one file only and increment an error counter — a single
    malformed session cannot abort an unattended nightly run.
@@ -148,6 +158,12 @@ way.
 assigns a project simply by setting that field. After any run that ingested new sessions,
 the writer materialises missing rows in `projects` with `ON CONFLICT DO NOTHING`, leaving
 manually curated rows untouched.
+
+**Generated sessions.** Throughline's own model calls can create source sessions. The writer
+labels those rows with `conversations.generated_by` instead of dropping them. Listings,
+search, charts, and answers exclude generated rows by default; a project view can show their
+withheld count and include them on request. This keeps an audit trail without letting
+self-generated content dominate retrieval.
 
 ---
 
@@ -169,8 +185,8 @@ headers, credential assignments and email addresses. Redaction is on by default 
 disabled only with `THROUGHLINE_REDACT_PII=0`. It is deliberately conservative: a missed
 secret is bad, but a chunk whose content has been hollowed out is useless.
 
-A separate pass, `scripts/extract_entities.py` (also launchable from the GUI's Knowledge
-Graph page), populates `entities`, `entity_mentions` and `relationships`, producing the
+A separate packaged job, `python -m throughline.jobs.extract_entities`, populates
+`entities`, `entity_mentions` and `relationships`, producing the
 knowledge graph behind the MCP `recall_entity` tool.
 
 `throughline reflect` maintains the memory store over time in four modes: **dedup** (merge
@@ -239,11 +255,11 @@ across filesystem copies, cloud sync and restores; a SHA-256 of the file's conte
 This is what makes it safe for the scheduled job to re-scan every tool's directory in full,
 once an hour, at negligible cost.
 
-**Local-first as a hard constraint, not a deployment option.** The database binds to
-localhost and authenticates as the operating-system user. Transcripts contain credentials,
-client names and unreleased work, and the only defensible default for that data is that it
-does not leave the machine. The two stages that can call an external API are optional, have
-local substitutes, and redact before sending.
+**Local-first as a hard constraint, not a deployment option.** Native services bind to
+loopback. Compose publishes only loopback ports, requires a database password, runs the
+application as an unprivileged user, and mounts tool directories read-only. Transcripts can
+contain credentials, client names, and unreleased work. The API has no authentication, so a
+remote bind requires the operator's own authentication and TLS. See [SECURITY.md](../SECURITY.md).
 
 **Supersession rather than deletion.** Memory that turns out to be wrong is marked, not
 erased — `superseded_by`, `status` and `memory_reflections` preserve both the old fact and
@@ -260,4 +276,4 @@ genuinely require removal.
 - [ADAPTER_DEVELOPMENT.md](ADAPTER_DEVELOPMENT.md) — writing a new adapter
 - [DEPLOYMENT.md](DEPLOYMENT.md) — scheduled jobs, Docker, backups
 - [PERFORMANCE.md](PERFORMANCE.md) and [BENCHMARKS.md](BENCHMARKS.md) — measured behaviour
-- [architecture.de.md](architecture.de.md) — the original German design draft
+- [architecture.de.md](architecture.de.md) — current German architecture reference

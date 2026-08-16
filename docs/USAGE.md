@@ -94,8 +94,8 @@ If you upgraded from a version before this existed, label what is already
 stored:
 
 ```bash
-python3 scripts/backfill_generated_by.py --dry-run   # count first
-python3 scripts/backfill_generated_by.py
+python -m throughline.jobs.backfill_generated_by --dry-run   # count first
+python -m throughline.jobs.backfill_generated_by
 ```
 
 ## Getting answers back
@@ -176,7 +176,7 @@ it.
 throughline status                       # counts, coverage, what is pending
 throughline doctor                       # environment, schema, adapters, backups
 throughline doctor --category archive    # store consistency and backup age
-python3 scripts/migrate.py --status      # pending schema migrations
+throughline migrate --status             # pending schema migrations
 ```
 
 `doctor` is the one to run when something behaves oddly: it checks Python,

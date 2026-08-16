@@ -8,18 +8,20 @@ security model.
 
 ### In scope
 
-- PostgreSQL database running on `localhost:5432`
-- Python scripts reading/writing local files under `~/.claude/` and the
-  repository directory
+- PostgreSQL database running on a local native port (normally
+  `localhost:5432`) or the Compose loopback port (normally `127.0.0.1:5433`)
+- Throughline reading local session files for the supported source tools and
+  writing its own database and configuration
 - web UI on `http://127.0.0.1:8790` (native) or `:8788` (Docker)
-- launchd jobs that run as the logged-in user
+- launchd or systemd user jobs that run as the local user
 - API keys (optional) for OpenAI or Anthropic, stored in environment variables
 
 ### Out of scope
 
-- Multi-user deployments (the default `trust` auth is single-user only)
-- Network-exposed databases or UIs — running the web UI on `0.0.0.0` is not
-  supported and not recommended
+- Multi-user deployments
+- Network-exposed databases or UIs. A native `throughline serve` refuses a
+  non-loopback bind unless `THROUGHLINE_ALLOW_REMOTE=1` is set. That bypass is
+  only for an operator who has added their own authentication and TLS.
 - Shared CI/CD infrastructure
 
 ## Known Considerations
@@ -49,12 +51,16 @@ listing in the UI are entirely local. There is no telemetry and no account.
 
 ### The API has no authentication
 
-`throughline serve` binds to loopback and the compose stack publishes only to
-`127.0.0.1`. There is no login, by design for a single-user local tool: anything
-that can reach the port can read everything, and the Console endpoint can run
-arbitrary read-only SQL. That is safe on a single-user machine and unsafe the
-moment the port is exposed — do not bind it to `0.0.0.0`, do not put it behind a
-tunnel, and treat shell access to the machine as full access to the database.
+`throughline serve` binds to loopback and Compose publishes PostgreSQL, the web
+UI, and optional Ollama on loopback only. There is no login. Anything that can
+reach the web port can read the stored corpus, and the Console endpoint accepts
+arbitrary read-only SQL. Do not expose these ports, tunnel them, or use the
+remote-bind bypass unless you operate suitable authentication and TLS in front
+of them. Treat shell access to the machine as full access to the database.
+
+Compose deliberately lets the web container bind internally so Docker can
+publish its port. The host mapping remains `127.0.0.1`, and only that controlled
+service receives `THROUGHLINE_ALLOW_REMOTE=1`.
 
 ### Encryption at rest
 
@@ -65,14 +71,19 @@ it.
 
 ### Database access
 
-The default installation uses PostgreSQL's `trust` authentication — anyone with
-shell access to your machine can read the Throughline database. If your
-machine is shared, switch to password auth or `scram-sha-256` and set
-`PGPASSWORD` in your environment.
+Native PostgreSQL authentication is the operator's choice. Compose requires
+`POSTGRES_PASSWORD`; `scripts/init_compose_env.py` creates an owner-only `.env`
+with a random password and the host UID/GID. Application containers run as an
+unprivileged `throughline` user and mount source directories read-only. Re-run
+the bootstrap script after moving a checkout between host users, then rebuild.
+
+On an existing Compose volume, `POSTGRES_USER` and `POSTGRES_DB` are immutable
+identities. Changing a password needs the documented `credential-rotate`
+profile; it does not rename a database or role. Keep `.env` and backups private.
 
 ### Session data is sensitive
 
-Claude Code JSONL sessions may contain:
+AI-tool session files may contain:
 
 - File paths that reveal proprietary code structure
 - Snippets of source code, config values, or prompts
@@ -99,7 +110,7 @@ raw transcript to reach the model.
 
 ### API keys
 
-Scripts read `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment.
+Throughline reads `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the environment.
 These must never be committed. `.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 

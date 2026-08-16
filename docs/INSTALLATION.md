@@ -1,8 +1,9 @@
 # Installation Guide
 
-Full setup for a fresh machine. macOS is the primary supported platform.
-Linux works for the core stack (Postgres, Python, the web UI), but the
-AppleScript-based mail and calendar hooks are macOS-only.
+Full setup for a fresh machine. Docker Compose is the shortest supported path.
+The native path is for an existing PostgreSQL installation. macOS and Linux are
+tested; Windows under WSL2 is not tested. AppleScript integrations are macOS
+only.
 
 ## 1. Prerequisites
 
@@ -11,19 +12,42 @@ AppleScript-based mail and calendar hooks are macOS-only.
 | macOS | 13 (Ventura) | 14 (Sonoma) or 15 (Sequoia) recommended |
 | Homebrew | current | [brew.sh](https://brew.sh) |
 | PostgreSQL | 16 | installed via Homebrew |
-| Python | 3.10 | 3.11 or 3.12 recommended |
+| Python | 3.10+ | matches package metadata |
 | Git | any | |
 
 Optional but recommended:
 
 | Tool | Purpose |
 |---|---|
-| Claude Code CLI | one of two memory-extraction backends (the other is the Anthropic API) — inherits your existing CLI authentication and configured model |
-| Ollama | local embeddings (no API key needed) |
-| OpenAI API key | alternative to Ollama for embeddings |
-| Anthropic API key | alternative to Claude CLI for memory extraction |
+| Model backend | optional for answers, extraction, titles, and reflection; use a local backend to keep content on the machine |
+| Ollama | local embeddings and model backend, no API key needed |
+| OpenAI API key | optional hosted embedding or model backend |
+| Claude Code CLI | optional model backend when configured locally |
 
-## 2. Install PostgreSQL and pgvector
+## 2. Docker Compose
+
+Docker with Compose v2 needs no native Python or PostgreSQL installation:
+
+```bash
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+python3 scripts/init_compose_env.py
+docker compose up -d
+docker compose exec web throughline ingest --all
+```
+
+The bootstrap script creates or updates the ignored `.env`, generates a random
+database password, and writes your numeric UID/GID. Compose uses those values
+to run application containers as an unprivileged user while retaining access to
+0600 source files on Linux and Docker Desktop for macOS. PostgreSQL, the web
+UI, and optional Ollama ports publish on loopback only. The migration service
+runs before web or MCP starts; check it with `docker compose ps` if startup
+does not complete.
+
+Open `http://127.0.0.1:8788`. See [DEPLOYMENT.md](DEPLOYMENT.md) for profiles,
+credential rotation, backups, and Linux source-mount details.
+
+## 3. Install PostgreSQL and pgvector for the native route
 
 ### PostgreSQL
 
@@ -60,7 +84,7 @@ make PG_CONFIG=/opt/homebrew/opt/postgresql@16/bin/pg_config
 make install PG_CONFIG=/opt/homebrew/opt/postgresql@16/bin/pg_config
 ```
 
-## 3. Clone the repository
+## 4. Clone the repository
 
 ```bash
 cd ~/Documents/GitHub   # or wherever you keep code
@@ -68,84 +92,66 @@ git clone https://github.com/mkupermann/throughline.git
 cd throughline
 ```
 
-## 4. Create the database and schema
+## 5. Create the database and apply migrations
 
 ```bash
-createdb claude_memory
-psql -d claude_memory -f sql/schema.sql
+createdb throughline
 ```
 
-Verify 11 tables exist:
+Do not bootstrap a new database by applying `sql/schema.sql` directly. The next
+step runs the tracked migrations.
 
-```bash
-psql -d claude_memory -c "\dt"
-```
-
-You should see `conversations`, `messages`, `memory_chunks`, `skills`,
-`prompts`, `projects`, `entities`, `relationships`, `entity_mentions`,
-`embeddings`, `memory_reflections`, `ingestion_log`.
-
-## 5. Install Python dependencies
-
-```bash
-pip3 install --break-system-packages -r requirements.txt
-```
-
-`--break-system-packages` is required on macOS with Homebrew Python because of
-PEP 668. If you prefer a virtualenv:
+## 6. Install Throughline
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
+throughline migrate
 ```
 
-## 6. Configure
+The package requires Python 3.10 or later. `pip install -e .` includes the web
+server and the built frontend, so Node is not needed for installation.
 
-Copy the example config and fill in what is relevant to your setup:
+Verify the migration state:
 
 ```bash
-cp config.example.yaml config.yaml
+throughline migrate --status
+```
+
+## 7. Configure the native connection
+
+The standard libpq variables select the database. A repository-root `.env` is
+loaded automatically:
+
+```bash
 cp .env.example .env
 ```
 
-Edit `.env` to set `PGUSER` (defaults to `$USER`) and optional API keys.
+Set `PGDATABASE=throughline` for the new default, or retain
+`PGDATABASE=claude_memory` when upgrading an existing installation. Set the
+other `PG*` variables if your PostgreSQL requires them.
 
-`config.yaml` is already gitignored.
-
-## 7. First ingestion run
+## 8. First ingestion run
 
 ```bash
-python3 scripts/ingest_sessions.py
-python3 scripts/scan_skills.py
-python3 scripts/scan_prompts.py
+throughline ingest --list-sources
+throughline ingest --all
+throughline scan-skills
+throughline scan-prompts
 ```
 
-Expected output:
-
-```
-Throughline — session ingestion
-============================================================
-Found: 47 JSONL files
-
-Result:
-  Ingested: 47 sessions (3068 messages)
-  Skipped:  0
-  Errors:   0
-```
-
-Your numbers will vary.
-
-## 8. Start the GUI
+## 9. Start the web UI
 
 ```bash
 throughline serve
 ```
 
-Open `http://127.0.0.1:8790`. You should land on the Dashboard with counts
-for conversations, messages, skills, and memory chunks.
+Open `http://127.0.0.1:8790`. The current UI has eight routes: Overview, Find,
+Timeline, Curate, Project, Detail, Operate, and Console. The navigation shows
+the first six user-facing surfaces; project and detail pages open from links.
 
-## 9. Optional — enable the scheduler
+## 10. Optional: enable the scheduler
 
 ```bash
 ./scripts/install.sh
@@ -163,17 +169,17 @@ Verify:
 launchctl list | grep claude-memory
 ```
 
-## 10. Optional — install the context pre-loader
+## 11. Optional: install the context pre-loader
 
 ```bash
-./scripts/install_hooks.sh
+throughline install-hooks
 ```
 
 This registers a `SessionStart` hook in `~/.claude/settings.json` that injects
 relevant memories into every new Claude session as
 `./.claude/MEMORY_CONTEXT.md`.
 
-## 11. Optional — generate embeddings for semantic search
+## 12. Optional: generate embeddings for semantic search
 
 Pick a backend:
 
@@ -181,7 +187,7 @@ Pick a backend:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python3 scripts/generate_embeddings.py --backend openai
+throughline embed --backend openai
 ```
 
 **Ollama** (local, no API key):
@@ -190,13 +196,13 @@ python3 scripts/generate_embeddings.py --backend openai
 brew install ollama
 brew services start ollama
 ollama pull nomic-embed-text
-python3 scripts/generate_embeddings.py --backend ollama
+throughline embed --backend ollama
 ```
 
 Test semantic search:
 
 ```bash
-python3 scripts/search_semantic.py "PostgreSQL migration"
+throughline search "PostgreSQL migration"
 ```
 
 ## Troubleshooting
@@ -219,7 +225,7 @@ brew services restart postgresql@16
 ### `ERROR: extension "vector" is not available`
 
 pgvector is not installed for the Postgres version you're running.
-Rebuild it (see step 2). Verify with:
+Rebuild it (see step 3). Verify with:
 
 ```bash
 ls /opt/homebrew/opt/postgresql@16/share/postgresql@16/extension/vector*
@@ -251,9 +257,12 @@ next query.
 When the schema changes between versions:
 
 ```bash
-psql -d claude_memory -f sql/schema.sql
+throughline migrate --status
+throughline migrate
 ```
 
-The schema file uses `CREATE ... IF NOT EXISTS` everywhere, so re-running
-it is safe. For schema migrations that require data changes, look for
-files under `sql/migrations/`.
+Migrations are ordered SQL files shipped inside the installed package. Compose
+runs the same command automatically and blocks web/MCP startup until it
+succeeds. For an older database initialized from `sql/schema.sql`, the runner
+records its baseline before applying later migrations. It does not rewrite or
+delete migration history.

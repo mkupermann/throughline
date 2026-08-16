@@ -16,6 +16,7 @@ its own long-term memory across sessions.
 | `memory.list_projects()` | Distinct `project_name` values in `memory_chunks`. |
 | `memory.recent_reflections(limit, types)` | Recent rows from the `memory_reflections` audit log — what the reflection engine and the preload hook have been doing. |
 | `memory.preload_summary()` | The most recent SessionStart preload row: which chunks the hook injected at the start of this session, and when. |
+| `memory.stats()` | Same machine-readable health snapshot as `throughline status --json`. |
 
 Every tool with a `project` parameter defaults to the basename of
 `$CLAUDE_PROJECT_DIR` if it is set. Pass `project=""` to opt out and search
@@ -33,13 +34,13 @@ requirement, not a per-call convention.
 ## Run
 
 ```bash
-pip install 'mcp[cli]>=1.2' psycopg2-binary
+pip install throughline
 python -m memory_mcp.server
 ```
 
 The DB connection honours libpq env vars: `PGHOST`, `PGPORT`, `PGDATABASE`,
-`PGUSER`, `PGPASSWORD`. Defaults are `localhost:5432 / claude_memory /
-$PGUSER or mkupermann`.
+`PGUSER`, `PGPASSWORD`. Defaults are `localhost:5432`, `throughline`, and
+`$PGUSER` or `mkupermann`.
 
 ## Wire to Claude Code
 
@@ -54,7 +55,7 @@ Add to `~/.claude.json`:
       "cwd": "/absolute/path/to/claude-memory-db",
       "env": {
         "PGHOST": "localhost",
-        "PGDATABASE": "claude_memory",
+        "PGDATABASE": "throughline",
         "PGUSER": "mkupermann"
       }
     }
@@ -62,7 +63,7 @@ Add to `~/.claude.json`:
 }
 ```
 
-Restart Claude Code, then run `/mcp` — the six `claude-memory.*` tools should
+Restart Claude Code, then run `/mcp` — the `claude-memory.*` tools should
 list. Try `claude-memory.list_projects` first as a smoke test.
 
 ## Verify
@@ -73,5 +74,5 @@ python -c "from memory_mcp.server import mcp; print(sorted(t.name for t in mcp._
 
 Expected output:
 ```
-['forget', 'list_projects', 'recall_entity', 'search', 'supersede', 'write']
+['forget', 'list_projects', 'preload_summary', 'recall_entity', 'recent_reflections', 'search', 'stats', 'supersede', 'write']
 ```

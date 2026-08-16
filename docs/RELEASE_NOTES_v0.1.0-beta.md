@@ -1,5 +1,10 @@
 # Throughline v0.1.0-beta — Initial Public Release
 
+> Historical release record. It describes the 0.1.0-beta launch, including the
+> Streamlit UI and then-planned integrations. For the current runtime, security
+> boundaries, migrations, and installation, use [README.md](../README.md),
+> [INSTALLATION.md](INSTALLATION.md), and [DEPLOYMENT.md](DEPLOYMENT.md).
+
 *The thread that survives every session.*
 
 First public release of Throughline. A local-first, self-reflecting

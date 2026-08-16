@@ -40,10 +40,17 @@ Examples:
 ## Applying
 
 ```bash
-python3 scripts/migrate.py              # apply all pending migrations
-python3 scripts/migrate.py --status     # list which migrations are applied
-python3 scripts/migrate.py --dry-run    # show what would run, without running it
+throughline migrate              # apply all pending migrations
+throughline migrate --status     # list which migrations are applied
+throughline migrate --dry-run    # show what would run, without running it
 ```
+
+The migration SQL is package data. An installed wheel therefore has the same
+migration set as a source checkout; `scripts/migrate.py` remains only as a
+direct-execution compatibility wrapper. Docker Compose runs `throughline
+migrate` automatically after PostgreSQL is ready and waits for it before it
+starts the web or MCP service. Native installations run the command after
+creating the database and after each upgrade.
 
 The runner:
 
@@ -59,12 +66,17 @@ deletes migration history.
 
 ## Baseline
 
-`000_baseline.sql` is the schema captured at release `0.1.0-beta`. On a fresh database,
-running `python3 scripts/migrate.py` is equivalent to running
-`psql -f sql/schema.sql` and then applying every later migration.
+`000_baseline.sql` is the schema captured at release `0.1.0-beta`. On a fresh
+database, `throughline migrate` applies it and every later migration. Do not
+initialize a new installation from `sql/schema.sql`; it exists for schema
+inspection and CI validation, while the migration runner is the installation
+and upgrade path.
 
-If you already created your database from `sql/schema.sql` directly, mark the baseline as
-applied without re-running it:
+If an older installation was created from `sql/schema.sql`, simply run
+`throughline migrate`. It detects the existing schema, records the baseline,
+and then applies later migrations. Use `throughline migrate --dry-run` first
+if you want to inspect that plan without changing the database. Manual edits
+to `applied_migrations` are unnecessary.
 
 ```bash
 psql -d claude_memory -c "

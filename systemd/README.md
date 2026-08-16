@@ -7,19 +7,24 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 
 | Unit | Schedule | Purpose |
 |------|----------|---------|
-| `throughline-ingest.timer`  | hourly           | `scripts/ingest_sessions.py` — pull new Claude Code JSONL sessions into Postgres |
+| `throughline-ingest.timer`  | hourly           | `scripts/ingest_sessions.py` — pull available local-tool sessions into Postgres |
 | `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
 
 All three services are `Type=oneshot`: they run, finish, and exit. The timer units keep
 them on schedule.
 
+The shipped units serve a source checkout and invoke its compatibility wrappers.
+Those wrappers dispatch into the packaged `throughline.jobs` implementations;
+interactive or installed use should prefer `throughline ingest --all`,
+`throughline extract-memory`, and `throughline backup`.
+
 ## Prerequisites
 
 - Linux with `systemd --user` support (any mainstream distro from the last five years).
 - `python3` available at `/usr/bin/python3` (adjust the `ExecStart` line if yours differs).
-- A running `postgres` with the `throughline` database and the schema from `sql/schema.sql`
-  applied. Either run it locally, or start the container from `docker-compose.yml`.
+- A running PostgreSQL with the `throughline` database. Run `throughline migrate`
+  once after creating a native database; Docker Compose does this automatically.
 - Your checkout of Throughline at `~/.local/share/throughline/` (or update the paths in each
   unit file — `%h` expands to `$HOME`, `%u` to your username).
 

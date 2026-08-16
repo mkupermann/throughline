@@ -21,7 +21,7 @@ psql -c 'ALTER DATABASE claude_memory RENAME TO throughline'   # adopt the new o
 **Machine-generated conversations are now labelled and hidden by default.**
 Throughline calls a model to title, extract and answer; those calls are sessions
 on disk and were ingested as if they were yours. Run
-`python3 scripts/backfill_generated_by.py --dry-run` to see how many of your
+`python -m throughline.jobs.backfill_generated_by --dry-run` to see how many of your
 stored conversations are the tool talking to itself, then run it without the
 flag to label them. Nothing is deleted — every listing gains a
 `generated_by IS NULL` filter and each project page reports what it withheld.
