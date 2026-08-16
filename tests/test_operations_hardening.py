@@ -284,7 +284,9 @@ def test_configured_container_uid_reads_a_private_source_mount(tmp_path: Path) -
     if probe.returncode:
         pytest.skip("Docker daemon is not available to this test user")
 
-    fixture = tmp_path / "private.jsonl"
+    fixture_dir = tmp_path / ".claude"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "private.jsonl"
     fixture.write_text("private transcript", encoding="utf-8")
     fixture.chmod(0o600)
     env_file = tmp_path / ".env"
@@ -298,7 +300,10 @@ def test_configured_container_uid_reads_a_private_source_mount(tmp_path: Path) -
         "  web:\n"
         "    command: [python, -c, \"from pathlib import Path; print(Path('/home/throughline/.claude/private.jsonl').read_text())\"]\n"
         "    volumes:\n"
-        f"      - {fixture}:/home/throughline/.claude/private.jsonl:ro\n",
+        # Compose replaces the base source mount by its target path. Mounting a
+        # file below that read-only base directory would require OCI to create
+        # a nested mountpoint and fails before the permission assertion runs.
+        f"      - {fixture_dir}:/home/throughline/.claude:ro\n",
         encoding="utf-8",
     )
 
