@@ -146,10 +146,17 @@ jobs:
           exit 1
       - name: Validate migration discovery and a fresh upgrade
         run: |
+          set -o pipefail
           python -c "from throughline.jobs.migrate import discover_migrations; print(*(p.name for p in discover_migrations()), sep='\n')"
           psql -c "CREATE DATABASE throughline_migration_smoke;"
           PGDATABASE=throughline_migration_smoke throughline migrate
-          PGDATABASE=throughline_migration_smoke throughline migrate --dry-run
+          PGDATABASE=throughline_migration_smoke throughline migrate \
+            | tee /tmp/migration-second-run.txt
+          grep -Fxq "Nothing to do. Database is up to date." \
+            /tmp/migration-second-run.txt
+          PGDATABASE=throughline_migration_smoke throughline migrate --status \
+            | tee /tmp/migration-status.txt
+          grep -Eq "^[0-9]+ total, 0 pending$" /tmp/migration-status.txt
       - name: Run every integration test
         run: |
           pytest tests/ -v --tb=short -m integration \
