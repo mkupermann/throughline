@@ -7,22 +7,26 @@ on:
     branches: [main]
 
 jobs:
-  python-syntax:
-    name: Python syntax check
+  python-quality:
+    name: Python lint, format, and syntax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Compile all Python files
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install quality tools
+        run: pip install -r requirements-dev.txt
+      - name: Ruff
+        run: ruff check throughline memory_mcp scripts skill/scripts evals tests
+      - name: Black
+        run: black --check throughline memory_mcp scripts skill/scripts evals tests
+      - name: Compile every maintained Python path
         run: |
-          set -e
-          for f in scripts/*.py skill/scripts/*.py; do
-            [ -f "$f" ] || continue
-            echo "→ $f"
-            python3 -m py_compile "$f"
-          done
+          python -m compileall -q \
+            throughline memory_mcp scripts skill/scripts evals tests
 
   frontend:
     name: Frontend build is current
@@ -44,7 +48,7 @@ jobs:
       # Node. The cost of committing build output is that a source-only commit
       # silently ships the previous UI — so rebuild and fail if the result
       # differs from what is checked in.
-      - name: Rebuild
+      - name: Production build
         run: npm --prefix web run build
       - name: Fail if the committed build is stale
         run: |
@@ -56,16 +60,29 @@ jobs:
           fi
           echo "Committed frontend matches source."
 
-  python-imports:
-    name: Verify required packages are declarable
+  wheel-smoke:
+    name: Clean wheel smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install requirements
-        run: pip install -r requirements.txt
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install wheel build tools
+        run: pip install "setuptools>=68" wheel
+      - name: Build wheel without importing the checkout
+        run: python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+      - name: Install into a clean environment
+        run: |
+          python -m venv /tmp/throughline-wheel-smoke
+          /tmp/throughline-wheel-smoke/bin/pip install --no-deps dist/*.whl
+      - name: Exercise installed entry points outside the checkout
+        working-directory: /tmp
+        run: |
+          /tmp/throughline-wheel-smoke/bin/throughline --help
+          /tmp/throughline-wheel-smoke/bin/claude-memory-mcp --help
 
   unit-tests:
     name: Unit tests (no DB)
@@ -77,10 +94,14 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install -e .
           pip install -r requirements-dev.txt
-      - name: Run pytest (unit only)
-        run: pytest tests/ -v --tb=short -m "not integration" --ignore=tests/integration
+      - name: Run unit tests with runtime coverage floor
+        run: |
+          pytest tests/ -v --tb=short \
+            -m "not integration" --ignore=tests/integration \
+            --cov=throughline --cov=memory_mcp \
+            --cov-report=term-missing:skip-covered --cov-fail-under=47.5
 
   integration-tests:
     name: Integration tests (Postgres)
@@ -105,6 +126,7 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
       PGADMINDB: postgres
+      PGDATABASE: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -112,7 +134,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install -e .
           pip install -r requirements-dev.txt
       - name: Wait for Postgres
         run: |
@@ -122,8 +144,17 @@ jobs:
           done
           echo "Postgres did not become ready" >&2
           exit 1
-      - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short -m integration
+      - name: Validate migration discovery and a fresh upgrade
+        run: |
+          python -c "from throughline.jobs.migrate import discover_migrations; print(*(p.name for p in discover_migrations()), sep='\n')"
+          psql -c "CREATE DATABASE throughline_migration_smoke;"
+          PGDATABASE=throughline_migration_smoke throughline migrate
+          PGDATABASE=throughline_migration_smoke throughline migrate --dry-run
+      - name: Run every integration test
+        run: |
+          pytest tests/ -v --tb=short -m integration \
+            --junitxml=/tmp/integration-results.xml
+          python -c "import xml.etree.ElementTree as E; r=E.parse('/tmp/integration-results.xml').getroot(); n=sum(int(x.get('skipped', 0)) for x in r.findall('.//testsuite')); assert n == 0, f'{n} integration tests skipped'"
 
   shell-syntax:
     name: Bash syntax check
@@ -139,8 +170,8 @@ jobs:
             bash -n "$f"
           done
 
-  sql-syntax:
-    name: SQL syntax check
+  schema-validation:
+    name: Fresh schema validation
     runs-on: ubuntu-latest
     services:
       postgres:

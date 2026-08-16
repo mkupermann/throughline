@@ -39,7 +39,7 @@ vector in, so nothing here touches the network.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from ._exec import Row, check_embedding_column, rows, scalar
 

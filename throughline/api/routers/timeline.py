@@ -49,7 +49,5 @@ def get_timeline_day(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     with connection(settings) as conn:
-        items = T.day_detail(
-            conn, day, kinds=kind, providers=provider, limit=limit, offset=offset
-        )
+        items = T.day_detail(conn, day, kinds=kind, providers=provider, limit=limit, offset=offset)
     return {"day": day, "items": items}

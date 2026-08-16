@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -25,31 +25,36 @@ from throughline.conflicts import (
     format_human,
 )
 
-
 # ---------------------------------------------------------------------------
 # Contradiction markers
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text", [
-    "We rolled back to SQLAlchemy",
-    "Switched from Milvus to pgvector",
-    "Actually we should use Postgres",
-    "The Redis approach was deprecated last sprint",
-    "Replaced by a simpler in-memory cache",
-    "no longer using Celery",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We rolled back to SQLAlchemy",
+        "Switched from Milvus to pgvector",
+        "Actually we should use Postgres",
+        "The Redis approach was deprecated last sprint",
+        "Replaced by a simpler in-memory cache",
+        "no longer using Celery",
+    ],
+)
 def test_marker_detection_positive(text: str) -> None:
     assert _has_contradiction_marker(text), f"should match: {text!r}"
 
 
-@pytest.mark.parametrize("text", [
-    "We picked pgvector for the audit pipeline",
-    "Migration ran cleanly in production",
-    "",
-    None,
-    "Just a regular note about the project structure.",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We picked pgvector for the audit pipeline",
+        "Migration ran cleanly in production",
+        "",
+        None,
+        "Just a regular note about the project structure.",
+    ],
+)
 def test_marker_detection_negative(text) -> None:
     assert not _has_contradiction_marker(text or ""), f"should NOT match: {text!r}"
 
@@ -66,9 +71,13 @@ def test_marker_detection_case_insensitive() -> None:
 
 def _mk_chunk(chunk_id: int = 1, tool: str = "claude_code") -> ConflictChunk:
     return ConflictChunk(
-        chunk_id=chunk_id, tool=tool, project="myproj",
-        category="decision", content="some text",
-        created_at="2026-01-01T00:00:00+00:00", status="active",
+        chunk_id=chunk_id,
+        tool=tool,
+        project="myproj",
+        category="decision",
+        content="some text",
+        created_at="2026-01-01T00:00:00+00:00",
+        status="active",
     )
 
 
@@ -82,8 +91,10 @@ def test_chunk_serializes() -> None:
 
 def test_conflict_serializes() -> None:
     c = Conflict(
-        kind="supersession", confidence=1.0,
-        a=_mk_chunk(1, "claude_code"), b=_mk_chunk(2, "codex"),
+        kind="supersession",
+        confidence=1.0,
+        a=_mk_chunk(1, "claude_code"),
+        b=_mk_chunk(2, "codex"),
         why="example",
     )
     d = c.to_dict()
@@ -94,12 +105,14 @@ def test_conflict_serializes() -> None:
 
 
 def test_report_summary() -> None:
-    rep = ConflictReport(conflicts=[
-        Conflict("supersession", 1.0, _mk_chunk(1), _mk_chunk(2), "x"),
-        Conflict("supersession", 1.0, _mk_chunk(3), _mk_chunk(4), "x"),
-        Conflict("semantic", 0.92, _mk_chunk(5), _mk_chunk(6), "x"),
-        Conflict("stale_drift", 0.5, _mk_chunk(7), _mk_chunk(8), "x"),
-    ])
+    rep = ConflictReport(
+        conflicts=[
+            Conflict("supersession", 1.0, _mk_chunk(1), _mk_chunk(2), "x"),
+            Conflict("supersession", 1.0, _mk_chunk(3), _mk_chunk(4), "x"),
+            Conflict("semantic", 0.92, _mk_chunk(5), _mk_chunk(6), "x"),
+            Conflict("stale_drift", 0.5, _mk_chunk(7), _mk_chunk(8), "x"),
+        ]
+    )
     assert rep.by_kind == {"supersession": 2, "semantic": 1, "stale_drift": 1}
     assert rep.to_dict()["summary"] == {
         "total": 4,
@@ -127,12 +140,24 @@ def test_format_human_db_unreachable() -> None:
 
 
 def test_format_human_groups_by_kind() -> None:
-    rep = ConflictReport(conflicts=[
-        Conflict("supersession", 1.0, _mk_chunk(1, "claude_code"), _mk_chunk(2, "codex"),
-                 "chunk #1 (from claude_code) was explicitly superseded by chunk #2 (from codex)"),
-        Conflict("semantic", 0.91, _mk_chunk(3, "hermes"), _mk_chunk(4, "claude_code"),
-                 "hermes and claude_code agree-ish; newer rejected"),
-    ])
+    rep = ConflictReport(
+        conflicts=[
+            Conflict(
+                "supersession",
+                1.0,
+                _mk_chunk(1, "claude_code"),
+                _mk_chunk(2, "codex"),
+                "chunk #1 (from claude_code) was explicitly superseded by chunk #2 (from codex)",
+            ),
+            Conflict(
+                "semantic",
+                0.91,
+                _mk_chunk(3, "hermes"),
+                _mk_chunk(4, "claude_code"),
+                "hermes and claude_code agree-ish; newer rejected",
+            ),
+        ]
+    )
     txt = format_human(rep)
     assert "Documented supersession (1)" in txt
     assert "Semantic near-duplicate" in txt
@@ -175,7 +200,7 @@ class _MockCursor:
         self.executed: list[tuple[str, dict]] = []
         self._results: list = []
 
-    def __enter__(self) -> "_MockCursor":
+    def __enter__(self) -> _MockCursor:
         return self
 
     def __exit__(self, *a) -> None:
@@ -231,7 +256,9 @@ def test_cli_conflicts_json_smoke() -> None:
     when no DB is reachable."""
     result = subprocess.run(
         [sys.executable, "-m", "throughline.cli", "conflicts", "--json"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     payload = json.loads(result.stdout)
     assert "conflicts" in payload
@@ -242,9 +269,20 @@ def test_cli_conflicts_json_smoke() -> None:
 
 def test_cli_conflicts_kind_filter_via_argv() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "throughline.cli", "conflicts", "--json",
-         "--kind", "supersession", "--kind", "semantic"],
-        capture_output=True, text=True, timeout=30,
+        [
+            sys.executable,
+            "-m",
+            "throughline.cli",
+            "conflicts",
+            "--json",
+            "--kind",
+            "supersession",
+            "--kind",
+            "semantic",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     payload = json.loads(result.stdout)
     assert payload["params"]["kinds"] == ["semantic", "supersession"]

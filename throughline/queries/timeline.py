@@ -41,8 +41,7 @@ _SOURCES: dict[str, tuple[str, str, str | None]] = {
         "c.source_tool",
     ),
     "memory": (
-        "memory_chunks mc LEFT JOIN conversations c "
-        "ON mc.source_type = 'conversation' AND mc.source_id = c.id",
+        "memory_chunks mc LEFT JOIN conversations c ON mc.source_type = 'conversation' AND mc.source_id = c.id",
         "mc.created_at",
         "c.source_tool",
     ),
@@ -85,9 +84,7 @@ _HUMAN_FILTER: dict[str, str] = {
 }
 
 
-def _provider_filter(
-    provider_col: str, providers: list[str], named: list[str], include_null: bool
-) -> str:
+def _provider_filter(provider_col: str, providers: list[str], named: list[str], include_null: bool) -> str:
     """The `AND ...` fragment for one kind's provider column.
 
     Three shapes, depending on what was requested:

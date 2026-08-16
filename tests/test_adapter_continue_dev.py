@@ -8,9 +8,6 @@ tests pin both code paths.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from throughline.adapters.continue_dev import ContinueDevAdapter
 

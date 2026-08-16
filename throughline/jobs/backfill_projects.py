@@ -30,7 +30,9 @@ Usage::
 Exit code: 0 on success (including dry-run), 2 on a usage error, 1 on
 DB failure.
 """
+
 from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -67,8 +69,7 @@ def collect_observed_names(conn, *, include_conversations: bool) -> list[str]:
     with conn.cursor() as cur:
         for tbl in sources:
             cur.execute(
-                f"SELECT DISTINCT project_name FROM public.{tbl} "
-                "WHERE project_name IS NOT NULL AND project_name <> ''"
+                f"SELECT DISTINCT project_name FROM public.{tbl} WHERE project_name IS NOT NULL AND project_name <> ''"
             )
             for (n,) in cur.fetchall():
                 names.add(n)
@@ -90,8 +91,7 @@ def insert_missing(conn, missing: list[str]) -> int:
         return 0
     with conn.cursor() as cur:
         cur.executemany(
-            "INSERT INTO public.projects (name, status) VALUES (%s, 'active') "
-            "ON CONFLICT (name) DO NOTHING",
+            "INSERT INTO public.projects (name, status) VALUES (%s, 'active') ON CONFLICT (name) DO NOTHING",
             [(n,) for n in missing],
         )
         # cur.rowcount with executemany on psycopg2 is driver-dependent.
@@ -112,8 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--include-conversations",
         action="store_true",
-        help=("Also pull project_names from the conversations table. Default "
-              "is memory_chunks only — the more signal-rich source."),
+        help=(
+            "Also pull project_names from the conversations table. Default "
+            "is memory_chunks only — the more signal-rich source."
+        ),
     )
     ap.add_argument(
         "--dry-run",
@@ -130,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         observed = collect_observed_names(
-            conn, include_conversations=args.include_conversations,
+            conn,
+            include_conversations=args.include_conversations,
         )
         existing = existing_project_names(conn)
         to_insert = [n for n in observed if n not in existing]
@@ -161,8 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         with conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM public.projects")
             total = int(cur.fetchone()[0])
-        print(f"[backfill] inserted {len(to_insert)} row(s); "
-              f"projects table now has {total}.")
+        print(f"[backfill] inserted {len(to_insert)} row(s); projects table now has {total}.")
         return 0
     finally:
         try:

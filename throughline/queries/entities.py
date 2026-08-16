@@ -54,17 +54,17 @@ def pending_extraction_count(conn, min_messages: int = 3) -> int:
 
 
 def entity_types(conn) -> list[str]:
-    return [r["entity_type"] for r in rows(
-        conn, "SELECT DISTINCT entity_type FROM entities ORDER BY entity_type"
-    )]
+    return [r["entity_type"] for r in rows(conn, "SELECT DISTINCT entity_type FROM entities ORDER BY entity_type")]
 
 
 def entity_projects(conn) -> list[str]:
-    return [r["project_name"] for r in rows(
-        conn,
-        "SELECT DISTINCT project_name FROM entities "
-        "WHERE project_name IS NOT NULL ORDER BY project_name",
-    )]
+    return [
+        r["project_name"]
+        for r in rows(
+            conn,
+            "SELECT DISTINCT project_name FROM entities WHERE project_name IS NOT NULL ORDER BY project_name",
+        )
+    ]
 
 
 def find_entity_ids(conn, terms: list[str], match_all: bool = False) -> list[int]:

@@ -9,12 +9,13 @@ behaviour.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
+from throughline.self_referential import is_agent_call_transcript
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
-from throughline.self_referential import is_agent_call_transcript
 
 # Sessions whose first user message starts with this marker are headless
 # `claude -p ...` calls issued by scripts/generate_titles.py. Each such call is
@@ -22,8 +23,7 @@ from throughline.self_referential import is_agent_call_transcript
 # hundreds of indistinguishable "Session-Titel-Generator" rows. Skip them at
 # the adapter boundary so they never enter the DB.
 _TITLE_GENERATOR_MARKER = (
-    "Du bekommst einen Auszug aus einer Claude Code Session. "
-    "Generiere einen prägnanten deutschen Titel"
+    "Du bekommst einen Auszug aus einer Claude Code Session. Generiere einen prägnanten deutschen Titel"
 )
 
 
@@ -152,7 +152,7 @@ class ClaudeCodeAdapter(Adapter):
 
         entries: list[dict[str, Any]] = []
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:

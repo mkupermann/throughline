@@ -3,13 +3,14 @@
 Windsurf ingestion: reads Windsurf plans (~/.windsurf/plans/*.md) as conversations
 and writes them into the Throughline database.
 """
-import os
-import sys
+
 import hashlib
+import os
 import re
+import sys
 import uuid
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -65,10 +66,7 @@ def ingest_plan(cursor: Any, filepath: Path) -> bool:
     file_hash = sha256_file(filepath)
 
     # Schon ingestiert?
-    cursor.execute(
-        "SELECT 1 FROM ingestion_log WHERE file_path = %s AND file_hash = %s",
-        (str(filepath), file_hash)
-    )
+    cursor.execute("SELECT 1 FROM ingestion_log WHERE file_path = %s AND file_hash = %s", (str(filepath), file_hash))
     if cursor.fetchone():
         return False
 
@@ -78,40 +76,51 @@ def ingest_plan(cursor: Any, filepath: Path) -> bool:
     session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(filepath)))
 
     # Insert the conversation
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO conversations
           (session_id, project_path, model, entrypoint, started_at, ended_at,
            message_count, summary, tags, metadata)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (session_id) DO NOTHING
         RETURNING id
-    """, (
-        session_id,
-        "windsurf:plans",
-        "windsurf-cascade",
-        "windsurf",
-        ctime, mtime,
-        1, title,
-        ["windsurf", "plan"],
-        Json({"source": "windsurf", "file": filepath.name, "kind": "plan"})
-    ))
+    """,
+        (
+            session_id,
+            "windsurf:plans",
+            "windsurf-cascade",
+            "windsurf",
+            ctime,
+            mtime,
+            1,
+            title,
+            ["windsurf", "plan"],
+            Json({"source": "windsurf", "file": filepath.name, "kind": "plan"}),
+        ),
+    )
     row = cursor.fetchone()
     if not row:
         return False
     conv_id = row[0]
 
     # Plan-Inhalt als user-Message speichern
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO messages
           (conversation_id, role, content, created_at, metadata)
         VALUES (%s, %s, %s, %s, %s)
-    """, (conv_id, "user", content, ctime, Json({"source_file": str(filepath)})))
+    """,
+        (conv_id, "user", content, ctime, Json({"source_file": str(filepath)})),
+    )
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO ingestion_log (file_path, file_hash, record_count)
         VALUES (%s, %s, 1)
         ON CONFLICT DO NOTHING
-    """, (str(filepath), file_hash))
+    """,
+        (str(filepath), file_hash),
+    )
 
     return True
 

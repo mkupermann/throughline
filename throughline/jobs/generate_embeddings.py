@@ -25,6 +25,7 @@ Usage:
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -32,7 +33,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Any, List, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import psycopg2
 
@@ -46,7 +48,7 @@ DB_CONFIG: dict[str, Any] = {
 }
 
 
-def _connect() -> "psycopg2.extensions.connection":
+def _connect() -> psycopg2.extensions.connection:
     """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
     try:
         return psycopg2.connect(**DB_CONFIG)
@@ -59,6 +61,7 @@ def _connect() -> "psycopg2.extensions.connection":
             f"  Underlying error: {e}\n"
         )
         raise SystemExit(2) from e
+
 
 OPENAI_MODEL = "text-embedding-3-small"
 OPENAI_DIM = 1536
@@ -84,7 +87,7 @@ class Backend:
     batch: int
     max_chars: int
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         raise NotImplementedError
 
 
@@ -99,11 +102,13 @@ class OpenAIBackend(Backend):
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
-        payload = json.dumps({
-            "model": self.model,
-            "input": list(texts),
-        }).encode("utf-8")
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        payload = json.dumps(
+            {
+                "model": self.model,
+                "input": list(texts),
+            }
+        ).encode("utf-8")
         req = urllib.request.Request(
             OPENAI_URL,
             data=payload,
@@ -126,7 +131,7 @@ class OllamaBackend(Backend):
     batch = OLLAMA_BATCH
     max_chars = OLLAMA_MAX_CHARS
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         out = []
         for t in texts:
             payload = json.dumps({"model": self.model, "prompt": t}).encode("utf-8")
@@ -203,10 +208,7 @@ def pick_backend(choice: str) -> Backend:
     if not ollama_has_model(OLLAMA_MODEL):
         print(f"Ollama model '{OLLAMA_MODEL}' is missing — pulling it now…")
         if not ollama_pull(OLLAMA_MODEL):
-            sys.stderr.write(
-                f"ERROR: could not pull model '{OLLAMA_MODEL}'.\n"
-                f"  Manuell:  ollama pull {OLLAMA_MODEL}\n"
-            )
+            sys.stderr.write(f"ERROR: could not pull model '{OLLAMA_MODEL}'.\n  Manuell:  ollama pull {OLLAMA_MODEL}\n")
             sys.exit(2)
     if choice == "auto":
         print("Backend: ollama (no OPENAI_API_KEY, Ollama reachable)")
@@ -220,7 +222,8 @@ def fetch_pending(cursor: Any, backend: Backend, limit: int | None) -> list[tupl
     that have NO embedding for the given model yet.
     """
     lim_sql = f"LIMIT {int(limit)}" if limit else ""
-    cursor.execute(f"""
+    cursor.execute(
+        f"""
         SELECT 'memory_chunk' AS source_type, mc.id, mc.content
         FROM memory_chunks mc
         WHERE NOT EXISTS (
@@ -240,7 +243,9 @@ def fetch_pending(cursor: Any, backend: Backend, limit: int | None) -> list[tupl
                 AND e.model = %s AND e.{backend.column} IS NOT NULL
           )
         {lim_sql}
-    """, (backend.model, MIN_MESSAGE_CHARS, backend.model))
+    """,
+        (backend.model, MIN_MESSAGE_CHARS, backend.model),
+    )
     return cursor.fetchall()
 
 
@@ -290,7 +295,7 @@ def main() -> None:
     batch_sz = backend.batch
 
     for start in range(0, total, batch_sz):
-        batch = pending[start:start + batch_sz]
+        batch = pending[start : start + batch_sz]
         texts = []
         meta = []
         for stype, sid, content in batch:

@@ -1,9 +1,42 @@
 """Tests for scripts/scan_prompts.py — CLAUDE.md discovery, variable extraction, project name derivation."""
 
-import pytest
 from pathlib import Path
 
 from throughline.jobs import scan_prompts as sp
+
+
+def test_skill_ingestion_rolls_back_the_cursor_connection_on_failure(tmp_path, monkeypatch):
+    """One bad skill must not leave its failed transaction open."""
+
+    skill_dir = tmp_path / "broken-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: broken-skill\n---\n\nBody long enough to ingest.\n",
+        encoding="utf-8",
+    )
+
+    class Connection:
+        def __init__(self):
+            self.rollbacks = 0
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    class Cursor:
+        def __init__(self):
+            self.connection = Connection()
+
+        def execute(self, *_args, **_kwargs):
+            raise RuntimeError("database rejected row")
+
+    cursor = Cursor()
+    stats = {"new": 0, "updated": 0, "errors": 0}
+    monkeypatch.setattr(sp, "GLOBAL_SKILLS", tmp_path)
+
+    sp.ingest_skill_prompts(cursor, stats)
+
+    assert cursor.connection.rollbacks == 1
+    assert stats["errors"] == 1
 
 
 class TestVariableExtraction:
@@ -78,13 +111,7 @@ class TestProjectNameDerivation:
 
 class TestSkillFrontmatterParsing:
     def test_parses_name_and_description(self):
-        content = (
-            "---\n"
-            'name: test-skill\n'
-            'description: does testing\n'
-            "---\n"
-            "body\n"
-        )
+        content = "---\nname: test-skill\ndescription: does testing\n---\nbody\n"
         meta = sp.parse_skill_frontmatter(content)
         assert meta.get("name") == "test-skill"
         assert meta.get("description") == "does testing"
@@ -96,12 +123,7 @@ class TestSkillFrontmatterParsing:
         assert meta.get("description") is None
 
     def test_handles_quoted_values(self):
-        content = (
-            "---\n"
-            'name: "quoted-name"\n'
-            "description: 'single-quoted'\n"
-            "---\n"
-        )
+        content = "---\nname: \"quoted-name\"\ndescription: 'single-quoted'\n---\n"
         meta = sp.parse_skill_frontmatter(content)
         assert meta.get("name") == "quoted-name"
         assert meta.get("description") == "single-quoted"

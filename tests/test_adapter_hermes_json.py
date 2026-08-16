@@ -9,9 +9,6 @@ state.db is unavailable or the user has only the JSON exports.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from throughline.adapters.hermes import HermesAdapter
 
@@ -95,9 +92,7 @@ class TestHermesJSONAdapter:
     def test_is_present_when_neither_source_exists(self, tmp_path, monkeypatch):
         # Re-point the adapter's hermes root at an empty tmp dir.
         a = HermesAdapter()
-        monkeypatch.setattr(
-            HermesAdapter, "_hermes_root", property(lambda self: tmp_path / "missing")
-        )
+        monkeypatch.setattr(HermesAdapter, "_hermes_root", property(lambda self: tmp_path / "missing"))
         assert a.is_present() is False
 
     def test_is_present_when_sessions_dir_exists_but_is_empty(self, tmp_path, monkeypatch):
@@ -105,9 +100,7 @@ class TestHermesJSONAdapter:
         fake_root = tmp_path / ".hermes"
         (fake_root / "sessions").mkdir(parents=True)
         a = HermesAdapter()
-        monkeypatch.setattr(
-            HermesAdapter, "_hermes_root", property(lambda self: fake_root)
-        )
+        monkeypatch.setattr(HermesAdapter, "_hermes_root", property(lambda self: fake_root))
         assert a.is_present() is False
 
     def test_is_present_when_a_session_export_exists(self, tmp_path, monkeypatch):
@@ -119,9 +112,7 @@ class TestHermesJSONAdapter:
             encoding="utf-8",
         )
         a = HermesAdapter()
-        monkeypatch.setattr(
-            HermesAdapter, "_hermes_root", property(lambda self: fake_root)
-        )
+        monkeypatch.setattr(HermesAdapter, "_hermes_root", property(lambda self: fake_root))
         assert a.is_present() is True
 
     def test_is_present_when_only_state_db_exists(self, tmp_path, monkeypatch):
@@ -132,9 +123,7 @@ class TestHermesJSONAdapter:
         fake_root.mkdir(parents=True)
         (fake_root / "state.db").write_bytes(b"")
         a = HermesAdapter()
-        monkeypatch.setattr(
-            HermesAdapter, "_hermes_root", property(lambda self: fake_root)
-        )
+        monkeypatch.setattr(HermesAdapter, "_hermes_root", property(lambda self: fake_root))
         assert a.is_present() is True
 
 
@@ -165,9 +154,7 @@ class TestTimestampsAreRealTimes:
         )
         conv = HermesAdapter().parse(p)
         assert conv is not None
-        assert conv.started_at.year == 2023, (
-            f"expected the session's real date, got {conv.started_at}"
-        )
+        assert conv.started_at.year == 2023, f"expected the session's real date, got {conv.started_at}"
         age = dt.datetime.now(dt.timezone.utc) - conv.started_at
         assert age > dt.timedelta(days=1), "session was dated to the import"
 

@@ -6,8 +6,6 @@ covered by integration tests against a real Postgres.
 
 from datetime import datetime, timezone
 
-import pytest
-
 from throughline.jobs import ingest_hermes as ih
 
 

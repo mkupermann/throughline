@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from throughline.adapters.cursor import CursorAdapter
 
 
@@ -37,10 +35,10 @@ class TestCursorAdapter:
         _make_session(home, filename="session_def.jsonl", messages=[{"role": "user", "content": "test"}])
         # Create a non-matching file
         (home / "not_a_session.txt").write_text("not a session")
-        
+
         a = CursorAdapter()
         monkeypatch.setattr(a, "home", home)
-        
+
         discovered = sorted(p.name for p in a.discover())
         assert discovered == ["session_abc.jsonl", "session_def.jsonl"]
 
@@ -59,7 +57,7 @@ class TestCursorAdapter:
                 {"role": "assistant", "content": "How can I help?", "message_id": "msg_2"},
             ],
         )
-        
+
         conv = CursorAdapter().parse(session_path)
         assert conv is not None
         assert conv.entrypoint == "cursor"
@@ -90,7 +88,7 @@ class TestCursorAdapter:
                 },
             ],
         )
-        
+
         conv = CursorAdapter().parse(session_path)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -115,7 +113,7 @@ class TestCursorAdapter:
                 },
             ],
         )
-        
+
         conv = CursorAdapter().parse(session_path)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -126,28 +124,28 @@ class TestCursorAdapter:
 
     def test_parse_returns_none_for_empty_file(self, tmp_path):
         session_path = _make_session(tmp_path, filename="empty.jsonl", messages=[])
-        
+
         assert CursorAdapter().parse(session_path) is None
 
     def test_parse_returns_none_for_non_file(self, tmp_path):
         not_a_file = tmp_path / "not_a_file"
-        
+
         assert CursorAdapter().parse(not_a_file) is None
 
     def test_session_id_is_deterministic(self, tmp_path):
         messages = [{"role": "user", "content": "test", "message_id": "msg_1"}]
-        
+
         session_dir1 = tmp_path / "a"
         session_dir2 = tmp_path / "b"
         session_dir1.mkdir()
         session_dir2.mkdir()
-        
+
         session_path1 = _make_session(session_dir1, filename="session_abc.jsonl", messages=messages)
         session_path2 = _make_session(session_dir2, filename="session_xyz.jsonl", messages=messages)
-        
+
         conv1 = CursorAdapter().parse(session_path1)
         conv2 = CursorAdapter().parse(session_path2)
-        
+
         assert conv1 is not None
         assert conv2 is not None
         # Different file names but same content should have different session IDs
@@ -167,7 +165,7 @@ class TestCursorAdapter:
                 },
             ],
         )
-        
+
         conv = CursorAdapter().parse(session_path)
         assert conv is not None
         assert conv.metadata["source"] == "cursor"

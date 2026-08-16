@@ -1,11 +1,10 @@
 """Shared pytest fixtures."""
 
-import os
-import sys
 import json
+import sys
 import uuid
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -71,7 +70,7 @@ def tmp_skill_dir(tmp_path):
     skill_md = skill_dir / "SKILL.md"
     skill_md.write_text(
         "---\n"
-        'name: sample-skill\n'
+        "name: sample-skill\n"
         'description: A sample skill that does X. Trigger bei "sample", "test"\n'
         "version: 1.2.3\n"
         "---\n\n"

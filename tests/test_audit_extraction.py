@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
 
 import pytest
 
@@ -92,8 +91,8 @@ class TestAuditChunk:
         recall, drifted_strict, _ = ae.audit_chunk(chunk, source, threshold=0.50)
         _, drifted_lax, _ = ae.audit_chunk(chunk, source, threshold=0.10)
         assert recall == pytest.approx(0.25)
-        assert drifted_strict is True   # 0.25 < 0.50
-        assert drifted_lax is False     # 0.25 >= 0.10
+        assert drifted_strict is True  # 0.25 < 0.50
+        assert drifted_lax is False  # 0.25 >= 0.10
 
     def test_partial_overlap_above_threshold(self):
         chunk = "pgvector cosine distance memory"
@@ -121,11 +120,14 @@ class _FakeCursor:
         self.log.append((sql, params))
         normalised = " ".join(sql.lower().split())
         if "from memory_chunks" in normalised and "order by random" in normalised:
+
             class _Col:
-                def __init__(self, name): self.name = name
-            self.description = [_Col(n) for n in (
-                "id", "source_type", "source_id", "category", "content", "project_name"
-            )]
+                def __init__(self, name):
+                    self.name = name
+
+            self.description = [
+                _Col(n) for n in ("id", "source_type", "source_id", "category", "content", "project_name")
+            ]
             self._scripted_fetch = [tuple(r.values()) for r in self.sample_rows]
         elif "from messages" in normalised:
             conv_id = params[0] if params else None

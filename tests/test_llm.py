@@ -99,9 +99,7 @@ def test_embedding_models_are_filtered_out_of_the_candidate_list(monkeypatch, na
         status = 200
 
         def read(self):
-            return (
-                '{"models": [{"name": "' + name + '"}, {"name": "qwen2.5:7b"}]}'
-            ).encode()
+            return ('{"models": [{"name": "' + name + '"}, {"name": "qwen2.5:7b"}]}').encode()
 
         def __enter__(self):
             return self
@@ -195,7 +193,8 @@ def test_without_a_per_call_model_the_probed_one_is_used(monkeypatch):
     stub(monkeypatch, ollama=["qwen2.5:7b"])
     seen: dict = {}
     monkeypatch.setattr(
-        llm, "_http_json",
+        llm,
+        "_http_json",
         lambda url, payload, *, timeout, headers=None: (seen.update(payload), {"response": "ok"})[1],
     )
     llm.complete("q")

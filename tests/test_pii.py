@@ -113,10 +113,7 @@ def test_does_not_redact_short_sk_prefixed_words() -> None:
 
 
 def test_multiple_redactions_in_one_string() -> None:
-    text = (
-        "email: alice@example.com, key: sk-ant-api03-" + "x" * 40 +
-        ", path: /Users/alice/work"
-    )
+    text = "email: alice@example.com, key: sk-ant-api03-" + "x" * 40 + ", path: /Users/alice/work"
     out = redact(text)
     assert "alice@example.com" not in out
     assert "sk-ant-api03" not in out

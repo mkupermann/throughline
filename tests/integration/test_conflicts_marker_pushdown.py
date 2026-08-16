@@ -19,8 +19,6 @@ query shape.
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
 from throughline import conflicts
@@ -188,10 +186,7 @@ def test_sql_and_python_markers_agree_on_every_body(seeded):
         for body, sql_hit in sql_verdicts.items()
         if sql_hit != conflicts._has_contradiction_marker(body)
     }
-    assert not mismatches, (
-        "SQL and Python marker predicates disagree (body: sql_says, python_says): "
-        f"{mismatches}"
-    )
+    assert not mismatches, f"SQL and Python marker predicates disagree (body: sql_says, python_says): {mismatches}"
 
 
 def test_pushdown_matches_python_filter(seeded):
@@ -201,21 +196,13 @@ def test_pushdown_matches_python_filter(seeded):
     New     = marker applied as a join predicate.
     """
     legacy = {
-        (a, b)
-        for a, b, full_b, _sim in _run(seeded, LEGACY_SQL)
-        if conflicts._has_contradiction_marker(full_b or "")
+        (a, b) for a, b, full_b, _sim in _run(seeded, LEGACY_SQL) if conflicts._has_contradiction_marker(full_b or "")
     }
-    new = {
-        (a, b)
-        for a, b, _full_b, _sim in _run(
-            seeded, NEW_SQL, marker_re=conflicts._CONTRADICTION_SQL_RE
-        )
-    }
+    new = {(a, b) for a, b, _full_b, _sim in _run(seeded, NEW_SQL, marker_re=conflicts._CONTRADICTION_SQL_RE)}
 
     assert legacy, "fixture produced no conflicts — it cannot discriminate"
     assert new == legacy, (
-        f"pushdown changed the result set: "
-        f"missing={sorted(legacy - new)[:10]} extra={sorted(new - legacy)[:10]}"
+        f"pushdown changed the result set: missing={sorted(legacy - new)[:10]} extra={sorted(new - legacy)[:10]}"
     )
 
 
@@ -236,9 +223,7 @@ def test_pushdown_examines_fewer_pairs(seeded):
 
     legacy_rows = total_rows(legacy_plan[0]["Plan"])
     new_rows = total_rows(new_plan[0]["Plan"])
-    assert new_rows < legacy_rows, (
-        f"pushdown did not reduce materialised rows: {new_rows} vs {legacy_rows}"
-    )
+    assert new_rows < legacy_rows, f"pushdown did not reduce materialised rows: {new_rows} vs {legacy_rows}"
 
 
 def test_find_conflicts_still_reports_semantic_conflicts(seeded):

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Claude Memory — query CLI for the memory DB."""
 
-import sys
 import os
+import sys
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -22,44 +23,53 @@ def cmd_search(term: str):
     """Suche in memory_chunks + messages. Trackt access_count/last_accessed."""
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         print(f"\n=== Memory Chunks zu '{term}' ===")
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id, category::text, content, confidence, project_name, tags
             FROM memory_chunks
             WHERE (content ILIKE %s OR %s = ANY(tags) OR project_name ILIKE %s)
               AND COALESCE(status, 'active') = 'active'
             ORDER BY confidence DESC, created_at DESC
             LIMIT 20
-        """, (f"%{term}%", term, f"%{term}%"))
+        """,
+            (f"%{term}%", term, f"%{term}%"),
+        )
         rows = cur.fetchall()
         seen_ids = [r["id"] for r in rows]
         for r in rows:
             print(f"\n[{r['category']}] Conf: {r['confidence']} | Projekt: {r['project_name'] or '-'}")
-            if r['tags']:
+            if r["tags"]:
                 print(f"  Tags: {', '.join(r['tags'])}")
             print(f"  {r['content']}")
         # Access-Tracking: access_count++ und last_accessed = now() fuer gelesene Chunks
         if seen_ids:
             try:
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE memory_chunks
                     SET access_count = COALESCE(access_count, 0) + 1,
                         last_accessed = now()
                     WHERE id = ANY(%s)
-                """, (seen_ids,))
+                """,
+                    (seen_ids,),
+                )
                 conn.commit()
-            except Exception as e:
+            except Exception:
                 # Spalten evtl. noch nicht migriert — ignorieren
                 conn.rollback()
 
         print(f"\n=== Conversations mit '{term}' ===")
-        cur.execute("""
+        cur.execute(
+            """
             SELECT DISTINCT c.id, c.project_name, c.started_at
             FROM conversations c
             JOIN messages m ON m.conversation_id = c.id
             WHERE m.content ILIKE %s
             ORDER BY c.started_at DESC
             LIMIT 10
-        """, (f"%{term}%",))
+        """,
+            (f"%{term}%",),
+        )
         for r in cur.fetchall():
             print(f"  #{r['id']} | {r['project_name'] or '-'} | {r['started_at']}")
 
@@ -68,16 +78,19 @@ def cmd_project(name: str):
     """Alle Memory-Chunks eines Projekts."""
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         print(f"\n=== Projekt: {name} ===")
-        cur.execute("""
+        cur.execute(
+            """
             SELECT category::text, content, confidence, tags
             FROM memory_chunks
             WHERE project_name ILIKE %s
             ORDER BY category, confidence DESC
-        """, (f"%{name}%",))
+        """,
+            (f"%{name}%",),
+        )
         current_cat = None
         for r in cur.fetchall():
-            if r['category'] != current_cat:
-                current_cat = r['category']
+            if r["category"] != current_cat:
+                current_cat = r["category"]
                 print(f"\n--- {current_cat.upper()} ---")
             print(f"  [{r['confidence']}] {r['content']}")
 
@@ -86,15 +99,18 @@ def cmd_contact(name: str):
     """Contact entries."""
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         print(f"\n=== Kontakt: {name} ===")
-        cur.execute("""
+        cur.execute(
+            """
             SELECT content, confidence, project_name, tags
             FROM memory_chunks
             WHERE category = 'contact' AND content ILIKE %s
             ORDER BY confidence DESC
-        """, (f"%{name}%",))
+        """,
+            (f"%{name}%",),
+        )
         for r in cur.fetchall():
             print(f"\n  [{r['confidence']}] {r['content']}")
-            if r['project_name']:
+            if r["project_name"]:
                 print(f"  Projekt: {r['project_name']}")
 
 
@@ -127,7 +143,7 @@ def cmd_stats():
                 (SELECT count(*) FROM prompts) AS pt
         """)
         r = cur.fetchone()
-        print(f"\n=== Claude Memory Stats ===")
+        print("\n=== Claude Memory Stats ===")
         print(f"  Conversations: {r['conv']}")
         print(f"  Messages:      {r['msg']}")
         print(f"  Memory Chunks: {r['mem']}")
@@ -136,7 +152,7 @@ def cmd_stats():
         print(f"  Prompts:       {r['pt']}")
 
         cur.execute("SELECT category::text, count(*) FROM memory_chunks GROUP BY category ORDER BY count DESC")
-        print(f"\n  Memory nach Kategorie:")
+        print("\n  Memory nach Kategorie:")
         for row in cur.fetchall():
             print(f"    {row['category']:20} {row['count']}")
 
@@ -156,12 +172,19 @@ Usage:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        usage(); sys.exit(1)
+        usage()
+        sys.exit(1)
     cmd = sys.argv[1]
     arg = sys.argv[2] if len(sys.argv) > 2 else None
-    if cmd == "search" and arg: cmd_search(arg)
-    elif cmd == "project" and arg: cmd_project(arg)
-    elif cmd == "contact" and arg: cmd_contact(arg)
-    elif cmd == "decisions": cmd_decisions()
-    elif cmd == "stats": cmd_stats()
-    else: usage()
+    if cmd == "search" and arg:
+        cmd_search(arg)
+    elif cmd == "project" and arg:
+        cmd_project(arg)
+    elif cmd == "contact" and arg:
+        cmd_contact(arg)
+    elif cmd == "decisions":
+        cmd_decisions()
+    elif cmd == "stats":
+        cmd_stats()
+    else:
+        usage()

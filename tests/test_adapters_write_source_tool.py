@@ -26,8 +26,7 @@ def test_adapter_sets_source_tool_to_its_own_name(adapter):
     """Bar 3: no adapter may leave provider identity to chance."""
     src = inspect.getsource(type(adapter))
     assert "source_tool=" in src, (
-        f"{adapter.name} never sets source_tool; provider identity would be "
-        f"NULL for everything it ingests"
+        f"{adapter.name} never sets source_tool; provider identity would be NULL for everything it ingests"
     )
     assert f'source_tool="{adapter.name}"' in src or "source_tool=self.name" in src, (
         f"{adapter.name} must write its own registered name"
@@ -41,7 +40,7 @@ def test_adapter_name_is_a_registered_provider(adapter):
 
 def test_entrypoint_is_left_alone():
     """Spec §8: entrypoint semantics do not change."""
-    from throughline.adapters import vibe, claude_code
+    from throughline.adapters import claude_code, vibe
 
     assert 'entrypoint=""' in inspect.getsource(vibe.VibeAdapter)
     assert "entrypoint=entrypoint" in inspect.getsource(claude_code.ClaudeCodeAdapter)

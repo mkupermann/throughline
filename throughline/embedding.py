@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
-
+from typing import Any
 
 _lock = threading.Lock()
 _resolved = False
@@ -103,9 +103,7 @@ def backend_info(preferred: str = "auto") -> BackendInfo:
     b = get_backend(preferred)
     if b is None:
         return BackendInfo(available=False, reason=_reason or "No embedding backend configured.")
-    return BackendInfo(
-        available=True, name=b.name, model=b.model, column=b.column, dim=b.dim
-    )
+    return BackendInfo(available=True, name=b.name, model=b.model, column=b.column, dim=b.dim)
 
 
 def embed_query(text: str, preferred: str = "auto") -> list[float] | None:

@@ -50,8 +50,7 @@ def sessions(
     offset: int = Query(0, ge=0),
     include_generated: bool = Query(
         False,
-        description="Also list sessions a script produced. Off by default; the "
-        "user decides, the interface does not.",
+        description="Also list sessions a script produced. Off by default; the user decides, the interface does not.",
     ),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -65,7 +64,12 @@ def sessions(
     term = (q or "").strip() or None
     with connection(settings) as conn:
         rows = Q.sessions(
-            conn, name, order=order, q=term, limit=limit, offset=offset,
+            conn,
+            name,
+            order=order,
+            q=term,
+            limit=limit,
+            offset=offset,
             include_generated=include_generated,
         )
         total = Q.session_count(conn, name, q=term, include_generated=include_generated)

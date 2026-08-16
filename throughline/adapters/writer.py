@@ -199,8 +199,7 @@ def _backfill_projects_from_observed(cur: Any) -> int:
     if not missing:
         return 0
     cur.executemany(
-        "INSERT INTO projects (name, status) VALUES (%s, 'active') "
-        "ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO projects (name, status) VALUES (%s, 'active') ON CONFLICT (name) DO NOTHING",
         [(n,) for n in missing],
     )
     return len(missing)
@@ -234,8 +233,7 @@ def _record_decision(conn: Any, cur: Any, fp: Path, fhash: str) -> None:
     conn.rollback()
     try:
         cur.execute(
-            "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
-            "VALUES (%s, %s, 0) ON CONFLICT DO NOTHING",
+            "INSERT INTO ingestion_log (file_path, file_hash, record_count) VALUES (%s, %s, 0) ON CONFLICT DO NOTHING",
             (str(fp), fhash),
         )
         conn.commit()

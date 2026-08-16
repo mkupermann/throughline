@@ -11,24 +11,22 @@ Gibt gruppierte Ergebnisse nach source_type (memory_chunk, message) aus.
 """
 
 from __future__ import annotations
+
 import argparse
-import json
-import os
 import sys
-import urllib.request
-from typing import Any, List
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
 
 from .generate_embeddings import (
     DB_CONFIG,
-    pick_backend,
     Backend,
+    pick_backend,
 )
 
 
-def _connect() -> "psycopg2.extensions.connection":
+def _connect() -> psycopg2.extensions.connection:
     """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
     try:
         return psycopg2.connect(**DB_CONFIG)
@@ -43,14 +41,14 @@ def _connect() -> "psycopg2.extensions.connection":
         raise SystemExit(2) from e
 
 
-def embed_query(backend: Backend, query: str) -> List[float]:
+def embed_query(backend: Backend, query: str) -> list[float]:
     vec = backend.embed([query[: backend.max_chars]])[0]
     if len(vec) != backend.dim:
         raise RuntimeError(f"Unerwartete Embedding-Dim: {len(vec)} != {backend.dim}")
     return vec
 
 
-def vec_literal(vec: List[float]) -> str:
+def vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
 
 
@@ -130,7 +128,7 @@ def main() -> None:
     if n_total == 0:
         sys.stderr.write(
             f"Keine Embeddings mit Modell '{backend.model}' in der DB.\n"
-            f"Erst generieren:  python3 {SCRIPT_DIR}/generate_embeddings.py --backend {backend.name}\n"
+            f"Erst generieren:  throughline embed --backend {backend.name}\n"
         )
         sys.exit(3)
 

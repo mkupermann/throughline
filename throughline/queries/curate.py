@@ -70,6 +70,7 @@ class Queue:
 
 # ── Queue contents ──────────────────────────────────────────────────────────
 
+
 def _chunk_projection(alias: str = "mc") -> str:
     return f"""
         {alias}.id,
@@ -305,9 +306,10 @@ def queue_counts(conn, low_confidence: float = LOW_CONFIDENCE_DEFAULT) -> dict[s
     sequential counts on a cold connection is the kind of thing that makes a
     page feel slow for no reason.
     """
-    row = one(
-        conn,
-        """
+    row = (
+        one(
+            conn,
+            """
         SELECT
           (SELECT count(*) FROM memory_reflections r
             WHERE r.reflection_type IN ('contradiction','conflict')
@@ -329,8 +331,10 @@ def queue_counts(conn, low_confidence: float = LOW_CONFIDENCE_DEFAULT) -> dict[s
                OR (mc.merged_from IS NOT NULL AND array_length(mc.merged_from,1) > 0)) AS superseded,
           (SELECT count(*) FROM memory_chunks mc WHERE mc.status = %s)              AS forgotten
         """,
-        (low_confidence, NEVER_ACCESSED_DAYS, FORGOTTEN),
-    ) or {}
+            (low_confidence, NEVER_ACCESSED_DAYS, FORGOTTEN),
+        )
+        or {}
+    )
 
     drift = len(queue_drift(conn, limit=10_000))
 
@@ -381,8 +385,7 @@ def forget(conn, ids: list[int], reason: str = "forgotten from Curate") -> dict[
     target = [int(r["id"]) for r in prior]
     changed = scalar(
         conn,
-        "WITH u AS (UPDATE memory_chunks SET status = %s WHERE id = ANY(%s) RETURNING 1) "
-        "SELECT count(*) FROM u",
+        "WITH u AS (UPDATE memory_chunks SET status = %s WHERE id = ANY(%s) RETURNING 1) SELECT count(*) FROM u",
         (FORGOTTEN, target),
     )
     _log(conn, "forget", target, reason)
@@ -400,12 +403,14 @@ def restore(conn, states: dict[str, str], reason: str = "restored") -> dict[str,
     ids = [int(k) for k in states]
     changed = 0
     for chunk_id, status in states.items():
-        changed += scalar(
-            conn,
-            "WITH u AS (UPDATE memory_chunks SET status = %s WHERE id = %s RETURNING 1) "
-            "SELECT count(*) FROM u",
-            (status, int(chunk_id)),
-        ) or 0
+        changed += (
+            scalar(
+                conn,
+                "WITH u AS (UPDATE memory_chunks SET status = %s WHERE id = %s RETURNING 1) SELECT count(*) FROM u",
+                (status, int(chunk_id)),
+            )
+            or 0
+        )
     _log(conn, "restore", ids, reason)
     conn.commit()
     return {
@@ -424,8 +429,7 @@ def set_confidence(conn, ids: list[int], value: float, reason: str = "confidence
     )
     changed = scalar(
         conn,
-        "WITH u AS (UPDATE memory_chunks SET confidence = %s WHERE id = ANY(%s) RETURNING 1) "
-        "SELECT count(*) FROM u",
+        "WITH u AS (UPDATE memory_chunks SET confidence = %s WHERE id = ANY(%s) RETURNING 1) SELECT count(*) FROM u",
         (value, ids),
     )
     _log(conn, "set_confidence", ids, reason)
@@ -444,12 +448,14 @@ def restore_confidence(conn, values: dict[str, float], reason: str = "confidence
         return {"changed": 0, "inverse": None}
     changed = 0
     for chunk_id, conf in values.items():
-        changed += scalar(
-            conn,
-            "WITH u AS (UPDATE memory_chunks SET confidence = %s WHERE id = %s RETURNING 1) "
-            "SELECT count(*) FROM u",
-            (conf, int(chunk_id)),
-        ) or 0
+        changed += (
+            scalar(
+                conn,
+                "WITH u AS (UPDATE memory_chunks SET confidence = %s WHERE id = %s RETURNING 1) SELECT count(*) FROM u",
+                (conf, int(chunk_id)),
+            )
+            or 0
+        )
     _log(conn, "restore_confidence", [int(k) for k in values], reason)
     conn.commit()
     return {"changed": int(changed), "inverse": None}
@@ -468,8 +474,7 @@ def clear_expiry(conn, ids: list[int], reason: str = "expiry cleared") -> dict[s
     target = [int(r["id"]) for r in prior]
     changed = scalar(
         conn,
-        "WITH u AS (UPDATE memory_chunks SET expires_at = NULL WHERE id = ANY(%s) RETURNING 1) "
-        "SELECT count(*) FROM u",
+        "WITH u AS (UPDATE memory_chunks SET expires_at = NULL WHERE id = ANY(%s) RETURNING 1) SELECT count(*) FROM u",
         (target,),
     )
     _log(conn, "clear_expiry", target, reason)
@@ -488,12 +493,14 @@ def restore_expiry(conn, values: dict[str, str], reason: str = "expiry restored"
         return {"changed": 0, "inverse": None}
     changed = 0
     for chunk_id, when in values.items():
-        changed += scalar(
-            conn,
-            "WITH u AS (UPDATE memory_chunks SET expires_at = %s WHERE id = %s RETURNING 1) "
-            "SELECT count(*) FROM u",
-            (when, int(chunk_id)),
-        ) or 0
+        changed += (
+            scalar(
+                conn,
+                "WITH u AS (UPDATE memory_chunks SET expires_at = %s WHERE id = %s RETURNING 1) SELECT count(*) FROM u",
+                (when, int(chunk_id)),
+            )
+            or 0
+        )
     _log(conn, "restore_expiry", [int(k) for k in values], reason)
     conn.commit()
     return {"changed": int(changed), "inverse": None}
@@ -529,12 +536,15 @@ def restore_action(conn, values: dict[str, Any], reason: str = "restored") -> di
         return {"changed": 0, "inverse": None}
     changed = 0
     for rid, action in values.items():
-        changed += scalar(
-            conn,
-            "WITH u AS (UPDATE memory_reflections SET action_taken = %s WHERE id = %s RETURNING 1) "
-            "SELECT count(*) FROM u",
-            (action, int(rid)),
-        ) or 0
+        changed += (
+            scalar(
+                conn,
+                "WITH u AS (UPDATE memory_reflections SET action_taken = %s WHERE id = %s RETURNING 1) "
+                "SELECT count(*) FROM u",
+                (action, int(rid)),
+            )
+            or 0
+        )
     conn.commit()
     return {"changed": int(changed), "inverse": None}
 

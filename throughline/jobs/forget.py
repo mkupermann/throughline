@@ -9,9 +9,10 @@ Convention for `memory_reflections.reflection_type`:
   - 'forget_entity'  — entity deleted via forget_entity (FK cascades take care
                        of entity_mentions and relationships)
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def forget_chunks(conn, ids: Iterable[int], *, reason: str) -> dict:

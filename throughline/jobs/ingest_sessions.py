@@ -3,12 +3,13 @@
 Session ingestion for the Throughline database.
 Liest Claude Code JSONL-Sessions und speichert sie in PostgreSQL.
 """
-import json
+
 import hashlib
+import json
 import os
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -79,10 +80,12 @@ def extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_use":
-            calls.append({
-                "tool_name": block.get("name", ""),
-                "input": block.get("input", {}),
-            })
+            calls.append(
+                {
+                    "tool_name": block.get("name", ""),
+                    "input": block.get("input", {}),
+                }
+            )
     return calls
 
 
@@ -141,8 +144,8 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
     for older JSONL files that pre-date the cwd field.
     """
     entries: list[dict[str, Any]] = []
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
+    with open(filepath, encoding="utf-8") as f:
+        for _line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
@@ -195,18 +198,29 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
 
     # Insert the conversation
     try:
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO conversations (session_id, project_path, model, entrypoint, git_branch,
                                        started_at, ended_at, message_count,
                                        token_count_in, token_count_out, metadata)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (session_id) DO NOTHING
             RETURNING id
-        """, (
-            session_id, project_path, model, entrypoint, git_branch,
-            started_at, ended_at, len(msg_entries),
-            conv_tokens_in, conv_tokens_out, Json({})
-        ))
+        """,
+            (
+                session_id,
+                project_path,
+                model,
+                entrypoint,
+                git_branch,
+                started_at,
+                ended_at,
+                len(msg_entries),
+                conv_tokens_in,
+                conv_tokens_out,
+                Json({}),
+            ),
+        )
         result = cursor.fetchone()
         if result is None:
             return 0  # Already exists
@@ -237,17 +251,29 @@ def ingest_file(cursor: Any, filepath: Path, project_path: str | None) -> int:
         msg_token_count = _per_message_total(msg)
 
         try:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO messages (conversation_id, uuid, parent_uuid, role, content,
                                      content_blocks, tool_calls, tool_name, is_sidechain,
                                      model, token_count, created_at, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                conv_id, uuid_val, parent_uuid, role, content,
-                Json(msg.get("content")) if isinstance(msg.get("content"), list) else None,
-                Json(tool_calls) if tool_calls else None,
-                tool_name, is_sidechain, msg_model, msg_token_count, ts, Json({})
-            ))
+            """,
+                (
+                    conv_id,
+                    uuid_val,
+                    parent_uuid,
+                    role,
+                    content,
+                    Json(msg.get("content")) if isinstance(msg.get("content"), list) else None,
+                    Json(tool_calls) if tool_calls else None,
+                    tool_name,
+                    is_sidechain,
+                    msg_model,
+                    msg_token_count,
+                    ts,
+                    Json({}),
+                ),
+            )
             msg_count += 1
         except Exception as e:
             print(f"  Fehler bei Message: {e}")
@@ -317,8 +343,7 @@ def main() -> None:
 
         # Bereits ingestiert?
         cursor.execute(
-            "SELECT 1 FROM ingestion_log WHERE file_path = %s AND file_hash = %s",
-            (str(filepath), file_hash)
+            "SELECT 1 FROM ingestion_log WHERE file_path = %s AND file_hash = %s", (str(filepath), file_hash)
         )
         if cursor.fetchone():
             skipped += 1
@@ -331,11 +356,14 @@ def main() -> None:
             msg_count = ingest_file(cursor, filepath, project_path)
             if msg_count > 0:
                 # In ingestion_log eintragen
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO ingestion_log (file_path, file_hash, record_count)
                     VALUES (%s, %s, %s)
                     ON CONFLICT DO NOTHING
-                """, (str(filepath), file_hash, msg_count))
+                """,
+                    (str(filepath), file_hash, msg_count),
+                )
                 conn.commit()
                 ingested += 1
                 total_messages += msg_count
@@ -349,7 +377,7 @@ def main() -> None:
             print(f"  ✗ {filepath.name}: {e}")
 
     print(f"\n{'=' * 60}")
-    print(f"Ergebnis:")
+    print("Ergebnis:")
     print(f"  Ingestiert:  {ingested} Sessions ({total_messages} Messages)")
     print(f"  Skipped: {skipped}")
     print(f"  Fehler:      {errors}")
@@ -367,13 +395,15 @@ def main() -> None:
                 existing_project_names,
                 insert_missing,
             )
+
             observed = collect_observed_names(conn, include_conversations=True)
             existing = existing_project_names(conn)
             to_insert = [n for n in observed if n not in existing]
             if to_insert:
                 insert_missing(conn, to_insert)
-                print(f"  Projects:    materialised {len(to_insert)} new row(s) "
-                      f"({len(existing) + len(to_insert)} total).")
+                print(
+                    f"  Projects:    materialised {len(to_insert)} new row(s) ({len(existing) + len(to_insert)} total)."
+                )
         except Exception as exc:
             # Backfill is a nice-to-have; ingestion itself succeeded.
             print(f"  Projects:    backfill skipped ({exc.__class__.__name__})")

@@ -3,24 +3,23 @@
 Entity-Extraction Pipeline via Claude Code CLI.
 Analysiert Conversations und extrahiert Entities + Relationships als Knowledge Graph.
 """
+
+import argparse
 import json
 import os
 import re
 import subprocess
-
-from throughline.self_referential import agent_call_cwd
 import sys
 import time
 import unicodedata
-import argparse
 from typing import Any
 
 import psycopg2
-
-from throughline.message_derivations import lock_and_revalidate_conversation
 import psycopg2.extras
 
+from throughline.message_derivations import lock_and_revalidate_conversation
 from throughline.pii import count_redactions, redact
+from throughline.self_referential import agent_call_cwd
 
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "throughline"),
@@ -56,6 +55,7 @@ def _resolve_claude_bin() -> str:
     if env:
         return env
     from shutil import which
+
     found = which("claude")
     return found or "claude"
 
@@ -73,8 +73,17 @@ SLEEP_BETWEEN_CALLS = 1.5
 TIMEOUT_PER_CALL = 180
 
 ALLOWED_ENTITY_TYPES = {"person", "project", "technology", "decision", "concept", "organization"}
-ALLOWED_REL_TYPES = {"works_on", "uses", "decided", "blocks", "relates_to", "member_of",
-                      "reports_to", "depends_on", "replaces"}
+ALLOWED_REL_TYPES = {
+    "works_on",
+    "uses",
+    "decided",
+    "blocks",
+    "relates_to",
+    "member_of",
+    "reports_to",
+    "depends_on",
+    "replaces",
+}
 
 PROMPT_TEMPLATE = """You are reading a session transcript and extracting the entities and relationships in it as JSON.
 
@@ -184,7 +193,7 @@ def parse_json_response(text: str) -> dict:
     if start == -1 or end == -1:
         return {"entities": [], "relationships": []}
     try:
-        parsed = json.loads(text[start:end+1])
+        parsed = json.loads(text[start : end + 1])
         if not isinstance(parsed, dict):
             return {"entities": [], "relationships": []}
         parsed.setdefault("entities", [])
@@ -220,15 +229,17 @@ def call_claude(prompt: str) -> str:
         return ""
 
 
-def upsert_entity(cursor, entity_type: str, name: str, attributes: dict,
-                   project_name: str | None, confidence: float) -> int | None:
+def upsert_entity(
+    cursor, entity_type: str, name: str, attributes: dict, project_name: str | None, confidence: float
+) -> int | None:
     """Insert or update an entity. Returns the entity_id."""
     canonical = canonicalize(name)
     if not canonical or entity_type not in ALLOWED_ENTITY_TYPES:
         return None
 
     # Try insert, on conflict update (bump mention_count, merge attributes, update last_seen)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO entities (entity_type, name, canonical_name, attributes, project_name, confidence)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (entity_type, canonical_name, project_name)
@@ -238,56 +249,74 @@ def upsert_entity(cursor, entity_type: str, name: str, attributes: dict,
             attributes = entities.attributes || EXCLUDED.attributes,
             confidence = GREATEST(entities.confidence, EXCLUDED.confidence)
         RETURNING id
-    """, (entity_type, name, canonical, json.dumps(attributes or {}),
-          project_name, confidence))
+    """,
+        (entity_type, name, canonical, json.dumps(attributes or {}), project_name, confidence),
+    )
     row = cursor.fetchone()
     return row[0] if row else None
 
 
-def insert_relationship(cursor, from_id: int, to_id: int, relation_type: str,
-                         confidence: float, source_type: str, source_id: int,
-                         attributes: dict) -> bool:
+def insert_relationship(
+    cursor,
+    from_id: int,
+    to_id: int,
+    relation_type: str,
+    confidence: float,
+    source_type: str,
+    source_id: int,
+    attributes: dict,
+) -> bool:
     if relation_type not in ALLOWED_REL_TYPES:
         return False
     if from_id == to_id:
         return False
     # Dedupe: never insert the same relation twice for one source
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id FROM relationships
         WHERE from_entity = %s AND to_entity = %s AND relation_type = %s
           AND source_type = %s AND source_id = %s
         LIMIT 1
-    """, (from_id, to_id, relation_type, source_type, source_id))
+    """,
+        (from_id, to_id, relation_type, source_type, source_id),
+    )
     if cursor.fetchone():
         return False
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO relationships (from_entity, to_entity, relation_type, confidence,
                                      source_type, source_id, attributes)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """, (from_id, to_id, relation_type, confidence, source_type, source_id,
-          json.dumps(attributes or {})))
+    """,
+        (from_id, to_id, relation_type, confidence, source_type, source_id, json.dumps(attributes or {})),
+    )
     return True
 
 
-def insert_mention(cursor, entity_id: int, source_type: str, source_id: int,
-                    context: str) -> None:
-    cursor.execute("""
+def insert_mention(cursor, entity_id: int, source_type: str, source_id: int, context: str) -> None:
+    cursor.execute(
+        """
         INSERT INTO entity_mentions (entity_id, source_type, source_id, context_snippet)
         VALUES (%s, %s, %s, %s)
-    """, (entity_id, source_type, source_id, context))
+    """,
+        (entity_id, source_type, source_id, context),
+    )
 
 
 def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> tuple:
     if not lock_and_revalidate_conversation(cursor, conv_id):
         return (0, 0)
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT role::text, content
         FROM messages
         WHERE conversation_id = %s AND role IN ('user', 'assistant')
         ORDER BY created_at
-    """, (conv_id,))
+    """,
+        (conv_id,),
+    )
     rows = cursor.fetchall()
     if not rows:
         return (0, 0)
@@ -350,25 +379,30 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
 
             # Fallback: Suche in DB falls nicht in dieser Session extrahiert
             if not from_id:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id FROM entities WHERE canonical_name = %s
                     ORDER BY (project_name = %s) DESC NULLS LAST, mention_count DESC LIMIT 1
-                """, (canonicalize(from_name), project_name))
+                """,
+                    (canonicalize(from_name), project_name),
+                )
                 r = cursor.fetchone()
                 if r:
                     from_id = r[0]
             if not to_id:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id FROM entities WHERE canonical_name = %s
                     ORDER BY (project_name = %s) DESC NULLS LAST, mention_count DESC LIMIT 1
-                """, (canonicalize(to_name), project_name))
+                """,
+                    (canonicalize(to_name), project_name),
+                )
                 r = cursor.fetchone()
                 if r:
                     to_id = r[0]
 
             if from_id and to_id and rtype in ALLOWED_REL_TYPES:
-                if insert_relationship(cursor, from_id, to_id, rtype, rconf,
-                                         "conversation", conv_id, rattrs):
+                if insert_relationship(cursor, from_id, to_id, rtype, rconf, "conversation", conv_id, rattrs):
                     rels_inserted += 1
         except Exception as e:
             print(f"    Relationship insert-Fehler: {e}")
@@ -389,6 +423,7 @@ def main() -> None:
     print("=" * 60)
 
     from shutil import which
+
     if which(CLAUDE_BIN) is None and not os.path.isfile(CLAUDE_BIN):
         sys.stderr.write(
             "ERROR: Claude CLI not found.\n"
@@ -401,11 +436,15 @@ def main() -> None:
     cursor = conn.cursor()
 
     if args.conv_id:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, project_name, message_count FROM conversations WHERE id = %s
-        """, (args.conv_id,))
+        """,
+            (args.conv_id,),
+        )
     else:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id, c.project_name, c.message_count
             FROM conversations c
             WHERE NOT EXISTS (
@@ -415,7 +454,9 @@ def main() -> None:
             AND c.message_count >= %s
             ORDER BY c.started_at DESC
             LIMIT %s
-        """, (args.min_messages, args.limit))
+        """,
+            (args.min_messages, args.limit),
+        )
     convs = cursor.fetchall()
 
     # Drop transcripts that are Throughline calling `claude -p` on itself.
@@ -430,8 +471,7 @@ def main() -> None:
         kept, skipped = [], 0
         for row in convs:
             cursor.execute(
-                "SELECT content FROM messages WHERE conversation_id = %s AND role = 'user' "
-                "ORDER BY id LIMIT 1",
+                "SELECT content FROM messages WHERE conversation_id = %s AND role = 'user' ORDER BY id LIMIT 1",
                 (row[0],),
             )
             first = cursor.fetchone()
@@ -440,8 +480,7 @@ def main() -> None:
             else:
                 kept.append(row)
         if skipped:
-            print(f"  skipped {skipped} self-referential transcript(s) "
-                  f"(Throughlines eigene claude -p Aufrufe)")
+            print(f"  skipped {skipped} self-referential transcript(s) (Throughlines eigene claude -p Aufrufe)")
         convs = kept
 
     print(f"\n{len(convs)} Conversations zu analysieren\n")
@@ -456,7 +495,11 @@ def main() -> None:
 
     for i, (conv_id, project_name, msg_count) in enumerate(convs, 1):
         elapsed = time.time() - start
-        print(f"  [{i}/{len(convs)}] #{conv_id} ({project_name or '–'}, {msg_count} Msgs) [{elapsed:.0f}s elapsed]", end=" ", flush=True)
+        print(
+            f"  [{i}/{len(convs)}] #{conv_id} ({project_name or '–'}, {msg_count} Msgs) [{elapsed:.0f}s elapsed]",
+            end=" ",
+            flush=True,
+        )
         try:
             ents, rels = extract_for_conversation(cursor, conv_id, project_name)
             conn.commit()

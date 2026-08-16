@@ -29,8 +29,10 @@ import re
 # not what. Keeping them short minimises token cost.
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # --- private keys (must run before email catch-all) ------------------
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"), "<REDACTED_PRIVATE_KEY>"),
-
+    (
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"),
+        "<REDACTED_PRIVATE_KEY>",
+    ),
     # --- API-key shapes ---------------------------------------------------
     # Anthropic
     (re.compile(r"sk-ant-[a-zA-Z0-9_\-]{20,}"), "<REDACTED_ANTHROPIC_KEY>"),
@@ -49,15 +51,14 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b"), "<REDACTED_STRIPE_KEY>"),
     # JWT-shaped tokens
     (re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"), "<REDACTED_JWT>"),
-
     # --- Authorization headers -------------------------------------------
     (re.compile(r"(?i)(Authorization\s*:\s*Bearer\s+)[A-Za-z0-9\.\-_]{10,}"), r"\1<REDACTED_BEARER>"),
-
     # --- Explicit password/secret/token/api_key assignments --------------
     # Matches `password = "abc"`, `SECRET='abc'`, `token=abc123` etc.
     # ``\b`` alone misses prefixed names (DB_PASSWORD, GITHUB_TOKEN, …)
     # because ``_`` is a word character — hence the explicit prefix group.
-    (re.compile(r"""(?ix)
+    (
+        re.compile(r"""(?ix)
         (
             (?: [A-Za-z0-9_\-]* [_\-] )?
             (?: password | passwd | pwd |
@@ -67,11 +68,11 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ['"]?
         ([A-Za-z0-9_\-\.\+/=]{6,})
         ['"]?
-    """), r"\1=<REDACTED>"),
-
+    """),
+        r"\1=<REDACTED>",
+    ),
     # --- Email addresses --------------------------------------------------
     (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), "<REDACTED_EMAIL>"),
-
     # --- Home-directory usernames ----------------------------------------
     (re.compile(r"/Users/[A-Za-z0-9._\-]+"), "/Users/<user>"),
     (re.compile(r"/home/[A-Za-z0-9._\-]+"), "/home/<user>"),

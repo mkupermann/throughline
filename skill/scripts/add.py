@@ -45,16 +45,11 @@ def parse_args() -> argparse.Namespace:
         description="Add a memory chunk to the Throughline database.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--category", required=True, choices=VALID_CATEGORIES,
-                   help="Category of the memory chunk.")
-    p.add_argument("--content", required=True,
-                   help="The insight itself (one clear sentence is best).")
-    p.add_argument("--project", default=None,
-                   help="Optional project name to scope the chunk.")
-    p.add_argument("--tags", default="",
-                   help="Comma-separated tags (e.g. 'postgresql,pgvector').")
-    p.add_argument("--confidence", type=float, default=0.8,
-                   help="Confidence in [0.0, 1.0].")
+    p.add_argument("--category", required=True, choices=VALID_CATEGORIES, help="Category of the memory chunk.")
+    p.add_argument("--content", required=True, help="The insight itself (one clear sentence is best).")
+    p.add_argument("--project", default=None, help="Optional project name to scope the chunk.")
+    p.add_argument("--tags", default="", help="Comma-separated tags (e.g. 'postgresql,pgvector').")
+    p.add_argument("--confidence", type=float, default=0.8, help="Confidence in [0.0, 1.0].")
     return p.parse_args()
 
 

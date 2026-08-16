@@ -43,10 +43,10 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
-from typing import Any, Iterable
-
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -58,11 +58,11 @@ class ConflictChunk:
     """One side of a conflict — a single memory chunk with its tool provenance."""
 
     chunk_id: int
-    tool: str                   # the conversations.source_tool value (claude_code, codex, ...)
+    tool: str  # the conversations.source_tool value (claude_code, codex, ...)
     project: str | None
     category: str
-    content: str                # truncated to ~500 chars by the SQL
-    created_at: str             # ISO timestamp
+    content: str  # truncated to ~500 chars by the SQL
+    created_at: str  # ISO timestamp
     status: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,11 +73,11 @@ class ConflictChunk:
 class Conflict:
     """One detected conflict — always two sides, plus the detection method."""
 
-    kind: str                   # "supersession" | "semantic" | "stale_drift"
-    confidence: float           # 0..1; semantic uses cosine, supersession is always 1.0
-    a: ConflictChunk            # the older / superseded / stale side
-    b: ConflictChunk            # the newer / superseding / active side
-    why: str                    # human-readable one-liner explaining the detection
+    kind: str  # "supersession" | "semantic" | "stale_drift"
+    confidence: float  # 0..1; semantic uses cosine, supersession is always 1.0
+    a: ConflictChunk  # the older / superseded / stale side
+    b: ConflictChunk  # the newer / superseding / active side
+    why: str  # human-readable one-liner explaining the detection
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -239,7 +239,7 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
     """
     sql = f"""
         SELECT
-            {_CHUNK_FIELDS.replace('mc.', 'a.').replace('c.', 'ca.')},
+            {_CHUNK_FIELDS.replace("mc.", "a.").replace("c.", "ca.")},
             ab.chunk_id    AS b_chunk_id,
             ab.tool        AS b_tool,
             ab.project     AS b_project,
@@ -251,7 +251,7 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
         LEFT JOIN public.conversations ca
             ON ca.id = a.source_id AND a.source_type = 'conversation'
         JOIN LATERAL (
-            SELECT {_CHUNK_FIELDS.replace('mc.', 'b.').replace('c.', 'cb.')}
+            SELECT {_CHUNK_FIELDS.replace("mc.", "b.").replace("c.", "cb.")}
             FROM public.memory_chunks b
             LEFT JOIN public.conversations cb
                 ON cb.id = b.source_id AND b.source_type = 'conversation'
@@ -285,12 +285,15 @@ def _supersession_conflicts(cur, *, project: str | None) -> list[Conflict]:
             created_at=row[12].isoformat() if row[12] else "",
             status=str(row[13] or ""),
         )
-        out.append(Conflict(
-            kind="supersession",
-            confidence=1.0,
-            a=a, b=b,
-            why=f"chunk #{a.chunk_id} (from {a.tool}) was explicitly superseded by chunk #{b.chunk_id} (from {b.tool})",
-        ))
+        out.append(
+            Conflict(
+                kind="supersession",
+                confidence=1.0,
+                a=a,
+                b=b,
+                why=f"chunk #{a.chunk_id} (from {a.tool}) was explicitly superseded by chunk #{b.chunk_id} (from {b.tool})",
+            )
+        )
     return out
 
 
@@ -371,27 +374,36 @@ def _semantic_conflicts(cur, *, project: str | None, min_similarity: float) -> l
             if not _has_contradiction_marker(full_b_content):
                 continue
             a = ConflictChunk(
-                chunk_id=int(row[0]), tool=str(row[1]), project=row[2],
-                category=str(row[3]), content=str(row[4] or ""),
+                chunk_id=int(row[0]),
+                tool=str(row[1]),
+                project=row[2],
+                category=str(row[3]),
+                content=str(row[4] or ""),
                 created_at=row[5].isoformat() if row[5] else "",
                 status=str(row[6] or ""),
             )
             b = ConflictChunk(
-                chunk_id=int(row[7]), tool=str(row[8]), project=row[9],
-                category=str(row[10]), content=str(row[11] or ""),
+                chunk_id=int(row[7]),
+                tool=str(row[8]),
+                project=row[9],
+                category=str(row[10]),
+                content=str(row[11] or ""),
                 created_at=row[12].isoformat() if row[12] else "",
                 status=str(row[13] or ""),
             )
-            parts.append(Conflict(
-                kind="semantic",
-                confidence=round(float(row[15]), 4),
-                a=a, b=b,
-                why=(
-                    f"{a.tool} and {b.tool} both recorded a {a.category} for project "
-                    f"'{a.project}' (cosine={row[15]:.3f}); the newer chunk contains "
-                    f"contradiction markers ('{_first_marker(full_b_content)}')"
-                ),
-            ))
+            parts.append(
+                Conflict(
+                    kind="semantic",
+                    confidence=round(float(row[15]), 4),
+                    a=a,
+                    b=b,
+                    why=(
+                        f"{a.tool} and {b.tool} both recorded a {a.category} for project "
+                        f"'{a.project}' (cosine={row[15]:.3f}); the newer chunk contains "
+                        f"contradiction markers ('{_first_marker(full_b_content)}')"
+                    ),
+                )
+            )
         # If the first column produced rows, don't double-count from the second.
         if parts:
             return parts
@@ -445,26 +457,35 @@ def _stale_drift_conflicts(cur, *, project: str | None, since_days: int) -> list
             continue
         seen.add((a_id, b_id))
         a = ConflictChunk(
-            chunk_id=a_id, tool=str(row[1]), project=row[2],
-            category=str(row[3]), content=str(row[4] or ""),
+            chunk_id=a_id,
+            tool=str(row[1]),
+            project=row[2],
+            category=str(row[3]),
+            content=str(row[4] or ""),
             created_at=row[5].isoformat() if row[5] else "",
             status=str(row[6] or ""),
         )
         b = ConflictChunk(
-            chunk_id=b_id, tool=str(row[8]), project=row[9],
-            category=str(row[10]), content=str(row[11] or ""),
+            chunk_id=b_id,
+            tool=str(row[8]),
+            project=row[9],
+            category=str(row[10]),
+            content=str(row[11] or ""),
             created_at=row[12].isoformat() if row[12] else "",
             status=str(row[13] or ""),
         )
-        out.append(Conflict(
-            kind="stale_drift",
-            confidence=0.5,  # weakest signal of the three
-            a=a, b=b,
-            why=(
-                f"{a.tool}'s {a.category} for '{a.project}' is >{since_days} days old "
-                f"and never accessed, while {b.tool} has a newer {b.category} for the same project"
-            ),
-        ))
+        out.append(
+            Conflict(
+                kind="stale_drift",
+                confidence=0.5,  # weakest signal of the three
+                a=a,
+                b=b,
+                why=(
+                    f"{a.tool}'s {a.category} for '{a.project}' is >{since_days} days old "
+                    f"and never accessed, while {b.tool} has a newer {b.category} for the same project"
+                ),
+            )
+        )
     return out
 
 
@@ -481,10 +502,7 @@ def tools_in_use(conn) -> list[str]:
     move — probably down — and that is a correction, not a regression.
     """
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT source_tool FROM conversations "
-            "WHERE source_tool IS NOT NULL ORDER BY 1"
-        )
+        cur.execute("SELECT DISTINCT source_tool FROM conversations WHERE source_tool IS NOT NULL ORDER BY 1")
         return [r[0] for r in cur.fetchall()]
 
 
@@ -533,12 +551,14 @@ def find_conflicts(
                 },
             )
 
-    report = ConflictReport(params={
-        "project": project,
-        "kinds": sorted(requested),
-        "since_days": since_days,
-        "min_similarity": min_similarity,
-    })
+    report = ConflictReport(
+        params={
+            "project": project,
+            "kinds": sorted(requested),
+            "since_days": since_days,
+            "min_similarity": min_similarity,
+        }
+    )
     try:
         with conn.cursor() as cur:
             if "supersession" in requested:
@@ -548,16 +568,12 @@ def find_conflicts(
                     report.error = (report.error or "") + f"supersession: {e}; "
             if "semantic" in requested:
                 try:
-                    report.conflicts.extend(_semantic_conflicts(
-                        cur, project=project, min_similarity=min_similarity
-                    ))
+                    report.conflicts.extend(_semantic_conflicts(cur, project=project, min_similarity=min_similarity))
                 except Exception as e:
                     report.error = (report.error or "") + f"semantic: {e}; "
             if "stale_drift" in requested:
                 try:
-                    report.conflicts.extend(_stale_drift_conflicts(
-                        cur, project=project, since_days=since_days
-                    ))
+                    report.conflicts.extend(_stale_drift_conflicts(cur, project=project, since_days=since_days))
                 except Exception as e:
                     report.error = (report.error or "") + f"stale_drift: {e}; "
     finally:
@@ -594,15 +610,12 @@ def format_human(report: ConflictReport) -> str:
 
     if not report.conflicts:
         if report.error:
-            return (
-                "Conflict scan incomplete — no results, but errors occurred:\n"
-                f"  {report.error}"
-            )
+            return f"Conflict scan incomplete — no results, but errors occurred:\n  {report.error}"
         return (
             "No cross-tool conflicts found"
             + (f" for project '{report.params.get('project')}'." if report.params.get("project") else ".")
             + "\nThis usually means: one tool dominates this workspace, OR the project hasn't accumulated\n"
-              "enough multi-tool history yet. Try `throughline conflicts --since-days 90` for a wider window."
+            "enough multi-tool history yet. Try `throughline conflicts --since-days 90` for a wider window."
         )
 
     by_kind: dict[str, list[Conflict]] = {}

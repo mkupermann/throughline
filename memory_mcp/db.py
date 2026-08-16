@@ -5,9 +5,11 @@ PGPASSWORD) so the server works inside Docker, in CI, or against a local
 DB without any code edits. Falls back to the same defaults the rest of
 the codebase uses.
 """
+
 from __future__ import annotations
 
 import os
+
 import psycopg2
 
 

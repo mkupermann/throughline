@@ -59,8 +59,7 @@ def seeded(db_connection):
             (conv, conv),
         )
         cur.execute(
-            "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
-            "VALUES ('/tmp/seed.jsonl', 'abc', 1)"
+            "INSERT INTO ingestion_log (file_path, file_hash, record_count) VALUES ('/tmp/seed.jsonl', 'abc', 1)"
         )
     db_connection.commit()
     return db_connection
@@ -97,7 +96,12 @@ def test_overview_shape(client, seeded):
     body = r.json()
 
     assert set(body) == {
-        "headline", "verdict", "verdict_reason", "attention", "activity", "totals",
+        "headline",
+        "verdict",
+        "verdict_reason",
+        "attention",
+        "activity",
+        "totals",
         # Chunk counts per category — the Overview draws its "memory by
         # category" chart from this. Served with the rest of the payload so the
         # page is one request, not two.
@@ -109,14 +113,18 @@ def test_overview_shape(client, seeded):
         assert isinstance(row["n"], int)
         assert row["category"], "a category must never render as an empty label"
     counts = [row["n"] for row in body["categories"]]
-    assert counts == sorted(counts, reverse=True), (
-        "the API sorts descending so the chart does not have to"
-    )
+    assert counts == sorted(counts, reverse=True), "the API sorts descending so the chart does not have to"
     assert body["verdict"] in {"ok", "degraded", "broken"}
     assert set(body["headline"]) == {"label", "value", "sublabel"}
     for item in body["attention"]:
         assert set(item) == {
-            "id", "severity", "title", "detail", "count", "action", "action_label",
+            "id",
+            "severity",
+            "title",
+            "detail",
+            "count",
+            "action",
+            "action_label",
         }
         assert item["severity"] in {"critical", "warning", "info"}
 

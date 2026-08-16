@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import timezone
 from pathlib import Path
 
-import pytest
-
 from throughline.adapters.hermes import (
+    _NS,
     HermesAdapter,
     _parse_state_db,
-    _NS,
 )
 
 # Minimal Hermes-compatible schema. Mirrors the columns the adapter
@@ -79,20 +76,37 @@ class TestParseStateDb:
         path = _make_db(
             tmp_path,
             sessions=[
-                {"id": "S1", "source": "cli", "model": "claude-opus-4-7",
-                 "title": "First", "started_at": 1700000000.0, "ended_at": 1700000600.0,
-                 "message_count": 2, "input_tokens": 10, "output_tokens": 5},
-                {"id": "S2", "source": "cli", "model": "claude-opus-4-7",
-                 "title": "Second", "started_at": 1700001000.0, "ended_at": 1700001100.0,
-                 "message_count": 1},
+                {
+                    "id": "S1",
+                    "source": "cli",
+                    "model": "claude-opus-4-7",
+                    "title": "First",
+                    "started_at": 1700000000.0,
+                    "ended_at": 1700000600.0,
+                    "message_count": 2,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+                {
+                    "id": "S2",
+                    "source": "cli",
+                    "model": "claude-opus-4-7",
+                    "title": "Second",
+                    "started_at": 1700001000.0,
+                    "ended_at": 1700001100.0,
+                    "message_count": 1,
+                },
             ],
             messages=[
-                {"session_id": "S1", "role": "user", "content": "hi",
-                 "timestamp": 1700000010.0},
-                {"session_id": "S1", "role": "assistant", "content": "hello",
-                 "timestamp": 1700000020.0, "finish_reason": "stop"},
-                {"session_id": "S2", "role": "user", "content": "only one",
-                 "timestamp": 1700001050.0},
+                {"session_id": "S1", "role": "user", "content": "hi", "timestamp": 1700000010.0},
+                {
+                    "session_id": "S1",
+                    "role": "assistant",
+                    "content": "hello",
+                    "timestamp": 1700000020.0,
+                    "finish_reason": "stop",
+                },
+                {"session_id": "S2", "role": "user", "content": "only one", "timestamp": 1700001050.0},
             ],
         )
         out = _parse_state_db(path)
@@ -110,10 +124,12 @@ class TestParseStateDb:
         for the same Hermes session, so they upsert into one DB row."""
         path = _make_db(
             tmp_path,
-            sessions=[{"id": "20260511_160653_6f89a7", "source": "cli",
-                       "started_at": 1700000000.0, "message_count": 1}],
-            messages=[{"session_id": "20260511_160653_6f89a7", "role": "user",
-                       "content": "x", "timestamp": 1700000010.0}],
+            sessions=[
+                {"id": "20260511_160653_6f89a7", "source": "cli", "started_at": 1700000000.0, "message_count": 1}
+            ],
+            messages=[
+                {"session_id": "20260511_160653_6f89a7", "role": "user", "content": "x", "timestamp": 1700000010.0}
+            ],
         )
         out = _parse_state_db(path)
         assert len(out) == 1
@@ -123,12 +139,10 @@ class TestParseStateDb:
     def test_unknown_role_is_skipped(self, tmp_path):
         path = _make_db(
             tmp_path,
-            sessions=[{"id": "S", "source": "cli", "started_at": 1.0,
-                       "message_count": 0}],
+            sessions=[{"id": "S", "source": "cli", "started_at": 1.0, "message_count": 0}],
             messages=[
                 {"session_id": "S", "role": "user", "content": "hi", "timestamp": 1.0},
-                {"session_id": "S", "role": "developer",
-                 "content": "ignore me", "timestamp": 2.0},
+                {"session_id": "S", "role": "developer", "content": "ignore me", "timestamp": 2.0},
                 {"session_id": "S", "role": "assistant", "content": "ok", "timestamp": 3.0},
             ],
         )
@@ -139,15 +153,16 @@ class TestParseStateDb:
     def test_tool_calls_blob_is_decoded(self, tmp_path):
         path = _make_db(
             tmp_path,
-            sessions=[{"id": "S", "source": "cli", "started_at": 1.0,
-                       "message_count": 1}],
-            messages=[{
-                "session_id": "S",
-                "role": "assistant",
-                "content": "",
-                "tool_calls": '[{"function": {"name": "shell", "arguments": "{\\"cmd\\": \\"ls\\"}"}}]',
-                "timestamp": 1.0,
-            }],
+            sessions=[{"id": "S", "source": "cli", "started_at": 1.0, "message_count": 1}],
+            messages=[
+                {
+                    "session_id": "S",
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": '[{"function": {"name": "shell", "arguments": "{\\"cmd\\": \\"ls\\"}"}}]',
+                    "timestamp": 1.0,
+                }
+            ],
         )
         out = _parse_state_db(path)
         assert len(out) == 1
@@ -186,7 +201,8 @@ class TestHermesDiscoverWithDb:
         a = HermesAdapter()
         # Patch the root resolver to our tmp tree.
         monkeypatch.setattr(
-            type(a), "_hermes_root",
+            type(a),
+            "_hermes_root",
             property(lambda self: hermes_root),
         )
         order = [p.name for p in a.discover()]

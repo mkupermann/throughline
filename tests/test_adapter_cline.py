@@ -11,19 +11,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from throughline.adapters.cline import ClineAdapter
 
 
-def _make_task(tmp_path: Path, *, task_id: str, api: list | None = None,
-               ui: list | None = None, meta: dict | None = None) -> Path:
+def _make_task(
+    tmp_path: Path, *, task_id: str, api: list | None = None, ui: list | None = None, meta: dict | None = None
+) -> Path:
     task_dir = tmp_path / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     if api is not None:
-        (task_dir / "api_conversation_history.json").write_text(
-            json.dumps(api), encoding="utf-8"
-        )
+        (task_dir / "api_conversation_history.json").write_text(json.dumps(api), encoding="utf-8")
     if ui is not None:
         (task_dir / "ui_messages.json").write_text(json.dumps(ui), encoding="utf-8")
     if meta is not None:
@@ -66,8 +63,7 @@ class TestClineAdapter:
                     "role": "assistant",
                     "content": [
                         {"type": "text", "text": "I'll list files."},
-                        {"type": "tool_use", "name": "execute_command",
-                         "input": {"command": "ls"}},
+                        {"type": "tool_use", "name": "execute_command", "input": {"command": "ls"}},
                     ],
                 },
             ],
@@ -85,12 +81,14 @@ class TestClineAdapter:
             tmp_path,
             task_id="t3",
             ui=[
-                {"ts": 1700000000000, "type": "say", "say": "text",
-                 "text": "Working on it..."},
-                {"ts": 1700000060000, "type": "ask", "ask": "command",
-                 "text": "May I run `rm -rf` ?"},
-                {"ts": 1700000070000, "type": "say", "say": "api_req_started",
-                 "text": "{\"request\":\"...\"}"},  # noise — should be skipped
+                {"ts": 1700000000000, "type": "say", "say": "text", "text": "Working on it..."},
+                {"ts": 1700000060000, "type": "ask", "ask": "command", "text": "May I run `rm -rf` ?"},
+                {
+                    "ts": 1700000070000,
+                    "type": "say",
+                    "say": "api_req_started",
+                    "text": '{"request":"..."}',
+                },  # noise — should be skipped
             ],
         )
         conv = ClineAdapter().parse(task)
@@ -132,7 +130,8 @@ class TestClineAdapter:
         # Stub out the candidate roots to point at our tmp_path layout.
         root_a = tmp_path / "roota"
         root_b = tmp_path / "rootb"
-        root_a.mkdir(); root_b.mkdir()
+        root_a.mkdir()
+        root_b.mkdir()
         (root_a / "task1").mkdir()
         (root_b / "task2").mkdir()
         monkeypatch.setattr(
@@ -149,7 +148,8 @@ class TestClineAdapter:
         # only their emptiness should make this False.
         root_a = tmp_path / "roota"
         root_b = tmp_path / "rootb"
-        root_a.mkdir(); root_b.mkdir()
+        root_a.mkdir()
+        root_b.mkdir()
         monkeypatch.setattr(
             "throughline.adapters.cline._candidate_task_roots",
             lambda: [root_a, root_b],
@@ -159,7 +159,8 @@ class TestClineAdapter:
     def test_is_present_true_when_a_task_dir_exists_in_any_root(self, tmp_path, monkeypatch):
         root_a = tmp_path / "roota"
         root_b = tmp_path / "rootb"
-        root_a.mkdir(); root_b.mkdir()
+        root_a.mkdir()
+        root_b.mkdir()
         (root_b / "task1").mkdir()
         monkeypatch.setattr(
             "throughline.adapters.cline._candidate_task_roots",

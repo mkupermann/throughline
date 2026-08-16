@@ -41,10 +41,10 @@ def colliding_ids(db_connection):
     with db_connection.cursor() as cur:
         conv_ids = {}
         for key, entrypoint, provider in [
-            ("a", "cli", "claude_code"),        # id 1 — the superseded chunk's real conversation
-            ("b", "windsurf", "windsurf"),       # id 2 — decoy: owns the message colliding with conv_a
-            ("d", "hermes", "hermes"),           # id 3 — decoy: owns the message colliding with conv_c
-            ("c", "codex", "codex"),             # id 4 — the superseding chunk's real conversation
+            ("a", "cli", "claude_code"),  # id 1 — the superseded chunk's real conversation
+            ("b", "windsurf", "windsurf"),  # id 2 — decoy: owns the message colliding with conv_a
+            ("d", "hermes", "hermes"),  # id 3 — decoy: owns the message colliding with conv_c
+            ("c", "codex", "codex"),  # id 4 — the superseding chunk's real conversation
         ]:
             cur.execute(
                 """

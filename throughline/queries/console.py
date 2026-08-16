@@ -163,9 +163,7 @@ def schema(conn) -> dict[str, Any]:
     )
     tables: dict[str, list[dict[str, str]]] = {}
     for r in cols:
-        tables.setdefault(r["table_name"], []).append(
-            {"name": r["column_name"], "type": r["data_type"]}
-        )
+        tables.setdefault(r["table_name"], []).append({"name": r["column_name"], "type": r["data_type"]})
 
     enums = _rows(
         conn,

@@ -103,9 +103,7 @@ class UndoRegistry:
         for t in expired:
             self._entries.pop(t, None)
         if len(self._entries) > self._max:
-            for t in sorted(self._entries, key=lambda k: self._entries[k].created_at)[
-                : len(self._entries) - self._max
-            ]:
+            for t in sorted(self._entries, key=lambda k: self._entries[k].created_at)[: len(self._entries) - self._max]:
                 self._entries.pop(t, None)
 
     def clear(self) -> None:

@@ -7,9 +7,10 @@ from ._exec import Row, one, rows, scalar
 
 def pipeline_counts(conn) -> Row:
     """Headline counts for each stage of the pipeline."""
-    return one(
-        conn,
-        """
+    return (
+        one(
+            conn,
+            """
         SELECT
             (SELECT count(*) FROM conversations
               WHERE generated_by IS NULL)          AS conversations,
@@ -21,7 +22,9 @@ def pipeline_counts(conn) -> Row:
             (SELECT count(*) FROM entities)        AS entities,
             (SELECT count(*) FROM ingestion_log)   AS ingest_runs
         """,
-    ) or {}
+        )
+        or {}
+    )
 
 
 def pending_extraction(conn, min_messages: int = 5) -> int:

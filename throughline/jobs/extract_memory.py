@@ -25,10 +25,9 @@ work. ``tests/test_self_referential.py`` fails if you forget.
 By default the transcript is run through ``throughline.pii.redact`` before it
 is sent — set ``THROUGHLINE_REDACT_PII=0`` to disable.
 """
+
 import json
 import os
-
-from throughline.self_referential import agent_call_cwd
 import sys
 import time
 from typing import Any
@@ -38,6 +37,7 @@ import psycopg2
 from throughline import llm as _llm
 from throughline import prompts as _prompts
 from throughline.pii import count_redactions, redact
+from throughline.self_referential import agent_call_cwd
 
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "throughline"),
@@ -176,7 +176,7 @@ def parse_json_response(text: str) -> list[dict[str, Any]]:
     if start == -1 or end == -1:
         return []
     try:
-        return json.loads(text[start:end+1])
+        return json.loads(text[start : end + 1])
     except json.JSONDecodeError as e:
         print(f"    JSON parse error: {e}")
         return []
@@ -211,12 +211,15 @@ call_claude = call_model
 
 
 def extract_for_conversation(cursor: Any, conv_id: int) -> int:
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT role::text, content
         FROM messages
         WHERE conversation_id = %s AND role IN ('user', 'assistant')
         ORDER BY created_at
-    """, (conv_id,))
+    """,
+        (conv_id,),
+    )
     rows = cursor.fetchall()
     if not rows:
         return 0
@@ -233,8 +236,7 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
         transcript = redacted
 
     prompt = (
-        PROMPT_TEMPLATE
-        .replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
+        PROMPT_TEMPLATE.replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
         .replace("{LANG}", _prompts.output_language())
         .replace("{TRANSCRIPT}", transcript)
     )
@@ -255,12 +257,24 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
             tags = chunk.get("tags", [])
             confidence = float(chunk.get("confidence", 0.8))
             project = chunk.get("project") or None
-            if not content or category not in ["decision", "pattern", "insight", "preference", "contact", "error_solution", "project_context", "workflow"]:
+            if not content or category not in [
+                "decision",
+                "pattern",
+                "insight",
+                "preference",
+                "contact",
+                "error_solution",
+                "project_context",
+                "workflow",
+            ]:
                 continue
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO memory_chunks (source_type, source_id, content, category, tags, confidence, project_name)
                 VALUES ('conversation', %s, %s, %s, %s, %s, %s)
-            """, (conv_id, content, category, tags, confidence, project))
+            """,
+                (conv_id, content, category, tags, confidence, project),
+            )
             inserted += 1
         except Exception as e:
             print(f"    Insert-Fehler: {e}")
@@ -278,8 +292,8 @@ def _parse_id_list(raw: str) -> list[int]:
             continue
         try:
             out.append(int(part))
-        except ValueError:
-            raise SystemExit(f"--force-conversations: '{part}' is not an integer")
+        except ValueError as exc:
+            raise SystemExit(f"--force-conversations: '{part}' is not an integer") from exc
     return out
 
 
@@ -295,9 +309,7 @@ def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
     errors = 0
     for cid in conv_ids:
         cursor.execute(
-            "DELETE FROM memory_chunks "
-            "WHERE source_type='conversation' AND source_id=%s "
-            "RETURNING id",
+            "DELETE FROM memory_chunks WHERE source_type='conversation' AND source_id=%s RETURNING id",
             (cid,),
         )
         deleted = len(cursor.fetchall())
@@ -316,16 +328,15 @@ def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(
-        description="Extract memory chunks from ingested conversations."
-    )
+
+    parser = argparse.ArgumentParser(description="Extract memory chunks from ingested conversations.")
     parser.add_argument(
         "--force-conversations",
         metavar="IDS",
         help="Comma-separated conversation IDs to re-extract. Deletes their "
-             "existing memory_chunks and runs extraction again with the "
-             "current prompt and limits. Use this after changing the "
-             "extractor to refresh affected rows.",
+        "existing memory_chunks and runs extraction again with the "
+        "current prompt and limits. Use this after changing the "
+        "extractor to refresh affected rows.",
     )
     parser.add_argument(
         "--limit",
@@ -333,22 +344,22 @@ def main() -> None:
         default=MAX_CONVERSATIONS_PER_RUN,
         metavar="N",
         help=f"How many conversations to process this run. Default: "
-             f"{MAX_CONVERSATIONS_PER_RUN}. Each one costs a separate `claude -p` "
-             f"call, so this is the cost dial — raise it deliberately.",
+        f"{MAX_CONVERSATIONS_PER_RUN}. Each one costs a separate `claude -p` "
+        f"call, so this is the cost dial — raise it deliberately.",
     )
     parser.add_argument(
         "--since",
         metavar="DATE",
         help="Only conversations started on or after DATE (YYYY-MM-DD). "
-             "Selection is newest-first, so this narrows a large backlog to a "
-             "period you actually care about instead of walking it blindly.",
+        "Selection is newest-first, so this narrows a large backlog to a "
+        "period you actually care about instead of walking it blindly.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List what would be extracted and stop. Makes no `claude -p` calls "
-             "and writes nothing — use it to see the size of a run before paying "
-             "for it.",
+        "and writes nothing — use it to see the size of a run before paying "
+        "for it.",
     )
     args = parser.parse_args()
 
@@ -373,8 +384,9 @@ def main() -> None:
             conn.rollback()
             raise
         print(f"\n{'=' * 60}")
-        print(f"Re-extracted: {len(conv_ids)} | Old chunks cleared: {deleted} | "
-              f"New chunks: {inserted} | Errors: {errors}")
+        print(
+            f"Re-extracted: {len(conv_ids)} | Old chunks cleared: {deleted} | New chunks: {inserted} | Errors: {errors}"
+        )
         print(f"{'=' * 60}")
         cursor.close()
         conn.close()
@@ -416,8 +428,7 @@ def main() -> None:
     pending = cursor.fetchone()[0]
 
     scope = f" seit {args.since}" if args.since else ""
-    print(f"\n{len(convs)} von {pending} offenen Conversations{scope} "
-          f"(limit={args.limit})\n")
+    print(f"\n{len(convs)} von {pending} offenen Conversations{scope} (limit={args.limit})\n")
     if not convs:
         print("Nichts zu tun.")
         return
@@ -426,8 +437,7 @@ def main() -> None:
         for cid, proj, n in convs:
             print(f"  #{cid} ({proj or '–'}, {n} Msgs)")
         remaining = pending - len(convs)
-        print(f"\nDry run — nichts extrahiert, nichts geschrieben. "
-              f"{remaining} would still be pending afterwards.")
+        print(f"\nDry run — nichts extrahiert, nichts geschrieben. {remaining} would still be pending afterwards.")
         cursor.close()
         conn.close()
         return

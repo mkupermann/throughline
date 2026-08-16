@@ -150,7 +150,7 @@ def create_chunk(
             )
             conn.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Undoable like every other mutation here.
     token = registry.register({"op": "forget", "ids": [chunk_id]}, "Added 1 chunk")
@@ -172,7 +172,7 @@ def undo(
         raise HTTPException(
             status_code=410,
             detail="That undo has expired or was already used. "
-                   "Forgotten chunks can still be restored from the Forgotten queue.",
+            "Forgotten chunks can still be restored from the Forgotten queue.",
         )
 
     op = INVERSE_OPS.get(entry.op)

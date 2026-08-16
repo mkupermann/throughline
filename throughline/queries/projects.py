@@ -40,8 +40,7 @@ from ._exec import Row, rows
 #: user's name. This is the whole fix: no config file, no registry to maintain,
 #: just refusing to claim that `cd ~` was a project.
 _NOT_A_PROJECT_PATHS = frozenset(
-    p.rstrip("/") or "/"
-    for p in (os.path.expanduser("~"), "/tmp", "/private/tmp", "/", "/var/tmp")
+    p.rstrip("/") or "/" for p in (os.path.expanduser("~"), "/tmp", "/private/tmp", "/", "/var/tmp")
 )
 
 #: What such sessions are called instead. Named rather than hidden: they are
@@ -65,6 +64,7 @@ def is_placed(project_path: str | None) -> bool:
     if not project_path:
         return False
     return _normalise(project_path) not in _NOT_A_PROJECT_PATHS
+
 
 #: Order for a session list. "oldest" reads the project as a story from the
 #: start; "newest" answers "what was I just doing". Both are wanted often

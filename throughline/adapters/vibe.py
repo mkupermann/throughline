@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -32,20 +33,21 @@ def _stable_uuid(ns, raw, fallback: str) -> str:
             return str(uuid.uuid5(ns, f"{fallback}:{raw}"))
     return str(uuid.uuid5(ns, fallback))
 
+
 # Role mapping from Vibe to Throughline roles
 _ROLE_MAP = {
     "user": "user",
-    "assistant": "assistant", 
+    "assistant": "assistant",
     "system": "system",
     "tool": "tool_result",
 }
 
 # Pattern to match Vibe session directories
 # Examples: session_20260727_180500_c919513d, session_20260728_091450_c0d81646
-_SESSION_DIR_PATTERN = re.compile(r'^session_\d{8}_\d{6}_[a-f0-9]+$')
+_SESSION_DIR_PATTERN = re.compile(r"^session_\d{8}_\d{6}_[a-f0-9]+$")
 
 # ANSI escape code pattern for cleaning content
-_ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _clean_ansi_content(content: str) -> str:
@@ -80,14 +82,14 @@ def _parse_timestamp(ts_str: str | None) -> datetime:
     """Parse Vibe timestamp format to datetime."""
     if not ts_str:
         return datetime.now(timezone.utc)
-    
+
     try:
         # Handle ISO format with Z or timezone
         ts_str = ts_str.replace("Z", "+00:00")
         return datetime.fromisoformat(ts_str)
     except (ValueError, AttributeError):
         pass
-    
+
     # Try parsing without timezone (assume UTC)
     try:
         dt = datetime.fromisoformat(ts_str)
@@ -107,7 +109,7 @@ def _extract_content_from_message(message: dict[str, Any]) -> tuple[str, Any | N
     """Extract plain text content and structured content blocks from a Vibe message."""
     parts = []
     content_blocks = None
-    
+
     # Main content
     content = message.get("content", "")
     if content:
@@ -130,14 +132,14 @@ def _extract_content_from_message(message: dict[str, Any]) -> tuple[str, Any | N
                 elif isinstance(block, str):
                     parts.append(_clean_ansi_content(block))
             content_blocks = content
-    
+
     # Reasoning content (from assistant) - use only if no regular content
     reasoning = message.get("reasoning_content", "")
     if reasoning and not parts:
         parts.append(_clean_ansi_content(reasoning))
         if content_blocks is None:
             content_blocks = reasoning
-    
+
     text_content = "\n".join(parts)
     return text_content[:10000], content_blocks  # Limit content length
 
@@ -147,16 +149,18 @@ def _extract_tool_calls_from_message(message: dict[str, Any]) -> list[dict[str, 
     tool_calls = message.get("tool_calls", [])
     if not tool_calls or not isinstance(tool_calls, list):
         return None
-    
+
     result = []
     for tc in tool_calls:
         if isinstance(tc, dict):
             func = tc.get("function", {})
             if isinstance(func, dict):
-                result.append({
-                    "tool_name": func.get("name", ""),
-                    "input": func.get("arguments", {}),
-                })
+                result.append(
+                    {
+                        "tool_name": func.get("name", ""),
+                        "input": func.get("arguments", {}),
+                    }
+                )
     return result if result else None
 
 
@@ -194,9 +198,9 @@ def _load_session_metadata(session_dir: Path) -> dict[str, Any] | None:
     meta_path = session_dir / "meta.json"
     if not meta_path.exists():
         return None
-    
+
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
             return _clean_ansi_from_dict(meta)
     except (json.JSONDecodeError, OSError):
@@ -206,13 +210,13 @@ def _load_session_metadata(session_dir: Path) -> dict[str, Any] | None:
 def _load_session_messages(session_dir: Path) -> list[dict[str, Any]]:
     """Load all messages from a Vibe session directory."""
     messages_path = session_dir / "messages.jsonl"
-    
+
     if not messages_path.exists():
         return []
-    
+
     messages = []
     try:
-        with open(messages_path, "r", encoding="utf-8") as f:
+        with open(messages_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -224,7 +228,7 @@ def _load_session_messages(session_dir: Path) -> list[dict[str, Any]]:
                     continue
     except OSError:
         pass
-    
+
     return messages
 
 
@@ -240,50 +244,50 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
     meta = _load_session_metadata(session_dir)
     if not meta:
         return None
-    
+
     session_id_str = meta.get("session_id")
     if not session_id_str:
         return None
-    
+
     # Load messages
     messages = _load_session_messages(session_dir)
     if not messages:
         return None
-    
+
     # Derive session UUID
     session_uuid = _derive_session_id(session_id_str)
-    
+
     # Parse timestamps
     start_time = _parse_timestamp(meta.get("start_time"))
     end_time = _parse_timestamp(meta.get("end_time"))
-    
+
     # Extract model from messages or meta
     model = None
     for msg in messages:
         model = _get_model_from_message(msg)
         if model:
             break
-    
+
     if not model:
         model = meta.get("model") or meta.get("active_model")
-    
+
     # Get project name
     project_path = _get_project_name_from_meta(meta)
-    
+
     # Extract stats
     stats = meta.get("stats", {})
     token_count_in = stats.get("session_prompt_tokens") or stats.get("total_prompt_tokens")
     token_count_out = stats.get("session_completion_tokens") or stats.get("total_completion_tokens")
-    
+
     # Get session title
     title = meta.get("title")
-    
+
     # Convert messages to NormalisedMessage format
     normalised_messages = []
     for msg in messages:
         text_content, content_blocks = _extract_content_from_message(msg)
         tool_calls = _extract_tool_calls_from_message(msg)
-        
+
         normalised_msg = NormalisedMessage(
             role=_map_vibe_role(msg.get("role")),
             content=text_content,
@@ -298,20 +302,21 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
             # same way; see cursor._stable_uuid for why this is not cosmetic.
             parent_uuid=(
                 _stable_uuid(_NS, msg.get("parent_message_id"), f"vibe:{session_uuid}:msg")
-                if msg.get("parent_message_id") else None
+                if msg.get("parent_message_id")
+                else None
             ),
-            uuid=_stable_uuid(
-                _NS, msg.get("message_id"), f"vibe:{session_uuid}:msg:{len(normalised_messages)}"
-            ),
+            uuid=_stable_uuid(_NS, msg.get("message_id"), f"vibe:{session_uuid}:msg:{len(normalised_messages)}"),
             metadata={
                 "injected": msg.get("injected", False),
                 "reasoning_content": _clean_ansi_content(msg.get("reasoning_content", ""))[:2000],
                 "reasoning_message_id": msg.get("reasoning_message_id"),
                 "tool_call_id": msg.get("tool_call_id"),
-            } if msg.get("injected") else {},
+            }
+            if msg.get("injected")
+            else {},
         )
         normalised_messages.append(normalised_msg)
-    
+
     # Build metadata for the conversation
     vibe_metadata = {
         "source": "vibe",
@@ -326,7 +331,7 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
         "environment": meta.get("environment", {}),
         "tools_available_count": len(meta.get("tools_available", [])),
     }
-    
+
     return {
         "session_id": session_uuid,
         "project_path": project_path,
@@ -344,7 +349,7 @@ def _parse_session_dir(session_dir: Path) -> dict[str, Any] | None:
 
 class VibeAdapter(Adapter):
     """Vibe (Mistral AI) session adapter.
-    
+
     Ingests Vibe sessions from ~/.vibe/logs/session/ directories.
     Vibe is Mistral AI's CLI coding agent similar to Claude Code.
     """
@@ -358,17 +363,17 @@ class VibeAdapter(Adapter):
         home = self.home
         if not home.exists():
             return []
-        
+
         session_dirs = []
         for entry in home.iterdir():
             if entry.is_dir() and _SESSION_DIR_PATTERN.match(entry.name):
                 session_dirs.append(entry)
-        
+
         return sorted(session_dirs, key=lambda x: x.name)
 
-    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+    def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         """Parse a Vibe session directory.
-        
+
         Each session directory contains meta.json and messages.jsonl files.
         Returns a single NormalisedConversation for the session.
         """

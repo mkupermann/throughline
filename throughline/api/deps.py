@@ -48,9 +48,7 @@ def init_pool(settings: Settings) -> None:
         if _pool is not None:
             return
         try:
-            _pool = ThreadedConnectionPool(
-                settings.pool_min, settings.pool_max, **get_db_config()
-            )
+            _pool = ThreadedConnectionPool(settings.pool_min, settings.pool_max, **get_db_config())
         except psycopg2.Error as exc:
             log.warning("database unreachable at startup, will retry per-request: %s", exc)
             _pool = None
@@ -71,9 +69,7 @@ def _get_or_create_pool(settings: Settings) -> ThreadedConnectionPool:
     with _pool_lock:
         if _pool is None:
             try:
-                _pool = ThreadedConnectionPool(
-                    settings.pool_min, settings.pool_max, **get_db_config()
-                )
+                _pool = ThreadedConnectionPool(settings.pool_min, settings.pool_max, **get_db_config())
             except psycopg2.Error as exc:
                 raise DatabaseUnavailable(str(exc)) from exc
         return _pool

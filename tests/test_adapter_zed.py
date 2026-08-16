@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from throughline.adapters.zed import ZedAdapter
 
 
@@ -37,10 +35,10 @@ class TestZedAdapter:
         _make_session(home, filename="session_def456.json", data={"id": "s2", "messages": []})
         # Create a non-matching file
         (home / "not_a_session.txt").write_text("not a session")
-        
+
         a = ZedAdapter()
         monkeypatch.setattr(a, "home", home)
-        
+
         discovered = sorted(p.name for p in a.discover())
         assert discovered == ["session_abc123.json", "session_def456.json"]
 
@@ -65,7 +63,7 @@ class TestZedAdapter:
                 "model": "zed-pro",
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert conv.entrypoint == "zed"
@@ -96,7 +94,7 @@ class TestZedAdapter:
                 "started_at": 1700000000000,
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -130,7 +128,7 @@ class TestZedAdapter:
                 "started_at": 1700000000000,
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -152,7 +150,7 @@ class TestZedAdapter:
                 "workspace": "/Users/me/my-project",
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert conv.project_path == "my-project"
@@ -171,7 +169,7 @@ class TestZedAdapter:
                 "token_count_out": 200,
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert conv.token_count_in == 100
@@ -190,7 +188,7 @@ class TestZedAdapter:
                 "title": "Fix the authentication bug",
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert conv.summary == "Fix the authentication bug"
@@ -201,7 +199,7 @@ class TestZedAdapter:
             filename="session_empty.json",
             data={"id": "session_empty", "messages": [], "started_at": 1700000000000},
         )
-        
+
         assert ZedAdapter().parse(session_path) is None
 
     def test_parse_returns_none_for_missing_id(self, tmp_path):
@@ -210,12 +208,12 @@ class TestZedAdapter:
             filename="session_no_id.json",
             data={"messages": [], "started_at": 1700000000000},
         )
-        
+
         assert ZedAdapter().parse(session_path) is None
 
     def test_parse_returns_none_for_non_file(self, tmp_path):
         not_a_file = tmp_path / "not_a_file"
-        
+
         assert ZedAdapter().parse(not_a_file) is None
 
     def test_session_id_is_deterministic(self, tmp_path):
@@ -224,13 +222,13 @@ class TestZedAdapter:
             "messages": [{"role": "user", "content": "test", "id": "msg_1", "timestamp": 1700000000000}],
             "started_at": 1700000000000,
         }
-        
+
         session_path1 = _make_session(tmp_path / "a", filename="session_1.json", data=data)
         session_path2 = _make_session(tmp_path / "b", filename="session_2.json", data=data)
-        
+
         conv1 = ZedAdapter().parse(session_path1)
         conv2 = ZedAdapter().parse(session_path2)
-        
+
         assert conv1 is not None
         assert conv2 is not None
         # Same session ID in data should produce same UUID
@@ -248,7 +246,7 @@ class TestZedAdapter:
                 "workspace": "/path/to/workspace",
             },
         )
-        
+
         conv = ZedAdapter().parse(session_path)
         assert conv is not None
         assert conv.metadata["source"] == "zed"

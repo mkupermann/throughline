@@ -11,6 +11,7 @@ Six tools:
 Stdio transport (FastMCP default), suitable for Claude Code's MCP config.
 Run:  python -m memory_mcp.server
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,11 +20,14 @@ import sys
 from datetime import datetime, timezone
 
 import psycopg2.extras
+from mcp.server.fastmcp import FastMCP
 
 from throughline import embedding as _embedding
 from throughline.jobs.forget import forget_chunks
 from throughline.jobs.graph_query import resolve_entity
 from throughline.queries import semantic as _semantic
+
+from .db import connect
 
 
 def _semantic_search(conn, query: str, limit: int = 20, project: str | None = None) -> list[dict]:
@@ -48,9 +52,6 @@ def _semantic_search(conn, query: str, limit: int = 20, project: str | None = No
         project=project,
     )
 
-from mcp.server.fastmcp import FastMCP
-
-from .db import connect
 
 logger = logging.getLogger("memory-mcp")
 logging.basicConfig(
@@ -60,8 +61,14 @@ logging.basicConfig(
 )
 
 ALLOWED_CATEGORIES = {
-    "decision", "pattern", "insight", "preference",
-    "contact", "error_solution", "project_context", "workflow",
+    "decision",
+    "pattern",
+    "insight",
+    "preference",
+    "contact",
+    "error_solution",
+    "project_context",
+    "workflow",
 }
 
 mcp = FastMCP("claude-memory")
@@ -207,10 +214,28 @@ def recall_entity(
                     fe, te, rel, conf = row["from_entity"], row["to_entity"], row["relation_type"], row["confidence"]
                     if fe in frontier and te not in visited:
                         new_frontier.add(te)
-                        edges.append({"id": te, "from": fe, "relation_type": rel, "direction": "outgoing", "hops": hop, "confidence": float(conf or 0)})
+                        edges.append(
+                            {
+                                "id": te,
+                                "from": fe,
+                                "relation_type": rel,
+                                "direction": "outgoing",
+                                "hops": hop,
+                                "confidence": float(conf or 0),
+                            }
+                        )
                     elif te in frontier and fe not in visited:
                         new_frontier.add(fe)
-                        edges.append({"id": fe, "from": te, "relation_type": rel, "direction": "incoming", "hops": hop, "confidence": float(conf or 0)})
+                        edges.append(
+                            {
+                                "id": fe,
+                                "from": te,
+                                "relation_type": rel,
+                                "direction": "incoming",
+                                "hops": hop,
+                                "confidence": float(conf or 0),
+                            }
+                        )
                 visited |= new_frontier
                 frontier = new_frontier
 
@@ -253,13 +278,15 @@ def recall_entity(
             for e in edges:
                 meta = entity_meta.get(e["id"])
                 if meta:
-                    neighbors.append({
-                        "entity": meta,
-                        "relation_type": e["relation_type"],
-                        "direction": e["direction"],
-                        "hops": e["hops"],
-                        "confidence": e["confidence"],
-                    })
+                    neighbors.append(
+                        {
+                            "entity": meta,
+                            "relation_type": e["relation_type"],
+                            "direction": e["direction"],
+                            "hops": e["hops"],
+                            "confidence": e["confidence"],
+                        }
+                    )
 
             _log("memory.recall_entity", name=name, hops=hops, project=project, neighbors=len(neighbors))
             return {
@@ -390,8 +417,7 @@ def list_projects() -> list[str]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT project_name FROM memory_chunks "
-                "WHERE project_name IS NOT NULL ORDER BY project_name"
+                "SELECT DISTINCT project_name FROM memory_chunks WHERE project_name IS NOT NULL ORDER BY project_name"
             )
             projects = [r[0] for r in cur.fetchall()]
     finally:
@@ -502,6 +528,7 @@ def stats() -> dict:
     a reflection pass to see if there's a backlog.
     """
     from throughline.status import collect_status
+
     conn = connect()
     try:
         payload = collect_status(conn=conn)

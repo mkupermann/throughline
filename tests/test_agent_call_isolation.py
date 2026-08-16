@@ -44,17 +44,15 @@ def test_slug_matches_claude_codes_rule(agent_dir, tmp_path):
     """
     slug = str(agent_dir).replace("/", "-").replace(".", "-")
     assert is_agent_call_transcript(Path(slug) / "session.jsonl")
-    assert not is_agent_call_transcript(
-        Path("-Users-someone-Documents-GitHub-throughline") / "session.jsonl"
-    )
+    assert not is_agent_call_transcript(Path("-Users-someone-Documents-GitHub-throughline") / "session.jsonl")
 
 
 def test_dotted_directory_produces_a_doubled_dash(tmp_path, monkeypatch):
     """The ``~/.throughline`` default is a dotted path — the case that bites."""
     monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", "/home/u/.throughline/agent-calls")
-    assert is_agent_call_transcript(
-        Path("-home-u--throughline-agent-calls") / "s.jsonl"
-    ), "the dot must slug to a dash, yielding a doubled dash after the '/'"
+    assert is_agent_call_transcript(Path("-home-u--throughline-agent-calls") / "s.jsonl"), (
+        "the dot must slug to a dash, yielding a doubled dash after the '/'"
+    )
 
 
 def test_the_predicate_creates_nothing(tmp_path, monkeypatch):

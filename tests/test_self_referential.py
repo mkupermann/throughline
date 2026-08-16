@@ -22,23 +22,36 @@ from throughline.self_referential import (
     self_referential_reason,
 )
 
-
 # The exact openings recorded on disk, including the older wordings. Each entry
 # is (opening text, which script it came from).
 TOOL_PROMPTS = [
-    ("Du bekommst einen Auszug aus einer Claude Code Session. Generiere einen "
-     "prägnanten deutschen Titel (max 8 Wörter).", "generate_titles"),
-    ("Du analysierst eine Entwickler-Session (Claude Code, Codex, Hermes, Continue, "
-     "Windsurf, Cline) und extrahierst Memory-Chunks.", "extract_memory"),
+    (
+        "Du bekommst einen Auszug aus einer Claude Code Session. Generiere einen "
+        "prägnanten deutschen Titel (max 8 Wörter).",
+        "generate_titles",
+    ),
+    (
+        "Du analysierst eine Entwickler-Session (Claude Code, Codex, Hermes, Continue, "
+        "Windsurf, Cline) und extrahierst Memory-Chunks.",
+        "extract_memory",
+    ),
     # The earlier wording — 642 transcripts still open this way.
-    ("Du analysierst eine Claude Code Entwickler-Session und extrahierst verwertbare "
-     "Erkenntnisse als JSON.", "extract_memory"),
-    ("Du analysierst ein Session-Transcript und extrahierst strukturierte Entitäten "
-     "+ Beziehungen als JSON.", "extract_entities"),
-    ("Du bekommst zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank. "
-     "Chunk A (ID 22, erstellt 2026-01-01)", "reflect_memory"),
-    ("Du bekommst zwei Memory-Chunks die denselben Sachverhalt beschreiben. "
-     "Formuliere einen einzigen Chunk.", "reflect_memory"),
+    (
+        "Du analysierst eine Claude Code Entwickler-Session und extrahierst verwertbare Erkenntnisse als JSON.",
+        "extract_memory",
+    ),
+    (
+        "Du analysierst ein Session-Transcript und extrahierst strukturierte Entitäten + Beziehungen als JSON.",
+        "extract_entities",
+    ),
+    (
+        "Du bekommst zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank. Chunk A (ID 22, erstellt 2026-01-01)",
+        "reflect_memory",
+    ),
+    (
+        "Du bekommst zwei Memory-Chunks die denselben Sachverhalt beschreiben. Formuliere einen einzigen Chunk.",
+        "reflect_memory",
+    ),
 ]
 
 # Real work that must survive. The mail-analyst prompt is deliberately included:
@@ -63,7 +76,7 @@ def test_tool_prompts_are_recognised(text, script):
     assert self_referential_reason(text) == script
 
 
-@pytest.mark.parametrize("text", REAL_WORK, ids=lambda t: (t[:28] or "empty"))
+@pytest.mark.parametrize("text", REAL_WORK, ids=lambda t: t[:28] or "empty")
 def test_real_work_is_not_flagged(text):
     assert self_referential_reason(text) is None
 
@@ -86,9 +99,10 @@ def test_matching_is_anchored_not_substring():
 
 
 def test_leading_whitespace_and_case_do_not_defeat_it():
-    assert self_referential_reason(
-        "\n\n   DU BEKOMMST EINEN AUSZUG AUS EINER CLAUDE CODE SESSION. Generiere..."
-    ) == "generate_titles"
+    assert (
+        self_referential_reason("\n\n   DU BEKOMMST EINEN AUSZUG AUS EINER CLAUDE CODE SESSION. Generiere...")
+        == "generate_titles"
+    )
 
 
 # ── first_user_text ──────────────────────────────────────────────────────────
@@ -177,7 +191,6 @@ class TestEveryLivePromptIsRecognised:
         for text, script in (
             ("Du analysierst eine Entwickler-Session (Claude Code, Codex...", "extract_memory"),
             ("Du bekommst einen Auszug aus einer Claude Code Session.", "generate_titles"),
-            ("Du bekommst zwei Memory-Chunks aus einer persoenlichen "
-             "Wissensdatenbank.", "reflect_memory"),
+            ("Du bekommst zwei Memory-Chunks aus einer persoenlichen Wissensdatenbank.", "reflect_memory"),
         ):
             assert generated_by(text) == script, f"lost the historical marker for {script}"

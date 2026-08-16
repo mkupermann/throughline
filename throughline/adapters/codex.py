@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -85,7 +86,7 @@ class CodexAdapter(Adapter):
     def parse(self, path: Path) -> NormalisedConversation | None:
         events: list[dict[str, Any]] = []
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -109,11 +110,7 @@ class CodexAdapter(Adapter):
         if not meta_event:
             meta_event = events[0]
 
-        raw_session_id = (
-            meta_event.get("session_id")
-            or meta_event.get("id")
-            or path.stem
-        )
+        raw_session_id = meta_event.get("session_id") or meta_event.get("id") or path.stem
         model = meta_event.get("model") or meta_event.get("model_name")
         cwd = meta_event.get("cwd") or meta_event.get("working_directory")
         project_path = cwd or "codex"
@@ -125,11 +122,7 @@ class CodexAdapter(Adapter):
             or _parse_ts(events[0].get("timestamp"))
             or datetime.now(timezone.utc)
         )
-        ended = (
-            _parse_ts(meta_event.get("ended_at"))
-            or _parse_ts(events[-1].get("timestamp"))
-            or started
-        )
+        ended = _parse_ts(meta_event.get("ended_at")) or _parse_ts(events[-1].get("timestamp")) or started
 
         norm: list[NormalisedMessage] = []
         for idx, ev in enumerate(events):

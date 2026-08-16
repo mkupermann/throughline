@@ -8,8 +8,15 @@ from throughline.adapters.registry import all_adapters
 
 def test_registry_lists_exactly_the_nine_providers():
     assert P.NAMES == {
-        "claude_code", "windsurf", "hermes", "codex", "continue",
-        "cline", "vibe", "cursor", "zed",
+        "claude_code",
+        "windsurf",
+        "hermes",
+        "codex",
+        "continue",
+        "cline",
+        "vibe",
+        "cursor",
+        "zed",
     }
 
 

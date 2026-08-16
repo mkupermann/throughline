@@ -29,15 +29,16 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field, replace as _replace
+from dataclasses import dataclass, field
+from dataclasses import replace as _replace
 from typing import Any
 
 from throughline import embedding as _embedding
 from throughline import llm as _llm
 from throughline import pii as _pii
-from throughline.self_referential import agent_call_cwd
 from throughline.queries import search as _search
 from throughline.queries import semantic as _semantic
+from throughline.self_referential import agent_call_cwd
 
 #: How many records go into the prompt.
 #:
@@ -308,7 +309,7 @@ def build_prompt(question: str, sources: list[Source]) -> str:
         if s.project:
             head += f" · {s.project}"
         body = _neutralise(_maybe_redact(s.content[:_EXCERPT]))
-        blocks.append(f"<record n=\"{s.n}\">\n{head}\n{body}\n</record>")
+        blocks.append(f'<record n="{s.n}">\n{head}\n{body}\n</record>')
     context = "\n".join(blocks) if blocks else "(nothing retrieved)"
 
     # A stated ceiling, not an emergent one.
@@ -334,10 +335,7 @@ def build_prompt(question: str, sources: list[Source]) -> str:
         dropped = len(blocks) - len(kept)
         context = "\n".join(kept)
         if dropped:
-            context += (
-                f"\n\n({dropped} further records were retrieved but did not fit; "
-                "they ranked below those above.)"
-            )
+            context += f"\n\n({dropped} further records were retrieved but did not fit; they ranked below those above.)"
 
     return (
         "You are answering a question about the user's own working history, "
@@ -439,8 +437,13 @@ def answer(
     text, err = _call_model(build_prompt(question, sources), model=model)
     if text is None:
         return Answer(
-            question=question, text="", sources=sources, degraded=err,
-            backend=info.backend, model=info.model, local=info.local,
+            question=question,
+            text="",
+            sources=sources,
+            degraded=err,
+            backend=info.backend,
+            model=info.model,
+            local=info.local,
         )
 
     return Answer(

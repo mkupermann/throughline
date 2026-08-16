@@ -42,7 +42,6 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
-
 DB_CONFIG: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "throughline"),
     "user": os.environ.get("PGUSER", os.environ.get("USER", "postgres")),
@@ -58,19 +57,80 @@ MAX_SOURCE_CHARS = 200_000  # cap per-chunk source text we hold in memory
 # Small stoplist — keeping the wordset tight so domain-specific terms
 # (function names, paths, tool names) dominate the recall signal.
 _STOP = {
-    "the", "and", "for", "with", "from", "this", "that", "these", "those",
-    "have", "has", "had", "was", "were", "are", "been", "being",
-    "into", "onto", "than", "then", "them", "they", "them",
-    "but", "not", "but", "yes", "you", "your", "yours", "our", "ours",
-    "would", "could", "should", "will", "shall", "can", "may", "might",
-    "der", "die", "das", "und", "oder", "nicht", "ist", "sind", "wird",
-    "kann", "muss", "soll", "darf", "also", "noch", "nur", "auch",
-    "ein", "eine", "einen", "eines", "einer", "einem",
-    "mit", "ohne", "ueber", "über", "unter", "auf", "aus", "vor",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "these",
+    "those",
+    "have",
+    "has",
+    "had",
+    "was",
+    "were",
+    "are",
+    "been",
+    "being",
+    "into",
+    "onto",
+    "than",
+    "then",
+    "them",
+    "they",
+    "but",
+    "not",
+    "yes",
+    "you",
+    "your",
+    "yours",
+    "our",
+    "ours",
+    "would",
+    "could",
+    "should",
+    "will",
+    "shall",
+    "can",
+    "may",
+    "might",
+    "der",
+    "die",
+    "das",
+    "und",
+    "oder",
+    "nicht",
+    "ist",
+    "sind",
+    "wird",
+    "kann",
+    "muss",
+    "soll",
+    "darf",
+    "also",
+    "noch",
+    "nur",
+    "auch",
+    "ein",
+    "eine",
+    "einen",
+    "eines",
+    "einer",
+    "einem",
+    "mit",
+    "ohne",
+    "ueber",
+    "über",
+    "unter",
+    "auf",
+    "aus",
+    "vor",
 }
 
 
-def _connect() -> "psycopg2.extensions.connection":
+def _connect() -> psycopg2.extensions.connection:
     try:
         return psycopg2.connect(**DB_CONFIG)
     except psycopg2.OperationalError as e:
@@ -164,9 +224,7 @@ def _fetch_source_text(cur, source_type: str, source_id: int | None) -> str:
     if source_id is None or source_type != "conversation":
         return ""
     cur.execute(
-        "SELECT content FROM messages "
-        "WHERE conversation_id = %s AND role IN ('user', 'assistant') "
-        "ORDER BY created_at",
+        "SELECT content FROM messages WHERE conversation_id = %s AND role IN ('user', 'assistant') ORDER BY created_at",
         (source_id,),
     )
     parts: list[str] = []
@@ -197,7 +255,7 @@ def sample_chunks(cur, *, limit: int) -> list[dict[str, Any]]:
         (limit,),
     )
     cols = [d.name for d in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
 
 def run_audit(
@@ -215,20 +273,24 @@ def run_audit(
         for row in rows:
             source_text = _fetch_source_text(cur, row["source_type"], row["source_id"])
             recall, drifted, reason = audit_chunk(
-                row["content"] or "", source_text, threshold=threshold,
+                row["content"] or "",
+                source_text,
+                threshold=threshold,
             )
-            results.append(ChunkAudit(
-                chunk_id=int(row["id"]),
-                source_type=row["source_type"],
-                source_id=int(row["source_id"]) if row["source_id"] is not None else None,
-                category=row["category"],
-                recall=recall,
-                chunk_word_count=len(meaningful_words(row["content"] or "")),
-                source_word_count=len(meaningful_words(source_text)),
-                drifted=drifted,
-                reason=reason,
-                content_preview=(row["content"] or "")[:140],
-            ))
+            results.append(
+                ChunkAudit(
+                    chunk_id=int(row["id"]),
+                    source_type=row["source_type"],
+                    source_id=int(row["source_id"]) if row["source_id"] is not None else None,
+                    category=row["category"],
+                    recall=recall,
+                    chunk_word_count=len(meaningful_words(row["content"] or "")),
+                    source_word_count=len(meaningful_words(source_text)),
+                    drifted=drifted,
+                    reason=reason,
+                    content_preview=(row["content"] or "")[:140],
+                )
+            )
 
         drifted_ids = [r.chunk_id for r in results if r.drifted]
         summary = {
@@ -236,9 +298,7 @@ def run_audit(
             "drifted": len(drifted_ids),
             "drift_rate": round(len(drifted_ids) / len(results), 4) if results else 0.0,
             "threshold": threshold,
-            "mean_recall": round(
-                sum(r.recall for r in results) / len(results), 4
-            ) if results else 1.0,
+            "mean_recall": round(sum(r.recall for r in results) / len(results), 4) if results else 1.0,
             "drifted_ids": drifted_ids,
             "by_category": _by_category(results),
             "examples": [r.to_dict() for r in results if r.drifted][:5],
@@ -286,11 +346,10 @@ def _by_category(results: list[ChunkAudit]) -> dict[str, dict[str, int]]:
 
 def _print_human(summary: dict[str, Any]) -> None:
     print("=" * 60)
-    print(f"Memory-extraction drift audit")
+    print("Memory-extraction drift audit")
     print("=" * 60)
     print(f"  Sampled       : {summary['sampled']}")
-    print(f"  Drifted       : {summary['drifted']}  "
-          f"(rate {summary['drift_rate']*100:.1f}%)")
+    print(f"  Drifted       : {summary['drifted']}  (rate {summary['drift_rate'] * 100:.1f}%)")
     print(f"  Mean recall   : {summary['mean_recall']:.2f}")
     print(f"  Threshold     : {summary['threshold']:.2f}")
     if summary["by_category"]:
@@ -300,26 +359,33 @@ def _print_human(summary: dict[str, Any]) -> None:
     if summary["examples"]:
         print("  Drifted examples (top 5):")
         for ex in summary["examples"]:
-            print(f"    #{ex['chunk_id']:<5d} [{ex['category']:<14s}] "
-                  f"recall {ex['recall']:.2f} | {ex['content_preview']}")
+            print(
+                f"    #{ex['chunk_id']:<5d} [{ex['category']:<14s}] recall {ex['recall']:.2f} | {ex['content_preview']}"
+            )
     if summary.get("reflection_id"):
         print(f"  Audit row     : memory_reflections #{summary['reflection_id']}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sample memory chunks and flag those that have drifted "
-                    "from their source conversation."
+        description="Sample memory chunks and flag those that have drifted from their source conversation."
     )
-    parser.add_argument("--limit", type=int, default=DEFAULT_SAMPLE_SIZE,
-                        help=f"Number of chunks to sample (default {DEFAULT_SAMPLE_SIZE}).")
-    parser.add_argument("--threshold", type=float, default=DEFAULT_DRIFT_THRESHOLD,
-                        help=f"Recall floor below which a chunk is flagged as drift "
-                             f"(default {DEFAULT_DRIFT_THRESHOLD}).")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Compute + report, do NOT write the audit row.")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit a single JSON document for cron / monitoring scrapes.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_SAMPLE_SIZE,
+        help=f"Number of chunks to sample (default {DEFAULT_SAMPLE_SIZE}).",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=DEFAULT_DRIFT_THRESHOLD,
+        help=f"Recall floor below which a chunk is flagged as drift (default {DEFAULT_DRIFT_THRESHOLD}).",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Compute + report, do NOT write the audit row.")
+    parser.add_argument(
+        "--json", action="store_true", help="Emit a single JSON document for cron / monitoring scrapes."
+    )
     args = parser.parse_args()
 
     conn = _connect()

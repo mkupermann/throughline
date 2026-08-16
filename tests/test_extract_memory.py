@@ -1,6 +1,7 @@
 """Tests for scripts/extract_memory.py — JSON response parsing and transcript building."""
 
 import pytest
+
 from throughline.jobs import extract_memory as em
 
 
@@ -155,7 +156,8 @@ class TestBackendIsNotOneVendor:
         import extract_memory as em
 
         monkeypatch.setattr(
-            em._llm, "complete",
+            em._llm,
+            "complete",
             lambda *a, **k: (None, "ollama timed out after 300s"),
         )
         assert em.call_model("anything") == ""
@@ -168,7 +170,8 @@ class TestBackendIsNotOneVendor:
 
         seen = {}
         monkeypatch.setattr(
-            em._llm, "complete",
+            em._llm,
+            "complete",
             lambda p, **k: (seen.update(k), ("[]", None))[1],
         )
         em.call_model("x")

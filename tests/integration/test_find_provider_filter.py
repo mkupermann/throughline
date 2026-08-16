@@ -32,7 +32,8 @@ def test_unfiltered_finds_all_three(corpus):
 
 def test_one_provider_narrows(corpus):
     res = F.find(
-        corpus, "zebrafish",
+        corpus,
+        "zebrafish",
         filters=F.FindFilters(kinds=["conversation"], providers=["hermes"]),
         limit=50,
     )
@@ -41,7 +42,8 @@ def test_one_provider_narrows(corpus):
 
 def test_several_providers_union(corpus):
     res = F.find(
-        corpus, "zebrafish",
+        corpus,
+        "zebrafish",
         filters=F.FindFilters(kinds=["conversation"], providers=["hermes", "claude_code"]),
         limit=50,
     )
@@ -65,7 +67,8 @@ def test_messages_inherit_provider_through_their_conversation(corpus):
         )
     corpus.commit()
     res = F.find(
-        corpus, "zebrafish",
+        corpus,
+        "zebrafish",
         filters=F.FindFilters(kinds=["message"], providers=["hermes"]),
         limit=50,
     )
@@ -88,7 +91,8 @@ def test_memory_chunk_source_id_only_means_conversation_when_source_type_matches
         )
     corpus.commit()
     res = F.find(
-        corpus, "zebrafish",
+        corpus,
+        "zebrafish",
         filters=F.FindFilters(kinds=["memory"], providers=["hermes"]),
         limit=50,
     )

@@ -151,7 +151,6 @@ def _make_codex(root: Path) -> Path:
     return root
 
 
-
 def _make_cursor(root: Path) -> Path:
     """~/.cursor/sessions/*.jsonl — one JSON object per line."""
     f = root / "session_cursor1.jsonl"
@@ -217,9 +216,7 @@ def _make_vibe(root: Path) -> Path:
             "timestamp": "2026-01-01T12:00:40Z",
         },
     ]
-    (d / "messages.jsonl").write_text(
-        "\n".join(json.dumps(m) for m in msgs) + "\n", encoding="utf-8"
-    )
+    (d / "messages.jsonl").write_text("\n".join(json.dumps(m) for m in msgs) + "\n", encoding="utf-8")
     return root
 
 
@@ -295,15 +292,15 @@ def _patch_adapter_homes(monkeypatch, tmp_path: Path) -> dict[str, Path]:
     for d in homes.values():
         d.mkdir(parents=True, exist_ok=True)
 
+    from throughline.adapters import hermes as hermes_mod
     from throughline.adapters.claude_code import ClaudeCodeAdapter
+    from throughline.adapters.cline import ClineAdapter
     from throughline.adapters.codex import CodexAdapter
     from throughline.adapters.continue_dev import ContinueDevAdapter
-    from throughline.adapters.windsurf import WindsurfAdapter
-    from throughline.adapters.cline import ClineAdapter
-    from throughline.adapters.vibe import VibeAdapter
     from throughline.adapters.cursor import CursorAdapter
+    from throughline.adapters.vibe import VibeAdapter
+    from throughline.adapters.windsurf import WindsurfAdapter
     from throughline.adapters.zed import ZedAdapter
-    from throughline.adapters import hermes as hermes_mod
 
     monkeypatch.setattr(ClaudeCodeAdapter, "home", homes["claude_code"])
     monkeypatch.setattr(CodexAdapter, "home", homes["codex"])
@@ -361,9 +358,7 @@ def test_run_many_writes_every_source_end_to_end(tmp_path, db_env, monkeypatch):
     # nine tools; a test covering three of them is not evidence for nine, and
     # the six that were missing are exactly the ones whose on-disk shape nobody
     # had exercised against a real database.
-    assert names == set(EXPECTED_MESSAGES), (
-        f"setup bug: expected every adapter present, got {sorted(names)}"
-    )
+    assert names == set(EXPECTED_MESSAGES), f"setup bug: expected every adapter present, got {sorted(names)}"
 
     summaries = run_many(present, verbose=False)
     by_name = {s.adapter: s for s in summaries}
@@ -383,8 +378,7 @@ def test_run_many_writes_every_source_end_to_end(tmp_path, db_env, monkeypatch):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT project_name, COUNT(*) AS n FROM conversations "
-                "GROUP BY project_name ORDER BY project_name"
+                "SELECT project_name, COUNT(*) AS n FROM conversations GROUP BY project_name ORDER BY project_name"
             )
             rows = {r["project_name"]: r["n"] for r in cur.fetchall()}
             assert rows.get("repo") == 1  # Claude Code's project_name from cwd

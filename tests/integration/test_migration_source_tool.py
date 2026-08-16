@@ -43,9 +43,7 @@ def corpus(db_connection):
 
 def _tool(conn, project_path: str):
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT source_tool FROM conversations WHERE project_path=%s", (project_path,)
-        )
+        cur.execute("SELECT source_tool FROM conversations WHERE project_path=%s", (project_path,))
         return cur.fetchone()[0]
 
 
@@ -103,7 +101,6 @@ def test_the_column_is_indexed(corpus):
     _apply(corpus)
     with corpus.cursor() as cur:
         cur.execute(
-            "SELECT 1 FROM pg_indexes "
-            "WHERE tablename='conversations' AND indexname='idx_conversations_source_tool'"
+            "SELECT 1 FROM pg_indexes WHERE tablename='conversations' AND indexname='idx_conversations_source_tool'"
         )
         assert cur.fetchone() is not None

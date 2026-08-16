@@ -98,8 +98,7 @@ def test_ingest_session_writes_conversation_and_messages(tmp_path, db_env, db_co
         assert conv[1] == 3
 
         cur.execute(
-            "SELECT count(*) FROM messages m JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE c.session_id = %s",
+            "SELECT count(*) FROM messages m JOIN conversations c ON m.conversation_id = c.id WHERE c.session_id = %s",
             (session_id,),
         )
         assert cur.fetchone()[0] == 3

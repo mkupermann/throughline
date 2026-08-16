@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -32,6 +33,7 @@ def _stable_uuid(ns, raw, fallback: str) -> str:
         except (ValueError, AttributeError, TypeError):
             return str(uuid.uuid5(ns, f"{fallback}:{raw}"))
     return str(uuid.uuid5(ns, fallback))
+
 
 # Role mapping from Zed to Throughline
 _ROLE_MAP = {
@@ -92,16 +94,18 @@ def _extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]] | None:
     tool_calls = message.get("tool_calls", [])
     if not tool_calls:
         return None
-    
+
     result = []
     for tc in tool_calls:
         if isinstance(tc, dict):
             func = tc.get("function", {})
             if isinstance(func, dict):
-                result.append({
-                    "tool_name": func.get("name", ""),
-                    "input": func.get("arguments", {}),
-                })
+                result.append(
+                    {
+                        "tool_name": func.get("name", ""),
+                        "input": func.get("arguments", {}),
+                    }
+                )
     return result if result else None
 
 
@@ -114,14 +118,14 @@ def _get_project_path(session_data: dict[str, Any]) -> str | None:
             return str(path_obj.name)
         if len(path_obj.parts) > 1:
             return str(path_obj.parts[-2]) if path_obj.parts[-2] else None
-    
+
     # Try project_root
     project_root = session_data.get("project_root")
     if project_root:
         path_obj = Path(project_root)
         if path_obj.name and path_obj.name != ".":
             return str(path_obj.name)
-    
+
     return None
 
 
@@ -129,25 +133,25 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
     """Parse a single Zed session JSON file."""
     if not file_path.exists():
         return None
-    
+
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             session_data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
-    
+
     # Zed session structure
     messages = session_data.get("messages", [])
     if not messages:
         return None
-    
+
     session_id = session_data.get("id") or file_path.stem
     if not session_id:
         return None
-    
+
     # Derive session UUID
     session_uuid = _derive_session_id(session_id)
-    
+
     # Extract metadata
     model = session_data.get("model")
     start_time = _parse_timestamp(session_data.get("started_at"))
@@ -163,13 +167,13 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
         except OSError:
             start_time = datetime.now(tz=timezone.utc)
     project_path = _get_project_path(session_data)
-    
+
     # Convert messages to NormalisedMessage
     normalised_messages = []
     for msg in messages:
         content = _extract_content(msg)
         tool_calls = _extract_tool_calls(msg)
-        
+
         normalised_msg = NormalisedMessage(
             role=_map_zed_role(msg.get("role")),
             content=content,
@@ -183,17 +187,16 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
             # message ids are not UUIDs, and the column is.
             parent_uuid=(
                 _stable_uuid(_ZED_NS, msg.get("parent_message_id"), f"zed:{session_uuid}:msg")
-                if msg.get("parent_message_id") else None
+                if msg.get("parent_message_id")
+                else None
             ),
-            uuid=_stable_uuid(
-                _ZED_NS, msg.get("id"), f"zed:{session_uuid}:msg:{len(normalised_messages)}"
-            ),
+            uuid=_stable_uuid(_ZED_NS, msg.get("id"), f"zed:{session_uuid}:msg:{len(normalised_messages)}"),
             metadata={
                 "zed_message_type": msg.get("type"),
             },
         )
         normalised_messages.append(normalised_msg)
-    
+
     # Build metadata
     zed_metadata = {
         "source": "zed",
@@ -201,14 +204,14 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
         "zed_version": session_data.get("version"),
         "workspace": session_data.get("workspace"),
     }
-    
+
     # Token counts
     token_count_in = session_data.get("token_count_in")
     token_count_out = session_data.get("token_count_out")
-    
+
     # Summary
     summary = session_data.get("title") or session_data.get("summary")
-    
+
     return NormalisedConversation(
         session_id=session_uuid,
         project_path=project_path,
@@ -228,31 +231,31 @@ def _parse_zed_session_file(file_path: Path, source_tool: str) -> NormalisedConv
 
 class ZedAdapter(Adapter):
     """Zed adapter for Throughline.
-    
+
     Ingests Zed sessions from ~/.zed/data/sessions/*.json files.
     Zed is a high-performance, collaborative code editor.
     """
-    
+
     name = "zed"
     label = "Zed"
     home = Path("~/.zed/data/sessions").expanduser()
-    
+
     def discover(self) -> Iterable[Path]:
         """Discover Zed session JSON files."""
         home = self.home
         if not home.exists():
             return []
-        
+
         session_files = []
         for entry in home.iterdir():
             if entry.is_file() and entry.suffix == ".json":
                 # Zed session files are named like: session_<id>.json
                 if entry.name.startswith("session_") or "session" in entry.name.lower():
                     session_files.append(entry)
-        
+
         return sorted(session_files, key=lambda x: x.stat().st_mtime, reverse=True)
-    
-    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+
+    def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         """Parse a Zed session JSON file."""
         if not path.is_file():
             return None

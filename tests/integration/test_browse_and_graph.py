@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from throughline.queries import entities as E, find as F
+from throughline.queries import entities as E
+from throughline.queries import find as F
 
 pytestmark = pytest.mark.integration
 
@@ -78,7 +79,10 @@ def test_browse_pagination_is_stable_and_disjoint(corpus, db_connection):
     The merge takes the top-N of each kind; if SQL and the merge disagree on
     how to break ties, page 2 repeats rows from page 1.
     """
-    key = lambda rs: [(r["kind"], r["id"]) for r in rs]
+
+    def key(rs):
+        return [(r["kind"], r["id"]) for r in rs]
+
     p1 = key(F.browse(db_connection, F.FindFilters(), limit=4, offset=0).items)
     p2 = key(F.browse(db_connection, F.FindFilters(), limit=4, offset=4).items)
     both = key(F.browse(db_connection, F.FindFilters(), limit=8, offset=0).items)
@@ -135,7 +139,5 @@ def test_graph_of_nothing_is_empty_not_everything(corpus, db_connection):
 
 
 def test_graph_node_cap_is_respected(corpus, db_connection):
-    graph = E.subgraph_for_sources(
-        db_connection, [("conversation", corpus["conversation"])], limit_nodes=1
-    )
+    graph = E.subgraph_for_sources(db_connection, [("conversation", corpus["conversation"])], limit_nodes=1)
     assert len(graph["nodes"]) == 1

@@ -8,21 +8,26 @@ from ._exec import Row, one, rows, scalar
 
 
 def distinct_projects(conn) -> list[str]:
-    return [r["project_name"] for r in rows(
-        conn,
-        # A filter dropdown must only offer values that can return a result.
-        "SELECT DISTINCT project_name FROM conversations "
-        "WHERE project_name IS NOT NULL AND generated_by IS NULL "
-        "ORDER BY project_name",
-    )]
+    return [
+        r["project_name"]
+        for r in rows(
+            conn,
+            # A filter dropdown must only offer values that can return a result.
+            "SELECT DISTINCT project_name FROM conversations "
+            "WHERE project_name IS NOT NULL AND generated_by IS NULL "
+            "ORDER BY project_name",
+        )
+    ]
 
 
 def distinct_models(conn) -> list[str]:
-    return [r["model"] for r in rows(
-        conn,
-        "SELECT DISTINCT model FROM conversations "
-        "WHERE model IS NOT NULL AND generated_by IS NULL ORDER BY model",
-    )]
+    return [
+        r["model"]
+        for r in rows(
+            conn,
+            "SELECT DISTINCT model FROM conversations WHERE model IS NOT NULL AND generated_by IS NULL ORDER BY model",
+        )
+    ]
 
 
 def _filters(
@@ -42,9 +47,7 @@ def _filters(
         clauses.append("c.model = %s")
         params.append(model)
     if message_search:
-        clauses.append(
-            "c.id IN (SELECT DISTINCT conversation_id FROM messages WHERE content ILIKE %s)"
-        )
+        clauses.append("c.id IN (SELECT DISTINCT conversation_id FROM messages WHERE content ILIKE %s)")
         params.append(f"%{message_search}%")
     return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
 

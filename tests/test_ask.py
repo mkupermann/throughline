@@ -12,8 +12,12 @@ Nothing here calls a model or a database.
 
 from __future__ import annotations
 
+import json
+from argparse import Namespace
+
 import pytest
 
+from throughline import cli
 from throughline.ask import Answer, Source, build_prompt, cited_sources
 
 
@@ -127,6 +131,23 @@ def test_degraded_answer_keeps_its_sources():
     assert d["degraded"] == "no model"
     assert len(d["sources"]) == 2
     assert d["cited"] == []
+
+
+def test_cli_ask_json_emits_a_machine_readable_answer(monkeypatch, capsys):
+    """The JSON CLI path must serialize the answer instead of crashing."""
+
+    class Connection:
+        def close(self):
+            pass
+
+    answer = Answer(question="why?", text="Because.", sources=[src(1)])
+    monkeypatch.setattr("throughline.status._connect", lambda: Connection())
+    monkeypatch.setattr("throughline.ask.answer", lambda *_args, **_kwargs: answer)
+
+    result = cli.cmd_ask(Namespace(question="why?", top_k=None, project=None, model=None, json=True))
+
+    assert result == 0
+    assert json.loads(capsys.readouterr().out)["answer"] == "Because."
 
 
 # ── Fusing two retrievers that do not share a score scale ───────────────────

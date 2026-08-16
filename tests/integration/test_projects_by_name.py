@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from throughline.queries import find as F, skills as S
+from throughline.queries import find as F
+from throughline.queries import skills as S
 
 pytestmark = pytest.mark.integration
 
@@ -34,8 +35,7 @@ def corpus(db_connection):
         )
         # Only one of the two projects has a registry row.
         cur.execute(
-            "INSERT INTO projects (name, description, status) "
-            "VALUES ('registered', 'has a registry row', 'active')"
+            "INSERT INTO projects (name, description, status) VALUES ('registered', 'has a registry row', 'active')"
         )
     db_connection.commit()
     return db_connection

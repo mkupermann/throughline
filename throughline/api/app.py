@@ -68,8 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "error": "database_unavailable",
                 "detail": str(exc),
                 "hint": (
-                    "Is PostgreSQL running? Check PGHOST/PGPORT/PGDATABASE, or run "
-                    "`docker compose up -d postgres`."
+                    "Is PostgreSQL running? Check PGHOST/PGPORT/PGDATABASE, or run `docker compose up -d postgres`."
                 ),
             },
         )
@@ -104,6 +103,7 @@ def _mount_frontend(app: FastAPI, dist: Path | None) -> None:
     rather than a bare Not Found.
     """
     if dist is None or not dist.is_dir():
+
         @app.get("/{full_path:path}")
         def _no_frontend(full_path: str):
             return JSONResponse(
@@ -114,6 +114,7 @@ def _mount_frontend(app: FastAPI, dist: Path | None) -> None:
                     "hint": "Run `npm --prefix web install && npm --prefix web run build`.",
                 },
             )
+
         return
 
     assets = dist / "assets"

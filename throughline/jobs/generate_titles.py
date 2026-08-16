@@ -3,16 +3,17 @@
 Writes a short title for every conversation that has none.
 Uses whatever model `throughline.llm` finds — local first.
 """
-import os
 
-from throughline import llm as _llm
-from throughline import prompts as _prompts
-from throughline.self_referential import agent_call_cwd
+import os
 import sys
 import time
 from typing import Any
 
 import psycopg2
+
+from throughline import llm as _llm
+from throughline import prompts as _prompts
+from throughline.self_referential import agent_call_cwd
 
 DB: dict[str, Any] = {
     "dbname": os.environ.get("PGDATABASE", "throughline"),
@@ -150,13 +151,16 @@ def main() -> None:
     success = 0
     errors = 0
 
-    for conv_id, project, msg_count in convs:
-        cursor.execute("""
+    for conv_id, project, _msg_count in convs:
+        cursor.execute(
+            """
             SELECT role::text, content FROM messages
             WHERE conversation_id = %s AND role IN ('user', 'assistant')
             ORDER BY created_at
             LIMIT 30
-        """, (conv_id,))
+        """,
+            (conv_id,),
+        )
         msgs = cursor.fetchall()
         if not msgs:
             continue
@@ -165,11 +169,7 @@ def main() -> None:
         if len(preview) < 100:
             continue
 
-        prompt = (
-            PROMPT
-            .replace("{LANG}", _prompts.output_language())
-            .replace("{TRANSCRIPT}", preview)
-        )
+        prompt = PROMPT.replace("{LANG}", _prompts.output_language()).replace("{TRANSCRIPT}", preview)
         title = call_model(prompt)
 
         if not title:

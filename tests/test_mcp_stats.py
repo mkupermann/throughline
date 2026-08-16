@@ -6,6 +6,7 @@ real protocol-level test would need an MCP client; the value of this
 test is that the parent re-uses ``throughline.status.collect_status`` so
 the payload contract is enforced in one place.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -19,9 +20,9 @@ pytest.importorskip("mcp")
 
 def test_memory_stats_tool_is_registered():
     from memory_mcp import server
+
     # FastMCP wraps the function; in either form, the symbol exists.
-    assert hasattr(server, "stats"), \
-        "memory_mcp.server.stats must exist for the MCP tool wiring"
+    assert hasattr(server, "stats"), "memory_mcp.server.stats must exist for the MCP tool wiring"
 
 
 def test_memory_stats_returns_payload_when_db_unreachable(monkeypatch):
@@ -33,6 +34,7 @@ def test_memory_stats_returns_payload_when_db_unreachable(monkeypatch):
     # collect_status's fallback path will fire because conn is None and
     # then it tries to open one itself — also force that to fail.
     from throughline import status as st
+
     monkeypatch.setattr(st, "_connect", lambda: None)
 
     payload = server.stats()
@@ -51,11 +53,19 @@ def test_memory_stats_payload_has_stable_keys(monkeypatch):
 
     payload = server.stats()
     expected = {
-        "db_reachable", "captured_at", "schema_version", "error",
-        "table_row_counts", "chunks_total", "chunks_by_category",
-        "embedding_coverage_pct", "last_extraction_at",
-        "last_reflection_at", "contradictions_outstanding",
-        "projects_count", "version",
+        "db_reachable",
+        "captured_at",
+        "schema_version",
+        "error",
+        "table_row_counts",
+        "chunks_total",
+        "chunks_by_category",
+        "embedding_coverage_pct",
+        "last_extraction_at",
+        "last_reflection_at",
+        "contradictions_outstanding",
+        "projects_count",
+        "version",
     }
     missing = expected - set(payload)
     assert not missing, f"memory.stats payload missing keys: {missing}"

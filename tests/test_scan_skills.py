@@ -1,6 +1,5 @@
 """Tests for scripts/scan_skills.py — SKILL.md frontmatter parsing and trigger extraction."""
 
-import pytest
 from pathlib import Path
 
 from throughline.jobs import scan_skills as scan

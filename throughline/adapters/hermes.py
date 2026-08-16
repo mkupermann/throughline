@@ -25,9 +25,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -142,9 +143,7 @@ def _parse_state_db(path: Path) -> list[NormalisedConversation]:
     # even while Hermes is writing. ``mode=ro`` plus ``immutable`` is
     # the canonical "snapshot read" combo.
     try:
-        conn = sqlite3.connect(
-            f"file:{path}?mode=ro&immutable=1", uri=True
-        )
+        conn = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
     except sqlite3.Error:
         return out
     conn.row_factory = sqlite3.Row
@@ -152,12 +151,7 @@ def _parse_state_db(path: Path) -> list[NormalisedConversation]:
         # Probe the schema cheaply — if either table is missing, the
         # state.db is from a Hermes version we don't understand and we
         # bail rather than emit garbage.
-        names = {
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "sessions" not in names or "messages" not in names:
             return out
 
@@ -204,12 +198,10 @@ def _parse_state_db(path: Path) -> list[NormalisedConversation]:
                             tool_calls = [
                                 {
                                     "tool_name": (
-                                        (c.get("function") or {}).get("name")
-                                        if isinstance(c, dict) else None
+                                        (c.get("function") or {}).get("name") if isinstance(c, dict) else None
                                     ),
                                     "input": (
-                                        (c.get("function") or {}).get("arguments")
-                                        if isinstance(c, dict) else None
+                                        (c.get("function") or {}).get("arguments") if isinstance(c, dict) else None
                                     ),
                                 }
                                 for c in parsed
@@ -232,9 +224,7 @@ def _parse_state_db(path: Path) -> list[NormalisedConversation]:
                         role=role,
                         content=content,
                         tool_calls=tool_calls,
-                        tool_name=m["tool_name"] or (
-                            tool_calls[0]["tool_name"] if tool_calls else None
-                        ),
+                        tool_name=m["tool_name"] or (tool_calls[0]["tool_name"] if tool_calls else None),
                         created_at=_from_unix(m["timestamp"]) or started,
                         model=s["model"] if role == "assistant" else None,
                         token_count=m["token_count"],
@@ -324,7 +314,7 @@ class HermesAdapter(Adapter):
             out.extend(sorted(sessions.glob("session_*.json")))
         return out
 
-    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+    def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         # state.db path: emit one conversation per session row.
         if path.name == "state.db":
             convs = _parse_state_db(path)

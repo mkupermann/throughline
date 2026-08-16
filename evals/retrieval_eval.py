@@ -120,10 +120,7 @@ class Report:
             "recall_at_k": round(self.recall, 3),
             "recall_ci95": [round(self.interval[0], 3), round(self.interval[1], 3)],
             "mrr": round(self.mrr, 3),
-            "trials": [
-                {"chunk_id": t.chunk_id, "question": t.question, "rank": t.rank}
-                for t in self.trials
-            ],
+            "trials": [{"chunk_id": t.chunk_id, "question": t.question, "rank": t.rank} for t in self.trials],
         }
 
 
@@ -190,11 +187,7 @@ def main() -> int:
 
             sources = _ask.retrieve(conn, question, top_k=args.top_k)
             rank = next(
-                (
-                    s.n
-                    for s in sources
-                    if s.kind == "memory_chunk" and s.id == chunk_id
-                ),
+                (s.n for s in sources if s.kind == "memory_chunk" and s.id == chunk_id),
                 None,
             )
             report.trials.append(Trial(chunk_id=chunk_id, question=question, rank=rank))

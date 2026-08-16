@@ -8,7 +8,8 @@ pull a dataframe library into their import graph. Callers that want a
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
@@ -82,9 +83,7 @@ EMBEDDING_COLUMNS = frozenset({"embedding_1536", "embedding_768"})
 def check_embedding_column(col: str) -> str:
     """Return *col* if it is a known embedding column, else raise."""
     if col not in EMBEDDING_COLUMNS:
-        raise ValueError(
-            f"unknown embedding column {col!r}; expected one of {sorted(EMBEDDING_COLUMNS)}"
-        )
+        raise ValueError(f"unknown embedding column {col!r}; expected one of {sorted(EMBEDDING_COLUMNS)}")
     return col
 
 

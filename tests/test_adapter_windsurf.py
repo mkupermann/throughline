@@ -6,10 +6,6 @@ as a one-message conversation keyed by the file's URL-namespace uuid5.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from throughline.adapters.windsurf import WindsurfAdapter
 
 
@@ -42,8 +38,7 @@ class TestWindsurfAdapter:
         # No H1 → derive a title from the filename, stripping the 6-hex suffix.
         p = tmp_path / "migrate-auth-flow-a1b2c3.md"
         p.write_text(
-            "No leading heading here.\n\n"
-            "But still enough body text to satisfy the 50-char minimum.\n",
+            "No leading heading here.\n\nBut still enough body text to satisfy the 50-char minimum.\n",
             encoding="utf-8",
         )
         conv = WindsurfAdapter().parse(p)

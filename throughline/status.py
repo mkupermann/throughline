@@ -329,8 +329,7 @@ def collect_status(*, conn=None) -> dict[str, Any]:
             # nothing rejected the typo. See _EXTRACTION_SOURCE_TYPES.
             try:
                 cur.execute(
-                    "SELECT max(created_at) FROM public.memory_chunks "
-                    "WHERE source_type = ANY(%s)",
+                    "SELECT max(created_at) FROM public.memory_chunks WHERE source_type = ANY(%s)",
                     (list(_EXTRACTION_SOURCE_TYPES),),
                 )
                 row = cur.fetchone()
@@ -360,7 +359,7 @@ def collect_status(*, conn=None) -> dict[str, Any]:
 
             try:
                 cur.execute(
-                    "SELECT count(DISTINCT project_name) FROM public.memory_chunks " "WHERE project_name IS NOT NULL"
+                    "SELECT count(DISTINCT project_name) FROM public.memory_chunks WHERE project_name IS NOT NULL"
                 )
                 row = cur.fetchone()
                 payload.projects_count = int(row[0]) if row else 0

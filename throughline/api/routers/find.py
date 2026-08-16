@@ -8,7 +8,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel, Field
 
-from throughline import embedding, queries as Q
+from throughline import embedding
+from throughline import queries as Q
 from throughline.queries.find import FindFilters
 
 from ..deps import connection
@@ -79,8 +80,11 @@ def find(
             vector_literal = embedding.vec_literal(vec)
             model, column = backend.model, backend.column
 
-    has_filters = any([kind, category, project, provider, status, tag, since, until]) or \
-        min_confidence is not None or has_embedding is not None
+    has_filters = (
+        any([kind, category, project, provider, status, tag, since, until])
+        or min_confidence is not None
+        or has_embedding is not None
+    )
 
     with connection(settings) as conn:
         if not q.strip() and has_filters:
@@ -131,9 +135,7 @@ def graph(
 ) -> dict[str, Any]:
     """Entity subgraph induced by the records currently on screen."""
     with connection(settings) as conn:
-        data = Q.entities.subgraph_for_sources(
-            conn, [tuple(s) for s in body.sources], limit_nodes=body.limit_nodes
-        )
+        data = Q.entities.subgraph_for_sources(conn, [tuple(s) for s in body.sources], limit_nodes=body.limit_nodes)
     return {
         "nodes": [{k: _iso_any(v) for k, v in n.items()} for n in data["nodes"]],
         "edges": [{k: _iso_any(v) for k, v in e.items()} for e in data["edges"]],
@@ -208,9 +210,7 @@ def detail(
     with connection(settings) as conn:
         if kind == "conversation":
             record = Q.conversations.get_conversation(conn, item_id)
-            msgs = Q.conversations.messages_for(
-                conn, item_id, limit=msg_limit, offset=msg_offset
-            )
+            msgs = Q.conversations.messages_for(conn, item_id, limit=msg_limit, offset=msg_offset)
             # message_count on the conversation row is the authority: it is what
             # the writer stored, so it stays right even when this page is short.
             total = int((record or {}).get("message_count") or 0)

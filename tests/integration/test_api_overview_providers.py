@@ -29,12 +29,11 @@ def client(db_env, monkeypatch):
     hermes_paths = frozenset(f"/fake/hermes/{i}.json" for i in range(33))
     vibe_paths = frozenset(f"/fake/vibe/{i}.json" for i in range(15))
     monkeypatch.setattr(
-        Q, "_disk_scan",
+        Q,
+        "_disk_scan",
         lambda: {
-            "hermes": Q.DiskCounts(on_disk=33, excluded=0, present=True,
-                                    ingestable_paths=hermes_paths),
-            "vibe": Q.DiskCounts(on_disk=15, excluded=0, present=True,
-                                  ingestable_paths=vibe_paths),
+            "hermes": Q.DiskCounts(on_disk=33, excluded=0, present=True, ingestable_paths=hermes_paths),
+            "vibe": Q.DiskCounts(on_disk=15, excluded=0, present=True, ingestable_paths=vibe_paths),
         },
     )
     deps.close_pool()

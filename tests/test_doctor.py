@@ -10,15 +10,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from throughline import doctor
 from throughline.doctor import (
+    _ALL_CHECKS,
     CheckResult,
     DoctorReport,
-    _ALL_CHECKS,
     check_python_version,
     check_required_packages,
     format_human,
@@ -27,9 +24,7 @@ from throughline.doctor import (
 
 
 def test_check_result_serializes() -> None:
-    r = CheckResult(
-        name="x", category="python", status="pass", message="ok"
-    )
+    r = CheckResult(name="x", category="python", status="pass", message="ok")
     d = r.to_dict()
     assert d["name"] == "x"
     assert d["status"] == "pass"
@@ -38,12 +33,14 @@ def test_check_result_serializes() -> None:
 
 
 def test_report_counts() -> None:
-    rep = DoctorReport(checks=[
-        CheckResult("a", "python", "pass", ""),
-        CheckResult("b", "python", "warn", ""),
-        CheckResult("c", "postgres", "fail", ""),
-        CheckResult("d", "postgres", "fail", ""),
-    ])
+    rep = DoctorReport(
+        checks=[
+            CheckResult("a", "python", "pass", ""),
+            CheckResult("b", "python", "warn", ""),
+            CheckResult("c", "postgres", "fail", ""),
+            CheckResult("d", "postgres", "fail", ""),
+        ]
+    )
     assert rep.passes == 1
     assert rep.warns == 1
     assert rep.fails == 2
@@ -85,6 +82,7 @@ def test_run_doctor_category_filter() -> None:
 
 def test_check_exception_is_captured_as_fail() -> None:
     """A check that raises must come back as FAIL, never crash the report."""
+
     @doctor._check("boom", "python")
     def boom() -> CheckResult:
         raise RuntimeError("kaboom")
@@ -96,10 +94,12 @@ def test_check_exception_is_captured_as_fail() -> None:
 
 
 def test_format_human_renders_summary() -> None:
-    rep = DoctorReport(checks=[
-        CheckResult("ok", "python", "pass", "fine"),
-        CheckResult("bad", "postgres", "fail", "broken", remedy="fix it"),
-    ])
+    rep = DoctorReport(
+        checks=[
+            CheckResult("ok", "python", "pass", "fine"),
+            CheckResult("bad", "postgres", "fail", "broken", remedy="fix it"),
+        ]
+    )
     txt = format_human(rep, color=False)
     assert "── python ──" in txt
     assert "── postgres ──" in txt
@@ -108,9 +108,11 @@ def test_format_human_renders_summary() -> None:
 
 
 def test_format_human_skips_remedy_for_pass() -> None:
-    rep = DoctorReport(checks=[
-        CheckResult("ok", "python", "pass", "fine", remedy="should not appear"),
-    ])
+    rep = DoctorReport(
+        checks=[
+            CheckResult("ok", "python", "pass", "fine", remedy="should not appear"),
+        ]
+    )
     txt = format_human(rep, color=False)
     assert "should not appear" not in txt
 
@@ -156,10 +158,12 @@ def test_format_human_renders_unknown_categories() -> None:
     way to see the checks at all. Silent omission is the worst failure mode a
     diagnostic can have.
     """
-    rep = DoctorReport(checks=[
-        CheckResult("known", "python", "pass", "fine"),
-        CheckResult("newish", "archive", "warn", "something drifted", remedy="fix it"),
-    ])
+    rep = DoctorReport(
+        checks=[
+            CheckResult("known", "python", "pass", "fine"),
+            CheckResult("newish", "archive", "warn", "something drifted", remedy="fix it"),
+        ]
+    )
     txt = format_human(rep, color=False)
     assert "── archive ──" in txt
     assert "something drifted" in txt
@@ -168,11 +172,13 @@ def test_format_human_renders_unknown_categories() -> None:
 
 def test_known_categories_keep_their_order() -> None:
     """Unknown categories append; they must not reshuffle the familiar ones."""
-    rep = DoctorReport(checks=[
-        CheckResult("z", "archive", "pass", "a"),
-        CheckResult("a", "python", "pass", "b"),
-        CheckResult("m", "postgres", "pass", "c"),
-    ])
+    rep = DoctorReport(
+        checks=[
+            CheckResult("z", "archive", "pass", "a"),
+            CheckResult("a", "python", "pass", "b"),
+            CheckResult("m", "postgres", "pass", "c"),
+        ]
+    )
     txt = format_human(rep, color=False)
     assert txt.index("── python ──") < txt.index("── postgres ──") < txt.index("── archive ──")
 

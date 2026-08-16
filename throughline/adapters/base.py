@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import hashlib
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 # Roles understood by the messages.role enum in the DB schema.
 MessageRole = str  # one of: "user", "assistant", "system", "tool_result"
@@ -160,7 +160,7 @@ class Adapter(ABC):
         return any(True for _ in self.discover_all())
 
     @abstractmethod
-    def parse(self, path: Path) -> "NormalisedConversation | list[NormalisedConversation] | None":
+    def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         """Parse a single discovered file.
 
         Returns:

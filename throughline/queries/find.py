@@ -60,8 +60,9 @@ silently returning less than the user asked for.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Literal
 
 from ._exec import Row, rows, scalar
 
@@ -532,6 +533,7 @@ _LEXICAL = {
 
 # ── Filter fragment builders ────────────────────────────────────────────────
 
+
 def _provider_clause(alias: str, filters: FindFilters, params: dict) -> str:
     """SQL fragment restricting *alias* (a conversations alias) by provider."""
     if not filters.providers:
@@ -601,14 +603,14 @@ def _common_memory_filters(f: FindFilters) -> tuple[str, dict[str, Any]]:
     if f.has_embedding is not None:
         op = "EXISTS" if f.has_embedding else "NOT EXISTS"
         clauses += (
-            f" AND {op} (SELECT 1 FROM embeddings e "
-            "WHERE e.source_type = 'memory_chunk' AND e.source_id = mc.id)"
+            f" AND {op} (SELECT 1 FROM embeddings e WHERE e.source_type = 'memory_chunk' AND e.source_id = mc.id)"
         )
     clauses += _provider_clause_via_conversation("mc.source_id", f, params)
     return clauses, params
 
 
 # ── Semantic retrieval ──────────────────────────────────────────────────────
+
 
 def _semantic(
     conn,
@@ -694,6 +696,7 @@ def _semantic(
 
 # ── Fusion ──────────────────────────────────────────────────────────────────
 
+
 def _rrf(ranked_lists: Iterable[Sequence[Row]], k: int = RRF_K) -> list[Row]:
     """Reciprocal Rank Fusion over several ranked lists.
 
@@ -740,10 +743,10 @@ def _browse_sort_key(r: Row) -> tuple:
 
 def browse(
     conn,
-    filters: "FindFilters | None" = None,
+    filters: FindFilters | None = None,
     limit: int = 200,
     offset: int = 0,
-) -> "FindResult":
+) -> FindResult:
     """Filtered listing with no search text, ordered by time.
 
     Find has to answer "what happened in June?" as well as "where did I say
@@ -845,8 +848,7 @@ def find(
             notes.append(f"Semantic search unavailable: {exc}")
     else:
         notes.append(
-            "Semantic search is off — no embedding backend configured, so only "
-            "literal text matches are shown."
+            "Semantic search is off — no embedding backend configured, so only literal text matches are shown."
         )
 
     fused = _rrf(ranked)
@@ -860,6 +862,7 @@ def find(
 
 # ── Facets ──────────────────────────────────────────────────────────────────
 
+
 def facets(conn) -> dict[str, list[dict[str, Any]]]:
     """Available facet values with counts, for the filter rail.
 
@@ -869,8 +872,7 @@ def facets(conn) -> dict[str, list[dict[str, Any]]]:
     """
     cats = rows(
         conn,
-        "SELECT category::text AS value, count(*) AS n FROM memory_chunks "
-        "GROUP BY category ORDER BY n DESC",
+        "SELECT category::text AS value, count(*) AS n FROM memory_chunks GROUP BY category ORDER BY n DESC",
     )
     statuses = rows(
         conn,
@@ -894,8 +896,7 @@ def facets(conn) -> dict[str, list[dict[str, Any]]]:
     )
     tags = rows(
         conn,
-        "SELECT t AS value, count(*) AS n FROM memory_chunks, unnest(tags) t "
-        "GROUP BY t ORDER BY n DESC LIMIT 50",
+        "SELECT t AS value, count(*) AS n FROM memory_chunks, unnest(tags) t GROUP BY t ORDER BY n DESC LIMIT 50",
     )
     kinds = [
         {"value": "memory", "n": int(scalar(conn, "SELECT count(*) FROM memory_chunks", (), 0) or 0)},

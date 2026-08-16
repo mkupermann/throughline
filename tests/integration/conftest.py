@@ -109,8 +109,7 @@ def test_db(_pg_available) -> Iterator[dict]:
         with admin.cursor() as cur:
             # Kill any stragglers before dropping.
             cur.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
                 (db_name,),
             )
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
@@ -143,8 +142,7 @@ def empty_test_db(_pg_available) -> Iterator[dict]:
         admin.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         with admin.cursor() as cur:
             cur.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
                 (db_name,),
             )
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))

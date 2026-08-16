@@ -206,7 +206,7 @@ def _build_overview(conn, settings: Settings) -> Overview:
                 title="Low-confidence memory",
                 detail=f"Chunks stored below {LOW_CONFIDENCE:.0%} confidence.",
                 count=len(low_conf),
-                action=f"/curate?queue=low-confidence",
+                action="/curate?queue=low-confidence",
                 action_label="Review",
             )
         )
@@ -243,10 +243,7 @@ def _build_overview(conn, settings: Settings) -> Overview:
         if verdict != "broken":
             verdict_reason = f"{n} {plural} attention."
 
-    activity = [
-        {"day": str(r["day"]), "n": int(r["n"])}
-        for r in Q.activity.conversations_per_day(conn, days=30)
-    ]
+    activity = [{"day": str(r["day"]), "n": int(r["n"])} for r in Q.activity.conversations_per_day(conn, days=30)]
 
     return Overview(
         # The number and the words around it have to explain each other. This
@@ -258,10 +255,7 @@ def _build_overview(conn, settings: Settings) -> Overview:
         headline={
             "label": "Active memory",
             "value": int(counts.get("active") or 0),
-            "sublabel": (
-                f"of {int(counts.get('total') or 0):,} stored — the rest is "
-                "superseded, expired or forgotten"
-            ),
+            "sublabel": (f"of {int(counts.get('total') or 0):,} stored — the rest is superseded, expired or forgotten"),
         },
         verdict=verdict,
         verdict_reason=verdict_reason,
@@ -280,8 +274,7 @@ def _build_overview(conn, settings: Settings) -> Overview:
         # dropped. Sent with the rest of the payload rather than fetched
         # separately: one screen, one request.
         categories=[
-            {"category": r["category"] or "uncategorised", "n": int(r["n"])}
-            for r in Q.memory.category_counts(conn)
+            {"category": r["category"] or "uncategorised", "n": int(r["n"])} for r in Q.memory.category_counts(conn)
         ],
     )
 

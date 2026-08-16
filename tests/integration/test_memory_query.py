@@ -48,9 +48,7 @@ def test_insert_and_filter_by_category(db_connection):
         _insert_chunk(cur, "User prefers dark mode.", "preference")
         db_connection.commit()
 
-        cur.execute(
-            "SELECT content FROM memory_chunks WHERE category = 'decision'"
-        )
+        cur.execute("SELECT content FROM memory_chunks WHERE category = 'decision'")
         rows = [r[0] for r in cur.fetchall()]
         assert rows == ["We chose Postgres over SQLite."]
 
@@ -66,8 +64,7 @@ def test_tag_array_contains_lookup(db_connection):
         db_connection.commit()
 
         cur.execute(
-            "SELECT content FROM memory_chunks "
-            "WHERE tags @> ARRAY[%s]::text[] ORDER BY id",
+            "SELECT content FROM memory_chunks WHERE tags @> ARRAY[%s]::text[] ORDER BY id",
             ("pgvector",),
         )
         results = [r[0] for r in cur.fetchall()]
@@ -82,15 +79,12 @@ def test_supersede_chain(db_connection):
         new_id = _insert_chunk(cur, "Embedding dim is 768 (Ollama).", "decision", ["embeddings"])
 
         cur.execute(
-            "UPDATE memory_chunks SET superseded_by = %s, superseded_at = now(), status = 'superseded' "
-            "WHERE id = %s",
+            "UPDATE memory_chunks SET superseded_by = %s, superseded_at = now(), status = 'superseded' WHERE id = %s",
             (new_id, old_id),
         )
         db_connection.commit()
 
-        cur.execute(
-            "SELECT content FROM memory_chunks WHERE status = 'active' AND tags @> ARRAY['embeddings']::text[]"
-        )
+        cur.execute("SELECT content FROM memory_chunks WHERE status = 'active' AND tags @> ARRAY['embeddings']::text[]")
         current = [r[0] for r in cur.fetchall()]
         assert current == ["Embedding dim is 768 (Ollama)."]
 
@@ -118,15 +112,11 @@ def test_trigram_search_on_content(db_connection):
         # should rank first. This avoids depending on pg_trgm.similarity_threshold
         # (default 0.3) which is too strict for a short keyword vs long sentences.
         cur.execute(
-            "SELECT content, similarity(content, %s) AS sim "
-            "FROM memory_chunks "
-            "ORDER BY sim DESC",
+            "SELECT content, similarity(content, %s) AS sim FROM memory_chunks ORDER BY sim DESC",
             ("streamlit",),
         )
         hits = cur.fetchall()
         assert hits, "expected at least one row"
         top_content, top_sim = hits[0]
-        assert "streamlit dashboard" in top_content.lower(), (
-            f"top hit was {top_content!r} with sim={top_sim}"
-        )
+        assert "streamlit dashboard" in top_content.lower(), f"top hit was {top_content!r} with sim={top_sim}"
         assert top_sim > 0, f"top similarity should be >0, got {top_sim}"

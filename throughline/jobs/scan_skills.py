@@ -3,12 +3,13 @@
 Scannt alle Claude Code Skills und speichert Metadaten in die DB.
 Sucht in: ~/.claude/skills/ (global) und allen .claude/skills/ in Git-Repos.
 """
+
+import glob
 import os
 import re
 import sys
-import glob
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -35,6 +36,7 @@ def _connect() -> "psycopg2.extensions.connection":
             f"  Underlying error: {e}\n"
         )
         raise SystemExit(2) from e
+
 
 GLOBAL_SKILLS = Path.home() / ".claude" / "skills"
 # Projekt-Skills via glob
@@ -97,16 +99,20 @@ def scan_directory(skills_dir: Path, skill_type: str) -> list[dict[str, Any]]:
 
         meta = parse_skill_md(skill_md)
         stat = skill_md.stat()
-        skills.append({
-            "name": meta.get("name", skill_path.name),
-            "version": meta.get("version", "1.0.0"),
-            "description": meta.get("description", ""),
-            "path": str(skill_path),
-            "triggers": meta.get("triggers", []),
-            "skill_type": skill_type,
-            "file_created": datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc) if hasattr(stat, "st_birthtime") else datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
-            "file_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-        })
+        skills.append(
+            {
+                "name": meta.get("name", skill_path.name),
+                "version": meta.get("version", "1.0.0"),
+                "description": meta.get("description", ""),
+                "path": str(skill_path),
+                "triggers": meta.get("triggers", []),
+                "skill_type": skill_type,
+                "file_created": datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc)
+                if hasattr(stat, "st_birthtime")
+                else datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
+                "file_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            }
+        )
     return skills
 
 
@@ -137,7 +143,8 @@ def main() -> None:
     updated = 0
     for skill in all_skills:
         try:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO skills (name, version, description, path, triggers, config, file_created, file_modified)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (name, path) DO UPDATE SET
@@ -148,16 +155,18 @@ def main() -> None:
                     file_modified = EXCLUDED.file_modified,
                     updated_at = now()
                 RETURNING (xmax = 0) AS inserted
-            """, (
-                skill["name"],
-                skill["version"],
-                skill["description"][:2000],
-                skill["path"],
-                skill["triggers"],
-                Json({"skill_type": skill["skill_type"]}),
-                skill["file_created"],
-                skill["file_modified"],
-            ))
+            """,
+                (
+                    skill["name"],
+                    skill["version"],
+                    skill["description"][:2000],
+                    skill["path"],
+                    skill["triggers"],
+                    Json({"skill_type": skill["skill_type"]}),
+                    skill["file_created"],
+                    skill["file_modified"],
+                ),
+            )
             row = cursor.fetchone()
             if row and row[0]:
                 inserted += 1

@@ -60,7 +60,7 @@ class Settings:
     redact: bool = True
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         dist_override = os.environ.get("THROUGHLINE_WEB_DIST")
         if dist_override:
             web_dist: Path | None = Path(dist_override).expanduser().resolve()
@@ -73,8 +73,7 @@ class Settings:
             web_dist=web_dist,
             pool_min=int(os.environ.get("THROUGHLINE_POOL_MIN", "1")),
             pool_max=int(os.environ.get("THROUGHLINE_POOL_MAX", "8")),
-            redact=os.environ.get("THROUGHLINE_REDACT", "1").lower()
-            not in ("0", "false", "no", "off"),
+            redact=os.environ.get("THROUGHLINE_REDACT", "1").lower() not in ("0", "false", "no", "off"),
         )
 
 

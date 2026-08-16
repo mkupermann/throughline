@@ -53,11 +53,11 @@ from typing import Any
 
 @dataclass
 class CheckResult:
-    name: str                         # short stable identifier ("python_version")
-    category: str                     # one of the six categories above
-    status: str                       # "pass" | "warn" | "fail"
-    message: str                      # human-readable, one line
-    remedy: str | None = None         # optional one-line fix hint
+    name: str  # short stable identifier ("python_version")
+    category: str  # one of the six categories above
+    status: str  # "pass" | "warn" | "fail"
+    message: str  # human-readable, one line
+    remedy: str | None = None  # optional one-line fix hint
     details: dict[str, Any] = field(default_factory=dict)  # structured extras
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,14 +127,19 @@ def check_python_version() -> CheckResult:
     cur = f"{major}.{minor}.{sys.version_info.micro}"
     if (major, minor) < (3, 10):
         return CheckResult(
-            "python_version", "python", "fail",
+            "python_version",
+            "python",
+            "fail",
             f"Python {cur} found; throughline requires 3.10+",
             remedy="install Python 3.10 or newer (e.g. `brew install python@3.12`)",
             details={"current": cur, "required": ">=3.10"},
         )
     return CheckResult(
-        "python_version", "python", "pass",
-        f"Python {cur}", details={"current": cur},
+        "python_version",
+        "python",
+        "pass",
+        f"Python {cur}",
+        details={"current": cur},
     )
 
 
@@ -151,13 +156,17 @@ def check_required_packages() -> CheckResult:
             missing.append(pkg)
     if missing:
         return CheckResult(
-            "required_packages", "python", "fail",
+            "required_packages",
+            "python",
+            "fail",
             f"missing Python packages: {', '.join(missing)}",
             remedy=f"pip install {' '.join(missing)}",
             details={"missing": missing},
         )
     return CheckResult(
-        "required_packages", "python", "pass",
+        "required_packages",
+        "python",
+        "pass",
         "all required Python packages importable",
         details={"checked": required},
     )
@@ -179,11 +188,15 @@ def check_optional_packages() -> CheckResult:
             missing.append((pkg, why))
     if not missing:
         return CheckResult(
-            "optional_packages", "python", "pass",
+            "optional_packages",
+            "python",
+            "pass",
             "all optional packages importable",
         )
     return CheckResult(
-        "optional_packages", "python", "warn",
+        "optional_packages",
+        "python",
+        "warn",
         f"{len(missing)} optional packages not installed (see details)",
         remedy="install only what you actually use; none are required",
         details={"missing": [{"name": n, "purpose": w} for n, w in missing]},
@@ -203,7 +216,9 @@ def check_postgres_reachable() -> CheckResult:
         port = os.environ.get("PGPORT", "5432")
         db = os.environ.get("PGDATABASE", "throughline")
         return CheckResult(
-            "postgres_reachable", "postgres", "fail",
+            "postgres_reachable",
+            "postgres",
+            "fail",
             f"cannot connect to Postgres at {host}:{port}/{db}",
             remedy=(
                 "start Postgres (e.g. `pg_ctl start` / `brew services start postgresql@16`) "
@@ -220,7 +235,9 @@ def check_postgres_reachable() -> CheckResult:
     finally:
         conn.close()
     return CheckResult(
-        "postgres_reachable", "postgres", "pass",
+        "postgres_reachable",
+        "postgres",
+        "pass",
         f"Postgres reachable: {ver.split(',')[0]}",
         details={"server_version": ver},
     )
@@ -233,20 +250,22 @@ def check_pgvector() -> CheckResult:
     conn = _connect()
     if conn is None:
         return CheckResult(
-            "pgvector_installed", "postgres", "warn",
+            "pgvector_installed",
+            "postgres",
+            "warn",
             "skipped (Postgres not reachable)",
         )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector'"
-            )
+            cur.execute("SELECT extname, extversion FROM pg_extension WHERE extname = 'vector'")
             row = cur.fetchone()
     finally:
         conn.close()
     if not row:
         return CheckResult(
-            "pgvector_installed", "postgres", "fail",
+            "pgvector_installed",
+            "postgres",
+            "fail",
             "pgvector extension not installed in this database",
             remedy=(
                 "CREATE EXTENSION vector;  -- as a Postgres superuser; "
@@ -254,7 +273,9 @@ def check_pgvector() -> CheckResult:
             ),
         )
     return CheckResult(
-        "pgvector_installed", "postgres", "pass",
+        "pgvector_installed",
+        "postgres",
+        "pass",
         f"pgvector {row[1]} installed",
         details={"version": row[1]},
     )
@@ -267,21 +288,27 @@ def check_schema_present() -> CheckResult:
     payload = collect_status()
     if not payload.get("db_reachable"):
         return CheckResult(
-            "schema_present", "postgres", "warn",
+            "schema_present",
+            "postgres",
+            "warn",
             "skipped (Postgres not reachable)",
         )
     counts = payload.get("table_row_counts") or {}
     missing = [t for t in ("conversations", "messages", "memory_chunks") if t not in counts]
     if missing:
         return CheckResult(
-            "schema_present", "postgres", "fail",
+            "schema_present",
+            "postgres",
+            "fail",
             f"core tables missing: {', '.join(missing)}",
             remedy="run the schema migrations (`docker compose up -d` auto-deploys, or `psql -f db/schema.sql`)",
             details={"missing_tables": missing},
         )
     sv = payload.get("schema_version")
     return CheckResult(
-        "schema_present", "postgres", "pass",
+        "schema_present",
+        "postgres",
+        "pass",
         f"core schema present (version: {sv or 'unknown'})",
         details={"schema_version": sv, "table_counts": counts},
     )
@@ -296,7 +323,9 @@ def check_source_adapters() -> CheckResult:
         from throughline.adapters import all_adapters
     except Exception as e:
         return CheckResult(
-            "source_adapters", "adapters", "fail",
+            "source_adapters",
+            "adapters",
+            "fail",
             f"failed to import adapter registry: {e}",
             remedy="check that throughline is installed (`pip install -e .`)",
         )
@@ -313,38 +342,48 @@ def check_source_adapters() -> CheckResult:
             have_any = True
             try:
                 files = list(adapter.discover())
-                summary.append({
+                summary.append(
+                    {
+                        "name": adapter.name,
+                        "label": getattr(adapter, "label", adapter.name),
+                        "home": str(home),
+                        "present": True,
+                        "session_files": len(files),
+                    }
+                )
+            except Exception as e:
+                summary.append(
+                    {
+                        "name": adapter.name,
+                        "home": str(home),
+                        "present": True,
+                        "error": f"discover() raised: {e}",
+                    }
+                )
+        else:
+            summary.append(
+                {
                     "name": adapter.name,
                     "label": getattr(adapter, "label", adapter.name),
                     "home": str(home),
-                    "present": True,
-                    "session_files": len(files),
-                })
-            except Exception as e:
-                summary.append({
-                    "name": adapter.name,
-                    "home": str(home),
-                    "present": True,
-                    "error": f"discover() raised: {e}",
-                })
-        else:
-            summary.append({
-                "name": adapter.name,
-                "label": getattr(adapter, "label", adapter.name),
-                "home": str(home),
-                "present": False,
-            })
+                    "present": False,
+                }
+            )
 
     if not summary:
         return CheckResult(
-            "source_adapters", "adapters", "fail",
+            "source_adapters",
+            "adapters",
+            "fail",
             "adapter registry returned nothing",
             remedy="check `throughline.adapters.registry.BUILTIN_ADAPTERS`",
         )
 
     if not have_any:
         return CheckResult(
-            "source_adapters", "adapters", "warn",
+            "source_adapters",
+            "adapters",
+            "warn",
             "no adapter home directories exist on this machine",
             remedy="use one of: Claude Code, Codex, Hermes, Continue, Cline, Windsurf — once any of them has a session, throughline can ingest it",
             details={"adapters": summary},
@@ -352,7 +391,9 @@ def check_source_adapters() -> CheckResult:
 
     present_names = [s["name"] for s in summary if s.get("present")]
     return CheckResult(
-        "source_adapters", "adapters", "pass",
+        "source_adapters",
+        "adapters",
+        "pass",
         f"{len(present_names)}/{len(summary)} adapter homes present: {', '.join(present_names)}",
         details={"adapters": summary},
     )
@@ -374,7 +415,9 @@ def check_embeddings_backend() -> CheckResult:
     # Heuristic preference order: env vars first, then ollama default port.
     if os.environ.get("OPENAI_API_KEY"):
         return CheckResult(
-            "embeddings_backend", "embeddings", "pass",
+            "embeddings_backend",
+            "embeddings",
+            "pass",
             "OpenAI API key present (1536-dim embeddings)",
             details={"backend": "openai"},
         )
@@ -382,12 +425,16 @@ def check_embeddings_backend() -> CheckResult:
     ollama_port = int(os.environ.get("OLLAMA_PORT", "11434"))
     if _port_open(ollama_host, ollama_port):
         return CheckResult(
-            "embeddings_backend", "embeddings", "pass",
+            "embeddings_backend",
+            "embeddings",
+            "pass",
             f"Ollama reachable at {ollama_host}:{ollama_port} (768-dim, e.g. nomic-embed-text)",
             details={"backend": "ollama", "host": ollama_host, "port": ollama_port},
         )
     return CheckResult(
-        "embeddings_backend", "embeddings", "warn",
+        "embeddings_backend",
+        "embeddings",
+        "warn",
         "no embeddings backend reachable",
         remedy=(
             "either export OPENAI_API_KEY=…, or run a local Ollama "
@@ -413,17 +460,20 @@ def check_answer_backend() -> CheckResult:
     info = llm.backend_info()
     if not info.available:
         return CheckResult(
-            "answer_backend", "embeddings", "warn",
+            "answer_backend",
+            "embeddings",
+            "warn",
             f"no model available for `throughline ask` — {info.detail}",
             remedy="ollama pull llama3.1:8b — or set THROUGHLINE_ANSWER_BASE_URL / OPENAI_API_KEY",
             details={"available": False, "detail": info.detail},
         )
     where = "runs locally" if info.local else "sends excerpts off this machine"
     return CheckResult(
-        "answer_backend", "embeddings", "pass",
+        "answer_backend",
+        "embeddings",
+        "pass",
         f"{info.backend}/{info.model} — {where}",
-        details={"backend": info.backend, "model": info.model, "local": info.local,
-                 "detail": info.detail},
+        details={"backend": info.backend, "model": info.model, "local": info.local, "detail": info.detail},
     )
 
 
@@ -436,12 +486,16 @@ def check_scheduled_jobs() -> CheckResult:
             plists = sorted(p.name for p in launch_agents.glob("com.kupermann.throughline.*.plist"))
         if not plists:
             return CheckResult(
-                "scheduled_jobs", "schedule", "warn",
+                "scheduled_jobs",
+                "schedule",
+                "warn",
                 "no Throughline launchd jobs found in ~/Library/LaunchAgents",
                 remedy="run `throughline install-hooks` (or follow docs/INSTALLATION.md) to install hourly ingest / daily extract",
             )
         return CheckResult(
-            "scheduled_jobs", "schedule", "pass",
+            "scheduled_jobs",
+            "schedule",
+            "pass",
             f"{len(plists)} launchd plist(s) installed",
             details={"plists": plists},
         )
@@ -449,7 +503,9 @@ def check_scheduled_jobs() -> CheckResult:
         systemctl = shutil.which("systemctl")
         if not systemctl:
             return CheckResult(
-                "scheduled_jobs", "schedule", "warn",
+                "scheduled_jobs",
+                "schedule",
+                "warn",
                 "systemctl not found; cannot check timers",
             )
         # We don't actually run systemctl from doctor (avoid sudo prompts);
@@ -461,17 +517,23 @@ def check_scheduled_jobs() -> CheckResult:
             timers = sorted(p.name for p in user_sysd.glob("throughline-*.timer"))
         if not timers:
             return CheckResult(
-                "scheduled_jobs", "schedule", "warn",
+                "scheduled_jobs",
+                "schedule",
+                "warn",
                 "no Throughline systemd timers installed",
                 remedy="copy `systemd/throughline-*.timer` and `*.service` into ~/.config/systemd/user/ and run `systemctl --user enable --now throughline-ingest.timer`",
             )
         return CheckResult(
-            "scheduled_jobs", "schedule", "pass",
+            "scheduled_jobs",
+            "schedule",
+            "pass",
             f"{len(timers)} systemd timer(s) installed",
             details={"timers": timers},
         )
     return CheckResult(
-        "scheduled_jobs", "schedule", "warn",
+        "scheduled_jobs",
+        "schedule",
+        "warn",
         f"automated scheduling not supported on {sys.platform}; run ingest manually",
     )
 
@@ -534,7 +596,9 @@ def check_archive_consistency() -> CheckResult:
     problems = [f"{v} {k.replace('_', ' ')}" for k, v in details.items() if v]
     if not problems:
         return CheckResult(
-            "archive_consistency", "archive", "pass",
+            "archive_consistency",
+            "archive",
+            "pass",
             "no orphaned rows, no dangling memory, message counts agree",
             details=details,
         )
@@ -565,7 +629,9 @@ def check_archive_consistency() -> CheckResult:
     # content — the messages themselves are intact. Failing would put doctor
     # into a permanent red state over something that never blocks a read.
     return CheckResult(
-        "archive_consistency", "archive", "warn",
+        "archive_consistency",
+        "archive",
+        "warn",
         "; ".join(problems),
         remedy="; ".join(remedies) or None,
         details=details,
@@ -592,7 +658,9 @@ def check_archive_backup() -> CheckResult:
 
     if not backup_dir.is_dir():
         return CheckResult(
-            "archive_backup", "archive", "warn",
+            "archive_backup",
+            "archive",
+            "warn",
             f"no backup directory at {backup_dir}",
             remedy="bash scripts/install_backup_agent.sh",
             details={"backup_dir": str(backup_dir)},
@@ -602,7 +670,9 @@ def check_archive_backup() -> CheckResult:
     dumps = [p for p in dumps if p.stat().st_size > 0]
     if not dumps:
         return CheckResult(
-            "archive_backup", "archive", "warn",
+            "archive_backup",
+            "archive",
+            "warn",
             f"backup directory holds no usable dump ({backup_dir})",
             remedy="bash scripts/backup.sh",
             details={"backup_dir": str(backup_dir)},
@@ -622,13 +692,17 @@ def check_archive_backup() -> CheckResult:
     # run has actually been missed.
     if age_h > 48:
         return CheckResult(
-            "archive_backup", "archive", "warn",
+            "archive_backup",
+            "archive",
+            "warn",
             f"newest backup is {age_h / 24:.1f} days old ({newest.name})",
             remedy="bash scripts/backup.sh — and check the agent: launchctl list | grep claude-memory",
             details=details,
         )
     return CheckResult(
-        "archive_backup", "archive", "pass",
+        "archive_backup",
+        "archive",
+        "pass",
         f"{len(dumps)} backup(s), newest {age_h:.1f}h old, {size_mb:.0f} MB",
         details=details,
     )

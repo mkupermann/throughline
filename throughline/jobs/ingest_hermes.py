@@ -47,6 +47,7 @@ Usage::
     # or, directly:
     .venv/bin/python scripts/ingest_hermes.py
 """
+
 import hashlib
 import json
 import os

@@ -9,8 +9,8 @@ Commands:
   top-entities [--type TYPE]  Top nach mention_count
   contradictions              Find relationships that disagree
 """
+
 import argparse
-import json
 import os
 import re
 import sys
@@ -54,23 +54,29 @@ def canonicalize(name: str) -> str:
 def resolve_entity(cursor: Any, query: str) -> list[dict[str, Any]]:
     """Look an entity up by exact canonical name, then by LIKE. Returns list[(id, name, type, project)]."""
     canon = canonicalize(query)
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id, name, entity_type, project_name, mention_count
         FROM entities
         WHERE canonical_name = %s
         ORDER BY mention_count DESC
-    """, (canon,))
+    """,
+        (canon,),
+    )
     rows = cursor.fetchall()
     if rows:
         return rows
     # Fallback: LIKE
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id, name, entity_type, project_name, mention_count
         FROM entities
         WHERE canonical_name ILIKE %s
         ORDER BY mention_count DESC
         LIMIT 10
-    """, (f"%{canon}%",))
+    """,
+        (f"%{canon}%",),
+    )
     return cursor.fetchall()
 
 
@@ -90,13 +96,16 @@ def cmd_neighbors(cursor: Any, entity_query: str) -> None:
     print(f"\n── Neighbors of {entity_name} [{entity_type}] (#{entity_id}) ──\n")
 
     # Outgoing
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT r.relation_type, e.name, e.entity_type, e.id, r.confidence, r.source_id
         FROM relationships r
         JOIN entities e ON e.id = r.to_entity
         WHERE r.from_entity = %s
         ORDER BY r.confidence DESC
-    """, (entity_id,))
+    """,
+        (entity_id,),
+    )
     outgoing = cursor.fetchall()
     if outgoing:
         print("  Outgoing:")
@@ -104,13 +113,16 @@ def cmd_neighbors(cursor: Any, entity_query: str) -> None:
             print(f"    → [{r[0]}] {r[1]} [{r[2]}] (#{r[3]}, conf={r[4]}, src_conv={r[5]})")
 
     # Incoming
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT r.relation_type, e.name, e.entity_type, e.id, r.confidence, r.source_id
         FROM relationships r
         JOIN entities e ON e.id = r.from_entity
         WHERE r.to_entity = %s
         ORDER BY r.confidence DESC
-    """, (entity_id,))
+    """,
+        (entity_id,),
+    )
     incoming = cursor.fetchall()
     if incoming:
         print("\n  Incoming:")
@@ -135,7 +147,8 @@ def cmd_path(cursor: Any, from_query: str, to_query: str) -> None:
     print(f"\n── Shortest Path: {from_rows[0][1]} (#{from_id}) → {to_rows[0][1]} (#{to_id}) ──\n")
 
     # BFS via recursive CTE. Nutzt ungerichteten Graphen.
-    cursor.execute("""
+    cursor.execute(
+        """
         WITH RECURSIVE bfs AS (
             SELECT
                 %s::bigint AS current_id,
@@ -157,7 +170,9 @@ def cmd_path(cursor: Any, from_query: str, to_query: str) -> None:
         WHERE current_id = %s
         ORDER BY depth ASC
         LIMIT 1
-    """, (from_id, from_id, to_id))
+    """,
+        (from_id, from_id, to_id),
+    )
     result = cursor.fetchone()
     if not result:
         print("  Kein Pfad gefunden (max depth 6).")
@@ -185,14 +200,17 @@ def cmd_timeline(cursor: Any, entity_query: str) -> None:
     entity_name = rows[0][1]
     print(f"\n── Timeline of {entity_name} (#{entity_id}) ──\n")
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT em.created_at, em.source_type, em.source_id, em.context_snippet,
                c.summary, c.project_name
         FROM entity_mentions em
         LEFT JOIN conversations c ON c.id = em.source_id AND em.source_type = 'conversation'
         WHERE em.entity_id = %s
         ORDER BY em.created_at ASC
-    """, (entity_id,))
+    """,
+        (entity_id,),
+    )
     mentions = cursor.fetchall()
     for m in mentions:
         created_at, src_type, src_id, snippet, conv_title, proj = m
@@ -205,14 +223,17 @@ def cmd_timeline(cursor: Any, entity_query: str) -> None:
         print()
 
     # Relationship changes
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT r.created_at, r.relation_type, e_from.name, e_to.name, r.source_id
         FROM relationships r
         JOIN entities e_from ON e_from.id = r.from_entity
         JOIN entities e_to ON e_to.id = r.to_entity
         WHERE r.from_entity = %s OR r.to_entity = %s
         ORDER BY r.created_at ASC
-    """, (entity_id, entity_id))
+    """,
+        (entity_id, entity_id),
+    )
     rels = cursor.fetchall()
     if rels:
         print("  Relations-Historie:")
@@ -222,24 +243,30 @@ def cmd_timeline(cursor: Any, entity_query: str) -> None:
 
 def cmd_top(cursor: Any, entity_type: str | None, limit: int = 20) -> None:
     if entity_type:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, name, entity_type, project_name, mention_count
             FROM entities
             WHERE entity_type = %s
             ORDER BY mention_count DESC
             LIMIT %s
-        """, (entity_type, limit))
+        """,
+            (entity_type, limit),
+        )
     else:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, name, entity_type, project_name, mention_count
             FROM entities
             ORDER BY mention_count DESC
             LIMIT %s
-        """, (limit,))
+        """,
+            (limit,),
+        )
     rows = cursor.fetchall()
     print(f"\n── Top {len(rows)} Entities" + (f" ({entity_type})" if entity_type else "") + " ──\n")
     print(f"  {'ID':>5}  {'Type':<14} {'Mentions':>8}  {'Name':<40} Project")
-    print(f"  {'─'*5}  {'─'*14} {'─'*8}  {'─'*40} {'─'*15}")
+    print(f"  {'─' * 5}  {'─' * 14} {'─' * 8}  {'─' * 40} {'─' * 15}")
     for r in rows:
         print(f"  #{r[0]:<4} {r[2]:<14} {r[4]:>8}  {r[1][:40]:<40} {r[3] or '–'}")
 
@@ -319,7 +346,9 @@ def main() -> None:
     p_t.add_argument("entity")
 
     p_top = sub.add_parser("top-entities")
-    p_top.add_argument("--type", default=None, choices=["person", "project", "technology", "decision", "concept", "organization"])
+    p_top.add_argument(
+        "--type", default=None, choices=["person", "project", "technology", "decision", "concept", "organization"]
+    )
     p_top.add_argument("--limit", type=int, default=20)
 
     sub.add_parser("contradictions")

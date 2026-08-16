@@ -1,6 +1,5 @@
 """Tests for scripts/generate_titles.py — title cleanup and preview building."""
 
-import pytest
 from throughline.jobs import generate_titles as gt
 
 

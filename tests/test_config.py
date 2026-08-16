@@ -9,7 +9,6 @@ on shared boxes.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -121,13 +120,7 @@ class TestLoadDotenv:
         for k in ("TL_A", "TL_B", "TL_C"):
             monkeypatch.delenv(k, raising=False)
         env = tmp_path / ".env"
-        env.write_text(
-            "# a comment\n"
-            "\n"
-            "export TL_A=plain\n"
-            'TL_B="quoted value"\n'
-            "TL_C='has=equals'\n"
-        )
+        env.write_text("# a comment\n\nexport TL_A=plain\nTL_B=\"quoted value\"\nTL_C='has=equals'\n")
         applied = config.load_dotenv(env)
         assert applied == {"TL_A": "plain", "TL_B": "quoted value", "TL_C": "has=equals"}
 

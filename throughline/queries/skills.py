@@ -13,6 +13,7 @@ from ._exec import Row, one, rows
 
 # ── skills ───────────────────────────────────────────────────────────────────
 
+
 def list_skills(conn, limit: int = 500) -> list[Row]:
     return rows(
         conn,
@@ -158,10 +159,13 @@ PROMPT_SORTS: dict[str, str] = {
 
 
 def prompt_categories(conn) -> list[str]:
-    return [r["category"] for r in rows(
-        conn,
-        "SELECT DISTINCT category FROM prompts WHERE category IS NOT NULL ORDER BY category",
-    )]
+    return [
+        r["category"]
+        for r in rows(
+            conn,
+            "SELECT DISTINCT category FROM prompts WHERE category IS NOT NULL ORDER BY category",
+        )
+    ]
 
 
 def list_prompts(

@@ -29,8 +29,10 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator, Literal
+from typing import Literal
+
 
 class JobUnavailable(RuntimeError):
     """A job's environment prerequisites are not met."""
@@ -108,46 +110,54 @@ def _cli(*args: str) -> list[str]:
 
 JOBS: dict[str, JobSpec] = {
     "ingest": JobSpec(
-        "ingest", "Ingest sessions",
+        "ingest",
+        "Ingest sessions",
         "Import new sessions from every configured AI coding tool.",
         _cli("ingest", "--all"),
     ),
     "scan-skills": JobSpec(
-        "scan-skills", "Scan skills",
+        "scan-skills",
+        "Scan skills",
         "Re-scan SKILL.md files and refresh the skill catalogue.",
         _cli("scan-skills"),
     ),
     "scan-prompts": JobSpec(
-        "scan-prompts", "Scan prompts",
+        "scan-prompts",
+        "Scan prompts",
         "Re-scan prompt files.",
         _cli("scan-prompts"),
     ),
     "extract": JobSpec(
-        "extract", "Extract memory",
+        "extract",
+        "Extract memory",
         "Run the LLM extraction pass over conversations with no memory yet.",
         _cli("extract-memory"),
         requires="model",
     ),
     "embed": JobSpec(
-        "embed", "Generate embeddings",
+        "embed",
+        "Generate embeddings",
         "Embed chunks that semantic search cannot currently reach.",
         _cli("embed", "--backend", "auto"),
         requires="embedding",
     ),
     "titles": JobSpec(
-        "titles", "Generate titles",
+        "titles",
+        "Generate titles",
         "Summarise conversations that have no title.",
         _cli("generate-titles"),
         requires="model",
     ),
     "reflect": JobSpec(
-        "reflect", "Run reflection",
+        "reflect",
+        "Run reflection",
         "Deduplicate, find contradictions, mark stale memory.",
         _cli("reflect"),
         requires="model",
     ),
     "doctor": JobSpec(
-        "doctor", "Diagnostics",
+        "doctor",
+        "Diagnostics",
         "Check the install, database and extensions.",
         _cli("doctor"),
     ),
@@ -233,7 +243,7 @@ class JobRunner:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._by_id: dict[str, Job] = {}
-        self._current: dict[str, str] = {}   # job name -> job id
+        self._current: dict[str, str] = {}  # job name -> job id
         self._history: deque[str] = deque(maxlen=50)
 
     def start(self, name: str, extra_env: dict[str, str] | None = None) -> Job:

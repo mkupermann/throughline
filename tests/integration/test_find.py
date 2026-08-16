@@ -45,9 +45,12 @@ def corpus(db_connection):
             "(%s, 'user', %s, now()), "
             "(%s, 'assistant', %s, now())",
             (
-                conv, f"{FILLER} the pgvector extension is broken",
-                conv, "short message mentioning pgvector up front",
-                conv, "a message about something else entirely",
+                conv,
+                f"{FILLER} the pgvector extension is broken",
+                conv,
+                "short message mentioning pgvector up front",
+                conv,
+                "a message about something else entirely",
             ),
         )
         cur.execute(
@@ -65,9 +68,7 @@ def corpus(db_connection):
             "INSERT INTO skills (name, description, path) VALUES "
             "('pgvector-helper', 'works with pgvector indexes', '/s/pgv')"
         )
-        cur.execute(
-            "INSERT INTO projects (name, description, status) VALUES ('alpha', 'uses pgvector', 'active')"
-        )
+        cur.execute("INSERT INTO projects (name, description, status) VALUES ('alpha', 'uses pgvector', 'active')")
         cur.execute(
             "INSERT INTO prompts (name, category, content) VALUES "
             "('pgvector audit', 'review', 'check the pgvector install')"
@@ -93,9 +94,7 @@ def test_recall_matches_ilike_ground_truth_for_messages(corpus):
     assert truth >= 2, "fixture must contain matching messages"
 
     res = F.find(corpus, "pgvector", filters=F.FindFilters(kinds=["message"]), limit=100)
-    assert res.total == truth, (
-        f"found {res.total} of {truth} matching messages — recall regression"
-    )
+    assert res.total == truth, f"found {res.total} of {truth} matching messages — recall regression"
 
 
 def test_finds_a_term_buried_past_the_ranking_prefix(corpus):
@@ -119,16 +118,24 @@ def test_prominent_match_outranks_buried_match(corpus):
 def test_searches_every_record_type(corpus):
     res = F.find(corpus, "pgvector", limit=100)
     kinds = {r["kind"] for r in res.items}
-    assert {"message", "memory", "skill", "project", "prompt"} <= kinds, (
-        f"unified search missed record types: {kinds}"
-    )
+    assert {"message", "memory", "skill", "project", "prompt"} <= kinds, f"unified search missed record types: {kinds}"
 
 
 def test_result_shape_is_uniform_across_kinds(corpus):
     """Fusion depends on every retriever returning the same columns."""
     expected = {
-        "kind", "id", "title", "snippet", "project", "occurred_at",
-        "category", "status", "confidence", "conversation_id", "score", "retrievers",
+        "kind",
+        "id",
+        "title",
+        "snippet",
+        "project",
+        "occurred_at",
+        "category",
+        "status",
+        "confidence",
+        "conversation_id",
+        "score",
+        "retrievers",
     }
     for item in F.find(corpus, "pgvector", limit=100).items:
         assert set(item) == expected, f"{item['kind']} has a different shape: {set(item) ^ expected}"
@@ -156,14 +163,16 @@ def test_kind_filter_restricts_results(corpus):
 
 def test_category_and_project_filters(corpus):
     res = F.find(
-        corpus, "pgvector",
+        corpus,
+        "pgvector",
         filters=F.FindFilters(kinds=["memory"], categories=["pattern"]),
         limit=100,
     )
     assert {r["category"] for r in res.items} == {"pattern"}
 
     res = F.find(
-        corpus, "pgvector",
+        corpus,
+        "pgvector",
         filters=F.FindFilters(kinds=["memory"], projects=["beta"]),
         limit=100,
     )
@@ -182,17 +191,18 @@ def test_pagination_is_stable(corpus):
     full = F.find(corpus, "pgvector", limit=100).items
     page1 = F.find(corpus, "pgvector", limit=2, offset=0).items
     page2 = F.find(corpus, "pgvector", limit=2, offset=2).items
-    keys = lambda rs: [(r["kind"], r["id"]) for r in rs]
+
+    def keys(rs):
+        return [(r["kind"], r["id"]) for r in rs]
+
     assert keys(page1) == keys(full[:2])
     assert keys(page2) == keys(full[2:4])
 
 
 def test_rrf_rewards_agreement_between_retrievers():
     """A document both retrievers rank should beat one only one found."""
-    a = [{"kind": "memory", "id": 1, "occurred_at": None},
-         {"kind": "memory", "id": 2, "occurred_at": None}]
-    b = [{"kind": "memory", "id": 2, "occurred_at": None},
-         {"kind": "memory", "id": 3, "occurred_at": None}]
+    a = [{"kind": "memory", "id": 1, "occurred_at": None}, {"kind": "memory", "id": 2, "occurred_at": None}]
+    b = [{"kind": "memory", "id": 2, "occurred_at": None}, {"kind": "memory", "id": 3, "occurred_at": None}]
     fused = F._rrf([a, b])
     assert fused[0]["id"] == 2, "the document both retrievers found should rank first"
     assert fused[0]["retrievers"] == 2

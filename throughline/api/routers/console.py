@@ -35,9 +35,7 @@ def query(
     failed request.
     """
     with connection(settings) as conn:
-        result = C.run_query(
-            conn, body.sql, timeout_ms=body.timeout_ms, max_rows=body.max_rows
-        )
+        result = C.run_query(conn, body.sql, timeout_ms=body.timeout_ms, max_rows=body.max_rows)
     return asdict(result)
 
 

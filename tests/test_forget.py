@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-
 from forget import forget_chunks, forget_entity  # noqa: E402  (scripts/ on sys.path via conftest)
 
 

@@ -1,8 +1,6 @@
 """Tests for scripts/ingest_sessions.py — JSONL parsing, content extraction, role mapping."""
 
 import json
-import hashlib
-import pytest
 
 from throughline.jobs import ingest_sessions as ingest
 
@@ -35,16 +33,12 @@ class TestContentExtraction:
         assert "Visible output" in result
 
     def test_extract_tool_use_marker(self):
-        message = {
-            "content": [{"type": "tool_use", "name": "Read", "input": {"file": "x"}}]
-        }
+        message = {"content": [{"type": "tool_use", "name": "Read", "input": {"file": "x"}}]}
         result = ingest.extract_content(message)
         assert "Tool" in result and "Read" in result
 
     def test_extract_tool_result_truncation(self):
-        message = {
-            "content": [{"type": "tool_result", "content": "x" * 2000}]
-        }
+        message = {"content": [{"type": "tool_result", "content": "x" * 2000}]}
         result = ingest.extract_content(message)
         assert len(result) <= 550  # 500 chars + short prefix
 
@@ -60,11 +54,7 @@ class TestContentExtraction:
 
 class TestToolCallsExtraction:
     def test_extract_single_tool_call(self):
-        message = {
-            "content": [
-                {"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b"}}
-            ]
-        }
+        message = {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b"}}]}
         calls = ingest.extract_tool_calls(message)
         assert len(calls) == 1
         assert calls[0]["tool_name"] == "Read"

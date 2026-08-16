@@ -3,13 +3,13 @@
 Scannt CLAUDE.md-Dateien aus allen Projekten sowie Skill-Prompts
 und speichert sie als wiederverwendbare Templates in der prompts-Tabelle.
 """
+
 import os
 import re
-import sys
-import hashlib
 import subprocess
-from pathlib import Path
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -37,13 +37,14 @@ def _connect() -> "psycopg2.extensions.connection":
         )
         raise SystemExit(2) from e
 
+
 # Where CLAUDE.md usually lives — kept narrow so the scan stays fast and
 # never rglobs a synced cloud folder
 HOME = Path.home()
 SEARCH_PATHS = [
-    HOME,                                                # ~/CLAUDE.md (global user)
-    HOME / ".claude",                                   # ~/.claude/CLAUDE.md
-    HOME / "Documents/GitHub",                          # GitHub-Repos
+    HOME,  # ~/CLAUDE.md (global user)
+    HOME / ".claude",  # ~/.claude/CLAUDE.md
+    HOME / "Documents/GitHub",  # GitHub-Repos
 ]
 GLOBAL_SKILLS = HOME / ".claude/skills"
 MAX_DEPTH = 4
@@ -63,24 +64,52 @@ def find_claude_mds() -> list[Path]:
         try:
             result = subprocess.run(
                 [
-                    "find", str(root),
-                    "-maxdepth", str(MAX_DEPTH + 1),
+                    "find",
+                    str(root),
+                    "-maxdepth",
+                    str(MAX_DEPTH + 1),
                     "(",
-                    "-name", "node_modules", "-o",
-                    "-name", ".git", "-o",
-                    "-name", ".venv", "-o",
-                    "-name", "venv", "-o",
-                    "-name", "__pycache__", "-o",
-                    "-name", "dist", "-o",
-                    "-name", "build", "-o",
-                    "-name", ".next", "-o",
-                    "-name", ".cache", "-o",
-                    "-name", "CloudStorage",  # Google Drive skip
+                    "-name",
+                    "node_modules",
+                    "-o",
+                    "-name",
+                    ".git",
+                    "-o",
+                    "-name",
+                    ".venv",
+                    "-o",
+                    "-name",
+                    "venv",
+                    "-o",
+                    "-name",
+                    "__pycache__",
+                    "-o",
+                    "-name",
+                    "dist",
+                    "-o",
+                    "-name",
+                    "build",
+                    "-o",
+                    "-name",
+                    ".next",
+                    "-o",
+                    "-name",
+                    ".cache",
+                    "-o",
+                    "-name",
+                    "CloudStorage",  # Google Drive skip
                     ")",
-                    "-prune", "-o",
-                    "-type", "f", "-name", "CLAUDE.md", "-print"
+                    "-prune",
+                    "-o",
+                    "-type",
+                    "f",
+                    "-name",
+                    "CLAUDE.md",
+                    "-print",
                 ],
-                capture_output=True, text=True, timeout=30
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             for line in result.stdout.splitlines():
                 line = line.strip()
@@ -161,7 +190,8 @@ def ingest_claude_md(cur: Any, filepath: Path, stats: dict[str, int]) -> bool:
     mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
 
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO prompts (name, category, content, variables, source_path, tags, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (name) DO UPDATE SET
@@ -171,10 +201,9 @@ def ingest_claude_md(cur: Any, filepath: Path, stats: dict[str, int]) -> bool:
                 tags = EXCLUDED.tags,
                 updated_at = now()
             RETURNING (xmax = 0) AS inserted
-        """, (
-            name[:200], category, content[:10000], Json(variables),
-            str(filepath), tags, mtime
-        ))
+        """,
+            (name[:200], category, content[:10000], Json(variables), str(filepath), tags, mtime),
+        )
         row = cur.fetchone()
         if row and row[0]:
             stats["new"] += 1
@@ -211,7 +240,8 @@ def ingest_skill_prompts(cur: Any, stats: dict[str, int]) -> None:
         mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
 
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO prompts (name, category, content, variables, source_path, tags, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (name) DO UPDATE SET
@@ -221,17 +251,16 @@ def ingest_skill_prompts(cur: Any, stats: dict[str, int]) -> None:
                     tags = EXCLUDED.tags,
                     updated_at = now()
                 RETURNING (xmax = 0) AS inserted
-            """, (
-                name[:200], "skill", content[:10000], Json(variables),
-                str(skill_md), ["skill", skill_name], mtime
-            ))
+            """,
+                (name[:200], "skill", content[:10000], Json(variables), str(skill_md), ["skill", skill_name], mtime),
+            )
             row = cur.fetchone()
             if row and row[0]:
                 stats["new"] += 1
             else:
                 stats["updated"] += 1
         except Exception as e:
-            conn.rollback()
+            cur.connection.rollback()
             print(f"  ! {skill_md}: {e}")
             stats["errors"] += 1
 

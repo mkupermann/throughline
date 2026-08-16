@@ -36,7 +36,14 @@ def test_every_provider_is_reported(client):
 def test_row_shape(client):
     p = client.get("/api/providers").json()["providers"][0]
     assert set(p) >= {
-        "name", "label", "on_disk", "pending", "excluded", "ingested", "last_run", "status",
+        "name",
+        "label",
+        "on_disk",
+        "pending",
+        "excluded",
+        "ingested",
+        "last_run",
+        "status",
     }
 
 
@@ -55,9 +62,9 @@ def test_a_source_with_files_and_no_rows_is_not_ingested(client, monkeypatch):
 
     fake_paths = frozenset(f"/fake/hermes/{i}.json" for i in range(33))
     monkeypatch.setattr(
-        Q, "_disk_scan",
-        lambda: {"hermes": Q.DiskCounts(on_disk=33, excluded=0, present=True,
-                                         ingestable_paths=fake_paths)},
+        Q,
+        "_disk_scan",
+        lambda: {"hermes": Q.DiskCounts(on_disk=33, excluded=0, present=True, ingestable_paths=fake_paths)},
     )
     # test_db's ingestion_log is empty, so all 33 fake paths diff as pending —
     # pending is computed live against the caller's connection (Finding 1),
@@ -72,7 +79,8 @@ def test_an_installed_source_with_no_files_reports_no_data(client, monkeypatch):
     from throughline.queries import providers as Q
 
     monkeypatch.setattr(
-        Q, "_disk_scan",
+        Q,
+        "_disk_scan",
         lambda: {"cline": Q.DiskCounts(on_disk=0, excluded=0, present=False)},
     )
     rows = {p["name"]: p for p in client.get("/api/providers").json()["providers"]}
@@ -115,7 +123,8 @@ def test_present_with_nothing_importable_is_not_ok(client, monkeypatch):
     from throughline.queries import providers as Q
 
     monkeypatch.setattr(
-        Q, "_disk_scan",
+        Q,
+        "_disk_scan",
         lambda: {"cline": Q.DiskCounts(on_disk=12, excluded=12, present=True)},
     )
     rows = {p["name"]: p for p in client.get("/api/providers").json()["providers"]}
@@ -132,9 +141,7 @@ def test_unattributed_rows_are_surfaced_not_hidden(client, db_connection):
         )
     db_connection.commit()
     rows = {p["name"]: p for p in client.get("/api/providers").json()["providers"]}
-    assert "(unattributed)" in rows or any(
-        p["label"] == "(unattributed)" for p in rows.values()
-    )
+    assert "(unattributed)" in rows or any(p["label"] == "(unattributed)" for p in rows.values())
 
 
 def test_the_scan_is_cached(monkeypatch):

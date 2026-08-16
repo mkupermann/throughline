@@ -72,9 +72,7 @@ def test_returns_rows_in_distance_order(seeded):
 
 
 def test_project_filter_restricts_results(seeded):
-    hits = semantic.semantic_search(
-        seeded, _probe(), model=MODEL, column=COLUMN, limit=10, project="proj-a"
-    )
+    hits = semantic.semantic_search(seeded, _probe(), model=MODEL, column=COLUMN, limit=10, project="proj-a")
     assert hits
     assert {h["project_name"] for h in hits} == {"proj-a"}
 
@@ -90,9 +88,7 @@ def test_project_filter_still_fills_the_limit(seeded):
     limit = 20
     assert available > limit, "fixture must have more matches than the limit"
 
-    hits = semantic.semantic_search(
-        seeded, _probe(), model=MODEL, column=COLUMN, limit=limit, project="proj-a"
-    )
+    hits = semantic.semantic_search(seeded, _probe(), model=MODEL, column=COLUMN, limit=limit, project="proj-a")
     assert len(hits) == limit, (
         f"filtered search returned {len(hits)} of {limit} requested rows while "
         f"{available} matching chunks exist — candidates are being capped "
@@ -102,31 +98,22 @@ def test_project_filter_still_fills_the_limit(seeded):
 
 def test_unknown_embedding_column_is_rejected(seeded):
     with pytest.raises(ValueError):
-        semantic.semantic_search(
-            seeded, _probe(), model=MODEL, column="embedding_999; DROP TABLE x", limit=5
-        )
+        semantic.semantic_search(seeded, _probe(), model=MODEL, column="embedding_999; DROP TABLE x", limit=5)
     with pytest.raises(ValueError):
-        semantic.similar_to_source(
-            seeded, "memory_chunk", 1, model=MODEL, column="bogus", limit=5
-        )
+        semantic.similar_to_source(seeded, "memory_chunk", 1, model=MODEL, column="bogus", limit=5)
 
 
 def test_similar_to_source_excludes_itself(seeded):
     row_id = next(
-        r["source_id"]
-        for r in semantic.semantic_search(seeded, _probe(), model=MODEL, column=COLUMN, limit=1)
+        r["source_id"] for r in semantic.semantic_search(seeded, _probe(), model=MODEL, column=COLUMN, limit=1)
     )
-    hits = semantic.similar_to_source(
-        seeded, "memory_chunk", row_id, model=MODEL, column=COLUMN, limit=5
-    )
+    hits = semantic.similar_to_source(seeded, "memory_chunk", row_id, model=MODEL, column=COLUMN, limit=5)
     assert hits
     assert all(h["source_id"] != row_id for h in hits)
 
 
 def test_similar_to_source_on_missing_row_returns_empty(seeded):
-    assert semantic.similar_to_source(
-        seeded, "memory_chunk", 10**9, model=MODEL, column=COLUMN, limit=5
-    ) == []
+    assert semantic.similar_to_source(seeded, "memory_chunk", 10**9, model=MODEL, column=COLUMN, limit=5) == []
 
 
 def test_count_embeddings(seeded):

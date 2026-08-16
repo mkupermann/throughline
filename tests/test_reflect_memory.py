@@ -45,7 +45,7 @@ class TestParseJsonObject:
 
     def test_array_is_not_an_object(self):
         # A top-level array is valid JSON but not a dict; callers expect a dict.
-        assert rm.parse_json_object('[1, 2, 3]') is None
+        assert rm.parse_json_object("[1, 2, 3]") is None
 
 
 class TestFirstVal:

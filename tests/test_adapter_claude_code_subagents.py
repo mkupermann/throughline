@@ -88,9 +88,7 @@ def test_nested_workflow_subagents_are_also_excluded(projects):
     anywhere in the relative path" is what makes this pass.
     """
     adapter, sid = projects
-    nested = (
-        adapter.home / "-Users-x" / sid / "subagents" / "workflows" / "wf_abc" / "agent-0.jsonl"
-    )
+    nested = adapter.home / "-Users-x" / sid / "subagents" / "workflows" / "wf_abc" / "agent-0.jsonl"
     assert adapter.excluded_reason(nested) == "subagent transcript"
     # Compare relative to `home`, not the absolute path: pytest's `tmp_path`
     # fixture names the temp dir after the test function, and this test's

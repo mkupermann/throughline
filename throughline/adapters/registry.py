@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
-from typing import Iterator
+from collections.abc import Iterator
 
 from .base import Adapter
 

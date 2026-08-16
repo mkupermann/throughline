@@ -106,6 +106,11 @@ ignore = [
     "B008",  # function call as default argument
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Direct-execution compatibility wrappers must bootstrap the project interpreter
+# and source root before importing their packaged implementation.
+"scripts/*.py" = ["E402"]
+
 [tool.black]
 line-length = 120
 target-version = ["py310", "py311", "py312"]
@@ -118,3 +123,15 @@ extend-exclude = """
   | venv
 )/
 """
+
+[tool.coverage.run]
+source = ["throughline", "memory_mcp"]
+
+[tool.coverage.report]
+# Measured locally against the DB-free suite on 2026-08-16: 47.644%.
+# Integration tests run separately against PostgreSQL and are never counted as
+# skipped coverage credit.
+fail_under = 47.5
+precision = 1
+show_missing = true
+skip_covered = true

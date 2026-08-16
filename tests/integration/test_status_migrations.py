@@ -35,8 +35,7 @@ def _apply(conn, *names: str) -> None:
         cur.execute(_RUNNER_DDL)
         for n in names:
             cur.execute(
-                "INSERT INTO applied_migrations (migration_name) VALUES (%s) "
-                "ON CONFLICT DO NOTHING",
+                "INSERT INTO applied_migrations (migration_name) VALUES (%s) ON CONFLICT DO NOTHING",
                 (n,),
             )
     conn.commit()
@@ -116,7 +115,7 @@ def test_pending_migrations_are_listed(db_env):
 
 
 def test_pending_is_none_not_empty_when_unknowable(db_env):
-    """"Could not check" must stay distinguishable from "nothing pending".
+    """ "Could not check" must stay distinguishable from "nothing pending".
 
     Collapsing them would let a status report that never looked print an
     all-clear.

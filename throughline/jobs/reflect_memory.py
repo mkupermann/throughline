@@ -24,14 +24,11 @@ Aufruf:
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 import os
 import re
-
-from throughline import llm as _llm
-from throughline import prompts as _prompts
-from throughline.self_referential import agent_call_cwd
 import sys
 import time
 from datetime import datetime, timezone
@@ -40,6 +37,9 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
+from throughline import llm as _llm
+from throughline import prompts as _prompts
+from throughline.self_referential import agent_call_cwd
 
 # ---- Konfiguration ----------------------------------------------------------
 
@@ -51,7 +51,7 @@ DB_CONFIG: dict[str, Any] = {
 }
 
 
-def _connect() -> "psycopg2.extensions.connection":
+def _connect() -> psycopg2.extensions.connection:
     """Connect to PostgreSQL with a friendly error if the DB is unreachable."""
     try:
         return psycopg2.connect(**DB_CONFIG)
@@ -85,10 +85,27 @@ MAX_PAIRS_DEFAULT = 80
 
 CONTRA_CATEGORIES = ("decision", "pattern", "preference")
 STALE_TRIGGERS = [
-    "heute", "aktuell", "derzeit", "momentan", "gerade", "jetzt",
-    "diese woche", "naechste woche", "nächste woche", "meeting am",
-    "termin am", "am ", "q1", "q2", "q3", "q4", "2025", "2026",
-    "release", "sprint", "kw ",
+    "heute",
+    "aktuell",
+    "derzeit",
+    "momentan",
+    "gerade",
+    "jetzt",
+    "diese woche",
+    "naechste woche",
+    "nächste woche",
+    "meeting am",
+    "termin am",
+    "am ",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "2025",
+    "2026",
+    "release",
+    "sprint",
+    "kw ",
 ]
 DATE_PATTERN = re.compile(
     r"\b(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?|\d{4}-\d{2}-\d{2}|"
@@ -98,6 +115,7 @@ DATE_PATTERN = re.compile(
 
 
 # ---- Utility ----------------------------------------------------------------
+
 
 def call_model(prompt: str) -> str:
     """Ask whichever backend the probe found. Returns "" on any failure.
@@ -157,8 +175,9 @@ def _first_val(row):
     return row[0]
 
 
-def log_reflection(cur, reflection_type: str, affected: list[int],
-                   action: str, reasoning: str, confidence: float) -> int:
+def log_reflection(
+    cur, reflection_type: str, affected: list[int], action: str, reasoning: str, confidence: float
+) -> int:
     cur.execute(
         """
         INSERT INTO memory_reflections (reflection_type, affected_chunks,
@@ -217,7 +236,7 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
         groups.setdefault(key, []).append(r)
 
     pairs = []
-    for key, items in groups.items():
+    for _key, items in groups.items():
         if len(items) < 2:
             continue
         for i in range(len(items)):
@@ -238,8 +257,12 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
         if a["id"] in consumed or b["id"] in consumed:
             continue
         prompt = DEDUP_PROMPT.format(
-            id_a=a["id"], date_a=str(a["created_at"])[:10], content_a=a["content"],
-            id_b=b["id"], date_b=str(b["created_at"])[:10], content_b=b["content"],
+            id_a=a["id"],
+            date_a=str(a["created_at"])[:10],
+            content_a=a["content"],
+            id_b=b["id"],
+            date_b=str(b["created_at"])[:10],
+            content_b=b["content"],
         )
         resp = call_model(prompt)
         obj = parse_json_object(resp)
@@ -256,16 +279,15 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
         if is_dup and conf >= 0.6:
             stats["duplicates"] += 1
             if dry_run:
-                log_reflection(cur, "dedup", [a["id"], b["id"]],
-                               "kept_both_dryrun", reason, conf)
+                log_reflection(cur, "dedup", [a["id"], b["id"]], "kept_both_dryrun", reason, conf)
                 conn.commit()
                 time.sleep(SLEEP_BETWEEN_CALLS)
                 continue
 
             # Merge
             merge_prompt = MERGE_PROMPT.format(
-            content_a=a["content"], content_b=b["content"], LANG=_prompts.output_language()
-        )
+                content_a=a["content"], content_b=b["content"], LANG=_prompts.output_language()
+            )
             merge_resp = call_model(merge_prompt)
             merge_obj = parse_json_object(merge_resp)
             merged_content = (merge_obj or {}).get("content") if merge_obj else None
@@ -281,31 +303,35 @@ def mode_dedup(cur, conn, limit: int, max_pairs: int, dry_run: bool) -> dict:
             merged_tags = list({*(a_meta["tags"] or []), *(b_meta["tags"] or [])})
             merged_conf = max(float(a_meta["confidence"] or 0.8), float(b_meta["confidence"] or 0.8))
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO memory_chunks
                     (source_type, source_id, content, category, tags, confidence,
                      project_name, merged_from, status)
                 VALUES ('reflection_merge', NULL, %s, %s, %s, %s, %s, %s, 'active')
                 RETURNING id
-            """, (merged_content, a["category"], merged_tags, merged_conf,
-                  a_meta["project_name"], [a["id"], b["id"]]))
+            """,
+                (merged_content, a["category"], merged_tags, merged_conf, a_meta["project_name"], [a["id"], b["id"]]),
+            )
             new_id = _first_val(cur.fetchone())
 
             now = datetime.now(timezone.utc)
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE memory_chunks
                 SET status='merged', superseded_by=%s, superseded_at=%s
                 WHERE id IN (%s, %s)
-            """, (new_id, now, a["id"], b["id"]))
-            log_reflection(cur, "dedup", [a["id"], b["id"], new_id],
-                           "merged", reason, conf)
+            """,
+                (new_id, now, a["id"], b["id"]),
+            )
+            log_reflection(cur, "dedup", [a["id"], b["id"], new_id], "merged", reason, conf)
             conn.commit()
-            consumed.add(a["id"]); consumed.add(b["id"])
+            consumed.add(a["id"])
+            consumed.add(b["id"])
             stats["merged"] += 1
             print(f"    -> merged into #{new_id}")
         else:
-            log_reflection(cur, "dedup", [a["id"], b["id"]],
-                           "kept_both", reason, conf)
+            log_reflection(cur, "dedup", [a["id"], b["id"]], "kept_both", reason, conf)
             conn.commit()
 
         time.sleep(SLEEP_BETWEEN_CALLS)
@@ -354,7 +380,7 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
         groups.setdefault(key, []).append(r)
 
     pairs = []
-    for key, items in groups.items():
+    for _key, items in groups.items():
         if len(items) < 2:
             continue
         for i in range(len(items)):
@@ -370,9 +396,14 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
     stats = {"pairs": len(pairs), "contradictions": 0, "superseded": 0, "errors": 0}
     for a, b in pairs:
         prompt = CONTRA_PROMPT.format(
-            category=a["category"], project=a["project_name"] or "–",
-            id_a=a["id"], date_a=str(a["created_at"])[:10], content_a=a["content"],
-            id_b=b["id"], date_b=str(b["created_at"])[:10], content_b=b["content"],
+            category=a["category"],
+            project=a["project_name"] or "–",
+            id_a=a["id"],
+            date_a=str(a["created_at"])[:10],
+            content_a=a["content"],
+            id_b=b["id"],
+            date_b=str(b["created_at"])[:10],
+            content_b=b["content"],
         )
         resp = call_model(prompt)
         obj = parse_json_object(resp)
@@ -401,22 +432,24 @@ def mode_contradictions(cur, conn, limit: int, max_pairs: int, dry_run: bool) ->
 
             if not dry_run:
                 now = datetime.now(timezone.utc)
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE memory_chunks
                     SET status='superseded', superseded_by=%s, superseded_at=%s
                     WHERE id=%s AND status='active'
-                """, (new_id, now, old_id))
+                """,
+                    (new_id, now, old_id),
+                )
                 stats["superseded"] += cur.rowcount
-                log_reflection(cur, "contradiction", [a["id"], b["id"]],
-                               f"superseded_{old_id}_by_{new_id}", reason, conf)
+                log_reflection(
+                    cur, "contradiction", [a["id"], b["id"]], f"superseded_{old_id}_by_{new_id}", reason, conf
+                )
                 conn.commit()
             else:
-                log_reflection(cur, "contradiction", [a["id"], b["id"]],
-                               "dryrun_would_supersede", reason, conf)
+                log_reflection(cur, "contradiction", [a["id"], b["id"]], "dryrun_would_supersede", reason, conf)
                 conn.commit()
         else:
-            log_reflection(cur, "contradiction", [a["id"], b["id"]],
-                           "kept_both", reason, conf)
+            log_reflection(cur, "contradiction", [a["id"], b["id"]], "kept_both", reason, conf)
             conn.commit()
 
         time.sleep(SLEEP_BETWEEN_CALLS)
@@ -472,7 +505,9 @@ def mode_stale(cur, conn, limit: int, dry_run: bool) -> dict:
 
     for r in candidates:
         prompt = STALE_PROMPT.format(
-            content=r["content"], created_at=str(r["created_at"])[:10], today=today.isoformat(),
+            content=r["content"],
+            created_at=str(r["created_at"])[:10],
+            today=today.isoformat(),
         )
         resp = call_model(prompt)
         obj = parse_json_object(resp)
@@ -503,13 +538,11 @@ def mode_stale(cur, conn, limit: int, dry_run: bool) -> dict:
         action = "kept_active"
         if not dry_run:
             if expires_date:
-                cur.execute("UPDATE memory_chunks SET expires_at=%s WHERE id=%s",
-                            (expires_date, r["id"]))
+                cur.execute("UPDATE memory_chunks SET expires_at=%s WHERE id=%s", (expires_date, r["id"]))
                 stats["expires_set"] += 1
                 action = "expires_set"
             if expires_date and expires_date.date() < today:
-                cur.execute("UPDATE memory_chunks SET status='stale' WHERE id=%s AND status='active'",
-                            (r["id"],))
+                cur.execute("UPDATE memory_chunks SET status='stale' WHERE id=%s AND status='active'", (r["id"],))
                 stats["stale_flagged"] += cur.rowcount
                 action = "marked_stale"
         log_reflection(cur, "stale_detection", [r["id"]], action, reason, conf)
@@ -586,7 +619,8 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
     for key, items in clusters:
         ids = [i["id"] for i in items]
         items_text = "\n\n".join(
-            f"[ID {i['id']}] {i['content']}" for i in items[:8]  # cap per cluster
+            f"[ID {i['id']}] {i['content']}"
+            for i in items[:8]  # cap per cluster
         )
         prompt = CONSOLIDATE_PROMPT.format(items=items_text, LANG=_prompts.output_language())
         resp = call_model(prompt)
@@ -613,14 +647,16 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
             time.sleep(SLEEP_BETWEEN_CALLS)
             continue
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO memory_chunks
                 (source_type, source_id, content, category, tags, confidence,
                  project_name, merged_from, status)
             VALUES ('consolidation', NULL, %s, %s, %s, %s, %s, %s, 'active')
             RETURNING id
-        """, (content, items[0]["category"], list(tags), 0.9,
-              items[0]["project_name"], ids))
+        """,
+            (content, items[0]["category"], list(tags), 0.9, items[0]["project_name"], ids),
+        )
         new_id = _first_val(cur.fetchone())
         log_reflection(cur, "consolidation", ids + [new_id], "created_super_chunk", reason, 0.9)
         conn.commit()
@@ -631,6 +667,7 @@ def mode_consolidate(cur, conn, limit: int, dry_run: bool) -> dict:
 
 
 # ---- Main -------------------------------------------------------------------
+
 
 def print_report(stats_by_mode: dict[str, dict[str, Any]]) -> None:
     print("\n" + "=" * 60)
@@ -644,14 +681,16 @@ def print_report(stats_by_mode: dict[str, dict[str, Any]]) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Self-Reflecting Memory Engine")
-    p.add_argument("--mode", choices=["dedup", "contradictions", "stale", "consolidate"],
-                   help="Einzelnen Modus ausfuehren (default: alle)")
-    p.add_argument("--limit", type=int, default=MAX_PAIRS_DEFAULT,
-                   help="Max. Paare/Kandidaten pro Modus (default 80)")
-    p.add_argument("--max-pairs", type=int, default=MAX_PAIRS_DEFAULT,
-                   help="Alias fuer --limit fuer paar-basierte Modi")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Keine Writes, nur Analyse + Log")
+    p.add_argument(
+        "--mode",
+        choices=["dedup", "contradictions", "stale", "consolidate"],
+        help="Einzelnen Modus ausfuehren (default: alle)",
+    )
+    p.add_argument("--limit", type=int, default=MAX_PAIRS_DEFAULT, help="Max. Paare/Kandidaten pro Modus (default 80)")
+    p.add_argument(
+        "--max-pairs", type=int, default=MAX_PAIRS_DEFAULT, help="Alias fuer --limit fuer paar-basierte Modi"
+    )
+    p.add_argument("--dry-run", action="store_true", help="Keine Writes, nur Analyse + Log")
     args = p.parse_args()
 
     print(f"Model: {_require_model()}")

@@ -26,7 +26,8 @@ def client(db_env, monkeypatch):
     from throughline.api import deps
 
     monkeypatch.setattr(
-        embedding, "backend_info",
+        embedding,
+        "backend_info",
         lambda preferred="auto": embedding.BackendInfo(available=False, reason="none"),
     )
     deps.close_pool()
@@ -75,8 +76,14 @@ def test_queues_listed_with_counts(client, chunks):
     body = client.get("/api/curate/queues").json()
     names = {q["name"] for q in body["queues"]}
     assert names == {
-        "contradictions", "drift", "superseded", "low-confidence",
-        "missing-embeddings", "expiring", "never-accessed", "forgotten",
+        "contradictions",
+        "drift",
+        "superseded",
+        "low-confidence",
+        "missing-embeddings",
+        "expiring",
+        "never-accessed",
+        "forgotten",
     }
     for q in body["queues"]:
         assert isinstance(q["count"], int)

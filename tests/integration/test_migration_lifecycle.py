@@ -57,9 +57,7 @@ def test_historical_duplicate_filename_upgrades_without_replaying_it(empty_test_
         "004_generated_by.sql",
     )
     paths = {path.name: path for path in migrate.MIGRATIONS_DIR.glob("*.sql")}
-    paths["001_widen_conversation_token_counts.sql"] = paths[
-        "005_widen_conversation_token_counts.sql"
-    ]
+    paths["001_widen_conversation_token_counts.sql"] = paths["005_widen_conversation_token_counts.sql"]
     conn = psycopg2.connect(**empty_test_db)
     try:
         with conn.cursor() as cur:

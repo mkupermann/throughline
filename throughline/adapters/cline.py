@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -199,7 +200,7 @@ def _parse_task_dir(task_dir: Path, source_tool: str) -> NormalisedConversation 
             meta = {}
         if isinstance(meta, dict):
             raw_task_id = str(meta.get("id") or raw_task_id)
-            summary = (meta.get("task") or None)
+            summary = meta.get("task") or None
             if summary and len(summary) > 200:
                 summary = summary[:200]
             started = _parse_ts_ms(meta.get("ts"))
@@ -308,4 +309,5 @@ class ClineAdapter(Adapter):
         # Empty / no-transcript dir — hash its name so we still produce
         # something, and the upper layer will skip on parse() returning None.
         import hashlib
+
         return hashlib.sha256(path.name.encode("utf-8")).hexdigest()

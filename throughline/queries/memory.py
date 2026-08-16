@@ -200,6 +200,7 @@ def reflection_summary(conn) -> list[Row]:
 
 # ── Curation queues (the /curate surface) ────────────────────────────────────
 
+
 def queue_low_confidence(conn, threshold: float = 0.6, limit: int = 100) -> list[Row]:
     return rows(
         conn,

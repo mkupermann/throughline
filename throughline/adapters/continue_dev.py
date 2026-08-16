@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .base import Adapter, NormalisedConversation, NormalisedMessage
 
@@ -86,12 +87,7 @@ def _session_from_dict(d: dict[str, Any], source_path: Path) -> NormalisedConver
         or _parse_ts(d.get("timestamp"))
         or datetime.now(timezone.utc)
     )
-    ended = (
-        _parse_ts(d.get("endTime"))
-        or _parse_ts(d.get("updatedAt"))
-        or _parse_ts(d.get("last_updated"))
-        or started
-    )
+    ended = _parse_ts(d.get("endTime")) or _parse_ts(d.get("updatedAt")) or _parse_ts(d.get("last_updated")) or started
 
     model = (
         d.get("model")
@@ -120,8 +116,7 @@ def _session_from_dict(d: dict[str, Any], source_path: Path) -> NormalisedConver
                 metadata={
                     k: v
                     for k, v in turn.items()
-                    if k not in ("message", "role", "content", "timestamp")
-                    and v is not None
+                    if k not in ("message", "role", "content", "timestamp") and v is not None
                 },
             )
         )

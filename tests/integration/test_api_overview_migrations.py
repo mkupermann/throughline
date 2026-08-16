@@ -54,9 +54,7 @@ def test_pending_migration_appears_as_critical(db_env, client):
     try:
         with conn.cursor() as cur:
             cur.execute(_RUNNER_DDL)
-            cur.execute(
-                "INSERT INTO applied_migrations (migration_name) VALUES ('000_baseline.sql')"
-            )
+            cur.execute("INSERT INTO applied_migrations (migration_name) VALUES ('000_baseline.sql')")
         conn.commit()
     finally:
         conn.close()
@@ -76,8 +74,7 @@ def test_fully_migrated_database_says_nothing(db_env, client):
     import pathlib
 
     migrations = sorted(
-        p.name
-        for p in (pathlib.Path(__file__).resolve().parents[2] / "throughline" / "migrations").glob("*.sql")
+        p.name for p in (pathlib.Path(__file__).resolve().parents[2] / "throughline" / "migrations").glob("*.sql")
     )
     conn = psycopg2.connect(**db_env)
     try:
@@ -85,8 +82,7 @@ def test_fully_migrated_database_says_nothing(db_env, client):
             cur.execute(_RUNNER_DDL)
             for name in migrations:
                 cur.execute(
-                    "INSERT INTO applied_migrations (migration_name) VALUES (%s) "
-                    "ON CONFLICT DO NOTHING",
+                    "INSERT INTO applied_migrations (migration_name) VALUES (%s) ON CONFLICT DO NOTHING",
                     (name,),
                 )
         conn.commit()

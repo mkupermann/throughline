@@ -14,9 +14,9 @@ pending.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 import psycopg2
 import pytest
@@ -142,8 +142,6 @@ def test_a_growing_file_is_judged_again(db_env, tmp_path):
         run_adapter(adapter, conn=conn, verbose=False)
         with conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM conversations")
-            assert cur.fetchone()[0] == 1, (
-                "the file grew into a real conversation but was never re-judged"
-            )
+            assert cur.fetchone()[0] == 1, "the file grew into a real conversation but was never re-judged"
     finally:
         conn.close()

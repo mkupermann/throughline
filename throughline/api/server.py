@@ -18,8 +18,7 @@ def serve(
         import uvicorn
     except ImportError:
         print(
-            "uvicorn is not installed — it is a core dependency.\n"
-            "  pip install -e .",
+            "uvicorn is not installed — it is a core dependency.\n  pip install -e .",
         )
         return 1
 
@@ -38,8 +37,7 @@ def serve(
 
     if settings.web_dist is None:
         print(
-            "No built frontend found — serving the API only.\n"
-            "  npm --prefix web install && npm --prefix web run build"
+            "No built frontend found — serving the API only.\n  npm --prefix web install && npm --prefix web run build"
         )
     print(f"Throughline → http://{settings.host}:{settings.port}")
 

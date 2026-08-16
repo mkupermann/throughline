@@ -27,7 +27,9 @@ Usage::
     # Same options via the unified CLI:
     throughline repair-conversations [--dry-run] [--limit N]
 """
+
 from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -125,8 +127,7 @@ def repair_session(conn, *, session_id: str, file_paths: list[str], dry_run: boo
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, project_path, token_count_in, token_count_out "
-            "FROM public.conversations WHERE session_id = %s",
+            "SELECT id, project_path, token_count_in, token_count_out FROM public.conversations WHERE session_id = %s",
             (session_id,),
         )
         row = cur.fetchone()
@@ -174,10 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             "were never populated by the original ingest)."
         ),
     )
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Preview changes; do not write to the DB.")
-    ap.add_argument("--limit", type=int, default=None,
-                    help="Cap on number of files processed (smoke testing).")
+    ap.add_argument("--dry-run", action="store_true", help="Preview changes; do not write to the DB.")
+    ap.add_argument("--limit", type=int, default=None, help="Cap on number of files processed (smoke testing).")
     args = ap.parse_args(argv)
 
     try:
@@ -194,8 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         # token totals.
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT file_path FROM public.ingestion_log "
-                "WHERE file_path LIKE %s ORDER BY ingested_at",
+                "SELECT file_path FROM public.ingestion_log WHERE file_path LIKE %s ORDER BY ingested_at",
                 ("%.jsonl",),
             )
             paths = [r[0] for r in cur.fetchall()]
@@ -215,8 +213,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             by_session.setdefault(sid, []).append(fp)
 
-        print(f"[repair] grouped into {len(by_session)} session(s); "
-              f"{unreadable} file(s) unreadable / no session id")
+        print(f"[repair] grouped into {len(by_session)} session(s); {unreadable} file(s) unreadable / no session id")
 
         n_updated = 0
         n_would = 0

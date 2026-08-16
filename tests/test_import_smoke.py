@@ -1,8 +1,9 @@
 """Smoke test — every script should be importable without side effects."""
 
 import importlib.util
-import pytest
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_DIR = ROOT / "scripts"

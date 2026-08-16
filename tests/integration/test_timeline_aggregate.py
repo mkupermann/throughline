@@ -48,8 +48,7 @@ def test_range_is_complete_not_paginated(spread):
 
     with spread.cursor() as cur:
         cur.execute(
-            "SELECT count(*) FROM conversations "
-            "WHERE started_at >= %s AND started_at < %s + interval '1 day'",
+            "SELECT count(*) FROM conversations WHERE started_at >= %s AND started_at < %s + interval '1 day'",
             (since, until),
         )
         raw = cur.fetchone()[0]
@@ -60,16 +59,24 @@ def test_range_is_complete_not_paginated(spread):
 
 def test_lanes_are_per_provider(spread):
     agg = T.aggregate(
-        spread, date(2026, 1, 1), date(2026, 12, 31), "month",
-        kinds=["conversation"], providers=[],
+        spread,
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "month",
+        kinds=["conversation"],
+        providers=[],
     )
     assert {r["provider"] for r in agg} >= {"claude_code", "hermes"}
 
 
 def test_provider_filter_narrows_and_still_reconciles(spread):
     agg = T.aggregate(
-        spread, date(2026, 1, 1), date(2026, 12, 31), "day",
-        kinds=["conversation"], providers=["hermes"],
+        spread,
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        "day",
+        kinds=["conversation"],
+        providers=["hermes"],
     )
     total = sum(r["n"] for r in agg)
     with spread.cursor() as cur:
@@ -80,8 +87,12 @@ def test_provider_filter_narrows_and_still_reconciles(spread):
 def test_row_count_stays_bounded_regardless_of_corpus(spread):
     """90 days x 9 providers is ~810 rows whatever the corpus size."""
     agg = T.aggregate(
-        spread, date(2026, 1, 1), date(2026, 3, 31), "day",
-        kinds=["conversation"], providers=[],
+        spread,
+        date(2026, 1, 1),
+        date(2026, 3, 31),
+        "day",
+        kinds=["conversation"],
+        providers=[],
     )
     assert len(agg) < 1000
 
@@ -96,24 +107,30 @@ def test_non_provider_sources_get_their_own_lane(db_connection):
         )
     db_connection.commit()
     agg = T.aggregate(
-        db_connection, date(2026, 5, 1), date(2026, 5, 31), "day",
-        kinds=["skill"], providers=[],
+        db_connection,
+        date(2026, 5, 1),
+        date(2026, 5, 31),
+        "day",
+        kinds=["skill"],
+        providers=[],
     )
     assert any(r["provider"] == T.NOT_TOOL_SPECIFIC for r in agg)
 
 
 def test_month_boundary_buckets_do_not_leak(spread):
     agg = T.aggregate(
-        spread, date(2026, 1, 1), date(2026, 1, 31), "month",
-        kinds=["conversation"], providers=[],
+        spread,
+        date(2026, 1, 1),
+        date(2026, 1, 31),
+        "month",
+        kinds=["conversation"],
+        providers=[],
     )
     assert {str(r["bucket"])[:7] for r in agg} == {"2026-01"}
 
 
 def test_day_detail_returns_that_days_events(spread):
-    detail = T.day_detail(
-        spread, date(2026, 2, 1), kinds=["conversation"], providers=[], limit=50, offset=0
-    )
+    detail = T.day_detail(spread, date(2026, 2, 1), kinds=["conversation"], providers=[], limit=50, offset=0)
     assert len(detail) >= 1
     assert all(str(r["ts"])[:10] == "2026-02-01" for r in detail)
 
@@ -138,13 +155,8 @@ def test_day_detail_defaults_to_all_kinds_like_aggregate(db_connection):
         )
     db_connection.commit()
 
-    agg_kinds = {
-        r["kind"] for r in T.aggregate(db_connection, day, day, "day", kinds=[], providers=[])
-    }
-    detail_kinds = {
-        r["kind"]
-        for r in T.day_detail(db_connection, day, kinds=[], providers=[], limit=100, offset=0)
-    }
+    agg_kinds = {r["kind"] for r in T.aggregate(db_connection, day, day, "day", kinds=[], providers=[])}
+    detail_kinds = {r["kind"] for r in T.day_detail(db_connection, day, kinds=[], providers=[], limit=100, offset=0)}
     assert detail_kinds == agg_kinds
     assert detail_kinds >= {"conversation", "skill"}
 
@@ -159,8 +171,14 @@ def test_sources_cover_every_old_calendar_source():
     so a future edit that silently deletes a key still fails this test.
     """
     old_calendar_sources = {
-        "conversation", "memory", "skill", "project", "prompt",
-        "entity", "reflection", "ingestion",
+        "conversation",
+        "memory",
+        "skill",
+        "project",
+        "prompt",
+        "entity",
+        "reflection",
+        "ingestion",
     }
     assert old_calendar_sources <= set(T._SOURCES)
 
@@ -174,18 +192,15 @@ def calendar_extras(db_connection):
         for i in range(5):
             ts = base + timedelta(days=i)
             cur.execute(
-                "INSERT INTO entities (entity_type, name, canonical_name, first_seen) "
-                "VALUES ('person', %s, %s, %s)",
+                "INSERT INTO entities (entity_type, name, canonical_name, first_seen) VALUES ('person', %s, %s, %s)",
                 (f"person-{i}", f"person-{i}", ts),
             )
             cur.execute(
-                "INSERT INTO memory_reflections (reflection_type, created_at) "
-                "VALUES ('merge', %s)",
+                "INSERT INTO memory_reflections (reflection_type, created_at) VALUES ('merge', %s)",
                 (ts,),
             )
             cur.execute(
-                "INSERT INTO ingestion_log (file_path, file_hash, ingested_at) "
-                "VALUES (%s, %s, %s)",
+                "INSERT INTO ingestion_log (file_path, file_hash, ingested_at) VALUES (%s, %s, %s)",
                 (f"/x/{i}.jsonl", f"hash-{i}", ts),
             )
     db_connection.commit()
@@ -200,9 +215,7 @@ def calendar_extras(db_connection):
         ("ingestion", "ingestion_log", "ingested_at"),
     ],
 )
-def test_calendar_extras_reconcile_and_land_in_not_tool_specific(
-    calendar_extras, kind, table, ts_col
-):
+def test_calendar_extras_reconcile_and_land_in_not_tool_specific(calendar_extras, kind, table, ts_col):
     """§5.3: entities/reflections/ingestion have no provider dimension. They
     must reconcile like every other lane, and land in NOT_TOOL_SPECIFIC."""
     since, until = date(2026, 6, 1), date(2026, 6, 30)
@@ -211,8 +224,7 @@ def test_calendar_extras_reconcile_and_land_in_not_tool_specific(
 
     with calendar_extras.cursor() as cur:
         cur.execute(
-            f"SELECT count(*) FROM {table} "
-            f"WHERE {ts_col} >= %s AND {ts_col} < %s + interval '1 day'",
+            f"SELECT count(*) FROM {table} WHERE {ts_col} >= %s AND {ts_col} < %s + interval '1 day'",
             (since, until),
         )
         raw = cur.fetchone()[0]
@@ -226,8 +238,12 @@ def test_calendar_extras_excluded_under_active_provider_filter(calendar_extras):
     already enforced for skill/project/prompt, now covering all six
     not-tool-specific kinds."""
     agg = T.aggregate(
-        calendar_extras, date(2026, 6, 1), date(2026, 6, 30), "day",
-        kinds=["entity", "reflection", "ingestion"], providers=["hermes"],
+        calendar_extras,
+        date(2026, 6, 1),
+        date(2026, 6, 30),
+        "day",
+        kinds=["entity", "reflection", "ingestion"],
+        providers=["hermes"],
     )
     assert agg == []
 
@@ -266,7 +282,12 @@ def mixed_attribution(db_connection):
 def test_aggregate_unattributed_matches_null_source_tool_not_the_literal_string(mixed_attribution):
     since = until = date(2026, 3, 19)
     agg = T.aggregate(
-        mixed_attribution, since, until, "day", kinds=["conversation"], providers=["unattributed"],
+        mixed_attribution,
+        since,
+        until,
+        "day",
+        kinds=["conversation"],
+        providers=["unattributed"],
     )
     assert {r["provider"] for r in agg} == {"unattributed"}
     total = sum(r["n"] for r in agg)
@@ -283,8 +304,12 @@ def test_aggregate_unattributed_matches_null_source_tool_not_the_literal_string(
 
 def test_day_detail_unattributed_matches_null_source_tool_not_the_literal_string(mixed_attribution):
     detail = T.day_detail(
-        mixed_attribution, date(2026, 3, 19),
-        kinds=["conversation"], providers=["unattributed"], limit=100, offset=0,
+        mixed_attribution,
+        date(2026, 3, 19),
+        kinds=["conversation"],
+        providers=["unattributed"],
+        limit=100,
+        offset=0,
     )
     assert len(detail) == 3
     assert all(r["provider"] == "unattributed" for r in detail)
@@ -294,8 +319,12 @@ def test_aggregate_mixed_named_and_unattributed_returns_the_union(mixed_attribut
     """A request for ["hermes", "unattributed"] must not silently pick one."""
     since = until = date(2026, 3, 19)
     agg = T.aggregate(
-        mixed_attribution, since, until, "day",
-        kinds=["conversation"], providers=["hermes", "unattributed"],
+        mixed_attribution,
+        since,
+        until,
+        "day",
+        kinds=["conversation"],
+        providers=["hermes", "unattributed"],
     )
     assert {r["provider"] for r in agg} == {"hermes", "unattributed"}
     total = sum(r["n"] for r in agg)
@@ -313,8 +342,12 @@ def test_aggregate_mixed_named_and_unattributed_returns_the_union(mixed_attribut
 
 def test_day_detail_mixed_named_and_unattributed_returns_the_union(mixed_attribution):
     detail = T.day_detail(
-        mixed_attribution, date(2026, 3, 19),
-        kinds=["conversation"], providers=["hermes", "unattributed"], limit=100, offset=0,
+        mixed_attribution,
+        date(2026, 3, 19),
+        kinds=["conversation"],
+        providers=["hermes", "unattributed"],
+        limit=100,
+        offset=0,
     )
     assert len(detail) == 5
     assert {r["provider"] for r in detail} == {"hermes", "unattributed"}
@@ -324,7 +357,12 @@ def test_aggregate_unattributed_alone_does_not_pull_in_named_providers(mixed_att
     """The claude_code row must not leak into an unattributed-only request."""
     since = until = date(2026, 3, 19)
     agg = T.aggregate(
-        mixed_attribution, since, until, "day", kinds=["conversation"], providers=["unattributed"],
+        mixed_attribution,
+        since,
+        until,
+        "day",
+        kinds=["conversation"],
+        providers=["unattributed"],
     )
     assert "claude_code" not in {r["provider"] for r in agg}
     assert "hermes" not in {r["provider"] for r in agg}
@@ -361,17 +399,14 @@ def test_day_detail_lists_conversations_before_messages(db_env):
             # one of them ahead of the conversation.
             for i in range(30):
                 cur.execute(
-                    "INSERT INTO messages (conversation_id, role, content, created_at) "
-                    "VALUES (%s, 'user', %s, %s)",
+                    "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (%s, 'user', %s, %s)",
                     (conv_id, f"m{i}", f"2026-05-05T1{i % 9}:00:00Z"),
                 )
         conn.commit()
 
         rows = T.day_detail(conn, date(2026, 5, 5), kinds=[], providers=[], limit=5)
         assert rows, "the day should not be empty"
-        assert rows[0]["kind"] == "conversation", (
-            f"a container must lead the list, got {rows[0]['kind']}"
-        )
+        assert rows[0]["kind"] == "conversation", f"a container must lead the list, got {rows[0]['kind']}"
     finally:
         conn.close()
 
@@ -395,10 +430,8 @@ def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
         )
     db_connection.commit()
 
-    rows = T.day_detail(
-        db_connection, date.today(), kinds=["ingestion"], providers=[], limit=50
-    )
+    rows = T.day_detail(db_connection, date.today(), kinds=["ingestion"], providers=[], limit=50)
     labels = [r["title"] for r in rows]
     assert labels, "expected the ingestion row back"
     assert "abc123.jsonl" in labels
-    assert not any("/Users/" in (l or "") for l in labels), labels
+    assert not any("/Users/" in (label or "") for label in labels), labels

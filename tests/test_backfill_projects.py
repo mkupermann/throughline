@@ -7,13 +7,11 @@ scoping rules (sources include/exclude conversations) and the
 idempotence semantics (existing names are skipped) without touching
 Postgres — the unit-tests CI job has no DB.
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-
-import pytest
-
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -21,8 +19,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 # ── Fakes ────────────────────────────────────────────────────────────────────
 class _FakeCursor:
-    def __init__(self, *, mc_names: list[str], conv_names: list[str],
-                 existing: list[str]):
+    def __init__(self, *, mc_names: list[str], conv_names: list[str], existing: list[str]):
         self.mc_names = mc_names
         self.conv_names = conv_names
         self.existing = existing
@@ -91,7 +88,7 @@ def test_collect_observed_with_conversations_unions_dedups_and_sorts():
 
     cur = _FakeCursor(
         mc_names=["alpha", "beta", "gamma"],
-        conv_names=["beta", "delta"],   # overlap on "beta"
+        conv_names=["beta", "delta"],  # overlap on "beta"
         existing=[],
     )
     names = bp.collect_observed_names(_FakeConn(cur), include_conversations=True)
@@ -181,6 +178,7 @@ def test_main_db_connect_failure_returns_1(monkeypatch, capsys):
 
     def _raise(**_kw):
         raise RuntimeError("boom")
+
     monkeypatch.setattr(bp, "psycopg2", type("P", (), {"connect": _raise}))
 
     rc = bp.main([])

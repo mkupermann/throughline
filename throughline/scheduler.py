@@ -27,9 +27,7 @@ def _launchd_jobs() -> dict[str, dict[str, str]]:
     panel is not worth an exception on a machine that never had the skill.
     """
     try:
-        result = subprocess.run(
-            ["launchctl", "list"], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5)
     except Exception:
         return {}
     jobs: dict[str, dict[str, str]] = {}

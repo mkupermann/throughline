@@ -7,7 +7,6 @@ import sys
 import zipfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -49,8 +48,7 @@ def test_wheel_contains_runtime_jobs_for_cli_and_mcp(tmp_path: Path) -> None:
         if path.name != "__init__.py"
     }
     expected_migrations = {
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "throughline" / "migrations").glob("*.sql")
+        path.relative_to(ROOT).as_posix() for path in (ROOT / "throughline" / "migrations").glob("*.sql")
     }
 
     assert expected_jobs <= contents

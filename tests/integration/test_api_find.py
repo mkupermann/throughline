@@ -20,9 +20,11 @@ def client(db_env, monkeypatch):
 
     # No embedding backend in CI, and we must not let a probe reach the
     # network from a test. Force the lexical-only path deterministically.
-    monkeypatch.setattr(embedding, "backend_info",
-                        lambda preferred="auto": embedding.BackendInfo(
-                            available=False, reason="No embedding backend configured."))
+    monkeypatch.setattr(
+        embedding,
+        "backend_info",
+        lambda preferred="auto": embedding.BackendInfo(available=False, reason="No embedding backend configured."),
+    )
     deps.close_pool()
     with TestClient(create_app(Settings(web_dist=None)), raise_server_exceptions=False) as c:
         yield c
@@ -69,14 +71,31 @@ def test_find_shape(client, corpus):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {
-        "query", "items", "total", "limit", "offset", "modes", "notes", "backend",
+        "query",
+        "items",
+        "total",
+        "limit",
+        "offset",
+        "modes",
+        "notes",
+        "backend",
     }
     assert body["query"] == "pgvector"
     assert body["total"] >= 1
     for item in body["items"]:
         assert set(item) == {
-            "kind", "id", "title", "snippet", "project", "occurred_at",
-            "category", "status", "confidence", "conversation_id", "score", "retrievers",
+            "kind",
+            "id",
+            "title",
+            "snippet",
+            "project",
+            "occurred_at",
+            "category",
+            "status",
+            "confidence",
+            "conversation_id",
+            "score",
+            "retrievers",
         }
         assert isinstance(item["id"], int)
 
@@ -100,9 +119,7 @@ def test_kind_filter(client, corpus):
 
 
 def test_multiple_kind_filters_are_unioned(client, corpus):
-    body = client.get(
-        "/api/find", params=[("q", "pgvector"), ("kind", "memory"), ("kind", "skill")]
-    ).json()
+    body = client.get("/api/find", params=[("q", "pgvector"), ("kind", "memory"), ("kind", "skill")]).json()
     assert {i["kind"] for i in body["items"]} <= {"memory", "skill"}
 
 
@@ -165,9 +182,7 @@ def test_provider_filter_alone_browses(client, provider_corpus):
 
 
 def test_two_providers_union_with_no_query(client, provider_corpus):
-    body = client.get(
-        "/api/find", params=[("provider", "hermes"), ("provider", "windsurf")]
-    ).json()
+    body = client.get("/api/find", params=[("provider", "hermes"), ("provider", "windsurf")]).json()
     got = {i["id"] for i in body["items"] if i["kind"] == "conversation"}
     assert got == set(provider_corpus["hermes"]) | set(provider_corpus["windsurf"])
 
@@ -181,8 +196,7 @@ def test_provider_with_no_data_returns_empty_without_erroring(client, provider_c
 def test_facets(client, corpus):
     body = client.get("/api/find/facets").json()
     assert set(body) == {"kinds", "categories", "statuses", "projects", "tags"}
-    assert all(isinstance(i["n"], int) and isinstance(i["value"], str)
-               for group in body.values() for i in group)
+    assert all(isinstance(i["n"], int) and isinstance(i["value"], str) for group in body.values() for i in group)
 
 
 @pytest.mark.parametrize("kind,key", [("conversation", "conversation"), ("memory", "memory")])

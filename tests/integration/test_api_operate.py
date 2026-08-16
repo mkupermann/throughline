@@ -23,7 +23,8 @@ def client(db_env, monkeypatch):
     from throughline.api import deps
 
     monkeypatch.setattr(
-        embedding, "backend_info",
+        embedding,
+        "backend_info",
         lambda preferred="auto": embedding.BackendInfo(available=False, reason="none"),
     )
     deps.close_pool()
@@ -42,17 +43,17 @@ def fake_jobs(monkeypatch):
     import sys
 
     specs = {
-        "echo": JobSpec("echo", "Echo", "prints lines",
-                        [sys.executable, "-c", "print('one'); print('two')"]),
-        "fail": JobSpec("fail", "Fail", "exits non-zero",
-                        [sys.executable, "-c", "import sys; print('bad'); sys.exit(3)"]),
-        "slow": JobSpec("slow", "Slow", "sleeps",
-                        [sys.executable, "-c",
-                         "import time,sys\n"
-                         "for i in range(20):\n"
-                         "    print(i, flush=True); time.sleep(0.3)"]),
-        "missing": JobSpec("missing", "Missing", "binary does not exist",
-                           ["/nonexistent/binary-xyz"]),
+        "echo": JobSpec("echo", "Echo", "prints lines", [sys.executable, "-c", "print('one'); print('two')"]),
+        "fail": JobSpec(
+            "fail", "Fail", "exits non-zero", [sys.executable, "-c", "import sys; print('bad'); sys.exit(3)"]
+        ),
+        "slow": JobSpec(
+            "slow",
+            "Slow",
+            "sleeps",
+            [sys.executable, "-c", "import time,sys\nfor i in range(20):\n    print(i, flush=True); time.sleep(0.3)"],
+        ),
+        "missing": JobSpec("missing", "Missing", "binary does not exist", ["/nonexistent/binary-xyz"]),
     }
     monkeypatch.setattr(jobs_mod, "JOBS", specs)
     monkeypatch.setattr("throughline.api.routers.operate.JOBS", specs)
@@ -72,7 +73,14 @@ def _wait(job, timeout=15):
 def test_status_shape(client):
     body = client.get("/api/operate/status").json()
     assert set(body) >= {
-        "counts", "database", "extensions", "embedding", "pending", "ingestion", "jobs", "history",
+        "counts",
+        "database",
+        "extensions",
+        "embedding",
+        "pending",
+        "ingestion",
+        "jobs",
+        "history",
     }
     assert isinstance(body["database"]["reachable"], bool)
     assert isinstance(body["extensions"]["pgvector_usable"], bool)
@@ -159,8 +167,7 @@ def test_output_buffer_is_bounded(monkeypatch):
 
     monkeypatch.setattr(jobs_mod, "MAX_LINES", 20)
     runner = JobRunner()
-    spec = JobSpec("chatty", "Chatty", "many lines",
-                   [sys.executable, "-c", "for i in range(500): print(i)"])
+    spec = JobSpec("chatty", "Chatty", "many lines", [sys.executable, "-c", "for i in range(500): print(i)"])
     monkeypatch.setattr(jobs_mod, "JOBS", {"chatty": spec})
     job = runner.start("chatty")
     _wait(job)
@@ -182,7 +189,8 @@ def _no_model(monkeypatch, detail="No model available. Start Ollama or set OPENA
     from throughline import llm
 
     monkeypatch.setattr(
-        llm, "backend_info",
+        llm,
+        "backend_info",
         lambda: llm.LLMInfo(available=False, detail=detail),
     )
     return detail
@@ -202,7 +210,8 @@ def test_available_job_reports_no_obstacle(client, monkeypatch):
     from throughline import llm
 
     monkeypatch.setattr(
-        llm, "backend_info",
+        llm,
+        "backend_info",
         lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
     )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
@@ -219,7 +228,8 @@ def test_a_local_model_makes_the_container_jobs_runnable(client, monkeypatch):
     from throughline import llm
 
     monkeypatch.setattr(
-        llm, "backend_info",
+        llm,
+        "backend_info",
         lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
     )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
@@ -239,9 +249,9 @@ def test_embedding_job_reports_the_backend_reason(client, monkeypatch):
     from throughline import embedding
 
     monkeypatch.setattr(
-        embedding, "backend_info",
-        lambda preferred="auto": embedding.BackendInfo(
-            available=False, reason="Ollama is not running."),
+        embedding,
+        "backend_info",
+        lambda preferred="auto": embedding.BackendInfo(available=False, reason="Ollama is not running."),
     )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
     assert jobs["embed"]["unavailable"] == "Ollama is not running."

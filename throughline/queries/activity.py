@@ -68,6 +68,7 @@ def chunks_per_day(conn, days: int = 14) -> list[Row]:
 # Each returns rows carrying an `event_date` so the timeline view can merge
 # them into one stream. `cutoff` of None means "no lower bound".
 
+
 def events_conversations(conn, cutoff: datetime | None = None) -> list[Row]:
     return rows(
         conn,

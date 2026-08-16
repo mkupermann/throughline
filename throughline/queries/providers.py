@@ -39,7 +39,7 @@ from throughline.queries._exec import rows
 #: docstring), so it is never stale even within the TTL window.
 CACHE_TTL_SECONDS = 60
 
-_cache: tuple[float, dict[str, "DiskCounts"]] | None = None
+_cache: tuple[float, dict[str, DiskCounts]] | None = None
 
 
 @dataclass(frozen=True)
@@ -152,9 +152,7 @@ def coverage(conn) -> list[dict]:
     }
     disk = _disk_scan()
     # Live, through the caller's own connection — see module docstring.
-    ingested_paths = {
-        r["file_path"] for r in rows(conn, "SELECT file_path FROM ingestion_log")
-    }
+    ingested_paths = {r["file_path"] for r in rows(conn, "SELECT file_path FROM ingestion_log")}
 
     out: list[dict] = []
     for prov in P.PROVIDERS:

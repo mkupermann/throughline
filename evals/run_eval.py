@@ -32,6 +32,7 @@ Either set ``ANTHROPIC_API_KEY`` (uses the SDK if installed) or have the
 runner auto-detects.
 
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,9 +41,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
 
 # Reuse the live MCP search implementation so this harness measures the same
 # retrieval the agent gets at runtime (not a parallel implementation that
@@ -67,6 +68,7 @@ def _load_memory_search():
     if memory_search is not None:
         return memory_search
     from memory_mcp.server import search as _search  # type: ignore
+
     memory_search = _search
     return memory_search
 
@@ -97,6 +99,7 @@ def call_claude(prompt: str, *, model: str = "sonnet") -> str:
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             import anthropic  # type: ignore
+
             client = anthropic.Anthropic()
             msg = client.messages.create(
                 model="claude-sonnet-4-6" if model == "sonnet" else model,
@@ -115,7 +118,9 @@ def call_claude(prompt: str, *, model: str = "sonnet") -> str:
         )
     proc = subprocess.run(
         [cli, "-p", prompt, "--model", model],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude CLI exited {proc.returncode}: {proc.stderr[-500:]}")
@@ -135,8 +140,7 @@ def retrieve(query: str, *, project: str | None, top_k: int) -> list[dict]:
     try:
         search_fn = _load_memory_search()
     except Exception as e:
-        print(f"[eval] retrieval skipped — memory_search unavailable: {e}",
-              file=sys.stderr)
+        print(f"[eval] retrieval skipped — memory_search unavailable: {e}", file=sys.stderr)
         return []
     try:
         return search_fn(
@@ -146,8 +150,7 @@ def retrieve(query: str, *, project: str | None, top_k: int) -> list[dict]:
             limit=top_k,
         )
     except Exception as e:
-        print(f"[eval] retrieval skipped — backend error: {e}",
-              file=sys.stderr)
+        print(f"[eval] retrieval skipped — backend error: {e}", file=sys.stderr)
         return []
 
 
@@ -184,14 +187,16 @@ def load_questions(path: Path) -> list[Question]:
                 continue
             try:
                 d = json.loads(line)
-                out.append(Question(
-                    id=d["id"],
-                    category=d.get("category", "?"),
-                    question=d["question"],
-                    expected_substrings=list(d.get("expected_substrings") or []),
-                    scope_project=d.get("scope_project"),
-                    notes=d.get("notes", ""),
-                ))
+                out.append(
+                    Question(
+                        id=d["id"],
+                        category=d.get("category", "?"),
+                        question=d["question"],
+                        expected_substrings=list(d.get("expected_substrings") or []),
+                        scope_project=d.get("scope_project"),
+                        notes=d.get("notes", ""),
+                    )
+                )
             except Exception as e:
                 print(f"[eval] {path}:{line_no}: skipped — {e}", file=sys.stderr)
     return out
@@ -246,10 +251,15 @@ def run_one(q: Question, *, top_k: int, dry_run: bool, offline_stub: bool) -> tu
     cold_hit, cold_match = grade(cold_ans, q.expected_substrings)
 
     return (
-        Result(qid=q.id, condition="with-memory", answer=with_ans, retrieved_ids=retrieved_ids,
-               hit=with_hit, matched_substring=with_match),
-        Result(qid=q.id, condition="cold", answer=cold_ans,
-               hit=cold_hit, matched_substring=cold_match),
+        Result(
+            qid=q.id,
+            condition="with-memory",
+            answer=with_ans,
+            retrieved_ids=retrieved_ids,
+            hit=with_hit,
+            matched_substring=with_match,
+        ),
+        Result(qid=q.id, condition="cold", answer=cold_ans, hit=cold_hit, matched_substring=cold_match),
     )
 
 
@@ -268,7 +278,7 @@ def write_report(path: Path, qs: list[Question], pairs: list[tuple[Result, Resul
     lines.append("## Per-question table\n")
     lines.append("| ID | Category | with-memory | cold | retrieved |")
     lines.append("|---|---|---|---|---|")
-    for q, (w, c) in zip(qs, pairs):
+    for q, (w, c) in zip(qs, pairs, strict=True):
         lines.append(
             f"| {q.id} | {q.category} | "
             f"{'✓ ' + (w.matched_substring or '') if w.hit else '✗'} | "
@@ -276,7 +286,7 @@ def write_report(path: Path, qs: list[Question], pairs: list[tuple[Result, Resul
             f"{','.join(str(i) for i in w.retrieved_ids[:5]) or '—'} |"
         )
 
-    misses = [(q, w) for q, (w, _) in zip(qs, pairs) if not w.hit and q.category != "control"]
+    misses = [(q, w) for q, (w, _) in zip(qs, pairs, strict=True) if not w.hit and q.category != "control"]
     if misses:
         lines.append("\n## Misses worth investigating\n")
         for q, w in misses:
@@ -293,21 +303,30 @@ def main() -> int:
     ap.add_argument("--questions", type=Path, default=_HERE / "questions.jsonl")
     ap.add_argument("--report", type=Path, default=_HERE / "last_run.md")
     ap.add_argument("--top-k", type=int, default=5)
-    ap.add_argument("--dry-run", action="store_true",
-                    help=("Parse questions, do not retrieve, do not call any "
-                          "LLM. Exits 0 if the file parses. Safe in CI "
-                          "without DB or API keys."))
-    ap.add_argument("--offline-stub", action="store_true",
-                    help=("Use a deterministic pretend-LLM that always emits "
-                          "the first expected substring in the with-memory "
-                          "condition and 'I do not know.' in the cold "
-                          "condition. Smoke-tests the harness end-to-end "
-                          "without spending tokens or needing API keys."))
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Parse questions, do not retrieve, do not call any "
+            "LLM. Exits 0 if the file parses. Safe in CI "
+            "without DB or API keys."
+        ),
+    )
+    ap.add_argument(
+        "--offline-stub",
+        action="store_true",
+        help=(
+            "Use a deterministic pretend-LLM that always emits "
+            "the first expected substring in the with-memory "
+            "condition and 'I do not know.' in the cold "
+            "condition. Smoke-tests the harness end-to-end "
+            "without spending tokens or needing API keys."
+        ),
+    )
     args = ap.parse_args()
 
     if args.dry_run and args.offline_stub:
-        print("[eval] --dry-run and --offline-stub are mutually exclusive.",
-              file=sys.stderr)
+        print("[eval] --dry-run and --offline-stub are mutually exclusive.", file=sys.stderr)
         return 2
 
     qs = load_questions(args.questions)
@@ -315,10 +334,7 @@ def main() -> int:
         print(f"[eval] no questions loaded from {args.questions}", file=sys.stderr)
         return 2
 
-    print(
-        f"[eval] {len(qs)} question(s); top-k={args.top_k}; "
-        f"dry_run={args.dry_run}; offline_stub={args.offline_stub}"
-    )
+    print(f"[eval] {len(qs)} question(s); top-k={args.top_k}; dry_run={args.dry_run}; offline_stub={args.offline_stub}")
     pairs: list[tuple[Result, Result]] = []
     for q in qs:
         try:

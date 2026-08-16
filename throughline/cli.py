@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import subprocess
 import sys
@@ -106,8 +107,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if args.all:
         present = [a for a in all_adapters() if a.is_present()]
         if not present:
-            print("No sources present — nothing ingested. "
-                  "Run 'throughline ingest --list-sources' to see expected paths.")
+            print(
+                "No sources present — nothing ingested. Run 'throughline ingest --list-sources' to see expected paths."
+            )
             return 1
         results = run_many(present)
         return 0 if all(r.errors == 0 for r in results) else 1
@@ -124,8 +126,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     adapter = get_adapter(name)
     if adapter is None:
         sys.stderr.write(
-            f"Unknown source: {name!r}. Run `throughline ingest --list-sources` "
-            f"to see the available adapters.\n"
+            f"Unknown source: {name!r}. Run `throughline ingest --list-sources` to see the available adapters.\n"
         )
         return 2
     summary = run_adapter(adapter)
@@ -259,8 +260,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         from throughline.api.settings import RemoteBindRefused
     except ImportError as exc:
         print(
-            f"ERROR: the API server could not be imported ({exc}).\n"
-            "Reinstall with: pip install -e .",
+            f"ERROR: the API server could not be imported ({exc}).\nReinstall with: pip install -e .",
             file=sys.stderr,
         )
         return 2
@@ -347,7 +347,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """
     import json
 
-    from throughline.doctor import run_doctor, format_human as doctor_format
+    from throughline.doctor import format_human as doctor_format
+    from throughline.doctor import run_doctor
 
     cats = args.category if getattr(args, "category", None) else None
     report = run_doctor(categories=cats)
@@ -369,7 +370,8 @@ def cmd_conflicts(args: argparse.Namespace) -> int:
     """
     import json
 
-    from throughline.conflicts import find_conflicts, format_human as conflicts_format
+    from throughline.conflicts import find_conflicts
+    from throughline.conflicts import format_human as conflicts_format
 
     kinds = args.kind if getattr(args, "kind", None) else None
     report = find_conflicts(
@@ -490,8 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed",
         help="Generate vector embeddings (OpenAI or local Ollama).",
         description=(
-            "Creates pgvector embeddings for memory_chunks and messages. "
-            "Use --backend=ollama for a fully local setup."
+            "Creates pgvector embeddings for memory_chunks and messages. Use --backend=ollama for a fully local setup."
         ),
     )
     p.add_argument(
@@ -627,10 +628,10 @@ def build_parser() -> argparse.ArgumentParser:
             "re-running adds only the genuinely new names."
         ),
     )
-    p.add_argument("--include-conversations", action="store_true",
-                   help="Also pull project_names from the conversations table.")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Preview what would be inserted; do not write.")
+    p.add_argument(
+        "--include-conversations", action="store_true", help="Also pull project_names from the conversations table."
+    )
+    p.add_argument("--dry-run", action="store_true", help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
 
     # repair-conversations
@@ -645,10 +646,8 @@ def build_parser() -> argparse.ArgumentParser:
             "and updates the matching row. Idempotent."
         ),
     )
-    p.add_argument("--dry-run", action="store_true",
-                   help="Preview changes; do not write.")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Cap on number of files processed.")
+    p.add_argument("--dry-run", action="store_true", help="Preview changes; do not write.")
+    p.add_argument("--limit", type=int, default=None, help="Cap on number of files processed.")
     p.set_defaults(func=cmd_repair_conversations)
 
     # status

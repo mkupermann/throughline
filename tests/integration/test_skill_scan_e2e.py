@@ -13,12 +13,7 @@ def _make_skill(root: Path, name: str, description: str, version: str = "1.0.0")
     skill_dir = root / name
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"version: {version}\n"
-        "---\n\n"
-        f"# {name}\n\nBody of the skill.\n",
+        f"---\nname: {name}\ndescription: {description}\nversion: {version}\n---\n\n# {name}\n\nBody of the skill.\n",
         encoding="utf-8",
     )
     return skill_dir
@@ -93,11 +88,7 @@ def test_scan_skills_upserts_on_rerun(tmp_path, db_env, db_connection, monkeypat
 
     # Update the skill file and re-scan.
     (skill_dir / "SKILL.md").write_text(
-        "---\n"
-        "name: evolving-skill\n"
-        'description: v2. Trigger bei "new"\n'
-        "version: 2.0.0\n"
-        "---\n\n# updated\n",
+        '---\nname: evolving-skill\ndescription: v2. Trigger bei "new"\nversion: 2.0.0\n---\n\n# updated\n',
         encoding="utf-8",
     )
     scan_skills.main()

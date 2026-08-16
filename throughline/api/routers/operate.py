@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from throughline import embedding, queries as Q
+from throughline import embedding
+from throughline import queries as Q
 from throughline.config import get_db_config
 from throughline.scheduler import status as scheduler_status
 from throughline.status import collect_status
@@ -53,7 +54,9 @@ def status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
             "pgvector_usable": vector_ok,
             # The catalogue can list pgvector while its library is missing —
             # exactly what a Homebrew major-version bump does. Say which.
-            "note": None if vector_ok else (
+            "note": None
+            if vector_ok
+            else (
                 "pgvector is registered but its shared library cannot be loaded. "
                 "Every query touching a vector column fails. Reinstall pgvector "
                 "for this PostgreSQL major version."
@@ -97,11 +100,11 @@ def run(name: str) -> dict[str, Any]:
     """Start a job, or return the one already running under that name."""
     try:
         job = runner.start(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown job {name!r}")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown job {name!r}") from exc
     except JobUnavailable as exc:
         # 409: the request is well-formed, the environment cannot serve it.
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     snap = job.snapshot()
     return {"job_id": job.id, "name": job.name, "running": snap["running"]}
 

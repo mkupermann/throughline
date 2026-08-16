@@ -24,8 +24,7 @@ pytestmark = pytest.mark.integration
 def _insert_chunk(conn, source_type: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO memory_chunks (source_type, content, category, confidence) "
-            "VALUES (%s, %s, 'decision', 0.9)",
+            "INSERT INTO memory_chunks (source_type, content, category, confidence) VALUES (%s, %s, 'decision', 0.9)",
             (source_type, f"chunk written as {source_type}"),
         )
     conn.commit()
@@ -41,9 +40,7 @@ def test_each_extraction_source_type_moves_the_timestamp(db_env, source_type):
     conn = psycopg2.connect(**db_env)
     try:
         before = collect_status(conn=conn)
-        assert before.get("last_extraction_at") is None, (
-            "fresh database should have no extraction timestamp"
-        )
+        assert before.get("last_extraction_at") is None, "fresh database should have no extraction timestamp"
 
         _insert_chunk(conn, source_type)
 

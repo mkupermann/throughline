@@ -38,9 +38,7 @@ MIGRATION_NAME = re.compile(r"(?P<ordinal>\d{3})_[a-z0-9_]+\.sql\Z")
 # Its replacement is therefore treated as applied when the historical name is
 # present; do not rewrite tracking rows, because those are deployment history.
 LEGACY_MIGRATION_NAMES: dict[str, frozenset[str]] = {
-    "005_widen_conversation_token_counts.sql": frozenset(
-        {"001_widen_conversation_token_counts.sql"}
-    ),
+    "005_widen_conversation_token_counts.sql": frozenset({"001_widen_conversation_token_counts.sql"}),
 }
 
 TRACKING_DDL = """
@@ -135,8 +133,7 @@ def run_migration(cursor, migration: Path, migration_name: str | None = None) ->
     sql = _executable_sql(migration.read_text(encoding="utf-8"))
     cursor.execute(sql)
     cursor.execute(
-        "INSERT INTO public.applied_migrations (migration_name) VALUES (%s) "
-        "ON CONFLICT DO NOTHING",
+        "INSERT INTO public.applied_migrations (migration_name) VALUES (%s) ON CONFLICT DO NOTHING",
         (migration_name or migration.name,),
     )
 

@@ -8,10 +8,7 @@ meta.json + messages.jsonl under a per-session directory.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
-
-import pytest
 
 from throughline.adapters.vibe import VibeAdapter
 
@@ -26,18 +23,16 @@ def _make_session(
     """Create a synthetic Vibe session directory with meta.json and messages.jsonl."""
     session_dir = tmp_path / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if meta is not None:
-        (session_dir / "meta.json").write_text(
-            json.dumps(meta), encoding="utf-8"
-        )
-    
+        (session_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
     if messages is not None:
         messages_path = session_dir / "messages.jsonl"
         with open(messages_path, "w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg) + "\n")
-    
+
     return session_dir
 
 
@@ -81,10 +76,10 @@ class TestVibeAdapter:
         _make_session(home, session_id="session_20260728_091450_c0d81646")
         # Create a non-matching directory
         (home / "not_a_session").mkdir()
-        
+
         a = VibeAdapter()
         monkeypatch.setattr(a, "home", home)
-        
+
         discovered = sorted(p.name for p in a.discover())
         assert discovered == ["session_20260727_180500_c919513d", "session_20260728_091450_c0d81646"]
 
@@ -111,11 +106,21 @@ class TestVibeAdapter:
                 "title": "Test session",
             },
             messages=[
-                {"role": "user", "content": "Hello, how are you?", "message_id": "msg_1", "timestamp": "2026-07-27T18:05:01Z"},
-                {"role": "assistant", "content": "I'm doing well, thanks!", "message_id": "msg_2", "timestamp": "2026-07-27T18:05:02Z"},
+                {
+                    "role": "user",
+                    "content": "Hello, how are you?",
+                    "message_id": "msg_1",
+                    "timestamp": "2026-07-27T18:05:01Z",
+                },
+                {
+                    "role": "assistant",
+                    "content": "I'm doing well, thanks!",
+                    "message_id": "msg_2",
+                    "timestamp": "2026-07-27T18:05:02Z",
+                },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert conv.entrypoint == ""
@@ -150,7 +155,7 @@ class TestVibeAdapter:
                 },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -187,7 +192,7 @@ class TestVibeAdapter:
                 },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -218,7 +223,7 @@ class TestVibeAdapter:
                 },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -237,10 +242,15 @@ class TestVibeAdapter:
                 "stats": {},
             },
             messages=[
-                {"role": "system", "content": "You are a helpful assistant", "message_id": "msg_1", "timestamp": "2026-07-27T18:05:01Z"},
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant",
+                    "message_id": "msg_1",
+                    "timestamp": "2026-07-27T18:05:01Z",
+                },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -258,10 +268,15 @@ class TestVibeAdapter:
                 "stats": {},
             },
             messages=[
-                {"role": "tool", "content": "Tool output here", "message_id": "msg_1", "timestamp": "2026-07-27T18:05:01Z"},
+                {
+                    "role": "tool",
+                    "content": "Tool output here",
+                    "message_id": "msg_1",
+                    "timestamp": "2026-07-27T18:05:01Z",
+                },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 1
@@ -272,7 +287,7 @@ class TestVibeAdapter:
         session_dir.mkdir()
         # No meta.json, only messages
         (session_dir / "messages.jsonl").write_text('{"role": "user", "content": "hi"}\n')
-        
+
         assert VibeAdapter().parse(session_dir) is None
 
     def test_parse_returns_none_when_no_messages(self, tmp_path):
@@ -282,33 +297,39 @@ class TestVibeAdapter:
             meta={"session_id": "session_20260727_180500_nomsgs"},
             messages=None,
         )
-        
+
         assert VibeAdapter().parse(session_dir) is None
 
     def test_parse_returns_none_for_non_directory(self, tmp_path):
         file_path = tmp_path / "not_a_directory.txt"
         file_path.write_text("not a session")
-        
+
         assert VibeAdapter().parse(file_path) is None
 
     def test_session_id_is_deterministic(self, tmp_path):
         # Same meta session_id should produce same conversation session_id
         meta = {"session_id": "test_session_123", "start_time": "2026-07-27T18:05:00Z"}
         messages = [{"role": "user", "content": "hi", "message_id": "msg_1", "timestamp": "2026-07-27T18:05:01Z"}]
-        
-        session_dir1 = _make_session(tmp_path / "a", session_id="session_20260727_180500_abc", meta=meta, messages=messages)
-        session_dir2 = _make_session(tmp_path / "b", session_id="session_20260727_180500_xyz", meta=meta, messages=messages)
-        
+
+        session_dir1 = _make_session(
+            tmp_path / "a", session_id="session_20260727_180500_abc", meta=meta, messages=messages
+        )
+        session_dir2 = _make_session(
+            tmp_path / "b", session_id="session_20260727_180500_xyz", meta=meta, messages=messages
+        )
+
         conv1 = VibeAdapter().parse(session_dir1)
         conv2 = VibeAdapter().parse(session_dir2)
         assert conv1 is not None
         assert conv2 is not None
         # Same meta.session_id -> same derived UUID
         assert conv1.session_id == conv2.session_id
-        
+
         # Different meta session_id should produce different conversation session_id
         meta2 = {"session_id": "different_session_456", "start_time": "2026-07-27T18:05:00Z"}
-        session_dir3 = _make_session(tmp_path / "c", session_id="session_20260727_180500_def", meta=meta2, messages=messages)
+        session_dir3 = _make_session(
+            tmp_path / "c", session_id="session_20260727_180500_def", meta=meta2, messages=messages
+        )
         conv3 = VibeAdapter().parse(session_dir3)
         assert conv3 is not None
         assert conv3.session_id != conv1.session_id
@@ -317,13 +338,14 @@ class TestVibeAdapter:
         # Test that discover correctly identifies session directories
         root_a = tmp_path / "roota"
         root_b = tmp_path / "rootb"
-        root_a.mkdir(); root_b.mkdir()
-        
+        root_a.mkdir()
+        root_b.mkdir()
+
         _make_session(root_a, session_id="session_20260727_180500_aaa")
         _make_session(root_b, session_id="session_20260727_180500_bbb")
         # Non-matching directory
         (root_a / "not_a_session").mkdir()
-        
+
         a = VibeAdapter()
         monkeypatch.setattr(a, "home", root_a)
         names = sorted(p.name for p in a.discover())
@@ -352,7 +374,7 @@ class TestVibeAdapter:
                 {"role": "user", "content": "test", "message_id": "msg_1", "timestamp": "2026-07-27T18:05:01Z"},
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert conv.metadata["source"] == "vibe"
@@ -394,7 +416,7 @@ class TestVibeAdapter:
                 },
             ],
         )
-        
+
         conv = VibeAdapter().parse(session_dir)
         assert conv is not None
         assert len(conv.messages) == 2
