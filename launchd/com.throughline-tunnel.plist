@@ -51,10 +51,18 @@
     <string>/tmp/throughline-tunnel.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/throughline-tunnel.err</string>
+    <!-- Both of these pin which copy of the package runs. A machine that has
+         ever held an older checkout will import that one instead as soon as
+         the working directory is not this repository, and the agent then runs
+         code that has no `tunnel` command at all. -->
+    <key>WorkingDirectory</key>
+    <string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONPATH</key>
+        <string>REPLACE_WITH_ABSOLUTE_PATH_TO_REPO</string>
     </dict>
 </dict>
 </plist>

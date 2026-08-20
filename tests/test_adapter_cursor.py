@@ -310,3 +310,29 @@ def test_a_missing_cursor_directory_is_not_an_error(tmp_path, monkeypatch):
     adapter = CursorAdapter()
     monkeypatch.setattr(adapter, "home", tmp_path / ".cursor" / "sessions")
     assert list(adapter.discover()) == []
+
+
+def test_the_adapter_counts_as_present_with_only_the_new_layout(tmp_path, monkeypatch):
+    """discover() was fixed and is_present() was not.
+
+    The runner asks is_present() first and skips the adapter entirely when it
+    says no — so a machine with transcripts only under projects/ was reported
+    as "no data directory", and the discovery fix never ran.
+    """
+    from throughline.adapters.cursor import CursorAdapter
+
+    folder = tmp_path / ".cursor" / "projects" / "w" / "agent-transcripts" / "abc"
+    folder.mkdir(parents=True)
+    (folder / "abc.jsonl").write_text(_transcript_line("user", "Frage") + "\n", encoding="utf-8")
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", tmp_path / ".cursor" / "sessions")
+    assert adapter.is_present() is True
+
+
+def test_the_adapter_is_absent_when_neither_layout_exists(tmp_path, monkeypatch):
+    from throughline.adapters.cursor import CursorAdapter
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", tmp_path / ".cursor" / "sessions")
+    assert adapter.is_present() is False

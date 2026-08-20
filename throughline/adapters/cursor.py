@@ -299,6 +299,18 @@ class CursorAdapter(Adapter):
 
         return sorted(found, key=lambda p: (p.name, str(p)))
 
+    def is_present(self) -> bool:
+        """Whether this machine has Cursor transcripts in either layout.
+
+        The base implementation short-circuits on `home` not existing, which
+        for Cursor is the layout that a current install does not have. The
+        runner asks this before discovery, so a machine whose transcripts live
+        only under projects/ was reported as "no data directory" and the
+        adapter never ran at all — the discovery fix on its own changed
+        nothing.
+        """
+        return any(True for _ in self.discover_all())
+
     def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         """Parse a Cursor session JSONL file."""
         if not path.is_file():
