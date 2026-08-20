@@ -162,6 +162,22 @@ def build_transcript(messages: list[tuple[str, str | None]]) -> str:
     return transcript
 
 
+def usable_chunks(chunks: Any) -> tuple[list[dict[str, Any]], int]:
+    """Split a parsed model response into usable objects and rejected junk.
+
+    A small local model routinely answers the extraction prompt with a JSON
+    array of plain strings rather than objects. Feeding those to the insert
+    loop raised ``'str' object has no attribute 'get'`` once per element — an
+    error that names a Python type instead of saying the model returned the
+    wrong shape. Returns the objects and a count of what was thrown away, so
+    the run can report a malformed response as exactly that.
+    """
+    if not isinstance(chunks, list):
+        return [], 0
+    kept = [c for c in chunks if isinstance(c, dict)]
+    return kept, len(chunks) - len(kept)
+
+
 def parse_json_response(text: str) -> list[dict[str, Any]]:
     text = text.strip()
     if text.startswith("```"):
@@ -182,6 +198,51 @@ def parse_json_response(text: str) -> list[dict[str, Any]]:
         return []
 
 
+#: The categories the insert accepts. Single source of truth: the schema the
+#: model is constrained to and the filter the insert applies must not drift,
+#: or the model produces confident, well-formed, silently discarded output.
+CATEGORIES = (
+    "decision",
+    "pattern",
+    "insight",
+    "preference",
+    "contact",
+    "error_solution",
+    "project_context",
+    "workflow",
+)
+
+#: What a chunk must look like. Ollama constrains generation to this, so the
+#: model cannot answer with a trailing comma or an array of bare strings —
+#: which is what a 3B model did for nineteen conversations out of twenty.
+CHUNK_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string"},
+            "category": {"type": "string", "enum": list(CATEGORIES)},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "confidence": {"type": "number"},
+            "project": {"type": "string"},
+        },
+        "required": ["content", "category"],
+    },
+}
+
+
+def _schema_enabled() -> bool:
+    """Whether to constrain generation to CHUNK_SCHEMA.
+
+    On by default: it makes malformed output impossible. Off is a real
+    choice, not a debug flag — constrained decoding also lets a model answer
+    with the shortest document the schema permits, and for an array that is
+    ``[]``. Which trade wins depends on the model, so measure before changing
+    it: run the job both ways and compare chunks produced.
+    """
+    return os.environ.get("THROUGHLINE_EXTRACT_SCHEMA", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
 def call_model(prompt: str) -> str:
     """Send the prompt to whichever backend the probe found. Never raises.
 
@@ -193,6 +254,7 @@ def call_model(prompt: str) -> str:
         prompt,
         timeout=TIMEOUT_PER_CALL,
         model=MODEL,
+        schema=CHUNK_SCHEMA if _schema_enabled() else None,
         # Only the claude CLI cares: Claude Code names the project folder after
         # the process CWD, so inheriting the repo's would file this call inside
         # the user's real project history, and the next ingest would read it
@@ -244,7 +306,9 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     if not response:
         return 0
 
-    chunks = parse_json_response(response)
+    chunks, malformed = usable_chunks(parse_json_response(response))
+    if malformed:
+        print(f"    Modell lieferte {malformed} Eintrag/Einträge in der falschen Form (kein Objekt) — verworfen")
     # Cap defensively in case the model ignores the prompt — extra chunks are
     # truncated rather than rejected, so we never silently drop a session.
     if len(chunks) > MAX_CHUNKS_PER_CONVERSATION:
@@ -257,16 +321,7 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
             tags = chunk.get("tags", [])
             confidence = float(chunk.get("confidence", 0.8))
             project = chunk.get("project") or None
-            if not content or category not in [
-                "decision",
-                "pattern",
-                "insight",
-                "preference",
-                "contact",
-                "error_solution",
-                "project_context",
-                "workflow",
-            ]:
+            if not content or category not in CATEGORIES:
                 continue
             cursor.execute(
                 """

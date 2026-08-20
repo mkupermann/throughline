@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import unicodedata
@@ -17,6 +16,7 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
+from throughline import llm
 from throughline.message_derivations import lock_and_revalidate_conversation
 from throughline.pii import count_redactions, redact
 from throughline.self_referential import agent_call_cwd
@@ -50,18 +50,6 @@ def _connect() -> "psycopg2.extensions.connection":
         raise SystemExit(2) from e
 
 
-def _resolve_claude_bin() -> str:
-    env = os.environ.get("CLAUDE_BIN")
-    if env:
-        return env
-    from shutil import which
-
-    found = which("claude")
-    return found or "claude"
-
-
-CLAUDE_BIN = _resolve_claude_bin()
-MODEL = "sonnet"
 MAX_CONVERSATIONS_PER_RUN = 100
 MIN_MESSAGES = 3
 MAX_TRANSCRIPT_CHARS = 40000
@@ -204,29 +192,25 @@ def parse_json_response(text: str) -> dict:
         return {"entities": [], "relationships": []}
 
 
-def call_claude(prompt: str) -> str:
-    try:
-        # Run from a directory of our own: Claude Code names the project folder
-        # after the process CWD, so inheriting the repo's would file this call
-        # inside the user's real project history, and the next ingest would read
-        # it back as their work. See throughline.self_referential.
-        result = subprocess.run(
-            [CLAUDE_BIN, "-p", prompt, "--model", MODEL],
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_PER_CALL,
-            cwd=str(agent_call_cwd()),
-        )
-        if result.returncode != 0:
-            print(f"    Claude CLI error (exit {result.returncode}): {result.stderr[:200]}")
-            return ""
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        print(f"    Claude CLI timeout ({TIMEOUT_PER_CALL}s)")
+def call_model(prompt: str) -> str:
+    """Generate through the shared backend, like every other job here.
+
+    This used to shell out to the `claude` CLI directly, which meant entity
+    extraction ignored whichever backend the user had configured, could not
+    run at all without one specific vendor's tool installed, and sent
+    transcripts to that vendor without the backend probe ever reporting it.
+
+    ``cwd`` still points somewhere of our own: a CLI-shaped backend names its
+    project folder after the process working directory, so inheriting the
+    repo's would file this call inside the user's real project history and the
+    next ingest would read it back as their work. See
+    throughline.self_referential.
+    """
+    text, error = llm.complete(prompt, timeout=TIMEOUT_PER_CALL, cwd=str(agent_call_cwd()))
+    if error:
+        print(f"    Model error: {error}")
         return ""
-    except Exception as e:
-        print(f"    Claude CLI exception: {e}")
-        return ""
+    return (text or "").strip()
 
 
 def upsert_entity(
@@ -333,7 +317,7 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
         transcript = redacted
 
     prompt = PROMPT_TEMPLATE.replace("{TRANSCRIPT}", transcript)
-    response = call_claude(prompt)
+    response = call_model(prompt)
     if not response:
         return (0, 0)
 
@@ -422,15 +406,12 @@ def main() -> None:
     print("Claude Memory DB — Entity Extraction (Knowledge Graph)")
     print("=" * 60)
 
-    from shutil import which
-
-    if which(CLAUDE_BIN) is None and not os.path.isfile(CLAUDE_BIN):
-        sys.stderr.write(
-            "ERROR: Claude CLI not found.\n"
-            "  Set $CLAUDE_BIN or install the Claude Code CLI:\n"
-            "    https://docs.anthropic.com/en/docs/claude-code/setup\n"
-        )
+    backend = llm.backend_info()
+    if not backend.available:
+        sys.stderr.write(f"ERROR: no model available for entity extraction.\n  {backend.detail}\n")
         raise SystemExit(2)
+    where = "local" if backend.local else "remote"
+    print(f"Model: {backend.backend}/{backend.model} ({where})")
 
     conn = _connect()
     cursor = conn.cursor()

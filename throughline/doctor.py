@@ -459,12 +459,25 @@ def check_answer_backend() -> CheckResult:
 
     info = llm.backend_info()
     if not info.available:
+        default = llm._DEFAULT_MODEL.get("ollama", "")
+        remedy = f"ollama pull {default} — or set THROUGHLINE_ANSWER_BASE_URL / OPENAI_API_KEY"
+        # Someone whose generation used to run through the `claude` CLI still
+        # has the setting that selected it. Without a word here they meet the
+        # removal as an unexplained failure.
+        if (
+            os.environ.get("THROUGHLINE_ANSWER_BACKEND", "").strip().lower() == "claude"
+            or os.environ.get("CLAUDE_BIN", "").strip()
+        ):
+            remedy = (
+                "the `claude` CLI is no longer a generation backend — unset "
+                "THROUGHLINE_ANSWER_BACKEND / CLAUDE_BIN, then " + remedy
+            )
         return CheckResult(
             "answer_backend",
             "embeddings",
             "warn",
             f"no model available for `throughline ask` — {info.detail}",
-            remedy="ollama pull llama3.1:8b — or set THROUGHLINE_ANSWER_BASE_URL / OPENAI_API_KEY",
+            remedy=remedy,
             details={"available": False, "detail": info.detail},
         )
     where = "runs locally" if info.local else "sends excerpts off this machine"

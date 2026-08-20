@@ -143,8 +143,8 @@ class TestBackendIsNotOneVendor:
 
         seen = {}
 
-        def fake_complete(prompt, *, timeout, model=None, cwd=None):
-            seen.update(prompt=prompt, timeout=timeout, model=model, cwd=cwd)
+        def fake_complete(prompt, *, timeout, model=None, cwd=None, schema=None):
+            seen.update(prompt=prompt, timeout=timeout, model=model, cwd=cwd, schema=schema)
             return "[]", None
 
         monkeypatch.setattr(em._llm, "complete", fake_complete)
@@ -176,3 +176,95 @@ class TestBackendIsNotOneVendor:
         )
         em.call_model("x")
         assert "agent-calls" in seen["cwd"]
+
+
+# --------------------------------------------------------------------------- #
+# A small model answers in whatever shape it likes                            #
+# --------------------------------------------------------------------------- #
+
+
+def test_a_list_of_strings_is_rejected_as_malformed_not_crashed_on():
+    # qwen2.5:3b routinely answers the extraction prompt with a JSON array of
+    # plain strings. The insert loop assumed objects and blew up per element
+    # with "'str' object has no attribute 'get'" — an error that names the
+    # Python type rather than the thing that went wrong.
+    from throughline.jobs.extract_memory import usable_chunks
+
+    kept, rejected = usable_chunks(["just a sentence", "another one"])
+    assert kept == []
+    assert rejected == 2
+
+
+def test_objects_survive_the_same_filter():
+    from throughline.jobs.extract_memory import usable_chunks
+
+    chunk = {"content": "Wir nutzen pgvector", "category": "decision"}
+    kept, rejected = usable_chunks([chunk, "noise"])
+    assert kept == [chunk]
+    assert rejected == 1
+
+
+def test_a_response_that_is_not_a_list_yields_nothing_rather_than_raising():
+    from throughline.jobs.extract_memory import usable_chunks
+
+    assert usable_chunks("not a list at all") == ([], 0)
+    assert usable_chunks(None) == ([], 0)
+
+
+# --------------------------------------------------------------------------- #
+# The model is constrained, not trusted                                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_extraction_constrains_the_model_to_the_chunk_schema(monkeypatch):
+    # Asking politely for "a PURE JSON array" and parsing whatever comes back
+    # is how a local model produced usable output once in twenty tries. The
+    # schema makes the wrong shape unrepresentable.
+    from throughline.jobs import extract_memory as em
+
+    sent = {}
+    monkeypatch.setattr(em._llm, "complete", lambda prompt, **kw: (sent.update(kw), ("[]", None))[1])
+    em.call_model("bitte extrahieren")
+
+    schema = sent["schema"]
+    assert schema["type"] == "array"
+    item = schema["items"]
+    assert item["type"] == "object"
+    assert set(item["required"]) == {"content", "category"}
+    assert item["properties"]["category"]["enum"] == list(em.CATEGORIES)
+
+
+def test_the_schema_categories_match_the_ones_the_insert_accepts():
+    # A schema that allows a category the insert then rejects would produce
+    # confident, well-formed, silently discarded output.
+    from throughline.jobs import extract_memory as em
+
+    assert set(em.CATEGORIES) == {
+        "decision",
+        "pattern",
+        "insight",
+        "preference",
+        "contact",
+        "error_solution",
+        "project_context",
+        "workflow",
+    }
+
+
+def test_the_schema_constraint_can_be_switched_off(monkeypatch):
+    # Constrained decoding fixes syntax and can cost content: a reasoning model
+    # given a schema is free to answer with the shortest valid document, and
+    # "[]" is one. Which trade is right depends on the model, so it is a
+    # setting rather than a decision baked in here.
+    from throughline.jobs import extract_memory as em
+
+    sent = {}
+    monkeypatch.setattr(em._llm, "complete", lambda prompt, **kw: (sent.update(kw), ("[]", None))[1])
+
+    monkeypatch.delenv("THROUGHLINE_EXTRACT_SCHEMA", raising=False)
+    em.call_model("x")
+    assert sent["schema"] is em.CHUNK_SCHEMA
+
+    monkeypatch.setenv("THROUGHLINE_EXTRACT_SCHEMA", "0")
+    em.call_model("x")
+    assert sent["schema"] is None

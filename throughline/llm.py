@@ -12,15 +12,23 @@ So: a backend is chosen the same way the embedding backend already is —
 probed, environment-driven, no new config format to learn — and the probe
 order puts local models first, because that is what the product promises.
 
-    THROUGHLINE_ANSWER_BACKEND   auto | ollama | openai | claude   (default: auto)
+    THROUGHLINE_ANSWER_BACKEND   auto | ollama | openai   (default: auto)
     THROUGHLINE_ANSWER_MODEL     model name for that backend
     THROUGHLINE_ANSWER_BASE_URL  OpenAI-compatible endpoint (LM Studio, vLLM,
                                  llama.cpp, LiteLLM, a colleague's server…)
     OPENAI_API_KEY               only read by the `openai` backend
 
-`auto` tries Ollama, then any OpenAI-compatible server named by BASE_URL, then
-the `claude` CLI, then hosted OpenAI. A machine with Ollama running never
-reaches a network call, and never had to be configured to avoid one.
+`auto` tries Ollama, then any OpenAI-compatible server named by BASE_URL,
+then hosted OpenAI. A machine with Ollama running never reaches a network
+call, and never had to be configured to avoid one.
+
+The `claude` CLI was a backend here and is not one any more. It was the last
+route by which generation could reach one specific vendor without anyone
+choosing that — the CLI is simply present on a developer's PATH, so `auto`
+found it and sent transcripts to Anthropic on a machine whose owner had
+configured nothing. An OpenAI-compatible endpoint at least has to be named
+before it is used. Point BASE_URL at any server, including one that fronts
+Anthropic, if that is what you want.
 
 Only stdlib: this module must not add a dependency to answer a question, and
 every backend here speaks plain HTTP or a subprocess.
@@ -30,7 +38,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -47,9 +54,8 @@ _DEFAULT_OPENAI_COMPAT = "http://localhost:1234/v1"
 #: this job: read twelve short excerpts, answer, cite. A frontier model is not
 #: what makes the answer good here — the retrieval is.
 _DEFAULT_MODEL = {
-    "ollama": "llama3.1:8b",
+    "ollama": "qwen3.5:9b",
     "openai": "gpt-4o-mini",
-    "claude": "haiku",
 }
 
 
@@ -127,10 +133,17 @@ def backend_info() -> LLMInfo:
     def pick(backend: str, *, local: bool, detail: str = "") -> LLMInfo:
         chosen = model
         if not chosen and backend == "ollama":
-            # Whatever is actually pulled, in Ollama's own order. A hardcoded
-            # name would name a model the machine may not have.
+            # Prefer the model this project is tuned against when the machine
+            # has it, and otherwise use what it does have. Taking Ollama's
+            # first entry alone looked fine and was luck: that list is ordered
+            # by modification date, so pulling any unrelated model silently
+            # changed which one answered, and the default named in the docs was
+            # never the one that ran. A hardcoded name alone is no better — it
+            # would report a model the machine may not have.
             pulled = _ollama_chat_models()
-            chosen = pulled[0] if pulled else ""
+            wanted = _DEFAULT_MODEL.get(backend, "")
+            preferred = next((n for n in pulled if n == wanted or n.startswith(f"{wanted}-")), "")
+            chosen = preferred or (pulled[0] if pulled else "")
         return LLMInfo(
             available=True,
             backend=backend,
@@ -162,9 +175,14 @@ def backend_info() -> LLMInfo:
         return pick("openai", local=False, detail="api.openai.com")
 
     if preferred == "claude":
-        if not shutil.which(os.environ.get("CLAUDE_BIN", "claude")):
-            return LLMInfo(False, detail="No `claude` CLI on PATH.")
-        return pick("claude", local=False, detail="Anthropic API via the claude CLI")
+        return LLMInfo(
+            False,
+            detail=(
+                "The `claude` CLI is no longer a generation backend. Use "
+                "`ollama`, or point THROUGHLINE_ANSWER_BASE_URL at an "
+                "OpenAI-compatible endpoint."
+            ),
+        )
 
     # auto — local first, and never silently reaching the network when
     # something on this machine can do the job.
@@ -173,16 +191,14 @@ def backend_info() -> LLMInfo:
         return pick("ollama", local=True, detail=", ".join(chat[:3]))
     if base:
         return pick("openai", local=_is_loopback(base), detail=base)
-    if shutil.which(os.environ.get("CLAUDE_BIN", "claude")):
-        return pick("claude", local=False, detail="Anthropic API via the claude CLI")
     if os.environ.get("OPENAI_API_KEY", "").strip():
         return pick("openai", local=False, detail="api.openai.com")
     return LLMInfo(
         False,
         detail=(
-            "No model available. Start Ollama (`ollama serve`), set "
-            "THROUGHLINE_ANSWER_BASE_URL to an OpenAI-compatible server, or "
-            "install the `claude` CLI."
+            "No model available. Start Ollama (`ollama serve`) and pull a "
+            "generation model, or set THROUGHLINE_ANSWER_BASE_URL to an "
+            "OpenAI-compatible server."
         ),
     )
 
@@ -197,6 +213,7 @@ def complete(
     timeout: float = 180.0,
     cwd: str | None = None,
     model: str | None = None,
+    schema: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Run *prompt* through the configured model. Returns (text, error).
 
@@ -216,12 +233,26 @@ def complete(
 
     try:
         if info.backend == "ollama":
-            data = _http_json(
-                f"{_OLLAMA_URL}/api/generate",
-                {"model": info.model, "prompt": prompt, "stream": False},
-                timeout=timeout,
-            )
-            return (data.get("response") or "").strip(), None
+            body: dict = {"model": info.model, "prompt": prompt, "stream": False}
+            if schema:
+                # Ollama constrains generation to the schema, so the model can
+                # only emit tokens that fit it. Malformed JSON stops being a
+                # possibility rather than something to parse defensively —
+                # which is what made small local models unusable for
+                # extraction: a 3B model produced usable output for one
+                # conversation in twenty, mostly by answering in the wrong
+                # shape.
+                body["format"] = schema
+                # Thinking has to go with it. A reasoning model given a schema
+                # emits the constrained JSON into `thinking` and leaves
+                # `response` empty, so the caller sees nothing at all — the
+                # same twenty conversations came back blank, this time without
+                # a single error to explain it.
+                body["think"] = False
+            data = _http_json(f"{_OLLAMA_URL}/api/generate", body, timeout=timeout)
+            # Belt and braces for a model that ignores think=false.
+            answer = (data.get("response") or "").strip() or (data.get("thinking") or "").strip()
+            return answer, None
 
         if info.backend == "openai":
             base = _openai_compat_base() or "https://api.openai.com/v1"
@@ -236,24 +267,16 @@ def complete(
                     "model": info.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.2,
+                    # OpenAI-compatible servers vary in how much of a schema
+                    # they honour; json_object is the part they all implement.
+                    **({"response_format": {"type": "json_object"}} if schema else {}),
                 },
                 timeout=timeout,
                 headers=headers,
             )
             return (data["choices"][0]["message"]["content"] or "").strip(), None
 
-        # claude CLI
-        cli = shutil.which(os.environ.get("CLAUDE_BIN", "claude"))
-        proc = subprocess.run(
-            [cli, "-p", prompt, "--model", info.model],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        if proc.returncode != 0:
-            return None, f"claude exited {proc.returncode}"
-        return proc.stdout.strip(), None
+        return None, f"Unknown backend {info.backend!r}"
 
     except subprocess.TimeoutExpired:
         return None, f"{info.backend} timed out after {timeout:.0f}s"

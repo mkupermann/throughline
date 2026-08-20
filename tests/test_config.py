@@ -54,22 +54,6 @@ class TestDbConfig:
             config.get_db_config()
 
 
-class TestClaudeBin:
-    def test_env_override_wins(self, monkeypatch):
-        monkeypatch.setenv("CLAUDE_BIN", "/opt/custom/claude")
-        assert config.get_claude_bin() == "/opt/custom/claude"
-
-    def test_path_lookup_used_when_no_override(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_BIN", raising=False)
-        monkeypatch.setattr(config, "which", lambda name: "/usr/local/bin/claude")
-        assert config.get_claude_bin() == "/usr/local/bin/claude"
-
-    def test_returns_none_when_nothing_found(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_BIN", raising=False)
-        monkeypatch.setattr(config, "which", lambda name: None)
-        assert config.get_claude_bin() is None
-
-
 class TestClaudeDir:
     def test_default_resolves_to_home_claude(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_DIR", raising=False)
@@ -146,3 +130,11 @@ class TestLoadDotenv:
         monkeypatch.delenv("TL_TEST_KEY", raising=False)
         applied = config.load_dotenv()
         assert isinstance(applied, dict)
+
+
+def test_the_claude_binary_lookup_is_gone():
+    """Generation no longer shells out to a vendor CLI, so nothing should be
+    resolving one — a helper that still exists is an invitation to use it."""
+    from throughline import config
+
+    assert not hasattr(config, "get_claude_bin")

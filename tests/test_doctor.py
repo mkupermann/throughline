@@ -226,3 +226,31 @@ def test_backup_check_passes_on_a_fresh_dump(tmp_path, monkeypatch) -> None:
     r = doctor.check_archive_backup()
     assert r.status == "pass"
     assert r.details["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# The removed vendor CLI                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_remedy_names_a_model_the_project_actually_defaults_to(monkeypatch):
+    # A remedy telling people to pull a model the tool no longer prefers sends
+    # them to a second-choice model and a second round of debugging.
+    from throughline import doctor, llm
+
+    monkeypatch.setattr(llm, "backend_info", lambda: llm.LLMInfo(False, detail="nothing here"))
+    result = doctor.check_answer_backend()
+    assert llm._DEFAULT_MODEL["ollama"] in (result.remedy or "")
+
+
+def test_a_leftover_claude_setting_is_called_out(monkeypatch):
+    # Someone whose generation ran through the claude CLI has CLAUDE_BIN or
+    # THROUGHLINE_ANSWER_BACKEND=claude set. Silence here means they discover
+    # the change as an unexplained failure.
+    from throughline import doctor, llm
+
+    monkeypatch.setenv("THROUGHLINE_ANSWER_BACKEND", "claude")
+    monkeypatch.setattr(llm, "backend_info", lambda: llm.LLMInfo(False, detail="not a backend"))
+    result = doctor.check_answer_backend()
+    assert result.status == "warn"
+    assert "claude" in (result.message + (result.remedy or "")).lower()

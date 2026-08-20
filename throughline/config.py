@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from shutil import which
 from typing import Any
 
 
@@ -65,19 +64,6 @@ def get_db_config() -> dict[str, Any]:
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
     }
-
-
-def get_claude_bin() -> str | None:
-    """Locate the ``claude`` CLI binary.
-
-    Priority: ``$CLAUDE_BIN`` env var -> ``PATH`` lookup -> ``None`` if
-    nothing was found. Callers are responsible for raising a meaningful
-    error when the binary is required but missing.
-    """
-    env = os.environ.get("CLAUDE_BIN")
-    if env:
-        return env
-    return which("claude")
 
 
 def get_claude_dir() -> Path:
