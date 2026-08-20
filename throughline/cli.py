@@ -302,6 +302,22 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
     return _call_script_main("backfill_projects", passthrough)
 
 
+def cmd_tunnel(args: argparse.Namespace) -> int:
+    """Hold open a loopback-only link to the other machine's PostgreSQL."""
+    passthrough: list[str] = ["--host", args.host, "--user", args.user]
+    for flag, value in (
+        ("--peer-port", args.peer_port),
+        ("--local-port", args.local_port),
+        ("--bridge-port", args.bridge_port),
+    ):
+        passthrough += [flag, str(value)]
+    if args.identity:
+        passthrough += ["--identity", args.identity]
+    if args.show:
+        passthrough.append("--print")
+    return _call_script_main("tunnel", passthrough)
+
+
 def cmd_consolidate(args: argparse.Namespace) -> int:
     """Move this database's contents into another Throughline database."""
     passthrough: list[str] = []
@@ -669,6 +685,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
+
+    # tunnel
+    p = sub.add_parser(
+        "tunnel",
+        help="Hold open a loopback-only link to another machine's PostgreSQL.",
+        description=(
+            "One SSH connection carries both directions, so only the machine "
+            "being dialled needs an SSH server, and neither database is ever "
+            "exposed to the network — both forwards bind to 127.0.0.1. Does "
+            "not daemonise; see launchd/com.throughline-tunnel.plist."
+        ),
+    )
+    p.add_argument("--host", required=True, help="The other machine, e.g. framework.fritz.box.")
+    p.add_argument("--user", required=True, help="Login on the other machine.")
+    p.add_argument("--peer-port", type=int, default=5433, help="Its PostgreSQL port (default: 5433).")
+    p.add_argument("--local-port", type=int, default=5433, help="This machine's PostgreSQL port.")
+    p.add_argument("--bridge-port", type=int, default=5434, help="Where each side reaches the other.")
+    p.add_argument("--identity", default=None, help="SSH key to use.")
+    p.add_argument("--print", action="store_true", dest="show", help="Print the command and exit.")
+    p.set_defaults(func=cmd_tunnel)
 
     # consolidate
     p = sub.add_parser(

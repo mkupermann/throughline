@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A standing, loopback-only link to the other machine's PostgreSQL.
+
+  One SSH connection carries both directions, so only the machine being
+  dialled needs an SSH server. Neither database is ever exposed to the
+  network: both forwards bind to 127.0.0.1.
+
+  Install:
+    1. Replace every REPLACE_WITH_ placeholder below.
+    2. cp launchd/com.throughline-tunnel.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.throughline-tunnel.plist
+
+  KeepAlive with SuccessfulExit=false restarts it whenever ssh exits, which is
+  what "connected whenever both machines are on the network" means in
+  practice: when the other machine is asleep or elsewhere, ssh fails, launchd
+  waits ThrottleInterval and tries again. That is a working retry loop, not an
+  error to fix — expect the log to fill with connection failures while the
+  other machine is away.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.throughline-tunnel</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>REPLACE_WITH_PYTHON</string>
+        <string>-m</string>
+        <string>throughline</string>
+        <string>tunnel</string>
+        <string>--host</string>
+        <string>REPLACE_WITH_PEER_HOSTNAME</string>
+        <string>--user</string>
+        <string>REPLACE_WITH_PEER_USER</string>
+        <string>--identity</string>
+        <string>REPLACE_WITH_ABSOLUTE_PATH_TO_SSH_KEY</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <!-- Long enough that an absent peer does not spin, short enough that the
+         link is back within half a minute of both machines being present. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/throughline-tunnel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/throughline-tunnel.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

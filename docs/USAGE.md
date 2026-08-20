@@ -275,6 +275,36 @@ restore checks one against the other. A restore without them is refused rather
 than performed blind, because a half-restored corpus looks exactly like a whole
 one until you go looking.
 
+## A standing link between two machines
+
+Bidirectional replication needs each node to reach the other's PostgreSQL.
+Opening a database port on the LAN is not the way: this corpus is served by a
+`trust`-configured PostgreSQL, so whoever reaches the port is in.
+
+One SSH connection carries both directions, so only the machine being dialled
+needs an SSH server:
+
+```bash
+throughline tunnel --host framework.fritz.box --user michael \
+    --identity ~/.ssh/id_ed25519_throughline
+```
+
+`-L` makes the peer's database reachable here on `127.0.0.1:5434`; `-R` makes
+this one reachable there on the same port, over the same socket. Both forwards
+bind to loopback, so neither database is ever on the network.
+
+For it to stand rather than be started by hand, use
+[`launchd/com.throughline-tunnel.plist`](../launchd/com.throughline-tunnel.plist).
+`KeepAlive` restarts ssh whenever it exits, which is what "connected whenever
+both machines are on the network" means in practice: while the other machine is
+asleep or elsewhere, ssh fails and launchd retries. Expect the log to fill with
+connection failures during those stretches — that is the retry loop working,
+not a fault.
+
+`ExitOnForwardFailure=yes` matters more than it looks: without it ssh stays up
+when a forward could not bind, so the supervisor sees a healthy process while
+replication sees nothing.
+
 ## Checking on it
 
 ```bash

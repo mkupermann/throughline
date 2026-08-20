@@ -180,6 +180,14 @@ flag to label them. Nothing is deleted — every listing gains a
   `THROUGHLINE_CLINE_DIR`, resolved per platform by the bootstrap, with an
   empty placeholder where Cline is absent.
 
+- **`throughline tunnel` holds a loopback-only link to another machine.** The
+  groundwork for replicating between two machines without putting a database
+  on the network — this corpus is served by a `trust`-configured PostgreSQL,
+  so whoever reaches the port is in. One SSH connection carries both
+  directions, so only the machine being dialled needs a server, and both
+  forwards bind to 127.0.0.1. A launch agent keeps it standing;
+  `ExitOnForwardFailure=yes` stops a half-open tunnel from reading as healthy.
+
 - **`throughline consolidate --export-to` carries a corpus to a machine that
   cannot see this one.** The archive travels with the row counts it should
   reproduce, because the far machine cannot compare against a source it cannot
