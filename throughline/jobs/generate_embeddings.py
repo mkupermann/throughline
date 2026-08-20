@@ -71,7 +71,11 @@ OPENAI_MAX_CHARS = 24000  # rough safety cap per input
 
 OLLAMA_MODEL = "nomic-embed-text"
 OLLAMA_DIM = 768
-OLLAMA_URL = "http://localhost:11434"
+# Same variable `throughline.llm` reads. It used to be hardcoded here, so a
+# container — or any machine where Ollama is not on this loopback — could
+# never embed no matter what was configured, and said so in a message that
+# was true and useless: "Ollama is not running on http://localhost:11434".
+OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 OLLAMA_BATCH = 1
 OLLAMA_MAX_CHARS = 4000
 

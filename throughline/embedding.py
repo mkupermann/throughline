@@ -64,7 +64,7 @@ def _probe(preferred: str) -> str:
         return ""
     if not ge.ollama_up():
         return (
-            "Ollama is not running on http://localhost:11434 and OPENAI_API_KEY "
+            f"Ollama is not running on {ge.OLLAMA_URL} and OPENAI_API_KEY "
             "is not set. Start Ollama (`ollama serve`) or set an API key."
         )
     if not ge.ollama_has_model(ge.OLLAMA_MODEL):

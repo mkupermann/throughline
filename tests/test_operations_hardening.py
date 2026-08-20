@@ -20,6 +20,11 @@ def compose() -> dict:
     return yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
 
 
+@pytest.fixture()
+def ci_workflow() -> dict:
+    return yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+
+
 def test_compose_publishes_every_network_service_on_loopback(compose: dict) -> None:
     """A missing loopback prefix would expose an unauthenticated service."""
     services = compose["services"]
@@ -56,13 +61,34 @@ def test_compose_ports_are_configurable_without_losing_loopback(compose: dict) -
         assert variable in str(services[service]["ports"][0])
 
 
+def test_schema_ci_stops_on_the_first_sql_error(ci_workflow: dict) -> None:
+    """psql otherwise reports success after errors in a schema file."""
+    apply_schema = next(
+        step for step in ci_workflow["jobs"]["schema-validation"]["steps"] if step.get("name") == "Apply schema"
+    )
+
+    assert "ON_ERROR_STOP=1" in apply_schema["run"]
+
+
+def test_markdownlint_is_a_required_ci_gate(ci_workflow: dict) -> None:
+    """Documentation format regressions must fail the workflow."""
+    markdownlint = next(
+        step for step in ci_workflow["jobs"]["markdown-lint"]["steps"] if step.get("name") == "markdownlint"
+    )
+
+    assert markdownlint.get("continue-on-error") is not True
+
+
 def test_application_image_runs_unprivileged_and_compose_owns_remote_bind(compose: dict) -> None:
     """The image stays safe when reused without the controlled Compose boundary."""
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    web_environment = compose["services"]["web"]["environment"]
 
     assert "USER throughline" in dockerfile
     assert "THROUGHLINE_ALLOW_REMOTE" not in dockerfile
-    assert compose["services"]["web"]["environment"]["THROUGHLINE_ALLOW_REMOTE"] == "1"
+    assert "THROUGHLINE_HOST=127.0.0.1" in dockerfile
+    assert web_environment["THROUGHLINE_HOST"] == "0.0.0.0"
+    assert web_environment["THROUGHLINE_ALLOW_REMOTE"] == "1"
 
 
 def test_application_uid_and_gid_are_build_time_configuration(compose: dict) -> None:
@@ -83,7 +109,7 @@ def test_dockerfile_handles_an_existing_gid_without_assuming_its_group_name() ->
     assert '(getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline)' in dockerfile
     assert 'useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID"' in dockerfile
     assert 'install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups' in dockerfile
-    assert 'install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups' not in dockerfile
+    assert "install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups" not in dockerfile
 
 
 @pytest.mark.integration
@@ -133,7 +159,7 @@ def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> No
     assert web["environment"]["CLAUDE_MEMORY_BACKUP_DIR"] == "/var/lib/throughline/backups"
     assert "backup_data:/var/lib/throughline/backups" in web["volumes"]
     assert compose["volumes"]["backup_data"]["name"] == "throughline_backup_data"
-    assert "install -d -m 700 -o throughline -g \"$THROUGHLINE_GID\" /var/lib/throughline/backups" in dockerfile
+    assert 'install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups' in dockerfile
 
 
 def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: Path) -> None:
@@ -417,3 +443,77 @@ def test_backup_discovers_pg_dump_on_path_without_a_homebrew_location(script: st
     subprocess.run(["bash", str(ROOT / script)], check=True, env=env, capture_output=True, text=True)
 
     assert len(list(backup_dir.glob("throughline_*.sql.gz"))) == 1
+
+
+def test_the_export_has_a_destination_that_survives_the_container(compose: dict) -> None:
+    """An export written into the container's own filesystem is thrown away.
+
+    Every source directory is mounted read-only and the rest of the image is
+    a throwaway layer, so the export's default destination — the container
+    user's home — looks like it worked and is gone on the next `up`. The
+    export needs one writable place that lives on the host.
+    """
+    web = compose["services"]["web"]
+    export_root = web["environment"]["THROUGHLINE_EXPORT_ROOT"]
+
+    # The boundary the API enforces must be a mount, not the container's home.
+    assert export_root != "/home/throughline"
+
+    def parts(mount: str) -> tuple[str, str, str]:
+        """Split source:target[:options], tolerating `${VAR:-default}` sources."""
+        options = ""
+        rest = mount
+        if rest.endswith((":ro", ":rw")):
+            rest, options = rest.rsplit(":", 1)
+        source, _, target = rest.rpartition(":")
+        return source, target, options
+
+    target = [parts(str(v)) for v in web["volumes"]]
+    match = [t for t in target if t[1] == export_root]
+    assert match, f"nothing is mounted at {export_root}"
+    source, _, options = match[0]
+
+    # It has to be writable — read-only would fail at the first file.
+    assert options != "ro"
+
+    # And it comes from the host, not a named volume the user cannot reach:
+    # an export nobody can open in their editor is not an export.
+    assert source.startswith(("~", "./", "/", "${"))
+
+
+def test_the_web_container_is_told_where_ollama_is(compose: dict) -> None:
+    """The optional `embeddings` profile ships an Ollama service, and nothing
+    ever told the web container to use it.
+
+    Unset, the probe looks for Ollama on the container's own loopback, where
+    there is never anything — so with the profile running, generation still
+    reported no model available. The default names the compose service; a host
+    install is one override away.
+    """
+    web = compose["services"]["web"]
+    host = web["environment"]["OLLAMA_HOST"]
+
+    assert "ollama" in host
+    assert "localhost" not in host and "127.0.0.1" not in host
+    # Overridable, because plenty of people run Ollama on the host instead.
+    assert host.startswith("${")
+
+
+def test_compose_does_not_borrow_variable_names_the_native_tool_reads(compose: dict) -> None:
+    """`.env` is read by Compose *and* by `throughline.config.load_dotenv`.
+
+    A Compose-only value stored under a name the native CLI also reads breaks
+    the native install: setting `OLLAMA_HOST=http://host.docker.internal:11434`
+    so the container could reach the host made the host's own server report no
+    embedding and no generation backend, because that name resolves nowhere
+    outside a container. Compose must map its own variable into the container's
+    environment, not reuse the application's name on the host side.
+    """
+    web = compose["services"]["web"]
+
+    # Names the application itself reads, on the host as well as in a container.
+    shared = ("OLLAMA_HOST", "OPENAI_API_KEY", "THROUGHLINE_ANSWER_BASE_URL", "THROUGHLINE_ANSWER_MODEL")
+    for key, value in web["environment"].items():
+        if key in shared and isinstance(value, str) and "${" in value:
+            interpolated = value[value.index("${") + 2 :].split(":-")[0].rstrip("}")
+            assert interpolated != key, f"{key} is filled from ${{{key}}} in .env, which the native CLI reads too"

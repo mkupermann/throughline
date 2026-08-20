@@ -105,11 +105,32 @@ services:
       <<: *pg-env
       # The image deliberately has no remote-bind bypass. Docker networking
       # requires 0.0.0.0 in the container; the port mapping below is loopback.
+      THROUGHLINE_HOST: "0.0.0.0"
       THROUGHLINE_ALLOW_REMOTE: "1"
       # This path is a named volume initialized with 0700 ownership in the
       # image, so backups survive web-container replacement without becoming
       # readable by other container users.
       CLAUDE_MEMORY_BACKUP_DIR: /var/lib/throughline/backups
+      # The Markdown export is the one thing this service writes for a person
+      # to read, so it needs somewhere on the host. Everything else here is a
+      # read-only source mount or a named volume, and the container's own
+      # filesystem is a throwaway layer: an export written there would look
+      # like it worked and be gone on the next `up`. Confining the API to this
+      # directory also keeps a request from naming any other path.
+      THROUGHLINE_EXPORT_ROOT: /home/throughline/exports
+      # Where to find Ollama. Unset, the probe looks on the container's own
+      # loopback, where there is never anything — so the optional `embeddings`
+      # profile shipped an Ollama service that the web container could not
+      # reach, and generation reported no model available with the service
+      # running beside it. Default: the compose service. For an Ollama on the
+      # host, set THROUGHLINE_OLLAMA_URL=http://host.docker.internal:11434 in
+      # .env (on Linux add `--add-host=host.docker.internal:host-gateway`).
+      #
+      # The host-side name is deliberately not OLLAMA_HOST: `.env` is read by
+      # Compose *and* by the native CLI, so storing a container-only address
+      # under the name the application itself reads makes the host's own
+      # server report no embedding and no generation backend.
+      OLLAMA_HOST: "${THROUGHLINE_OLLAMA_URL:-http://ollama:11434}"
     ports:
       # Published on loopback only: the API has no authentication, so the
       # container must not be reachable from the rest of the network.
@@ -125,6 +146,9 @@ services:
       - ~/.vibe:/home/throughline/.vibe:ro
       - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
       - backup_data:/var/lib/throughline/backups
+      # Writable, and on the host: override with THROUGHLINE_EXPORT_DIR to send
+      # the export straight into a vault or notes folder.
+      - ${THROUGHLINE_EXPORT_DIR:-./exports}:/home/throughline/exports
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8787/api/health"]
       interval: 30s
