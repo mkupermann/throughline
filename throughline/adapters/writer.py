@@ -32,6 +32,29 @@ from throughline.self_referential import first_user_text, self_referential_reaso
 from .base import Adapter, IngestSummary, NormalisedConversation
 
 
+def scrub_nul(value: Any) -> Any:
+    """Remove U+0000 from anything on its way into a text or jsonb column.
+
+    PostgreSQL text cannot hold a NUL byte, and psycopg2 refuses the whole
+    statement rather than the one value: "A string literal cannot contain NUL
+    (0x00) characters". The writer then rolls the session back, so one stray
+    byte anywhere in a transcript costs every message in it — a 224-message
+    Claude Code session ingested nowhere for exactly this reason.
+
+    Dropping the byte is the only option that keeps the session: it carries no
+    meaning in a transcript, and the alternative is losing the conversation.
+    Recurses into the JSON payloads, where a NUL fails the same insert for the
+    same reason.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {k: scrub_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub_nul(v) for v in value]
+    return value
+
+
 def _db_config() -> dict[str, Any]:
     return {
         "dbname": os.environ.get("PGDATABASE", "throughline"),
@@ -146,15 +169,15 @@ def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> i
             m.uuid,
             m.parent_uuid,
             m.role,
-            m.content,
-            Json(m.content_blocks) if m.content_blocks is not None else None,
-            Json(m.tool_calls) if m.tool_calls else None,
+            scrub_nul(m.content),
+            Json(scrub_nul(m.content_blocks)) if m.content_blocks is not None else None,
+            Json(scrub_nul(m.tool_calls)) if m.tool_calls else None,
             m.tool_name,
             m.is_sidechain,
             m.model,
             m.token_count,
             m.created_at or conv.started_at,
-            Json(m.metadata or {}),
+            Json(scrub_nul(m.metadata or {})),
         )
         for m in conv.messages
     ]
