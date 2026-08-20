@@ -509,6 +509,8 @@ export interface ExportOptions {
   root: string;
   /** A destination inside the root, offered so nobody has to invent one. */
   suggested: string;
+  /** Where `root` is on the machine the person is using. Differs in a container. */
+  hostPath: string;
   job: string;
   defaults: { includeGenerated: boolean; redact: boolean; toolOutput: number; memory: boolean };
 }

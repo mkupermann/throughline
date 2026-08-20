@@ -74,7 +74,7 @@ def _parse_timestamp(ts: str | float | int | None) -> datetime | None:
     """Parse Cursor timestamp to datetime."""
     if ts is None:
         return None
-    if isinstance(ts, (int, float)):
+    if isinstance(ts, int | float):
         return datetime.fromtimestamp(ts, tz=timezone.utc)
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -268,17 +268,36 @@ class CursorAdapter(Adapter):
     home = Path("~/.cursor/sessions").expanduser()
 
     def discover(self) -> Iterable[Path]:
-        """Discover Cursor session JSONL files."""
-        home = self.home
-        if not home.exists():
-            return []
+        """Every Cursor transcript this machine has, in either layout.
 
-        session_files = []
-        for entry in home.iterdir():
-            if entry.is_file() and entry.suffix == ".jsonl":
-                session_files.append(entry)
+        A current install writes to
+        ``~/.cursor/projects/<window>/agent-transcripts/<id>/<id>.jsonl``.
+        This adapter looked only at ``~/.cursor/sessions``, which such an
+        install does not have at all: on the machine where this was found,
+        35,411 files sat under ~/.cursor and not one session was ingested.
+        The old location is still read, because dropping it would trade one
+        silent gap for another.
 
-        return sorted(session_files, key=lambda x: x.name)
+        Transcripts under ``subagents/`` are left out for the same reason
+        Claude Code's are — a sub-agent's transcript belongs to the session
+        that spawned it, not to a session someone had.
+        """
+        found: list[Path] = []
+
+        # The layout this adapter was written against. `home` is the override
+        # point the rest of this package uses, so both locations derive from
+        # it rather than from the environment.
+        sessions = self.home
+        if sessions.exists():
+            found.extend(entry for entry in sessions.iterdir() if entry.is_file() and entry.suffix == ".jsonl")
+
+        projects = sessions.parent / "projects"
+        if projects.exists():
+            for path in projects.glob("*/agent-transcripts/*/*.jsonl"):
+                if path.is_file():
+                    found.append(path)
+
+        return sorted(found, key=lambda p: (p.name, str(p)))
 
     def parse(self, path: Path) -> NormalisedConversation | list[NormalisedConversation] | None:
         """Parse a Cursor session JSONL file."""

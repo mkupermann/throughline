@@ -31,6 +31,7 @@ const options = {
   root: "/Users/dev",
   suggested: "/Users/dev/Throughline-Export",
   job: "export-markdown",
+  hostPath: "/Users/dev",
   defaults: { includeGenerated: false, redact: false, toolOutput: 0, memory: true },
 };
 
@@ -123,5 +124,28 @@ describe("ExportPanel discoverability", () => {
     const { container } = renderPanel();
     await screen.findByLabelText(/destination/i);
     expect(container.querySelector("#export")).toBeTruthy();
+  });
+});
+
+describe("ExportPanel in a container", () => {
+  it("says where the files appear on the host, not only inside the container", async () => {
+    vi.mocked(exportApi.options).mockResolvedValue({
+      ...options,
+      root: "/home/throughline/exports",
+      suggested: "/home/throughline/exports/Throughline-Export",
+      hostPath: "C:\\Users\\nicet\\throughline\\exports",
+    });
+    renderPanel();
+
+    // Typing a Windows path is refused; without this the refusal reads as the
+    // export being broken, and a successful one lands somewhere unfindable.
+    expect(await screen.findByText(/C:\\Users\\nicet\\throughline\\exports/)).toBeTruthy();
+  });
+
+  it("does not repeat itself when the two are the same", async () => {
+    vi.mocked(exportApi.options).mockResolvedValue({ ...options, hostPath: options.root });
+    renderPanel();
+    await screen.findByLabelText(/destination/i);
+    expect(screen.queryByText(/appears on this machine/i)).toBeNull();
   });
 });

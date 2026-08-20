@@ -11,6 +11,7 @@ becomes argv; this endpoint does not spend it.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -40,8 +41,15 @@ class ExportRequest(BaseModel):
 def options() -> dict[str, Any]:
     """What the UI needs to offer the export without guessing."""
     root = em.export_root()
+    # In a container the destination is a container path, and the panel said
+    # nothing about where that is on the machine the person is using. On
+    # Windows they type C:\Users\… , are refused, and read it as the export
+    # being broken — while a successful export lands somewhere they cannot
+    # find. Compose passes the host side of the mount so the UI can say both.
+    host_path = os.environ.get("THROUGHLINE_EXPORT_HOST_PATH", "").strip() or str(root)
     return {
         "root": str(root),
+        "hostPath": host_path,
         "suggested": str(root / _SUGGESTED_FOLDER),
         "job": "export-markdown",
         "defaults": {

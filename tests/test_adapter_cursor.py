@@ -237,3 +237,76 @@ class TestMessageIdsSurviveTheDatabase:
         )
         conv = CursorAdapter().parse(tmp_path / "session_z.jsonl")
         assert conv.messages[0].uuid == real
+
+
+# --------------------------------------------------------------------------- #
+# Where Cursor keeps its agent transcripts                                     #
+# --------------------------------------------------------------------------- #
+
+
+def _transcript_line(role: str, text: str) -> str:
+    import json
+
+    return json.dumps({"role": role, "message": {"content": [{"type": "text", "text": text}]}})
+
+
+def test_agent_transcripts_are_discovered(tmp_path, monkeypatch):
+    """The adapter looked only in ~/.cursor/sessions.
+
+    That directory does not exist on a current Cursor install. The transcripts
+    live under ~/.cursor/projects/<window>/agent-transcripts/<id>/<id>.jsonl —
+    on the machine this was found on, 35,411 files under ~/.cursor and not one
+    session ingested.
+    """
+    from throughline.adapters.cursor import CursorAdapter
+
+    root = tmp_path / ".cursor"
+    folder = root / "projects" / "empty-window" / "agent-transcripts" / "abc"
+    folder.mkdir(parents=True)
+    (folder / "abc.jsonl").write_text(
+        _transcript_line("user", "Frage") + "\n" + _transcript_line("assistant", "Antwort") + "\n",
+        encoding="utf-8",
+    )
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", root / "sessions")
+    found = [p.name for p in adapter.discover()]
+    assert "abc.jsonl" in found
+
+
+def test_subagent_transcripts_are_left_out(tmp_path, monkeypatch):
+    # Same reason Claude Code's are: a sub-agent's transcript is part of the
+    # session that spawned it, not a session someone had.
+    from throughline.adapters.cursor import CursorAdapter
+
+    folder = tmp_path / ".cursor" / "projects" / "w" / "agent-transcripts" / "abc"
+    (folder / "subagents").mkdir(parents=True)
+    (folder / "abc.jsonl").write_text(_transcript_line("user", "Haupt") + "\n", encoding="utf-8")
+    (folder / "subagents" / "sub.jsonl").write_text(_transcript_line("user", "Neben") + "\n", encoding="utf-8")
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", tmp_path / ".cursor" / "sessions")
+    found = [p.name for p in adapter.discover()]
+    assert "abc.jsonl" in found
+    assert "sub.jsonl" not in found
+
+
+def test_the_old_sessions_directory_is_still_read(tmp_path, monkeypatch):
+    # Adding a location must not drop one that some installs still use.
+    from throughline.adapters.cursor import CursorAdapter
+
+    sessions = tmp_path / ".cursor" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "alt.jsonl").write_text(_transcript_line("user", "Alt") + "\n", encoding="utf-8")
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", sessions)
+    assert "alt.jsonl" in [p.name for p in adapter.discover()]
+
+
+def test_a_missing_cursor_directory_is_not_an_error(tmp_path, monkeypatch):
+    from throughline.adapters.cursor import CursorAdapter
+
+    adapter = CursorAdapter()
+    monkeypatch.setattr(adapter, "home", tmp_path / ".cursor" / "sessions")
+    assert list(adapter.discover()) == []

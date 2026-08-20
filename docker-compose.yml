@@ -123,6 +123,10 @@ services:
       # like it worked and be gone on the next `up`. Confining the API to this
       # directory also keeps a request from naming any other path.
       THROUGHLINE_EXPORT_ROOT: /home/throughline/exports
+      # The host side of that mount, so the UI can say where the files
+      # actually appear. Without it the panel names a container path and
+      # a successful export looks like a failed one.
+      THROUGHLINE_EXPORT_HOST_PATH: "${THROUGHLINE_EXPORT_DIR:-./exports}"
       # Where to find Ollama. Unset, the probe looks on the container's own
       # loopback, where there is never anything — so the optional `embeddings`
       # profile shipped an Ollama service that the web container could not

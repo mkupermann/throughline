@@ -88,7 +88,19 @@ export function ExportPanel() {
         {options && (
           <p className="job-unavailable">
             <Info size={13} aria-hidden />
-            <span>Must be an absolute path inside {options.root}</span>
+            <span>
+              Must be an absolute path inside {options.root}
+              {/* In a container that root is a container path, and a Windows
+                  or macOS path typed here is refused — which reads as the
+                  export being broken, while a successful one lands somewhere
+                  the person cannot find. */}
+              {options.hostPath && options.hostPath !== options.root && (
+                <>
+                  {" — appears on this machine under "}
+                  <code>{options.hostPath}</code>
+                </>
+              )}
+            </span>
           </p>
         )}
 

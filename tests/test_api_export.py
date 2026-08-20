@@ -150,3 +150,29 @@ def test_an_unavailable_generation_backend_says_why(monkeypatch):
 
     assert payload["available"] is False
     assert payload["detail"] == "No model available."
+
+
+# --------------------------------------------------------------------------- #
+# Where the files appear on the machine you are sitting at                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_options_say_where_the_export_lands_on_the_host(client, monkeypatch, tmp_path):
+    """In a container the destination is a container path.
+
+    The panel asks for an absolute path inside /home/throughline/exports and
+    says nothing about where that is on the machine the person is using. On
+    Windows they type C:\\Users\\… , are refused, and read it as the export
+    being broken — while a successful export lands somewhere they cannot find.
+    """
+    monkeypatch.setenv("THROUGHLINE_EXPORT_HOST_PATH", r"C:\Users\nicet\throughline\exports")
+    body = client.get("/api/export/markdown").json()
+    assert body["hostPath"] == r"C:\Users\nicet\throughline\exports"
+
+
+def test_without_a_container_the_host_path_is_simply_the_root(client, tmp_path, monkeypatch):
+    # Run natively and the two are the same thing; saying so twice would be
+    # noise, so the UI can compare them.
+    monkeypatch.delenv("THROUGHLINE_EXPORT_HOST_PATH", raising=False)
+    body = client.get("/api/export/markdown").json()
+    assert body["hostPath"] == body["root"]
