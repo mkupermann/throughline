@@ -23,6 +23,7 @@ from .routers import (
     ask,
     console,
     curate,
+    export,
     find,
     operate,
     overview,
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(timeline.router, prefix="/api")
     app.include_router(ask.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
+    app.include_router(export.router, prefix="/api")
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

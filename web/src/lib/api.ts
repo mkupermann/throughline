@@ -382,6 +382,14 @@ export interface OperateStatus {
     coverage: { total: number; embedded: number };
     by_model: Record<string, unknown>[];
   };
+  /** Which model generates — extraction, titles, reflection, answers. */
+  generation: {
+    available: boolean;
+    backend: string;
+    model: string;
+    local: boolean;
+    detail: string;
+  };
   pending: { extraction: number; titles: number };
   ingestion: Record<string, unknown>[];
   jobs: JobSummary[];
@@ -491,4 +499,41 @@ export const timelineApi = {
   range: (qs: URLSearchParams) => request<TimelineRange>(`/timeline?${qs}`),
   day: (day: string, qs: URLSearchParams) =>
     request<{ day: string; items: TimelineDayItem[] }>(`/timeline/day/${day}?${qs}`),
+};
+
+
+// ── Export ───────────────────────────────────────────────────────────────
+
+export interface ExportOptions {
+  /** The directory the export is confined to. */
+  root: string;
+  /** A destination inside the root, offered so nobody has to invent one. */
+  suggested: string;
+  job: string;
+  defaults: { includeGenerated: boolean; redact: boolean; toolOutput: number; memory: boolean };
+}
+
+export interface ExportRequest {
+  out: string;
+  project?: string | null;
+  since?: string | null;
+  includeGenerated?: boolean;
+  redact?: boolean;
+  toolOutput?: number;
+  memory?: boolean;
+}
+
+export interface ExportStarted {
+  out: string;
+  job: { id: string; name: string; running: boolean };
+}
+
+export const exportApi = {
+  options: () => request<ExportOptions>("/export/markdown"),
+  start: (body: ExportRequest) =>
+    request<ExportStarted>("/export/markdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };

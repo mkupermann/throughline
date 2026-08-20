@@ -47,6 +47,7 @@ const baseStatus: OperateStatus = {
     coverage: { total: 0, embedded: 0 },
     by_model: [],
   },
+  generation: { available: true, backend: "ollama", model: "qwen3.5:9b", local: true, detail: "qwen3.5:9b" },
   pending: { extraction: 0, titles: 0 },
   ingestion: [],
   jobs: [job("doctor"), job("ingest_hermes"), job("ingest_vibe")],
@@ -74,6 +75,18 @@ vi.mock("@/lib/api", () => ({
   },
   providersApi: {
     list: () => listFn(),
+  },
+  // The page now carries the export panel, which asks for its own options
+  // on mount. Without this the whole page fails to render.
+  exportApi: {
+    options: () =>
+      Promise.resolve({
+        root: "/Users/dev",
+        suggested: "/Users/dev/Throughline-Export",
+        job: "export-markdown",
+        defaults: { includeGenerated: false, redact: false, toolOutput: 0, memory: true },
+      }),
+    start: vi.fn(),
   },
 }));
 
@@ -145,5 +158,54 @@ describe("OperatePage provider coverage table", () => {
     renderPage();
     await screen.findByRole("table", { name: /coverage/i });
     expect(runFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Environment", () => {
+  it("says which model generates and whether it runs here", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      generation: {
+        available: true,
+        backend: "ollama",
+        model: "qwen3.5:9b",
+        local: true,
+        detail: "qwen3.5:9b",
+      },
+    });
+    renderPage();
+
+    // Which model extracts memory decides whether transcripts leave the
+    // machine. The page showed the embedding model and not this one.
+    expect(await screen.findByText("ollama/qwen3.5:9b")).toBeTruthy();
+    expect(await screen.findByText(/runs locally/i)).toBeTruthy();
+  });
+
+  it("marks a remote generation backend as leaving the machine", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      generation: {
+        available: true,
+        backend: "openai",
+        model: "gpt-4o-mini",
+        local: false,
+        detail: "api.openai.com",
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/leaves this machine/i)).toBeTruthy();
+  });
+
+  it("says so when nothing can generate", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      generation: { available: false, backend: "", model: "", local: false, detail: "No model available." },
+    });
+    renderPage();
+
+    // The row carries the short verdict, the disclosure below it the reason.
+    expect(await screen.findByText("no model available")).toBeTruthy();
+    expect(await screen.findByText("No model available.")).toBeTruthy();
   });
 });

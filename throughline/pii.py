@@ -76,6 +76,15 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # --- Home-directory usernames ----------------------------------------
     (re.compile(r"/Users/[A-Za-z0-9._\-]+"), "/Users/<user>"),
     (re.compile(r"/home/[A-Za-z0-9._\-]+"), "/home/<user>"),
+    # Claude Code names a project directory after the path it belongs to,
+    # with every separator turned into a hyphen: `/Users/alice/src/api`
+    # becomes `-Users-alice-src-api`. Those encoded names appear in session
+    # files, in scratch paths, and in anything that quotes them, so the
+    # slash-form patterns above miss the username every time. The username
+    # itself is matched without hyphens, since a hyphen is exactly what the
+    # encoding uses as a separator.
+    (re.compile(r"(?<![A-Za-z0-9])-Users-[A-Za-z0-9._]+"), "-Users-<user>"),
+    (re.compile(r"(?<![A-Za-z0-9])-home-[A-Za-z0-9._]+"), "-home-<user>"),
 ]
 
 

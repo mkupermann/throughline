@@ -20,9 +20,35 @@ from .common import get_settings
 
 router = APIRouter(tags=["operate"])
 
+#: Jobs this page must not offer as a bare Run button, because they need
+#: input the button cannot supply. The Markdown export needs a destination;
+#: it has its own panel and its own endpoint.
+HIDDEN_JOBS = frozenset({"export-markdown"})
+
 
 def _iso(v: Any) -> Any:
     return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def generation_panel() -> dict[str, Any]:
+    """Which model generates, and whether it runs here.
+
+    The page already showed the embedding backend. It said nothing about the
+    one that extracts memory, writes titles and answers questions — the model
+    whose choice decides whether transcripts leave the machine. That was
+    visible only from `throughline doctor`, which is the wrong place for a
+    fact the operating surface is otherwise built to show.
+    """
+    from throughline import llm
+
+    info = llm.backend_info()
+    return {
+        "available": info.available,
+        "backend": info.backend,
+        "model": info.model,
+        "local": info.local,
+        "detail": info.detail,
+    }
 
 
 @router.get("/operate/status")
@@ -74,6 +100,7 @@ def status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
             },
             "by_model": [{k: _iso(v) for k, v in r.items()} for r in by_model],
         },
+        "generation": generation_panel(),
         "pending": {"extraction": pending, "titles": titles},
         "ingestion": [{k: _iso(v) for k, v in r.items()} for r in recent],
         "jobs": [
@@ -89,6 +116,7 @@ def status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
                 "unavailable": check_requirement(spec.requires),
             }
             for spec in JOBS.values()
+            if spec.name not in HIDDEN_JOBS
         ],
         "history": runner.history(),
         # The external launchd scheduler skill — separate from the pipeline

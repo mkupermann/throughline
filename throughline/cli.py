@@ -302,6 +302,24 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
     return _call_script_main("backfill_projects", passthrough)
 
 
+def cmd_export_markdown(args: argparse.Namespace) -> int:
+    """Export the stored corpus as a Markdown vault, one folder per project."""
+    passthrough: list[str] = ["--out", args.out] if args.out else []
+    if args.project:
+        passthrough += ["--project", args.project]
+    if args.since:
+        passthrough += ["--since", args.since]
+    if args.include_generated:
+        passthrough.append("--include-generated")
+    if args.no_memory:
+        passthrough.append("--no-memory")
+    if args.redact:
+        passthrough.append("--redact")
+    passthrough += ["--tool-output", str(args.tool_output)]
+    passthrough += ["--split-bytes", str(args.split_bytes)]
+    return _call_script_main("export_markdown", passthrough)
+
+
 def cmd_repair_conversations(args: argparse.Namespace) -> int:
     """Re-read JSONL files and repair conversations.project_path / token counts."""
     passthrough: list[str] = []
@@ -633,6 +651,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
+
+    # export-markdown
+    p = sub.add_parser(
+        "export-markdown",
+        help="Export the corpus as a Markdown vault, one folder per project.",
+        description=(
+            "Writes the stored sessions to Markdown: one folder per "
+            "project, sessions oldest first, each reproducing the prompt, "
+            "the answer, every tool call, the shell commands, and a "
+            "file:// link to every file that was created or changed. "
+            "Machine-generated conversations are excluded unless "
+            "--include-generated is given. Large projects split into "
+            "monthly files so an editor can still open them."
+        ),
+    )
+    p.add_argument(
+        "--out",
+        default=None,
+        help="Destination directory (created if missing). Falls back to $THROUGHLINE_EXPORT_OUT.",
+    )
+    p.add_argument("--project", default=None, help="Export a single project instead of all.")
+    p.add_argument("--since", default=None, help="Only sessions started on or after this date (YYYY-MM-DD).")
+    p.add_argument("--include-generated", action="store_true", help="Also export machine-generated conversations.")
+    p.add_argument(
+        "--tool-output",
+        type=int,
+        default=0,
+        help="Characters of each tool result to include, collapsed (default: 0, omit them).",
+    )
+    p.add_argument(
+        "--split-bytes", type=int, default=1_500_000, help="Split a project into dated parts above this size."
+    )
+    p.add_argument("--no-memory", action="store_true", help="Skip the per-project Memory.md file.")
+    p.add_argument(
+        "--redact",
+        action="store_true",
+        help="Run every exported text through the PII pass (keys, tokens, emails, home paths).",
+    )
+    p.set_defaults(func=cmd_export_markdown)
 
     # repair-conversations
     p = sub.add_parser(

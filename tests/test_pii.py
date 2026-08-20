@@ -146,3 +146,23 @@ class TestPrefixedSecretNames:
     def test_home_path_leaves_trailing_punctuation(self):
         assert redact('path = "/Users/someone"') == 'path = "/Users/<user>"'
         assert redact("(/Users/bob), ok") == "(/Users/<user>), ok"
+
+
+def test_hyphen_encoded_home_path_username() -> None:
+    # Claude Code encodes /Users/alice/src/api as -Users-alice-src-api and
+    # uses that as a directory name, so the slash-form pattern never sees it.
+    text = "session at ~/.claude/projects/-Users-alice-Documents-GitHub-api/x.jsonl"
+    out = redact(text)
+    assert "-Users-alice" not in out
+    assert "-Users-<user>-Documents-GitHub-api" in out
+
+
+def test_hyphen_encoded_linux_home_username() -> None:
+    out = redact("dir -home-bob-src-tool holds the log")
+    assert "-home-bob" not in out
+    assert "-home-<user>-src-tool" in out
+
+
+def test_a_plain_hyphenated_word_is_not_mistaken_for_a_home_path() -> None:
+    # "multi-Users-view" is a word, not an encoded path.
+    assert redact("the multi-Users-view component") == "the multi-Users-view component"

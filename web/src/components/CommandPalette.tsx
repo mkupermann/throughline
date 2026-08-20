@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Moon, Sun, Monitor } from "lucide-react";
+import { Download, Moon, Sun, Monitor } from "lucide-react";
 
 import { NAV } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
@@ -61,6 +61,21 @@ export function CommandPalette() {
               <kbd className="palette-kbd">g {item.chord}</kbd>
             </Command.Item>
           ))}
+        </Command.Group>
+
+        <Command.Group heading="Actions" className="palette-group">
+          {/* The export lives on Operate. Reaching it meant knowing that, and
+              scrolling past fourteen job cards — so it is findable by name
+              here, and by the words people actually use for it. */}
+          <Command.Item
+            value="Export as Markdown Obsidian vault markdown files backup"
+            onSelect={() => run(() => navigate(carryProviders("/operate#export", sp)))}
+            className="palette-item"
+          >
+            <Download size={15} aria-hidden />
+            <span>Export as Markdown</span>
+            <span className="palette-hint">One folder per project, for Obsidian or any editor</span>
+          </Command.Item>
         </Command.Group>
 
         <Command.Group heading="Theme" className="palette-group">

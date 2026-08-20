@@ -262,8 +262,15 @@
   overflow-wrap: anywhere;
 }
 
-.total dd.ok { color: var(--status-good); }
-.total dd.bad { color: var(--status-critical); }
+.total dd.ok,
+.total dd .ok { color: var(--status-good); }
+.total dd.bad,
+.total dd .bad { color: var(--status-critical); }
+/* The local/remote verdict sits beside the model name, so it needs the
+   colour on a span rather than the whole value. Colour is the reinforcement
+   here, never the message — the words say it too. */
+.total dd .ok,
+.total dd .bad { font-size: var(--text-sm); }
 
 .curate-toolbar { margin-bottom: var(--space-3); }
 .curate-toolbar .button { margin-top: 0; }
@@ -307,6 +314,51 @@
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--text-secondary);
+}
+
+/* Markdown export. The one job on this page that takes input rather than a
+   single click, so it needs a form inside the same card shape. It spans the
+   grid: a path field squeezed into a 320px column is unreadable. */
+.job:has(.export-form) { grid-column: 1 / -1; }
+
+.export-form {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.export-field input {
+  padding: var(--space-2);
+  background: var(--surface-base);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.export-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.export-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+.export-toggles label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
 /* Provider coverage table. Reuses .sqltable's grid, but the row header

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
+import { Download, Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
 
 import { ApiError, operateApi, providersApi, type JobSummary, type ProviderCoverage } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
+import { ExportPanel } from "./ExportPanel";
+import { JobConsole } from "./JobConsole";
 
 /** Text label per status — colour alone never carries the meaning. */
 const STATUS_LABEL: Record<ProviderCoverage["status"], string> = {
@@ -111,59 +113,6 @@ function ProvidersTable({
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/**
- * Live job output.
- *
- * EventSource rather than polling: a job emits output in bursts and long
- * quiet stretches, and polling either lags the bursts or hammers the server
- * through the quiet. The stream replays the retained buffer on connect, so
- * opening this panel mid-run shows the whole run so far.
- */
-function JobConsole({ jobId, onFinished }: { jobId: string; onFinished: () => void }) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [done, setDone] = useState<string | null>(null);
-  const boxRef = useRef<HTMLPreElement>(null);
-  const pinned = useRef(true);
-
-  useEffect(() => {
-    setLines([]);
-    setDone(null);
-    const es = new EventSource(`/api/operate/job/${jobId}/stream`);
-    es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data]));
-    es.addEventListener("done", (e) => {
-      setDone((e as MessageEvent).data);
-      es.close();
-      onFinished();
-    });
-    es.onerror = () => es.close();
-    return () => es.close();
-  }, [jobId, onFinished]);
-
-  // Follow the tail, but stop fighting the user the moment they scroll up.
-  useEffect(() => {
-    const el = boxRef.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [lines]);
-
-  return (
-    <div className="console">
-      <pre
-        ref={boxRef}
-        className="console-out"
-        tabIndex={0}
-        aria-label="Job output"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
-      >
-        {lines.join("\n")}
-        {done && `\n\n— ${done}`}
-      </pre>
     </div>
   );
 }
@@ -324,7 +273,29 @@ export function OperatePage() {
             <dt>embedding coverage</dt>
             <dd className="tabular">{covPct}%</dd>
           </div>
+          {/* Which model generates decides whether transcripts leave the
+              machine. The page showed the embedding model and not this one,
+              so the fact was only reachable from `throughline doctor`. */}
+          <div className="total">
+            <dt>generation backend</dt>
+            {data.generation?.available ? (
+              <dd>
+                {data.generation.backend}/{data.generation.model}
+                <span className={data.generation.local ? "ok" : "bad"} style={{ marginLeft: "var(--space-2)" }}>
+                  {data.generation.local ? "runs locally" : "leaves this machine"}
+                </span>
+              </dd>
+            ) : (
+              <dd className="bad">no model available</dd>
+            )}
+          </div>
         </dl>
+        {data.generation && !data.generation.available && data.generation.detail && (
+          <div className="disclosure" style={{ marginTop: "var(--space-2)" }}>
+            <OctagonAlert size={15} aria-hidden />
+            <div>{data.generation.detail}</div>
+          </div>
+        )}
         {!data.embedding.available && data.embedding.reason && (
           <div className="disclosure" style={{ marginTop: "var(--space-2)" }}>
             <OctagonAlert size={15} aria-hidden />
@@ -367,6 +338,18 @@ export function OperatePage() {
         ) : (
           <div className="skeleton skeleton-row" />
         )}
+      </section>
+
+      {/* Export gets its own section, ahead of the jobs. It is not a
+          one-click job — it takes a destination — and at the end of fourteen
+          Run buttons it was there and nobody found it. */}
+      <section className="stack-top">
+        <h2 className="section-label">
+          <Download size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Export
+        </h2>
+        <div className="jobs">
+          <ExportPanel />
+        </div>
       </section>
 
       <section className="stack-top">
