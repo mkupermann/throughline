@@ -136,3 +136,50 @@ def test_the_reset_recreates_the_schema_it_drops():
     created = [s for s in reset_statements() if s.lower().startswith("create schema")]
     assert len(dropped) == 1 and len(created) == 1
     assert "public" in dropped[0] and "public" in created[0]
+
+
+# --------------------------------------------------------------------------- #
+# Carrying a corpus to a machine that cannot see the source                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_archive_carries_the_counts_it_should_reproduce(tmp_path):
+    """The far machine cannot reach the source to compare against it.
+
+    A dump that arrives on another continent, or just on a laptop that is not
+    on this network, has to be checkable on its own. The counts travel beside
+    it so the restore can say whether it reproduced the corpus or half of it.
+    """
+    from throughline.jobs.consolidate import read_counts_beside, write_counts_beside
+
+    dump = tmp_path / "corpus.dump"
+    counts = {"conversations": 3883, "messages": 103700}
+
+    sidecar = write_counts_beside(dump, counts)
+
+    assert sidecar == tmp_path / "corpus.dump.counts.json"
+    assert read_counts_beside(dump) == counts
+
+
+def test_a_missing_sidecar_reads_as_nothing_rather_than_raising(tmp_path):
+    from throughline.jobs.consolidate import read_counts_beside
+
+    assert read_counts_beside(tmp_path / "absent.dump") is None
+
+
+def test_a_corrupt_sidecar_reads_as_nothing(tmp_path):
+    # Better to say "no counts to check against" than to compare against junk.
+    from throughline.jobs.consolidate import read_counts_beside
+
+    dump = tmp_path / "corpus.dump"
+    (tmp_path / "corpus.dump.counts.json").write_text("{not json", encoding="utf-8")
+    assert read_counts_beside(dump) is None
+
+
+def test_the_sidecar_survives_a_round_trip_with_every_verified_table(tmp_path):
+    from throughline.jobs.consolidate import VERIFIED_TABLES, read_counts_beside, write_counts_beside
+
+    dump = tmp_path / "c.dump"
+    counts = {table: index for index, table in enumerate(VERIFIED_TABLES)}
+    write_counts_beside(dump, counts)
+    assert read_counts_beside(dump) == counts

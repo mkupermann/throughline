@@ -18,7 +18,9 @@ usage error or a failed preflight.
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -52,6 +54,38 @@ def major(version: str | None) -> int | None:
 # --------------------------------------------------------------------------- #
 # The commands                                                                #
 # --------------------------------------------------------------------------- #
+
+
+#: Suffix for the row counts that travel beside an archive.
+COUNTS_SUFFIX = ".counts.json"
+
+
+def write_counts_beside(dump: Path | str, counts: dict[str, int]) -> Path:
+    """Record the row counts an archive should reproduce, beside the archive.
+
+    A dump carried to another machine cannot be compared against its source:
+    the source is not reachable from there, which is the whole reason the dump
+    exists. The counts travel with it so the restore can say whether it
+    reproduced the corpus or half of it.
+    """
+    sidecar = Path(str(dump) + COUNTS_SUFFIX)
+    sidecar.write_text(json.dumps(counts, indent=1, sort_keys=True), encoding="utf-8")
+    return sidecar
+
+
+def read_counts_beside(dump: Path | str) -> dict[str, int] | None:
+    """The counts recorded beside an archive, or None if there are none.
+
+    A missing or unreadable sidecar reads as "nothing to check against" rather
+    than as an error: saying so is honest, comparing against junk is not.
+    """
+    try:
+        payload = json.loads(Path(str(dump) + COUNTS_SUFFIX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {str(k): int(v) for k, v in payload.items()}
 
 
 def _split_password(url: str) -> tuple[str, dict[str, str]]:
@@ -224,12 +258,35 @@ def main(argv: list[str] | None = None) -> int:
         description="Move this database's contents into another Throughline database.",
     )
     parser.add_argument("--source-url", default=None, help="Source connection URL (default: the configured database).")
-    parser.add_argument("--target-url", required=True, help="Target connection URL. Its contents are replaced.")
+    parser.add_argument("--target-url", default=None, help="Target connection URL. Its contents are replaced.")
     parser.add_argument("--dump-file", default=None, help="Where to keep the archive (default: a temporary file).")
+    parser.add_argument(
+        "--export-to",
+        default=None,
+        help="Write an archive plus its row counts and stop. For carrying a corpus to another machine.",
+    )
+    parser.add_argument(
+        "--from-dump",
+        default=None,
+        help="Restore an archive written by --export-to into the target, then verify it against its counts.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Report the plan and the counts; move nothing.")
     args = parser.parse_args(argv)
 
+    if args.export_to and args.from_dump:
+        print("ERROR: --export-to writes an archive, --from-dump reads one. Pick one.", file=sys.stderr)
+        return 2
+    if not args.export_to and not args.target_url:
+        print("ERROR: --target-url is required unless --export-to is given.", file=sys.stderr)
+        return 2
+
+    if args.from_dump:
+        return _load_archive(args.from_dump, args.target_url)
+
     source_url = args.source_url or _default_source_url()
+
+    if args.export_to:
+        return _write_archive(source_url, args.export_to)
 
     source_version, target_version = _version(source_url), _version(args.target_url)
     if source_version is None:
@@ -315,3 +372,83 @@ def _default_source_url() -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _write_archive(source_url: str, out: str) -> int:
+    """Dump the source and record what the dump should reproduce."""
+    import subprocess
+    import sys
+
+    version = _version(source_url)
+    if version is None:
+        print(f"ERROR: cannot reach the source: {source_url}", file=sys.stderr)
+        return 2
+
+    counts = _counts(source_url)
+    problems = preflight(source_version=version, target_version=version, source_counts=counts)
+    if problems:
+        for problem in problems:
+            print(f"ERROR: {problem}", file=sys.stderr)
+        return 2
+
+    argv, extra = dump_command(source_url, out)
+    proc = subprocess.run(argv, env={**os.environ, **extra}, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(proc.stderr[-2000:], file=sys.stderr)
+        return 1
+
+    sidecar = write_counts_beside(out, counts)
+    size = Path(out).stat().st_size
+    print(f"archive  {out}  {size / 1_048_576:.0f} MB")
+    print(f"counts   {sidecar}  {sum(counts.values()):,} rows across {len(counts)} tables")
+    print("\nCarry both files. The restore checks one against the other.")
+    return 0
+
+
+def _load_archive(dump: str, target_url: str) -> int:
+    """Replace the target with an archive, then check it reproduced the counts."""
+    import subprocess
+    import sys
+
+    if not Path(dump).is_file():
+        print(f"ERROR: no such archive: {dump}", file=sys.stderr)
+        return 2
+
+    expected = read_counts_beside(dump)
+    if expected is None:
+        print(
+            f"ERROR: no counts beside {dump}. Without them a half-restored corpus "
+            "cannot be told from a whole one — copy the .counts.json too.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if _version(target_url) is None:
+        print(f"ERROR: cannot reach the target: {target_url}", file=sys.stderr)
+        return 2
+
+    print(f"restoring {sum(expected.values()):,} rows across {len(expected)} tables into the target")
+
+    conn = _connect(target_url)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for statement in reset_statements():
+                cur.execute(statement)
+    finally:
+        conn.close()
+
+    argv, extra = restore_command(target_url, dump)
+    proc = subprocess.run(argv, env={**os.environ, **extra}, capture_output=True, text=True)
+    if proc.stderr.strip():
+        print(f"    {proc.stderr.strip().splitlines()[-1][:160]}")
+
+    gaps = count_gaps(expected, _counts(target_url))
+    if gaps:
+        print("\nThe restore did not reproduce the archive:", file=sys.stderr)
+        for gap in gaps:
+            print(f"  {gap}", file=sys.stderr)
+        return 1
+
+    print(f"\nAll {len(expected)} tables match the archive.")
+    return 0

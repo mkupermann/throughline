@@ -304,7 +304,13 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
 
 def cmd_consolidate(args: argparse.Namespace) -> int:
     """Move this database's contents into another Throughline database."""
-    passthrough: list[str] = ["--target-url", args.target_url]
+    passthrough: list[str] = []
+    if args.target_url:
+        passthrough += ["--target-url", args.target_url]
+    if args.export_to:
+        passthrough += ["--export-to", args.export_to]
+    if args.from_dump:
+        passthrough += ["--from-dump", args.from_dump]
     if args.source_url:
         passthrough += ["--source-url", args.source_url]
     if args.dump_file:
@@ -675,8 +681,18 @@ def build_parser() -> argparse.ArgumentParser:
             "version mismatch and an empty source."
         ),
     )
-    p.add_argument("--target-url", required=True, help="Target connection URL. Its contents are replaced.")
+    p.add_argument("--target-url", default=None, help="Target connection URL. Its contents are replaced.")
     p.add_argument("--source-url", default=None, help="Source connection URL (default: the configured database).")
+    p.add_argument(
+        "--export-to",
+        default=None,
+        help="Write an archive plus its row counts and stop — for carrying a corpus to another machine.",
+    )
+    p.add_argument(
+        "--from-dump",
+        default=None,
+        help="Restore an archive written by --export-to, then verify it against its counts.",
+    )
     p.add_argument("--dump-file", default=None, help="Where to keep the archive (default: a temporary file).")
     p.add_argument("--dry-run", action="store_true", help="Report the plan and the counts; move nothing.")
     p.set_defaults(func=cmd_consolidate)

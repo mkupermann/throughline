@@ -257,6 +257,24 @@ which is why the row comparison is part of the command rather than advice.
 A password in the URL is moved into `PGPASSWORD` before anything runs, because
 `argv` is visible to every process on the machine.
 
+### Carrying it to a machine that cannot see this one
+
+```bash
+# here
+throughline consolidate --export-to ~/transfer/corpus.dump
+
+# there, after copying both files across
+throughline consolidate --from-dump corpus.dump \
+    --target-url postgresql://throughline@127.0.0.1:5433/throughline
+```
+
+The export writes the archive and a `corpus.dump.counts.json` beside it. Carry
+both: the far machine cannot reach the source to compare against it — that is
+the whole reason the archive exists — so the counts travel with it and the
+restore checks one against the other. A restore without them is refused rather
+than performed blind, because a half-restored corpus looks exactly like a whole
+one until you go looking.
+
 ## Checking on it
 
 ```bash

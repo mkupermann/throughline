@@ -180,6 +180,14 @@ flag to label them. Nothing is deleted — every listing gains a
   `THROUGHLINE_CLINE_DIR`, resolved per platform by the bootstrap, with an
   empty placeholder where Cline is absent.
 
+- **`throughline consolidate --export-to` carries a corpus to a machine that
+  cannot see this one.** The archive travels with the row counts it should
+  reproduce, because the far machine cannot compare against a source it cannot
+  reach — which is the whole reason the archive exists. `--from-dump` restores
+  it and checks one against the other, and refuses outright when the counts are
+  missing: a half-restored corpus looks exactly like a whole one until you go
+  looking.
+
 - **`throughline consolidate` moves a corpus into another database.** Dump,
   replace, then compare row counts across every table; the source is never
   modified and remains the fallback until they agree. Emptying the target
