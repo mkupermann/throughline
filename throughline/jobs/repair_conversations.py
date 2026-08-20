@@ -34,9 +34,13 @@ import argparse
 import json
 import os
 import sys
+import uuid
+from collections.abc import Iterable
 from pathlib import Path
 
 import psycopg2
+
+from throughline.adapters.windsurf import _NS as _WINDSURF_NS
 
 
 def db_config() -> dict:
@@ -163,6 +167,40 @@ def repair_session(conn, *, session_id: str, file_paths: list[str], dry_run: boo
         )
     conn.commit()
     return {"status": "updated", "id": conv_id, "changes": changes}
+
+
+# --------------------------------------------------------------------------- #
+# Windsurf identifiers derived from the absolute path                         #
+# --------------------------------------------------------------------------- #
+
+
+def legacy_windsurf_id(path: Path) -> str:
+    """The identifier the Windsurf adapter used to derive from a full path.
+
+    Kept so a database written by the old adapter can be repaired. Nothing new
+    is written with it — see throughline/adapters/windsurf.py for why hashing
+    the path was wrong.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, str(path)))
+
+
+def plan_id_repairs(plans: Iterable[Path], existing: set[str]) -> list[tuple[str, str]]:
+    """Which stored sessions to rename to their machine-independent identifier.
+
+    Renaming rather than deleting: the stored row carries the memory chunks and
+    embeddings extracted from it, and rebuilding those costs a model run per
+    session. A plan already stored under the new identifier needs nothing, and
+    one stored under *both* is left alone — renaming onto a taken identifier
+    violates the unique constraint and would abort the repair for every other
+    row in the same transaction.
+    """
+    repairs: list[tuple[str, str]] = []
+    for plan in plans:
+        old = legacy_windsurf_id(plan)
+        new = str(uuid.uuid5(_WINDSURF_NS, f"windsurf:{plan.name}"))
+        if old in existing and new not in existing:
+            repairs.append((old, new))
+    return repairs
 
 
 def main(argv: list[str] | None = None) -> int:

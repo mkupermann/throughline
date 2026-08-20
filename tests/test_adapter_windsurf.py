@@ -74,3 +74,49 @@ class TestWindsurfAdapter:
         monkeypatch.setattr(a, "home", root)
         names = sorted(p.name for p in a.discover())
         assert names == ["a.md", "b.txt"]
+
+
+# --------------------------------------------------------------------------- #
+# The identifier has to survive a different machine                           #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_same_plan_gets_the_same_id_wherever_it_is_mounted(tmp_path):
+    """session_id was derived from the absolute path.
+
+    Read the same file from a container (/home/throughline/.windsurf) and from
+    a host (/Users/someone/.windsurf) and you got two different sessions for
+    one plan. Measured on this corpus: 34 windsurf plans stored twice across
+    the native and containerised databases, one set per mount point. It also
+    makes cross-machine convergence impossible, because the identifier that is
+    supposed to be the same everywhere is the one thing that differs.
+    """
+    from throughline.adapters.windsurf import WindsurfAdapter
+
+    body = "# Plan\n\n" + "Ein Plan mit genug Inhalt, damit der Adapter ihn annimmt.\n" * 3
+
+    a = tmp_path / "home" / "throughline" / ".windsurf" / "plans"
+    b = tmp_path / "Users" / "someone" / ".windsurf" / "plans"
+    for folder in (a, b):
+        folder.mkdir(parents=True)
+        (folder / "refactor-auth.md").write_text(body, encoding="utf-8")
+
+    adapter = WindsurfAdapter()
+    first = adapter.parse(a / "refactor-auth.md")
+    second = adapter.parse(b / "refactor-auth.md")
+
+    assert first is not None and second is not None
+    assert first.session_id == second.session_id
+
+
+def test_two_different_plans_still_get_different_ids(tmp_path):
+    from throughline.adapters.windsurf import WindsurfAdapter
+
+    body = "# Plan\n\n" + "Genug Inhalt, damit der Adapter die Datei annimmt.\n" * 3
+    folder = tmp_path / "plans"
+    folder.mkdir()
+    (folder / "one.md").write_text(body, encoding="utf-8")
+    (folder / "two.md").write_text(body, encoding="utf-8")
+
+    adapter = WindsurfAdapter()
+    assert adapter.parse(folder / "one.md").session_id != adapter.parse(folder / "two.md").session_id

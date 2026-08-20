@@ -79,9 +79,24 @@ def is_agent_call_transcript(path: Path) -> bool:
     imported because it is Claude Code's rule, not ours: every ``/`` in the
     absolute path becomes ``-``, and so does the ``.`` of a dotted directory,
     which is why ``~/.throughline`` yields a doubled dash.
+
+    The comparison ignores the home directory the path starts with. Matching
+    the whole absolute slug meant a container reading transcripts the host had
+    written computed ``-home-throughline--throughline-agent-calls`` and
+    compared it against ``-Users-alice--throughline-agent-calls``: no
+    match, so Throughline's own model calls were filed as the user's work —
+    fourteen of them on the corpus where this was found. Every second machine
+    reproduces that, and it is the tail of the slug that identifies the
+    directory anyway. An explicit ``THROUGHLINE_AGENT_CALL_DIR`` is still
+    matched in full: it names one specific place, not a convention.
     """
     slug = str(_agent_call_path()).replace("/", "-").replace(".", "-")
-    return path.parent.name == slug
+    if path.parent.name == slug:
+        return True
+    if os.environ.get("THROUGHLINE_AGENT_CALL_DIR"):
+        return False
+    suffix = f"--throughline-{_AGENT_CALL_DIRNAME}"
+    return path.parent.name.endswith(suffix)
 
 
 #: (marker, which script produced it). Matched against the start of a

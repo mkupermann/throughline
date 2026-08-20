@@ -25,6 +25,10 @@ def _extract_title(content: str, filename: str) -> str:
     return stem.replace("-", " ").replace("_", " ").title()[:200]
 
 
+#: Per-tool namespace, matching every other adapter here.
+_NS = uuid.uuid5(uuid.NAMESPACE_URL, "throughline:windsurf")
+
+
 class WindsurfAdapter(Adapter):
     name = "windsurf"
     label = "Windsurf plans"
@@ -49,7 +53,13 @@ class WindsurfAdapter(Adapter):
         stat = path.stat()
         ctime = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
         mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-        session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path)))
+        # From the file name, not the absolute path. The path differs between
+        # a container (/home/throughline/.windsurf) and a host
+        # (/Users/someone/.windsurf), so the same plan was stored twice — 34
+        # of them, once per mount point, on the corpus this was found on. A
+        # windsurf plan carries no identifier of its own, so the name is the
+        # only thing about it that is the same on every machine.
+        session_id = str(uuid.uuid5(_NS, f"windsurf:{path.name}"))
         return NormalisedConversation(
             session_id=session_id,
             project_path="windsurf",

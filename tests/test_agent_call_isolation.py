@@ -93,3 +93,52 @@ def test_adapter_excludes_agent_call_transcripts(agent_dir, tmp_path, monkeypatc
     ingestable = {p.name for p in adapter.discover()}
     assert discovered == {"a.jsonl", "b.jsonl"}
     assert ingestable == {"b.jsonl"}
+
+
+# --------------------------------------------------------------------------- #
+# Recognising our own calls on someone else's machine                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_our_own_calls_are_recognised_whatever_home_wrote_them(monkeypatch):
+    """The check slugged the *absolute* path of this process's home.
+
+    A container reading transcripts the host wrote computed
+    `-home-throughline--throughline-agent-calls` and compared it against
+    `-Users-alice--throughline-agent-calls`: no match, so Throughline's
+    own model calls were ingested as the user's work. Fourteen of them, on the
+    corpus where this was found. The same happens on any second machine, and
+    replication would then carry the mistake to both.
+    """
+    from pathlib import Path
+
+    from throughline.self_referential import is_agent_call_transcript
+
+    monkeypatch.delenv("THROUGHLINE_AGENT_CALL_DIR", raising=False)
+    for home in ("-Users-alice", "-home-throughline", "-home-bob"):
+        transcript = Path(f"/anywhere/projects/{home}--throughline-agent-calls/abc.jsonl")
+        assert is_agent_call_transcript(transcript), home
+
+
+def test_a_real_project_is_not_mistaken_for_one_of_our_calls(monkeypatch):
+    from pathlib import Path
+
+    from throughline.self_referential import is_agent_call_transcript
+
+    monkeypatch.delenv("THROUGHLINE_AGENT_CALL_DIR", raising=False)
+    for name in (
+        "-Users-alice-Documents-GitHub-throughline",
+        "-Users-alice--throughline",
+        "-Users-alice-agent-calls",
+    ):
+        assert not is_agent_call_transcript(Path(f"/p/{name}/abc.jsonl")), name
+
+
+def test_an_explicit_override_is_still_matched_exactly(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from throughline.self_referential import agent_call_cwd, is_agent_call_transcript
+
+    monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", str(tmp_path / "woanders"))
+    slug = str(agent_call_cwd()).replace("/", "-").replace(".", "-")
+    assert is_agent_call_transcript(Path(f"/p/{slug}/abc.jsonl"))

@@ -104,7 +104,7 @@ CREATE TABLE public.conversations (
     project_name text GENERATED ALWAYS AS (
 CASE
     WHEN (project_path IS NULL) THEN 'unknown'::text
-    ELSE split_part(project_path, '/'::text, '-1'::integer)
+    ELSE split_part(replace(project_path, '\'::text, '/'::text), '/'::text, '-1'::integer)
 END) STORED,
     model text,
     entrypoint text,
@@ -1050,4 +1050,3 @@ ALTER TABLE ONLY public.relationships
 --
 -- PostgreSQL database dump complete
 --
-
