@@ -82,3 +82,12 @@ docs/superpowers/
 # so they carry that corpus's questions verbatim. Local artefacts, never
 # committed — regenerate with `python3 evals/retrieval_eval.py`.
 evals/retrieval_report*.json
+
+# Docker export destination — the corpus, not source.
+exports/
+
+# setuptools build tree — never source.
+build/
+
+# pytest-cov output.
+.coverage
