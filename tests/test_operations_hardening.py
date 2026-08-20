@@ -588,3 +588,22 @@ def test_the_bootstrap_writes_the_cline_directory_into_the_env(monkeypatch, tmp_
     init_compose_env.main(["--env-file", str(env_file)])
 
     assert "THROUGHLINE_CLINE_DIR=" in env_file.read_text(encoding="utf-8")
+
+
+def test_postgres_is_configured_for_logical_replication(compose: dict) -> None:
+    """Two machines replicating to each other need wal_level=logical.
+
+    The default, `replica`, carries no row-level detail, so a publication
+    produces nothing and the failure is silent: the subscription connects, the
+    slot exists, and no row ever arrives. Changing it needs a restart, which is
+    why it belongs in the compose file rather than in a runbook step somebody
+    performs once and forgets on the second machine.
+    """
+    postgres = compose["services"]["postgres"]
+    command = " ".join(str(part) for part in postgres.get("command", []))
+
+    assert "wal_level=logical" in command.replace(" ", "")
+    # A replication slot retains WAL until its subscriber consumes it. With no
+    # cap, a laptop that stays away for a fortnight fills the other machine's
+    # disk — the slot has no idea anyone is on holiday.
+    assert "max_slot_wal_keep_size" in command

@@ -52,6 +52,27 @@ services:
       POSTGRES_DB: "${POSTGRES_DB:-throughline}"
       POSTGRES_USER: "${POSTGRES_USER:-throughline}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example first)}"
+    # Logical replication between two of your own machines needs row-level
+    # detail in the WAL. The default, `replica`, carries none: a publication
+    # then produces nothing and the failure is silent — the subscription
+    # connects, the slot exists, and no row ever arrives. It costs a little
+    # write volume on a single-machine install and nothing else.
+    #
+    # max_slot_wal_keep_size caps what a slot may retain for a subscriber that
+    # is not there. A replication slot has no idea anyone is on holiday: with
+    # the default of -1 a laptop away for a fortnight fills the other
+    # machine's disk. Above the cap the slot is invalidated and the pair needs
+    # re-seeding, which is the better of the two failures.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_slot_wal_keep_size=${THROUGHLINE_WAL_KEEP:-8GB}"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_wal_senders=10"
     ports:
       # Host port defaults to 5433 so a native PostgreSQL on 5432 is never
       # shadowed. Containers talk to postgres:5432 internally regardless.
