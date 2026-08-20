@@ -215,6 +215,14 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Fixed
 
+- **One NUL byte cost an entire session.** PostgreSQL text cannot hold U+0000,
+  and psycopg2 refuses the whole statement rather than the offending value, so
+  the writer rolled the session back: not a damaged message, no message at all.
+  Found on the first ingest run on a second machine — a 357-message Claude Code
+  session that ingested nowhere. Content, content blocks, tool calls and
+  metadata are scrubbed on the way in; a NUL carries no meaning in a transcript
+  and the alternative is losing the conversation.
+
 - **Three identifiers depended on where the process was running.** All three
   surfaced on the same day, from comparing a native database against a
   containerised one, and all three break the moment a corpus is shared across
