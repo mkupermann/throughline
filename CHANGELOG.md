@@ -169,6 +169,14 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Added
 
+- **`throughline consolidate` moves a corpus into another database.** Dump,
+  replace, then compare row counts across every table; the source is never
+  modified and remains the fallback until they agree. Emptying the target
+  first is what makes it correct: `pg_restore --clean` cannot drop a table
+  other tables reference, reports the failure as an ignored error, and the
+  load appends — a target of 762 conversations became 4,645 after loading a
+  source of 3,883, with every unreferenced table replaced correctly.
+
 - **A pre-commit hook refuses files that are not part of this project.** An
   agent run with its working directory in this checkout created a folder here
   for an unrelated project. It was untracked and unignored, so one `git add -A`

@@ -302,6 +302,18 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
     return _call_script_main("backfill_projects", passthrough)
 
 
+def cmd_consolidate(args: argparse.Namespace) -> int:
+    """Move this database's contents into another Throughline database."""
+    passthrough: list[str] = ["--target-url", args.target_url]
+    if args.source_url:
+        passthrough += ["--source-url", args.source_url]
+    if args.dump_file:
+        passthrough += ["--dump-file", args.dump_file]
+    if args.dry_run:
+        passthrough.append("--dry-run")
+    return _call_script_main("consolidate", passthrough)
+
+
 def cmd_export_markdown(args: argparse.Namespace) -> int:
     """Export the stored corpus as a Markdown vault, one folder per project."""
     passthrough: list[str] = ["--out", args.out] if args.out else []
@@ -651,6 +663,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
+
+    # consolidate
+    p = sub.add_parser(
+        "consolidate",
+        help="Move this database's contents into another Throughline database.",
+        description=(
+            "One-way: dump the source, replace the target, then compare row "
+            "counts across every table. The source is never modified and "
+            "remains the fallback until the counts agree. Refuses a major "
+            "version mismatch and an empty source."
+        ),
+    )
+    p.add_argument("--target-url", required=True, help="Target connection URL. Its contents are replaced.")
+    p.add_argument("--source-url", default=None, help="Source connection URL (default: the configured database).")
+    p.add_argument("--dump-file", default=None, help="Where to keep the archive (default: a temporary file).")
+    p.add_argument("--dry-run", action="store_true", help="Report the plan and the counts; move nothing.")
+    p.set_defaults(func=cmd_consolidate)
 
     # export-markdown
     p = sub.add_parser(

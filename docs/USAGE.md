@@ -232,6 +232,31 @@ unusual secret shape, so treat it as reducing exposure rather than removing it.
 A redacted path can no longer resolve, so file references render as plain code
 instead of links — a link that silently fails is worse than an honest path.
 
+## Moving the corpus to another database
+
+One-way, for the step where a native install becomes the Compose stack a
+second machine will replicate from:
+
+```bash
+throughline consolidate --target-url postgresql://user@127.0.0.1:5433/throughline --dry-run
+throughline consolidate --target-url postgresql://user@127.0.0.1:5433/throughline
+```
+
+The dry run prints both row counts side by side and moves nothing. The real
+run empties the target, loads the source, and compares every table
+afterwards — the source is never modified and remains the fallback until the
+counts agree.
+
+Emptying the target is not optional. `pg_restore --clean` alone fails to drop
+a table other tables reference, reports that as an ignored error, and the load
+that follows *appends*: a target holding 762 conversations ended up with 4,645
+after loading a source of 3,883, while every table nothing referenced was
+replaced correctly. That is the kind of partial success that reads as success,
+which is why the row comparison is part of the command rather than advice.
+
+A password in the URL is moved into `PGPASSWORD` before anything runs, because
+`argv` is visible to every process on the machine.
+
 ## Checking on it
 
 ```bash
