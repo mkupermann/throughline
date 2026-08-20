@@ -1,9 +1,18 @@
 # Installation Guide
 
-Full setup for a fresh machine. Docker Compose is the shortest supported path.
-The native path is for an existing PostgreSQL installation. macOS and Linux are
-tested; Windows under WSL2 is not tested. AppleScript integrations are macOS
-only.
+Full setup for a fresh machine. Docker Compose is the shortest supported path,
+and on Windows it is the only sensible one: the image carries PostgreSQL 16 and
+pgvector already built, which is the part that is genuinely painful to
+reproduce natively there. The native path is for an existing PostgreSQL
+installation.
+
+macOS and Linux are tested. Windows with Docker Desktop and the WSL2 backend is
+not: the known platform assumptions have been removed — `os.getuid` in the
+Compose bootstrap, the macOS-only Cline path, and a generated column that split
+project paths on `/` alone and so turned every `C:\Users\…` session into its
+own project — but removing the defects that were found is not the same as
+having run it. AppleScript integrations are macOS only, and the launchd
+scheduler status is macOS only.
 
 ## 1. Prerequisites
 
@@ -204,6 +213,13 @@ ollama pull nomic-embed-text          # embeddings, ~275 MB
 ollama pull qwen3.5:9b                # generation, ~6.6 GB
 throughline embed --backend ollama
 ```
+
+On Windows the session directories live under `C:\Users\<you>\` and Docker
+Desktop must be allowed to share that drive. `make init-compose` resolves
+Cline's storage location for the platform and writes it to `.env` as
+`THROUGHLINE_CLINE_DIR`; where Cline is not installed it creates an empty
+placeholder, because Docker refuses to bind-mount a source path that does not
+exist.
 
 Two models, two jobs. An embedding model cannot answer a question or extract
 memory, so a machine with only `nomic-embed-text` has working semantic search

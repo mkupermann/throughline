@@ -91,3 +91,6 @@ build/
 
 # pytest-cov output.
 .coverage
+
+# Placeholder for the Cline mount on machines without Cline installed.
+.cline-tasks/

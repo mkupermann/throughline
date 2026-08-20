@@ -21,6 +21,30 @@ def _values(lines: list[str]) -> dict[str, str]:
     return values
 
 
+def cline_tasks_dir(placeholder: Path, candidates: list[Path] | None = None) -> Path:
+    """A Cline tasks directory that exists, so Docker has something to mount.
+
+    Cline stores under the editor's globalStorage, which differs per platform.
+    Compose needs a host path that is present: a bind mount whose source does
+    not exist fails the whole `up`, so a machine without Cline is given an
+    empty placeholder rather than a path from someone else's operating system.
+    """
+    if candidates is None:
+        try:
+            from throughline.adapters.cline import _candidate_task_roots
+
+            candidates = list(_candidate_task_roots())
+        except Exception:
+            # Runs before the package is installed. The placeholder is correct
+            # either way, and the next run picks up the real directory.
+            candidates = []
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    placeholder.mkdir(parents=True, exist_ok=True)
+    return placeholder
+
+
 def _upsert(lines: list[str], key: str, value: str) -> list[str]:
     replacement = f"{key}={value}"
     for index, line in enumerate(lines):
@@ -49,7 +73,18 @@ def initialise(env_file: Path) -> bool:
 
     # Host identity is intentionally refreshed, unlike the database secret:
     # a checkout can move from macOS to Linux or between local user accounts.
-    for key, value in (("THROUGHLINE_UID", str(os.getuid())), ("THROUGHLINE_GID", str(os.getgid()))):
+    # os.getuid is POSIX-only. Windows has no numeric uid to map, and the
+    # containers are Linux either way, so the conventional first non-root id
+    # is the right answer there — without it this raised AttributeError before
+    # writing a single line, and `make docker-up` depends on it.
+    uid = str(os.getuid()) if hasattr(os, "getuid") else "1000"
+    gid = str(os.getgid()) if hasattr(os, "getgid") else "1000"
+    cline = cline_tasks_dir(Path.cwd() / ".cline-tasks")
+    for key, value in (
+        ("THROUGHLINE_UID", uid),
+        ("THROUGHLINE_GID", gid),
+        ("THROUGHLINE_CLINE_DIR", str(cline)),
+    ):
         if values.get(key) != value:
             lines = _upsert(lines, key, value)
             changed = True

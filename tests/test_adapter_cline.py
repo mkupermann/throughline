@@ -174,3 +174,41 @@ class TestClineAdapter:
             lambda: [tmp_path / "missing_a", tmp_path / "missing_b"],
         )
         assert ClineAdapter().is_present() is False
+
+
+# --------------------------------------------------------------------------- #
+# Where Cline stores its tasks, per platform                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_windows_storage_layout_is_looked_for():
+    """Cline is a VS Code extension, and VS Code's globalStorage lives under
+    %APPDATA% on Windows. The candidate list covered macOS, Cursor and Linux
+    and stopped there, so a Windows machine had a Cline history the adapter
+    could not see."""
+    from throughline.adapters.cline import _candidate_task_roots
+
+    roots = [str(p).replace("\\", "/") for p in _candidate_task_roots()]
+    assert any("AppData/Roaming/Code/User/globalStorage" in r for r in roots)
+    assert any("AppData/Roaming/Cursor/User/globalStorage" in r for r in roots)
+
+
+def test_every_known_layout_is_still_looked_for():
+    # Adding one platform must not quietly drop another.
+    from throughline.adapters.cline import _candidate_task_roots
+
+    roots = [str(p).replace("\\", "/") for p in _candidate_task_roots()]
+    for fragment in (
+        "Library/Application Support/Code/User/globalStorage",
+        "Library/Application Support/Cursor/User/globalStorage",
+        ".cline/data/tasks",
+        ".config/Code/User/globalStorage",
+    ):
+        assert any(fragment in r for r in roots), fragment
+
+
+def test_the_candidates_are_distinct():
+    from throughline.adapters.cline import _candidate_task_roots
+
+    roots = _candidate_task_roots()
+    assert len(roots) == len(set(roots))

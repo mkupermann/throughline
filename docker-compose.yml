@@ -25,8 +25,13 @@ x-source-mounts: &source-mounts
   - ~/.windsurf:/home/throughline/.windsurf:ro
   # Vibe (Mistral AI)
   - ~/.vibe:/home/throughline/.vibe:ro
-  # Cline (VS Code extension — macOS path; on Linux use ~/.config/Code/...)
-  - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
+  # Cline (VS Code extension). The only source here that is not
+  # ~/.something: Cline stores under the editor's globalStorage, which
+  # is ~/Library/Application Support on macOS, %APPDATA% on Windows and
+  # ~/.config on Linux. `make init-compose` resolves it per platform and
+  # creates an empty placeholder where Cline is not installed, because
+  # Docker refuses to bind-mount a source path that does not exist.
+  - ${THROUGHLINE_CLINE_DIR:-~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks}:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
 
 x-pg-env: &pg-env
   PGHOST: postgres
@@ -144,7 +149,7 @@ services:
       - ~/.continue:/home/throughline/.continue:ro
       - ~/.windsurf:/home/throughline/.windsurf:ro
       - ~/.vibe:/home/throughline/.vibe:ro
-      - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
+      - ${THROUGHLINE_CLINE_DIR:-~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks}:/home/throughline/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:ro
       - backup_data:/var/lib/throughline/backups
       # Writable, and on the host: override with THROUGHLINE_EXPORT_DIR to send
       # the export straight into a vault or notes folder.

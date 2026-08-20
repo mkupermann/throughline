@@ -54,6 +54,12 @@ def _candidate_task_roots() -> list[Path]:
         home / ".cline/tasks",
         # Linux equivalent (~/.config/Code/...) — rare but cheap to include:
         home / ".config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks",
+        # Windows: VS Code keeps globalStorage under %APPDATA%, which is
+        # ~/AppData/Roaming. Listing it costs one stat call on the platforms
+        # that do not have it, and its absence meant a Windows machine had a
+        # Cline history the adapter simply could not see.
+        home / "AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/tasks",
+        home / "AppData/Roaming/Cursor/User/globalStorage/saoudrizwan.claude-dev/tasks",
     ]
 
 

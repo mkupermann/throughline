@@ -517,3 +517,74 @@ def test_compose_does_not_borrow_variable_names_the_native_tool_reads(compose: d
         if key in shared and isinstance(value, str) and "${" in value:
             interpolated = value[value.index("${") + 2 :].split(":-")[0].rstrip("}")
             assert interpolated != key, f"{key} is filled from ${{{key}}} in .env, which the native CLI reads too"
+
+
+def test_the_compose_bootstrap_runs_where_there_is_no_getuid(monkeypatch, tmp_path):
+    """`os.getuid` does not exist on Windows.
+
+    The bootstrap refreshes the host identity on every run, so on the machine
+    this corpus is being extended to it raised AttributeError before writing a
+    single line — and `make docker-up` depends on it.
+    """
+    import os as os_module
+
+    from scripts import init_compose_env
+
+    monkeypatch.delattr(os_module, "getuid", raising=False)
+    monkeypatch.delattr(os_module, "getgid", raising=False)
+
+    env_file = tmp_path / ".env"
+    init_compose_env.main(["--env-file", str(env_file)])
+
+    body = env_file.read_text(encoding="utf-8")
+    assert "THROUGHLINE_UID=1000" in body
+    assert "THROUGHLINE_GID=1000" in body
+
+
+def test_the_cline_mount_is_parameterised(compose: dict) -> None:
+    """The only source mount that is not `~/.something`.
+
+    Cline is a VS Code extension, so its tasks live under the editor's
+    globalStorage: `~/Library/Application Support/…` on macOS,
+    `%APPDATA%\\…` on Windows, `~/.config/…` on Linux. Hardcoding the macOS
+    one means `docker compose up` on any other platform bind-mounts a path
+    that does not exist.
+    """
+    # The services that mount source directories. `migrate` does not — it only
+    # applies schema changes — so listing it here would test nothing.
+    for service in ("web", "mcp"):
+        mounts = [str(v) for v in compose["services"][service]["volumes"]]
+        cline = [m for m in mounts if "saoudrizwan.claude-dev" in m]
+        assert cline, f"{service} no longer mounts Cline's tasks"
+        assert all(m.startswith("${THROUGHLINE_CLINE_DIR") for m in cline), cline
+
+
+def test_the_bootstrap_finds_an_existing_cline_directory(tmp_path):
+    from scripts.init_compose_env import cline_tasks_dir
+
+    real = tmp_path / "Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks"
+    real.mkdir(parents=True)
+    placeholder = tmp_path / "placeholder"
+
+    assert cline_tasks_dir(placeholder, candidates=[tmp_path / "nope", real]) == real
+    assert not placeholder.exists()
+
+
+def test_the_bootstrap_creates_a_placeholder_when_cline_is_absent(tmp_path):
+    # Docker refuses to bind-mount a host path that does not exist, so a
+    # machine without Cline must still be given something real to mount.
+    from scripts.init_compose_env import cline_tasks_dir
+
+    placeholder = tmp_path / "placeholder"
+    assert cline_tasks_dir(placeholder, candidates=[tmp_path / "nope"]) == placeholder
+    assert placeholder.is_dir()
+
+
+def test_the_bootstrap_writes_the_cline_directory_into_the_env(monkeypatch, tmp_path):
+    from scripts import init_compose_env
+
+    env_file = tmp_path / ".env"
+    monkeypatch.chdir(tmp_path)
+    init_compose_env.main(["--env-file", str(env_file)])
+
+    assert "THROUGHLINE_CLINE_DIR=" in env_file.read_text(encoding="utf-8")

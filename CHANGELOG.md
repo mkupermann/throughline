@@ -169,6 +169,17 @@ flag to label them. Nothing is deleted — every listing gains a
 
 ### Added
 
+- **The Compose stack no longer assumes macOS.** Three assumptions stood
+  between it and a second machine: `scripts/init_compose_env.py` called
+  `os.getuid`, which does not exist on Windows and so raised before writing a
+  line — and `make docker-up` depends on it; the Cline mount hardcoded
+  `~/Library/Application Support/…`, and Docker fails an entire `up` on a bind
+  mount whose source is missing; and the Cline adapter looked in the macOS,
+  Cursor and Linux locations but not under `%APPDATA%`, so a Windows machine
+  had a Cline history it could not see. The mount is now
+  `THROUGHLINE_CLINE_DIR`, resolved per platform by the bootstrap, with an
+  empty placeholder where Cline is absent.
+
 - **`throughline consolidate` moves a corpus into another database.** Dump,
   replace, then compare row counts across every table; the source is never
   modified and remains the fallback until they agree. Emptying the target
