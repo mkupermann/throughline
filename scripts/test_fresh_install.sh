@@ -216,13 +216,17 @@ for rel in skill/scripts/query.py; do
     fi
 done
 
-# Python syntax sanity — compile everything
+# Python syntax sanity — compile every maintained package and script path
 log "compiling all python files"
-for f in "$PROJECT_DIR"/scripts/*.py "$PROJECT_DIR"/gui/*.py "$PROJECT_DIR"/skill/scripts/*.py; do
-    if ! "$PYTHON_BIN" -m py_compile "$f" >/dev/null 2>&1; then
-        fail "py_compile $f"
-    fi
-done
+if ! "$PYTHON_BIN" -m compileall -q \
+    "$PROJECT_DIR/throughline" \
+    "$PROJECT_DIR/memory_mcp" \
+    "$PROJECT_DIR/scripts" \
+    "$PROJECT_DIR/skill/scripts" \
+    "$PROJECT_DIR/evals" \
+    "$PROJECT_DIR/tests"; then
+    fail "python compileall"
+fi
 ok "python compile"
 
 # Bash syntax sanity

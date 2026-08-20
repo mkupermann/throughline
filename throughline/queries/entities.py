@@ -16,10 +16,9 @@ from ._exec import Row, one, rows, scalar
 
 
 def graph_stats(conn) -> Row:
-    return (
-        one(
-            conn,
-            """
+    return one(
+        conn,
+        """
         SELECT
             (SELECT count(*) FROM entities)         AS ents,
             (SELECT count(*) FROM relationships)    AS rels,
@@ -27,9 +26,7 @@ def graph_stats(conn) -> Row:
             (SELECT count(DISTINCT source_id) FROM entity_mentions
              WHERE source_type = 'conversation')    AS convs_analyzed
         """,
-        )
-        or {"ents": 0, "rels": 0, "ments": 0, "convs_analyzed": 0}
-    )
+    ) or {"ents": 0, "rels": 0, "ments": 0, "convs_analyzed": 0}
 
 
 def pending_extraction_count(conn, min_messages: int = 3) -> int:

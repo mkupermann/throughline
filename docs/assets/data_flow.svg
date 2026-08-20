@@ -116,9 +116,9 @@
     <text x="16" y="132" class="linehi">MCP server</text>
     <text x="16" y="150" class="line">search · recall_entity ·</text>
     <text x="16" y="168" class="line">write · forget · stats …</text>
-    <text x="16" y="196" class="linehi">Streamlit GUI</text>
-    <text x="16" y="214" class="line">14 pages — graph, calendar,</text>
-    <text x="16" y="232" class="line">memory health, SQL console</text>
+    <text x="16" y="196" class="linehi">FastAPI + React UI</text>
+    <text x="16" y="214" class="line">8 routes — find, timeline,</text>
+    <text x="16" y="232" class="line">curate, projects, console …</text>
     <text x="16" y="260" class="linehi">reflect</text>
     <text x="16" y="276" class="line">self-review of stored memory</text>
   </g>

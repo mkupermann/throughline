@@ -33,7 +33,7 @@ assignees: ''
 <details>
 <summary>Paste the full traceback or relevant log lines here</summary>
 
-```
+```text
 <!-- your logs -->
 ```
 

@@ -48,7 +48,7 @@ session directory. Run the capture against your real `$HOME` and the screenshots
 publish how many sessions you personally have, and where. Point `HOME` at a
 directory holding a handful of synthetic session files instead:
 
-```
+```text
 <fake-home>/.claude/projects/-Users-dev-projects-<name>/*.jsonl
 <fake-home>/.cursor/sessions/*.jsonl
 <fake-home>/.codex/sessions/<date>/rollout-*.jsonl

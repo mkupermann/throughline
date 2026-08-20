@@ -1,10 +1,19 @@
 name: Release
 
 # Build and publish a multi-arch Docker image to GitHub Container Registry on
-# every version tag (v0.x.y / vX.Y.Z). Lets users run throughline without a
-# git clone:
+# every version tag (v0.x.y / vX.Y.Z). Docker Compose is the supported path
+# because it supplies PostgreSQL, migrations, credentials and a loopback-only
+# host mapping. Advanced standalone-image use must supply a reachable database
+# and explicitly opt into the container's non-loopback bind:
 #
-#   docker run -p 127.0.0.1:8787:8787 ghcr.io/mkupermann/throughline:v0.2.0
+#   docker run --rm -p 127.0.0.1:8787:8787 \
+#     -e THROUGHLINE_HOST=0.0.0.0 -e THROUGHLINE_ALLOW_REMOTE=1 \
+#     -e PGHOST=host.docker.internal -e PGPORT=5432 \
+#     -e PGDATABASE=throughline -e PGUSER=throughline -e PGPASSWORD=... \
+#     ghcr.io/mkupermann/throughline:v0.3.0
+#
+# Without those explicit overrides the image binds to 127.0.0.1 inside the
+# container and remains local-safe by default.
 #
 # Manual dispatch is also supported for ad-hoc rebuilds.
 
@@ -15,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git tag to build (e.g. v0.2.0). Defaults to the current ref if empty."
+        description: "Git tag to build (e.g. v0.3.0). Defaults to the current ref if empty."
         required: false
 
 permissions:

@@ -144,7 +144,7 @@ Installation abgeschlossen.
 Was passiert jetzt beim nächsten Claude Code Start?
   1. Hook ruft: $HOOK_CMD
   2. Script liest \$CLAUDE_PROJECT_DIR (oder pwd), holt Top-20 Memory-Chunks aus
-     PostgreSQL 'claude_memory' DB und schreibt sie nach
+     PostgreSQL 'throughline' DB und schreibt sie nach
      <project>/.claude/MEMORY_CONTEXT.md
   3. Claude Code liest diese Datei automatisch als Zusatz-Context.
 

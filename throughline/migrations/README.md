@@ -5,7 +5,7 @@ Each file is applied exactly once, recorded in the `applied_migrations` table.
 
 ## File naming
 
-```
+```text
 NNN_short_description.sql
 ```
 
@@ -17,7 +17,7 @@ NNN_short_description.sql
 
 Examples:
 
-```
+```text
 000_baseline.sql
 001_add_project_priorities.sql
 002_add_hnsw_index_on_memory_chunks.sql

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Throughline — one memory across every local AI CLI on your laptop. Ingests sessions from Claude Code, Codex, Hermes, Continue, Windsurf, Cline, and Vibe (Mistral AI) into one local Postgres + pgvector store, extracts decisions and contacts, and exposes them via Streamlit, MCP, and a Claude Code skill.">
+  <meta name="description" content="Throughline — one memory across every local AI CLI on your laptop. Nine adapters ingest sessions into one local PostgreSQL + pgvector store, exposed through a FastAPI + React web UI, MCP, and the CLI.">
   <title>Throughline — One memory · every AI CLI on your laptop</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -460,12 +460,12 @@
 <!-- STATS BAR -->
 <div class="stats-bar">
   <div class="stat-item">
-    <span class="stat-value">6</span>
+    <span class="stat-value">9</span>
     <span class="stat-label">AI CLIs supported</span>
   </div>
   <div class="stat-item">
-    <span class="stat-value">14</span>
-    <span class="stat-label">Streamlit Pages</span>
+    <span class="stat-value">8</span>
+    <span class="stat-label">Web UI Routes</span>
   </div>
   <div class="stat-item">
     <span class="stat-value">8</span>
@@ -488,8 +488,8 @@
   <div class="features-grid">
 
     <div class="feature-card">
-      <h3>Six source adapters</h3>
-      <p>Pluggable framework — one small module per local AI tool, dedup by SHA-256, idempotent re-ingest. Today: <strong>Claude Code</strong> (<code>~/.claude/projects/*.jsonl</code>), <strong>OpenAI Codex CLI</strong> (<code>~/.codex/sessions/*.jsonl</code>), <strong>Hermes Agent</strong> (<code>~/.hermes/state.db</code> + <code>sessions/</code>), <strong>Continue.dev</strong> (<code>~/.continue/sessions/*.json</code>), <strong>Windsurf</strong> (<code>~/.windsurf/plans/*.md</code>), <strong>Cline</strong> (VS Code per-task dirs), <strong>Vibe (Mistral AI)</strong> (<code>~/.vibe/logs/session/session_*/</code>).</p>
+      <h3>Nine source adapters</h3>
+      <p>Pluggable framework — one small module per local AI tool, dedup by SHA-256, idempotent re-ingest. Today: <strong>Claude Code</strong>, <strong>Codex CLI</strong>, <strong>Cursor</strong>, <strong>Zed</strong>, <strong>Hermes</strong>, <strong>Continue.dev</strong>, <strong>Windsurf</strong>, <strong>Cline</strong>, and <strong>Vibe</strong>.</p>
     </div>
 
     <div class="feature-card">
@@ -509,7 +509,7 @@
 
     <div class="feature-card">
       <h3>Read APIs for every agent</h3>
-      <p>Three consumer surfaces, one source of truth: a <strong>Streamlit GUI</strong> (14 pages, live demo at this URL), an <strong>MCP server</strong> with eight stdio tools (works with any MCP client — Claude Code, Cursor, Zed, Continue, Claude Desktop), and a <strong>Claude Code skill</strong> that injects context at session start.</p>
+      <p>One source of truth, available through a <strong>FastAPI + React web UI</strong> with eight route components, an <strong>MCP server</strong> for any compatible client, the <strong>Throughline CLI</strong>, and session-start context preload.</p>
     </div>
 
     <div class="feature-card">
@@ -523,9 +523,9 @@
 <!-- ARCHITECTURE -->
 <section id="architecture" style="padding-top: 0;">
   <div class="section-title">Architecture, at a glance</div>
-  <div class="section-sub">Six sources on the left feed one local core; three consumer surfaces on the right read it.</div>
+  <div class="section-sub">Nine sources feed one local core; the web UI, MCP server, CLI, and automation read it.</div>
   <img src="../assets/architecture.svg"
-       alt="Throughline architecture — six AI CLIs plus Vibe feed one Postgres+pgvector store, read by Streamlit GUI, MCP server, and a Claude Code skill"
+       alt="Throughline architecture — nine AI CLI adapters feed one PostgreSQL and pgvector store, read by the React web UI, MCP server, CLI, and automation"
        style="width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border);">
 </section>
 
@@ -533,11 +533,11 @@
 <div class="code-section" id="quickstart">
   <div>
     <div class="code-info">
-      <h2 class="section-title">Up in one command</h2>
-      <p>Docker Compose brings up PostgreSQL 16 + pgvector + the Streamlit GUI. Every supported AI CLI's data directory (<code>~/.claude</code>, <code>~/.codex</code>, <code>~/.hermes</code>, <code>~/.continue</code>, <code>~/.windsurf</code>) is auto-discovered read-only, so ingestion picks up whichever ones you actually use.</p>
+      <h2 class="section-title">Up with Docker Compose</h2>
+      <p>The bootstrap creates a private database password and records your host UID/GID. Docker Compose then starts PostgreSQL 16 + pgvector, applies packaged migrations, and serves the FastAPI + React web UI. Supported source directories are mounted read-only.</p>
       <ol class="code-steps">
-        <li>Clone the repo and start all services with Docker Compose.</li>
-        <li>Open the Streamlit GUI in your browser at port 8501.</li>
+        <li>Clone the repo and initialize the private Compose environment.</li>
+        <li>Start the services and open the web UI at port 8788.</li>
         <li>Run <code>throughline ingest</code> — every adapter that finds its data directory contributes sessions.</li>
         <li>Optionally enable Ollama for fully offline embeddings and extraction.</li>
       </ol>
@@ -556,13 +556,14 @@
     <pre><span class="cmt"># Clone and start all services</span>
 <span class="cmd">git clone</span> https://github.com/mkupermann/throughline.git
 <span class="cmd">cd</span> throughline
+<span class="cmd">python3 scripts/init_compose_env.py</span>
 <span class="cmd">docker compose up -d</span>
 
-<span class="cmt"># Open the GUI</span>
-<span class="url">open http://localhost:8501</span>
+<span class="cmt"># Open the web UI</span>
+<span class="url">open http://127.0.0.1:8788</span>
 
 <span class="cmt"># Ingest from every AI CLI you actually use</span>
-<span class="cmd">docker compose exec gui</span> \
+<span class="cmd">docker compose exec web</span> \
   throughline ingest --all
 
 <span class="cmt"># …or pick one source</span>
@@ -668,7 +669,7 @@
         </tr>
         <tr class="highlight">
           <td>Throughline</td>
-          <td class="check">6 CLIs (extensible)</td>
+          <td class="check">9 CLIs (extensible)</td>
           <td class="check">100%</td>
           <td class="check">Yes (temporal)</td>
           <td class="check">Yes (incl. drift audit)</td>

@@ -178,7 +178,7 @@ findings has already turned out to be a non-issue.
 
 ### 4.2 Backend
 
-```
+```text
 throughline/
   api/
     __init__.py        FastAPI app factory
@@ -211,7 +211,7 @@ throughline/
 
 ### 4.3 Frontend
 
-```
+```text
 web/
   src/
     app/          router, shell, theme provider, command palette
@@ -262,7 +262,7 @@ retrofitting it later costs a lot.
 Keep the current GitHub-dark **surface** ramp. It is good, it is familiar, and it
 is not the problem:
 
-```
+```css
 --surface-base      #0D1117
 --surface-raised    #161B22
 --surface-hover     #1C2128
@@ -298,7 +298,7 @@ budget and buys nothing in a data tool.
 The current 8 category colours were validated against the dataviz six-check
 validator on the real `#0D1117` surface:
 
-```
+```text
 [FAIL] Lightness band      7 of 8 outside L 0.48–0.67 (all too light)
 [FAIL] CVD separation      worst #D2A8FF↔#79C0FF ΔE 2.3 (deutan)
 [FAIL] Normal-vision floor worst #F85149↔#FF7B72 ΔE 8.1 — indistinguishable
@@ -318,11 +318,11 @@ Search over the OKLCH gamut established the hard limit:
 
 **(a) Chart series — 6 validated slots, fixed order, never cycled:**
 
-```
+```text
 #9634A6  #D0365A  #B88923  #646506  #00949D  #9678F7
 ```
 
-```
+```bash
 node scripts/validate_palette.js "#9634A6,#D0365A,#B88923,#646506,#00949D,#9678F7" \
      --mode dark --surface "#0D1117" --pairs all
 → ALL CHECKS PASS
@@ -678,7 +678,7 @@ looking at what they were actually for here:
 Every statement runs inside `SET TRANSACTION READ ONLY`. The rejection comes
 from the database:
 
-```
+```text
 ERROR:  cannot execute DELETE in a read-only transaction
 ```
 

@@ -176,7 +176,7 @@
       <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
       <text x="75" y="22" class="chip" text-anchor="middle">ingestion_log</text>
     </g>
-    <text x="741" y="614" class="stepsub" text-anchor="middle">full schema in sql/schema.sql · versioned migrations in sql/migrations/</text>
+    <text x="741" y="614" class="stepsub" text-anchor="middle">schema snapshot in sql/schema.sql · packaged migrations in throughline/migrations/</text>
   </g>
 
   <g stroke="#5E7290" stroke-width="1.6">
@@ -193,11 +193,11 @@
   <g>
     <g transform="translate(50,722)">
       <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
-      <text x="14" y="26" class="cardh">Streamlit GUI</text>
-      <text x="196" y="26" class="badge">:8501</text>
-      <text x="14" y="50" class="cardv">14 pages — dashboard, semantic</text>
-      <text x="14" y="68" class="cardv">search, knowledge graph, calendar,</text>
-      <text x="14" y="86" class="cardv">memory health, SQL console …</text>
+      <text x="14" y="26" class="cardh">FastAPI + React UI</text>
+      <text x="196" y="26" class="badge">:8790</text>
+      <text x="14" y="50" class="cardv">8 routes — overview, find, timeline,</text>
+      <text x="14" y="68" class="cardv">curate, project, detail, operate,</text>
+      <text x="14" y="86" class="cardv">console · one packaged process</text>
     </g>
     <g transform="translate(330,722)">
       <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>

@@ -42,7 +42,7 @@ RUN pip install -e .
 # (read-only), e.g. ~/.claude -> /home/throughline/.claude.
 
 ENV HOME=/home/throughline \
-    THROUGHLINE_HOST=0.0.0.0 \
+    THROUGHLINE_HOST=127.0.0.1 \
     THROUGHLINE_PORT=8787
 
 USER throughline

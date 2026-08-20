@@ -159,10 +159,9 @@ def chunks_from_conversation(conn, conversation_id: int) -> list[Row]:
 
 
 def totals(conn) -> Row:
-    return (
-        one(
-            conn,
-            """
+    return one(
+        conn,
+        """
         -- Conversations and messages a person had. Counting the tool's own
         -- `claude -p` calls made the inventory a measure of how often
         -- Throughline had run, not of how much history is stored: 3,606
@@ -175,6 +174,4 @@ def totals(conn) -> Row:
             (SELECT count(*) FROM skills)         AS sk,
             (SELECT count(*) FROM memory_chunks)  AS mem
         """,
-        )
-        or {"conv": 0, "msg": 0, "sk": 0, "mem": 0}
-    )
+    ) or {"conv": 0, "msg": 0, "sk": 0, "mem": 0}

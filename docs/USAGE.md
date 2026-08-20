@@ -129,7 +129,7 @@ sessions produce German memory and English ones English.
 
 For embeddings, `auto` chooses OpenAI when `OPENAI_API_KEY` is set, otherwise
 Ollama. Answering can select a configured remote OpenAI-compatible endpoint,
-the Claude CLI, or hosted OpenAI; other model operations can also use hosted
+or hosted OpenAI; other model operations can also use hosted
 providers. `throughline doctor` prints which model will answer and whether it
 runs locally; the UI says so on screen with every answer. `--model` overrides
 the model for a single question.
@@ -171,6 +171,66 @@ the tool list and the project-scoping rules.
 `~/.claude/settings.json` that drops a short, project-scoped summary of past
 decisions and preferences into each new session — context without asking for
 it.
+
+## Taking it out again
+
+The corpus is worth more than the tool that holds it. `export-markdown` writes
+it back out as plain Markdown — one folder per project, sessions oldest first —
+so it stays readable in Obsidian, in a text editor, or in ten years.
+
+```bash
+throughline export-markdown --out ~/Obsidian/Throughline
+throughline export-markdown --out DIR --project throughline   # one project
+throughline export-markdown --out DIR --since 2026-01-01      # recent work only
+throughline export-markdown --out DIR --tool-output 400       # keep tool output
+throughline export-markdown --out DIR --redact                # scrub keys, tokens, emails, home paths
+```
+
+The same export runs from the Operate page in the web UI, where the destination
+is a field rather than a one-click Run, and the run streams its output like any
+other job.
+
+Each session becomes a dated section. Inside it every turn is labelled by kind —
+`Prompt`, `Answer`, `Execution` — and every assistant turn names the model that
+produced it, because a long session routes work to whatever model fits and the
+session header cannot say which one wrote a given paragraph. Commands appear
+verbatim, and every file the assistant created or changed is a `file://` link.
+
+Tool *output* is omitted by default: it is the bulk of the corpus and the least
+readable part of it. So are the tool's own model calls; `--include-generated`
+puts them back. `THROUGHLINE_AUTHOR` sets the label on your own prompts
+(default: `You`).
+
+A project that would land above roughly 1.5 MB splits into dated parts, because
+an editor asked to open a ten-megabyte Markdown file stops being an editor. The
+split never reorders or drops a session, and a single very long session stays in
+one piece.
+
+Re-running updates the same folder rather than rebuilding it. The export keeps
+a manifest of what it wrote (`.throughline-export.json`) and uses it three ways:
+a file whose content has not changed is left alone, so the modification date
+still means something and a synced folder does not re-upload the lot; a file the
+last run wrote and this one no longer produces — a part that disappeared because
+a project now splits differently — is deleted; and anything not in the manifest
+is never touched, so your own notes can live in the same vault safely.
+
+Only `README.md` changes on a run where nothing else did: it records when the
+export last ran.
+
+A service-triggered export is confined to `THROUGHLINE_EXPORT_ROOT` (your home
+directory by default) and its destination is validated before anything runs —
+see [SECURITY.md](../SECURITY.md). The command line is not confined: it runs as
+you do.
+
+The transcripts hold whatever your sessions held, so an export into a
+cloud-synced folder puts that content wherever the folder goes. `--redact` runs
+every exported text through the same heuristic pass that guards memory
+extraction ([`throughline/pii.py`](../throughline/pii.py)): API-key shapes, JWTs,
+bearer headers, `password=` assignments, private-key blocks, email addresses,
+and home-directory usernames. It is conservative by design and will miss an
+unusual secret shape, so treat it as reducing exposure rather than removing it.
+A redacted path can no longer resolve, so file references render as plain code
+instead of links — a link that silently fails is worse than an honest path.
 
 ## Checking on it
 

@@ -18,6 +18,21 @@ echo "PGDATABASE=claude_memory" >> .env                    # keep the old name
 psql -c 'ALTER DATABASE claude_memory RENAME TO throughline'   # adopt the new one
 ```
 
+**The `claude` CLI is no longer a generation backend.** If extraction,
+titles, reflection or `ask` worked for you through that CLI, they will now
+report that no model is available until you give them one:
+
+```bash
+ollama pull qwen3.5:9b                 # local, nothing leaves the machine
+# or name any OpenAI-compatible endpoint you trust:
+export THROUGHLINE_ANSWER_BASE_URL=http://localhost:1234/v1
+```
+
+`throughline doctor` prints which backend answers and whether it is local.
+Nothing else changed: no data is touched, and the CLI removal affects
+generation only — ingestion of Claude Code *sessions* is unrelated and
+continues to work.
+
 **Machine-generated conversations are now labelled and hidden by default.**
 Throughline calls a model to title, extract and answer; those calls are sessions
 on disk and were ingested as if they were yours. Run
@@ -27,6 +42,38 @@ flag to label them. Nothing is deleted — every listing gains a
 `generated_by IS NULL` filter and each project page reports what it withheld.
 
 ### Added
+
+- **`throughline export-markdown` writes the corpus out as a Markdown vault.**
+  The database is the archive; this is how you read it without the tool
+  installed, or in Obsidian alongside your own notes. One folder per project,
+  sessions oldest first, each reproducing the prompt, the answer, every tool
+  call, the shell commands, and a `file://` link to every file that was created
+  or changed. Machine-generated conversations stay out unless
+  `--include-generated` asks for them, tool output stays out unless
+  `--tool-output N` asks for it, and a project splits into dated parts once it
+  would grow past what an editor opens comfortably. `--redact` runs every
+  exported text through the same PII pass that guards memory extraction, for
+  the case where the destination is a synced or shared folder.
+
+  Every turn is labelled by kind — `Prompt`, `Answer`, `Execution` — and every
+  assistant turn names the model that produced it rather than inheriting the
+  session's: one tool in the test corpus answered from nine different models
+  inside single sessions, so a header line cannot say who wrote what.
+
+  The same export runs from the Operate page. It is the only endpoint that
+  writes files, so its destination is confined to `THROUGHLINE_EXPORT_ROOT`
+  (the home directory by default), validated before anything runs, and passed
+  to the job through the environment — the job registry keeps its guarantee
+  that no request body becomes argv. An export that fails partway leaves what
+  it wrote and stamps the index as incomplete with the reason, rather than
+  leaving a partial vault that reads like a finished one.
+
+  Re-running updates the destination instead of rebuilding it. A manifest in
+  the destination records what the export wrote, so an unchanged file is left
+  alone (a synced folder does not re-upload the whole export, and modification
+  dates keep their meaning), a file from an earlier run that is no longer
+  produced is removed rather than left to read as current, and anything the
+  export did not write is never touched.
 
 - **The prompts are in English.** All eight — extraction, entity extraction,
   titling, and the five reflection prompts — were written in German, which made
@@ -58,14 +105,115 @@ flag to label them. Nothing is deleted — every listing gains a
   not only prose — the commands that ran and what they returned.
 - **`throughline ask`** — a cited answer assembled from your own records, with
   retrieval fusing vector and lexical ranking.
-- **Vibe (Mistral AI) adapter.** New adapter in `throughline/adapters/vibe.py` 
+- **Vibe (Mistral AI) adapter.** New adapter in `throughline/adapters/vibe.py`
   that ingests Vibe CLI sessions from `~/.vibe/logs/session/session_*/` directories.
   Supports parsing of `meta.json` and `messages.jsonl` files, ANSI code cleaning,
   tool call extraction, role mapping (user/assistant/system/tool), timestamp parsing,
   and full metadata preservation. Registered in the adapter system as `vibe` source.
   Includes comprehensive unit tests in `tests/test_adapter_vibe.py`.
 
+### Changed
+
+- **The `claude` CLI is no longer a generation backend.** It was the last
+  route by which generation could reach one specific vendor without anyone
+  choosing that: the CLI is simply present on a developer's PATH, so `auto`
+  found it and sent transcripts to Anthropic on a machine whose owner had
+  configured nothing. Entity extraction did not even go through the backend
+  probe — it shelled out to `claude -p` directly, so it ignored the configured
+  backend and reported nothing about where the data went. Both are gone;
+  `THROUGHLINE_ANSWER_BACKEND=claude` now refuses with a reason rather than
+  silently working. Point `THROUGHLINE_ANSWER_BASE_URL` at any
+  OpenAI-compatible endpoint, including one that fronts Anthropic, if that is
+  what you want.
+
+- **Generation can constrain the model to a JSON schema, and extraction does.**
+  Ollama restricts generation to the schema, so malformed output stops being
+  something to parse defensively. Measured on this corpus: `qwen2.5:3b` free-form
+  produced usable memory for one conversation in twenty, failing with parse
+  errors and arrays of bare strings; `qwen3.5:9b` under the schema produced 44
+  chunks from twenty conversations with no errors at all. The default answer
+  model is now `qwen3.5:9b`.
+
+  A reasoning model needs one more thing: given a schema it emits the
+  constrained JSON into Ollama's `thinking` field and leaves `response` empty,
+  so the caller sees nothing and no error. Schema-constrained calls therefore
+  switch thinking off, and read `thinking` as a fallback. Unconstrained calls
+  are left alone. `THROUGHLINE_EXTRACT_SCHEMA=0` turns the constraint off —
+  worth measuring per model rather than assuming, because constrained decoding
+  also permits the shortest valid answer, and for an array that is `[]`.
+
+- **Operate names the generation backend, not just the embedding one.** The
+  page reported which model embeds and said nothing about the one that
+  extracts memory, writes titles and answers questions — the choice that
+  decides whether transcripts leave the machine. It now shows the backend, the
+  model, and `runs locally` or `leaves this machine`, with the reason spelled
+  out when nothing can generate at all.
+
+- **Docker: the export writes to the host, and Ollama is wired up.** Three
+  things the container could not do. The export's destination defaulted to the
+  container's own home — a throwaway layer, so an export looked like it worked
+  and was gone on the next `up`; there is now a writable host mount
+  (`./exports`, or `THROUGHLINE_EXPORT_DIR`) and the API is confined to it.
+  `OLLAMA_HOST` was never passed to the web container, so the optional
+  `embeddings` profile shipped an Ollama the container could not reach; it now
+  defaults to the compose service, and a host install is one `.env` line away.
+  And `generate_embeddings.py` hardcoded `http://localhost:11434` while
+  `llm.py` read `OLLAMA_HOST`, so embeddings could never work off this
+  loopback whatever you configured — and said so in a message that named the
+  hardcoded URL rather than the one it should have used.
+
+- **The Markdown export has its own section on Operate, and a ⌘K entry.** It
+  was at the end of fourteen one-click job cards, a thousand pixels down a page
+  nothing linked to. It takes a destination, so it was never a job card in the
+  first place. Searching the palette for "obsidian" now finds it.
+
+### Added
+
+- **A pre-commit hook refuses files that are not part of this project.** An
+  agent run with its working directory in this checkout created a folder here
+  for an unrelated project. It was untracked and unignored, so one `git add -A`
+  away from a public repository, and none of the configured hooks would have
+  noticed: they check formatting, file size and private keys, not whether a
+  file belongs here. `scripts/check_toplevel.py` compares every staged path
+  against the top-level entries this project owns. Adding a genuinely new one
+  means editing the list in the same commit, which is the moment to notice.
+
 ### Fixed
+
+- **Three identifiers depended on where the process was running.** All three
+  surfaced on the same day, from comparing a native database against a
+  containerised one, and all three break the moment a corpus is shared across
+  machines.
+
+  `windsurf.py` derived `session_id` from the plan's *absolute path*, so the
+  same plan read from `/home/throughline/.windsurf` and from
+  `/Users/someone/.windsurf` was two sessions: 34 plans stored twice. It now
+  derives from the file name, the only thing about a Windsurf plan that is the
+  same everywhere. `repair-conversations` renames existing rows to the new
+  identifier rather than deleting them, so the memory and embeddings extracted
+  from them survive.
+
+  `is_agent_call_transcript` compared the slugged absolute path of *this*
+  process's home against transcript directories written by another, so a
+  container filed Throughline's own model calls as the user's work — fourteen
+  of them. The comparison now ignores the home prefix; an explicit
+  `THROUGHLINE_AGENT_CALL_DIR` is still matched in full.
+
+  `conversations.project_name` split `project_path` on `/` alone. That path is
+  the `cwd` recorded inside the session file, so a session run on Windows
+  carries `C:\Users\…` and the split found no separator: every such session
+  became a project named by its own absolute path, and the same repository
+  worked on from two machines never grouped together. Migration
+  `006_project_name_separators.sql` normalises the separator before splitting;
+  POSIX paths are unaffected.
+
+- **PII redaction missed the encoded form of every home path.** Claude Code
+  names a project directory after the path it belongs to with the separators
+  turned into hyphens — `/Users/alice/src/api` becomes `-Users-alice-src-api` —
+  and those names appear throughout the transcripts. The slash-form pattern
+  never matched them, so the username survived every redaction pass that ran
+  before extraction. On one project's export the pass left 47 occurrences
+  standing; it now leaves the handful that are public GitHub URLs.
 
 - **Every Hermes message carried the same timestamp — the moment of import.**
   Two defects stacked. `session_start` arrives from Hermes JSON exports as a

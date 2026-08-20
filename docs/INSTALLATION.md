@@ -200,9 +200,20 @@ throughline embed --backend openai
 ```bash
 brew install ollama
 brew services start ollama
-ollama pull nomic-embed-text
+ollama pull nomic-embed-text          # embeddings, ~275 MB
+ollama pull qwen3.5:9b                # generation, ~6.6 GB
 throughline embed --backend ollama
 ```
+
+Two models, two jobs. An embedding model cannot answer a question or extract
+memory, so a machine with only `nomic-embed-text` has working semantic search
+and nothing else — `throughline doctor` reports both backends separately for
+exactly that reason.
+
+`qwen3.5:9b` needs roughly 8 GB of free RAM. On a smaller machine pull
+`qwen3.5:4b` instead and set `THROUGHLINE_ANSWER_MODEL=qwen3.5:4b`; on a larger
+one `qwen3.5:27b` is better at extraction and wants about 20 GB. Whatever you
+pull is used — the default is a preference, not a requirement.
 
 Test semantic search:
 
@@ -243,7 +254,7 @@ and macOS re-prompts for file and automation access. Permanent fix:
 
 **System Settings → Privacy & Security → Full Disk Access**, add the folder:
 
-```
+```text
 ~/.local/share/claude
 ```
 

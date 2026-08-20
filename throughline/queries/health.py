@@ -81,10 +81,9 @@ def missing_titles(conn, min_messages: int = 2) -> int:
 
 def embedding_coverage(conn, model: str | None = None) -> Row:
     """Share of active memory chunks that have an embedding."""
-    return (
-        one(
-            conn,
-            """
+    return one(
+        conn,
+        """
         SELECT
             count(*) AS total,
             count(*) FILTER (
@@ -98,10 +97,8 @@ def embedding_coverage(conn, model: str | None = None) -> Row:
         FROM memory_chunks mc
         WHERE COALESCE(mc.status, 'active') = 'active'
         """,
-            (model, model),
-        )
-        or {"total": 0, "embedded": 0}
-    )
+        (model, model),
+    ) or {"total": 0, "embedded": 0}
 
 
 def recent_ingestion(conn, limit: int = 50) -> list[Row]:

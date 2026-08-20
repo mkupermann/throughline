@@ -33,8 +33,9 @@ Three places, all of them a model call:
 1. **Answering a question.** `throughline ask`, and the Ask panel in the UI,
    send the retrieved excerpts to whichever model answers. With a local backend
    (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine.
-   The selected backend can be a configured remote endpoint, the Claude CLI,
-   or hosted OpenAI.
+   The selected backend can be a configured remote endpoint or hosted
+   OpenAI — but only one you named: generation probes Ollama first and has no
+   other automatic route off the machine.
    `throughline doctor` prints which model will answer and whether it is local;
    the UI states it with every answer. `THROUGHLINE_REDACT_PROMPTS=1` runs the
    excerpts through [`throughline/pii.py`](throughline/pii.py) first — off by
@@ -64,6 +65,32 @@ of them. Treat shell access to the machine as full access to the database.
 Compose deliberately lets the web container bind internally so Docker can
 publish its port. The host mapping remains `127.0.0.1`, and only that controlled
 service receives `THROUGHLINE_ALLOW_REMOTE=1`.
+
+### The Markdown export is the one endpoint that writes files
+
+Every other endpoint reads, or runs a job whose command line is fixed. The
+Markdown export takes a destination from the caller, which on an
+unauthenticated API is a different kind of capability — so it is bounded on
+both sides:
+
+- The destination must be an absolute path inside `THROUGHLINE_EXPORT_ROOT`
+  (the user's home directory by default). Symlinks are resolved before the
+  containment check, and a path naming an existing file is refused.
+- The destination reaches the job through the environment, never as a
+  command-line argument. The job registry's guarantee — that no request body
+  becomes argv — is not spent on this feature.
+
+Narrow the root if the service shares a machine with anything you would rather
+it could not write into:
+
+```bash
+THROUGHLINE_EXPORT_ROOT=~/Exports throughline serve
+```
+
+An export contains the transcripts themselves. Writing one into a synced or
+shared folder puts that content wherever the folder goes; `--redact` runs every
+exported text through [`throughline/pii.py`](throughline/pii.py) first, with
+the same conservative-by-design caveat as the extraction pass below.
 
 ### Encryption at rest
 

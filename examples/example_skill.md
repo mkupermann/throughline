@@ -26,15 +26,15 @@ Claude Code session begins with zero context.
 
 ## Usage
 
-```
+```text
 load context for fintech-api
 ```
 
-```
+```text
 what do I know about project-aurora?
 ```
 
-```
+```text
 project context acme-web
 ```
 
@@ -43,7 +43,7 @@ current working directory (last path segment).
 
 ## Example output
 
-```
+```text
 ## Context for: fintech-api
 Last session: 2026-04-01  |  17 memory chunks  |  3 decisions
 

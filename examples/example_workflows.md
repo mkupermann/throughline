@@ -144,7 +144,7 @@ a Claude Code session) and want to save what you learned to the memory database.
 
 **Option A — From Claude Code (natural language)**
 
-```
+```text
 Add a contact memory chunk:
   Name: Sam Johansson
   Project: project-aurora

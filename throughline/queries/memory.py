@@ -118,10 +118,9 @@ def category_counts(conn) -> list[Row]:
 
 
 def status_counts(conn) -> Row:
-    return (
-        one(
-            conn,
-            """
+    return one(
+        conn,
+        """
         SELECT
           COUNT(*) FILTER (WHERE COALESCE(status,'active')='active') AS active,
           COUNT(*) FILTER (WHERE status='superseded')                AS superseded,
@@ -130,9 +129,7 @@ def status_counts(conn) -> Row:
           COUNT(*)                                                   AS total
         FROM memory_chunks
         """,
-        )
-        or {"active": 0, "superseded": 0, "merged": 0, "stale": 0, "total": 0}
-    )
+    ) or {"active": 0, "superseded": 0, "merged": 0, "stale": 0, "total": 0}
 
 
 def most_accessed(conn, limit: int = 10, snippet: int = 120) -> list[Row]:

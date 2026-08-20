@@ -14,7 +14,7 @@
 <!-- How did you verify the change works? -->
 
 - [ ] Tested locally with a non-empty database
-- [ ] SQL schema changes include a migration note in `sql/migrations/`
+- [ ] SQL schema changes include the next migration in `throughline/migrations/`
 - [ ] Python files pass `python3 -m py_compile`
 - [ ] No new hardcoded user paths or secrets
 

@@ -1,7 +1,7 @@
 """Re-exec the calling script under the project's virtualenv if present.
 
-Throughline scripts depend on third-party packages (``psycopg2``, ``pandas``,
-``streamlit`` …) that are installed into a project-local virtualenv by
+Throughline scripts depend on third-party packages (for example ``psycopg2``
+and ``pyyaml``) that are installed into a project-local virtualenv by
 ``make install`` / ``pip install -e .``. The scripts' shebangs are
 ``#!/usr/bin/env python3``, which on most machines resolves to the *system*
 interpreter — where those dependencies are not installed — causing confusing

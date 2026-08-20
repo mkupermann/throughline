@@ -4,6 +4,14 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
+const stripTrailingWhitespace = {
+  name: "strip-trailing-whitespace",
+  renderChunk(code: string) {
+    const clean = code.replace(/[ \t]+$/gm, "");
+    return clean === code ? null : { code: clean, map: null };
+  },
+};
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -30,5 +38,9 @@ export default defineConfig({
     // output stable and reviewable rather than sprawling across chunks.
     sourcemap: false,
     chunkSizeWarningLimit: 900,
+    // Some dependency template literals contain whitespace-only lines. Keep
+    // generated assets compatible with the repository-wide diff gate as part
+    // of the reproducible build, before Rollup writes or hashes each chunk.
+    rollupOptions: { output: { plugins: [stripTrailingWhitespace] } },
   },
 });

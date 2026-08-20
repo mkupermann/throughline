@@ -199,7 +199,8 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE claude_memory;"
-          psql -h localhost -U postgres -d claude_memory -f sql/schema.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres \
+            -d claude_memory -f sql/schema.sql
 
   eval-smoke:
     name: Eval harness + status (no DB, no API)
@@ -245,12 +246,3 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@v16
         with:
           globs: "**/*.md"
-          config: |
-            {
-              "default": true,
-              "MD013": false,
-              "MD024": { "siblings_only": true },
-              "MD033": false,
-              "MD041": false
-            }
-        continue-on-error: true

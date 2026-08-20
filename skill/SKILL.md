@@ -9,7 +9,7 @@ Persistent long-term context for Claude Code sessions via a local PostgreSQL DB.
 
 ## DB connection
 
-```
+```text
 Host: localhost:5432
 Database: claude_memory
 User: $PGUSER (defaults to the current OS user; trust auth, no password)

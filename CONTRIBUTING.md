@@ -15,8 +15,7 @@ and moves fast — a little coordination up front saves everyone time.
 ```bash
 git clone https://github.com/mkupermann/Throughline.git
 cd Throughline
-./scripts/install.sh
-pip3 install --break-system-packages -r requirements-dev.txt  # if you plan to run lint/tests
+make install
 ```
 
 If the installer does not work on your OS, see [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
@@ -41,7 +40,7 @@ Branch off `main`. Keep branches rebased, not merged.
 
 We use [Conventional Commits](https://www.conventionalcommits.org/).
 
-```
+```text
 <type>(<scope>): <short summary>
 
 <body, wrapped at 72 cols, explaining the "why">
@@ -53,7 +52,7 @@ Accepted types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `bui
 
 Examples:
 
-```
+```text
 feat(embeddings): add Ollama provider with nomic-embed-text
 
 Adds an alternative 768-dim embedding path so users can run fully offline.
@@ -63,7 +62,7 @@ the new embedding_768 column is created on first use.
 Refs #42
 ```
 
-```
+```text
 fix(ingest): stop double-counting tool_result messages
 
 The map_role function was returning 'user' for tool_result blocks when
@@ -75,7 +74,7 @@ the enclosing message had mixed content. We now inspect all blocks.
 ### Python
 
 - Target 3.10+.
-- Format with [`black`](https://github.com/psf/black) (default 88-column line length).
+- Format with [`black`](https://github.com/psf/black) at the configured 120-column line length.
 - Lint with [`ruff`](https://github.com/astral-sh/ruff) using the config in `pyproject.toml`.
 - Type hints on public functions (`def foo(x: int) -> str:`). Internal helpers may skip them.
 - Imports in three blocks: stdlib, third-party, local — separated by blank lines.
@@ -87,8 +86,8 @@ the enclosing message had mixed content. We now inspect all blocks.
 Run locally:
 
 ```bash
-black scripts/ web/ skill/
-ruff check scripts/ web/ skill/
+black throughline memory_mcp scripts skill/scripts evals tests
+ruff check throughline memory_mcp scripts skill/scripts evals tests
 ```
 
 ### SQL
@@ -109,7 +108,7 @@ ruff check scripts/ web/ skill/
 
 - GitHub-flavored.
 - One sentence per line makes diffs readable, but not required.
-- Link relative (`[foo](docs/foo.md)`) not absolute.
+- Link relative (`[installation](docs/INSTALLATION.md)`) not absolute.
 - Fenced code blocks always specify a language: ` ```bash `, ` ```python `, ` ```sql `.
 
 ## Pre-commit hooks
@@ -134,29 +133,52 @@ Integration tests are **not** part of the pre-commit run — they require a live
 Postgres. Run them with:
 
 ```bash
-docker compose up -d postgres
-pytest tests/integration/ -v -m integration
+make test-integration
 ```
 
 ## Running the CI checks locally
 
 ```bash
-# Python syntax
-python3 -m py_compile scripts/*.py web/*.py skill/scripts/*.py
+# Python lint, format, and syntax
+ruff check throughline memory_mcp scripts skill/scripts evals tests
+black --check throughline memory_mcp scripts skill/scripts evals tests
+python3 -m compileall -q throughline memory_mcp scripts skill/scripts evals tests
 
-# SQL syntax (requires psql)
-psql -d claude_memory -f sql/schema.sql --set ON_ERROR_STOP=1 --single-transaction --dry-run
+# DB-free tests and the enforced runtime coverage floor
+pytest tests/ -v --tb=short -m "not integration" --ignore=tests/integration \
+  --cov=throughline --cov=memory_mcp \
+  --cov-report=term-missing:skip-covered --cov-fail-under=47.5
 
-# Markdown lint (requires markdownlint-cli)
-markdownlint '**/*.md' --ignore node_modules
+# Frontend tests, types, and reproducible production assets
+npm --prefix web ci
+npm --prefix web run test
+npm --prefix web run typecheck
+npm --prefix web run build
+git diff --exit-code -- throughline/web
+
+# Shell syntax
+for file in scripts/*.sh; do bash -n "$file"; done
+
+# Fresh schema snapshot (requires PostgreSQL and psql)
+createdb throughline_schema_check
+psql -v ON_ERROR_STOP=1 -d throughline_schema_check -f sql/schema.sql
+dropdb throughline_schema_check
+
+# Packaged migration discovery and status
+throughline migrate --status
+
+# Markdown formatting (same rules as CI)
+markdownlint-cli2 '**/*.md'
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same three checks on every PR.
+CI (`.github/workflows/ci.yml`) also builds and smoke-installs the wheel outside
+the checkout, verifies migration idempotence, runs all PostgreSQL-backed tests,
+validates the Compose configuration, and exercises the eval/status smoke paths.
 
 ## Tests
 
-This project is database-backed, so unit tests are limited. Contributions that
-add pytest coverage for pure-Python utilities are welcome.
+The DB-free suite covers packaged runtime behavior; PostgreSQL-backed tests use
+fresh temporary databases and must run without skips in CI.
 
 End-to-end smoke test (requires a running Postgres with the schema loaded):
 
@@ -168,14 +190,14 @@ python3 tests/seed_fake_session.py
 python3 scripts/ingest_sessions.py
 
 # Verify
-psql -d claude_memory -c "SELECT count(*) FROM conversations WHERE project_name = 'test-fixture';"
+psql -d throughline -c "SELECT count(*) FROM conversations WHERE project_name = 'test-fixture';"
 ```
 
 ## Submitting a pull request
 
 1. Fork the repo and create a branch with the right prefix.
 2. Make your change. Keep it focused.
-3. Run `black`, `ruff`, and the CI checks above.
+3. Run the relevant Python, frontend, database, and documentation gates above.
 4. Update `CHANGELOG.md` under `## [Unreleased]`.
 5. Open the PR using the template. Include:
    - What changed and why.
