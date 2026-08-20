@@ -180,6 +180,21 @@ flag to label them. Nothing is deleted — every listing gains a
   `THROUGHLINE_CLINE_DIR`, resolved per platform by the bootstrap, with an
   empty placeholder where Cline is absent.
 
+- **`throughline migrate-peer` migrates both machines of a replicating pair.**
+  Logical replication carries rows, never DDL: a column added on one node stops
+  the other's subscription at the first row that has it — quietly, with the
+  slot growing behind it. Both subscriptions are paused, both nodes migrated,
+  and replication resumes, including when a migration fails, because a pair
+  left not replicating fails silently.
+
+  It also carries the rule that made the first real run break: the publication
+  names its tables explicitly and leaves out `applied_migrations`. That table
+  is per-node bookkeeping. Published, it deadlocks the pair the first time both
+  nodes apply the same migration — each inserts the same primary key locally,
+  then sends it across, and the subscription dies on a duplicate key every five
+  seconds while the slot grows. `FOR ALL TABLES` cannot exclude anything, which
+  is how it got in.
+
 - **`throughline tunnel` holds a loopback-only link to another machine.** The
   groundwork for replicating between two machines without putting a database
   on the network — this corpus is served by a `trust`-configured PostgreSQL,

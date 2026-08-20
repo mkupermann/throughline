@@ -302,6 +302,14 @@ def cmd_backfill_projects(args: argparse.Namespace) -> int:
     return _call_script_main("backfill_projects", passthrough)
 
 
+def cmd_migrate_peer(args: argparse.Namespace) -> int:
+    """Apply pending migrations to this database and to a replicating peer."""
+    passthrough: list[str] = ["--peer-url", args.peer_url]
+    if args.dry_run:
+        passthrough.append("--dry-run")
+    return _call_script_main("migrate_peer", passthrough)
+
+
 def cmd_tunnel(args: argparse.Namespace) -> int:
     """Hold open a loopback-only link to the other machine's PostgreSQL."""
     passthrough: list[str] = ["--host", args.host, "--user", args.user]
@@ -685,6 +693,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="Preview what would be inserted; do not write.")
     p.set_defaults(func=cmd_backfill_projects)
+
+    # migrate-peer
+    p = sub.add_parser(
+        "migrate-peer",
+        help="Apply pending migrations to this database and to a replicating peer.",
+        description=(
+            "Logical replication carries rows, never DDL: a column added on "
+            "one node stops the other's subscription at the first row that "
+            "has it. Both subscriptions are paused, both nodes are migrated, "
+            "and replication resumes — including when a migration fails, "
+            "because a pair left not replicating fails silently."
+        ),
+    )
+    p.add_argument("--peer-url", required=True, help="Connection URL of the other node.")
+    p.add_argument("--dry-run", action="store_true", help="Print the plan and change nothing.")
+    p.set_defaults(func=cmd_migrate_peer)
 
     # tunnel
     p = sub.add_parser(
