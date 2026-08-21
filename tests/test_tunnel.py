@@ -15,7 +15,7 @@ from throughline.jobs.tunnel import ssh_command
 
 
 def _argv(**kw):
-    defaults = {"host": "framework.fritz.box", "user": "michael", "peer_port": 5433, "local_port": 5433}
+    defaults = {"host": "otherhost.local", "user": "alex", "peer_port": 5433, "local_port": 5433}
     return ssh_command(**{**defaults, **kw})
 
 
@@ -75,7 +75,7 @@ def test_without_an_identity_no_empty_flag_is_emitted():
 
 
 def test_the_destination_is_the_last_argument():
-    assert _argv()[-1] == "michael@framework.fritz.box"
+    assert _argv()[-1] == "alex@otherhost.local"
 
 
 @pytest.mark.parametrize("port", [0, -1, 70000])

@@ -721,7 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
             "not daemonise; see launchd/com.throughline-tunnel.plist."
         ),
     )
-    p.add_argument("--host", required=True, help="The other machine, e.g. framework.fritz.box.")
+    p.add_argument("--host", required=True, help="The other machine, e.g. otherhost.local.")
     p.add_argument("--user", required=True, help="Login on the other machine.")
     p.add_argument("--peer-port", type=int, default=5433, help="Its PostgreSQL port (default: 5433).")
     p.add_argument("--local-port", type=int, default=5433, help="This machine's PostgreSQL port.")

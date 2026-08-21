@@ -133,13 +133,13 @@ describe("ExportPanel in a container", () => {
       ...options,
       root: "/home/throughline/exports",
       suggested: "/home/throughline/exports/Throughline-Export",
-      hostPath: "C:\\Users\\nicet\\throughline\\exports",
+      hostPath: "C:\\Users\\alex\\throughline\\exports",
     });
     renderPanel();
 
     // Typing a Windows path is refused; without this the refusal reads as the
     // export being broken, and a successful one lands somewhere unfindable.
-    expect(await screen.findByText(/C:\\Users\\nicet\\throughline\\exports/)).toBeTruthy();
+    expect(await screen.findByText(/C:\\Users\\alex\\throughline\\exports/)).toBeTruthy();
   });
 
   it("does not repeat itself when the two are the same", async () => {

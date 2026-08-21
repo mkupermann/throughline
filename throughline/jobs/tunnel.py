@@ -16,7 +16,7 @@ so neither database is ever exposed to the network.
 
 Usage::
 
-    throughline tunnel --host framework.fritz.box --user michael
+    throughline tunnel --host otherhost.local --user alex
     throughline tunnel --host … --user … --bridge-port 5434
 
 It does not daemonise. Supervision belongs to launchd or systemd, which
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="throughline tunnel",
         description="Hold open a loopback-only link to the other machine's PostgreSQL.",
     )
-    parser.add_argument("--host", required=True, help="The other machine, e.g. framework.fritz.box.")
+    parser.add_argument("--host", required=True, help="The other machine, e.g. otherhost.local.")
     parser.add_argument("--user", required=True, help="Login on the other machine.")
     parser.add_argument("--peer-port", type=int, default=5433, help="Its PostgreSQL port (default: 5433).")
     parser.add_argument("--local-port", type=int, default=5433, help="This machine's PostgreSQL port.")

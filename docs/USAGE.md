@@ -285,7 +285,7 @@ One SSH connection carries both directions, so only the machine being dialled
 needs an SSH server:
 
 ```bash
-throughline tunnel --host framework.fritz.box --user michael \
+throughline tunnel --host otherhost.local --user alex \
     --identity ~/.ssh/id_ed25519_throughline
 ```
 

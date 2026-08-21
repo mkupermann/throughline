@@ -165,9 +165,9 @@ def test_the_options_say_where_the_export_lands_on_the_host(client, monkeypatch,
     Windows they type C:\\Users\\… , are refused, and read it as the export
     being broken — while a successful export lands somewhere they cannot find.
     """
-    monkeypatch.setenv("THROUGHLINE_EXPORT_HOST_PATH", r"C:\Users\nicet\throughline\exports")
+    monkeypatch.setenv("THROUGHLINE_EXPORT_HOST_PATH", r"C:\Users\alex\throughline\exports")
     body = client.get("/api/export/markdown").json()
-    assert body["hostPath"] == r"C:\Users\nicet\throughline\exports"
+    assert body["hostPath"] == r"C:\Users\alex\throughline\exports"
 
 
 def test_without_a_container_the_host_path_is_simply_the_root(client, tmp_path, monkeypatch):
