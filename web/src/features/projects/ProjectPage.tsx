@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, Search, X } from "lucide-react";
 
-import { ApiError, projectsApi } from "@/lib/api";
+import { ApiError, projectsApi, type ProjectSession } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 
 /**
@@ -61,20 +61,34 @@ export function ProjectPage() {
   // history on their behalf.
   const includeGenerated = sp.get("generated") === "1";
   const [draft, setDraft] = useState(q);
-  const [offset, setOffset] = useState(0);
+
+  // Sessions beyond the first page, appended as they arrive. Held here rather
+  // than fetched by bumping an `offset` query param on the main query: that
+  // approach fetched page N but never combined it with pages 1..N-1, so
+  // clicking "Show more" replaced the list with the next 50 rather than
+  // growing it — the button's own "X of Y" label promised accumulation that
+  // never happened.
+  const [more, setMore] = useState<ProjectSession[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
 
   const { data, isPending, error, refetch } = useQuery({
-    queryKey: ["project-sessions", project, order, q, offset, includeGenerated],
+    queryKey: ["project-sessions", project, order, q, includeGenerated],
     queryFn: () =>
       projectsApi.sessions(project, {
         order,
         q,
         limit: PAGE,
-        offset,
+        offset: 0,
         includeGenerated,
       }),
     enabled: Boolean(project),
   });
+
+  // A new filter, sort, or project means the accumulated tail belongs to the
+  // previous view.
+  useEffect(() => {
+    setMore([]);
+  }, [project, order, q, includeGenerated]);
 
   function update(next: Record<string, string | null>) {
     const p = new URLSearchParams(sp);
@@ -83,10 +97,36 @@ export function ProjectPage() {
       else p.delete(k);
     }
     setSp(p, { replace: true });
-    setOffset(0);
   }
 
-  const sessions = data?.sessions ?? [];
+  const firstPage = data?.sessions ?? [];
+  const sessions = firstPage.concat(more);
+  const total = data?.total ?? 0;
+  const complete = sessions.length >= total;
+
+  // Fetches every remaining page in one loop rather than one click per 50
+  // sessions, mirroring the conversation transcript's "Load full transcript".
+  async function loadAll() {
+    if (loadingAll || complete) return;
+    setLoadingAll(true);
+    try {
+      let loaded = sessions.length;
+      while (loaded < total) {
+        const next = await projectsApi.sessions(project, {
+          order,
+          q,
+          limit: PAGE,
+          offset: loaded,
+          includeGenerated,
+        });
+        if (!next.sessions.length) break;
+        setMore((prev) => prev.concat(next.sessions));
+        loaded += next.sessions.length;
+      }
+    } finally {
+      setLoadingAll(false);
+    }
+  }
 
   if (error) {
     const e = error as ApiError;
@@ -212,13 +252,11 @@ export function ProjectPage() {
         ))}
       </ol>
 
-      {data?.has_more && (
-        <button
-          type="button"
-          className="button stack-top"
-          onClick={() => setOffset(offset + PAGE)}
-        >
-          Show more — {formatCount(sessions.length + offset)} of {formatCount(data.total)}
+      {!complete && (
+        <button type="button" className="button stack-top" onClick={loadAll} disabled={loadingAll}>
+          {loadingAll
+            ? `Loading… (${formatCount(sessions.length)} of ${formatCount(total)})`
+            : `Load all sessions — ${formatCount(sessions.length)} of ${formatCount(total)} shown`}
         </button>
       )}
 
