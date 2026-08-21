@@ -694,6 +694,42 @@ def resolve_destination(raw: str, *, root: Path | None = None) -> Path:
     return resolved
 
 
+def list_directory(raw: str | None, *, root: Path | None = None) -> dict[str, Any]:
+    """List the immediate subdirectories of *raw* (or the export root).
+
+    Backs an in-app folder browser rather than a native OS dialog: the API
+    process may be running inside a Linux container with no display at all
+    (Docker Compose's `web` service, for one), where nothing server-side can
+    ever open the host's real file picker. Browsing the confined root itself
+    needs no display and works identically in a container or a native
+    install — the same containment rule as `resolve_destination`, except a
+    browse target must already exist, where a destination need not.
+    """
+    boundary = (root or export_root()).expanduser().resolve()
+    boundary.mkdir(parents=True, exist_ok=True)
+
+    text = (raw or "").strip()
+    target = Path(text).expanduser().resolve() if text else boundary
+    if target != boundary and boundary not in target.parents:
+        raise ValueError(f"The path is outside {boundary}: {target}")
+    if not target.is_dir():
+        raise ValueError(f"Not a directory: {target}")
+
+    # Dotfiles/dirs are noise for choosing an export destination (`.git`,
+    # `.throughline-export.json` from a previous run) and never useful here.
+    dirs = sorted(
+        (p for p in target.iterdir() if p.is_dir() and not p.name.startswith(".")),
+        key=lambda p: p.name.lower(),
+    )
+    parent = target.parent if target != boundary else None
+    return {
+        "path": str(target),
+        "root": str(boundary),
+        "parent": str(parent) if parent is not None else None,
+        "dirs": [{"name": p.name, "path": str(p)} for p in dirs],
+    }
+
+
 #: Record of what the last export wrote, kept in the destination itself.
 #: Without it a re-run cannot tell its own stale output from the person's own
 #: notes, and must either leave orphans behind or delete things it never made.

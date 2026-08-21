@@ -1,10 +1,81 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Download, Info } from "lucide-react";
+import { ArrowUp, Check, Download, Folder, FolderOpen, Info } from "lucide-react";
 
 import { exportApi, type ExportRequest } from "@/lib/api";
 import { useToast } from "@/components/Toaster";
 import { JobConsole } from "./JobConsole";
+
+/**
+ * Click-through folder browser, confined to the export root.
+ *
+ * Not a native OS dialog — the server may be running inside a container
+ * with no display at all, where nothing server-side can ever open the
+ * host's real file picker. This needs no display and works the same way in
+ * a container or a native install.
+ */
+function FolderBrowser({
+  startPath,
+  onChoose,
+  onCancel,
+}: {
+  startPath?: string;
+  onChoose: (path: string) => void;
+  onCancel: () => void;
+}) {
+  const [path, setPath] = useState<string | undefined>(startPath);
+
+  const { data, error, isPending } = useQuery({
+    queryKey: ["export", "browse", path],
+    queryFn: () => exportApi.browse(path),
+  });
+
+  return (
+    <div className="folder-browser">
+      <div className="folder-browser-path">{data?.path ?? path ?? "…"}</div>
+
+      {error && (
+        <p className="job-unavailable">
+          <Info size={13} aria-hidden />
+          <span>{(error as Error).message}</span>
+        </p>
+      )}
+
+      <ul className="folder-browser-list">
+        {data?.parent && (
+          <li>
+            <button type="button" className="folder-browser-row" onClick={() => setPath(data.parent!)}>
+              <ArrowUp size={14} aria-hidden />
+              <span>..</span>
+            </button>
+          </li>
+        )}
+        {isPending && <li className="folder-browser-empty">Loading…</li>}
+        {data && data.dirs.length === 0 && !data.parent && (
+          <li className="folder-browser-empty">No subfolders here.</li>
+        )}
+        {data?.dirs.map((d) => (
+          <li key={d.path}>
+            <button type="button" className="folder-browser-row" onClick={() => setPath(d.path)}>
+              <Folder size={14} aria-hidden />
+              <span>{d.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="folder-browser-actions">
+        <button type="button" className="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="button" disabled={!data} onClick={() => data && onChoose(data.path)}>
+          <Check size={13} aria-hidden />
+          Use this folder
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Write the corpus out as a Markdown vault.
@@ -23,6 +94,7 @@ export function ExportPanel() {
   const [toolOutput, setToolOutput] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
 
   const { data: options } = useQuery({
     queryKey: ["export", "options"],
@@ -76,14 +148,36 @@ export function ExportPanel() {
       <div className="export-form">
         <label className="export-field">
           <span>Destination</span>
-          <input
-            type="text"
-            value={out}
-            spellCheck={false}
-            onChange={(e) => setOut(e.target.value)}
-            placeholder={options?.suggested ?? "/absolute/path/to/a/folder"}
-          />
+          <div className="export-field-row">
+            <input
+              type="text"
+              value={out}
+              spellCheck={false}
+              onChange={(e) => setOut(e.target.value)}
+              placeholder={options?.suggested ?? "/absolute/path/to/a/folder"}
+            />
+            <button type="button" className="button is-small" onClick={() => setBrowsing(true)}>
+              <FolderOpen size={13} aria-hidden />
+              Choose folder…
+            </button>
+          </div>
         </label>
+
+        {browsing && (
+          // Always starts at the root, not at `out`: a suggested or typed
+          // destination may not exist yet, and browsing to a directory that
+          // isn't there yet is exactly the "Not a directory" error this is
+          // meant to spare people from.
+          <FolderBrowser
+            startPath={options?.root}
+            onCancel={() => setBrowsing(false)}
+            onChoose={(path) => {
+              setOut(path);
+              setProblem(null);
+              setBrowsing(false);
+            }}
+          />
+        )}
 
         {options && (
           <p className="job-unavailable">

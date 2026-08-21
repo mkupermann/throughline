@@ -28,6 +28,22 @@ function fmtLastImport(v: string | null): string {
 }
 
 /**
+ * The file name a person recognizes, not the raw stored path.
+ *
+ * `ingestion_log.file_path` is whatever the adapter recorded, which on
+ * Windows is backslash-separated and on the demo fixture arrives with every
+ * separator already flattened to a dash — splitting on `/` alone left either
+ * one unshortened. Only the name is the useful part here; the full value is
+ * still reachable as a tooltip for anyone who needs the whole path.
+ */
+function fmtIngestPath(raw: string): { label: string; full: string } {
+  const full = raw;
+  const parts = raw.split(/[\\/]+/).filter(Boolean);
+  const label = parts.length ? parts[parts.length - 1] : raw;
+  return { label, full };
+}
+
+/**
  * Coverage per source: what's on disk against what's imported (spec §4.3).
  *
  * 8,453 messages once sat on disk, fully parseable, one command away, and
@@ -382,17 +398,20 @@ export function OperatePage() {
         <section className="stack-top">
           <h2 className="section-label">Recent ingestion</h2>
           <ul className="results">
-            {data.ingestion.slice(0, 10).map((r, i) => (
-              <li key={i} className="result">
-                <div className="result-link">
-                  <div className="result-meta">
-                    <span>{String(r.file_path ?? "").split("/").slice(-2).join("/")}</span>
-                    <span className="tabular">{String(r.record_count ?? "")} records</span>
-                    <span>{String(r.ingested_at ?? "").slice(0, 16).replace("T", " ")}</span>
+            {data.ingestion.slice(0, 10).map((r, i) => {
+              const { label, full } = fmtIngestPath(String(r.file_path ?? ""));
+              return (
+                <li key={i} className="result">
+                  <div className="result-link">
+                    <div className="result-meta">
+                      <span title={full}>{label}</span>
+                      <span className="tabular">{String(r.record_count ?? "")} records</span>
+                      <span>{String(r.ingested_at ?? "").slice(0, 16).replace("T", " ")}</span>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

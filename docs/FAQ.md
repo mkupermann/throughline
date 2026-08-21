@@ -40,8 +40,11 @@ in the same database as the sessions and memory.
 ### Does Linux or Windows work?
 
 Linux supports the core stack and ships user-level systemd timers for ingest,
-extraction, and backup. AppleScript integrations are macOS only. Windows under
-WSL2 is not tested, and no Windows scheduler integration is supplied.
+extraction, and backup. Native Windows works the same way via Task Scheduler
+— see `windows/README.md` for `register-tasks.ps1`, which schedules the same
+three jobs. AppleScript integrations remain macOS only, and Windows under
+WSL2 is not tested — use the native route, not WSL2, for the scheduled
+tasks.
 
 ### Do I need Homebrew?
 

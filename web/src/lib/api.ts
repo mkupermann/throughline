@@ -530,6 +530,21 @@ export interface ExportStarted {
   job: { id: string; name: string; running: boolean };
 }
 
+export interface BrowseDir {
+  name: string;
+  path: string;
+}
+
+export interface BrowseResult {
+  /** The directory currently being shown. */
+  path: string;
+  /** The boundary browsing cannot go outside of — matches ExportOptions.root. */
+  root: string;
+  /** null at the root itself — nowhere further up to go. */
+  parent: string | null;
+  dirs: BrowseDir[];
+}
+
 export const exportApi = {
   options: () => request<ExportOptions>("/export/markdown"),
   start: (body: ExportRequest) =>
@@ -538,4 +553,10 @@ export const exportApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  // In-app folder browser, not a native OS dialog: the server may be running
+  // inside a container with no display at all, where nothing server-side
+  // can ever open the host's real file picker. `path` omitted browses the
+  // export root itself.
+  browse: (path?: string) =>
+    request<BrowseResult>(`/export/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 };

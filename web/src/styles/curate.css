@@ -334,6 +334,19 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
+.export-field-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.export-field-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.export-field-row .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .export-field input {
   padding: var(--space-2);
   background: var(--surface-base);
@@ -359,6 +372,65 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+/* In-app folder browser for the export destination — see ExportPanel.tsx.
+   Not a native OS dialog: confined to the export root, click-through only. */
+.folder-browser {
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.folder-browser-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+.folder-browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+}
+.folder-browser-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.folder-browser-row:hover {
+  background: var(--surface-hover);
+}
+.folder-browser-empty {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.folder-browser-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.folder-browser-actions .button {
+  margin-top: 0;
 }
 
 /* Provider coverage table. Reuses .sqltable's grid, but the row header

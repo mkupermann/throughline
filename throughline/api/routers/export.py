@@ -61,6 +61,24 @@ def options() -> dict[str, Any]:
     }
 
 
+@router.get("/export/browse")
+def browse(path: str | None = None) -> dict[str, Any]:
+    """List the subdirectories of *path* (or the export root), for an in-app
+    folder browser.
+
+    Not a native OS dialog: the API may be running inside a container with
+    no display at all (Docker Compose's `web` service, for one), where
+    nothing server-side can ever open the host's real file picker — that is
+    a hard OS boundary, not something this endpoint can paper over. Listing
+    the confined root itself needs no display, though, and behaves
+    identically in a container or a native install.
+    """
+    try:
+        return em.list_directory(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/export/markdown")
 def start(request: ExportRequest) -> dict[str, Any]:
     try:

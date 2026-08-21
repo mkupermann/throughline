@@ -36,6 +36,11 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const DEFAULT_DURATION = 5000;
+// An undo toast is the only way back from a bulk mutation, so it gets longer
+// on screen than a plain confirmation — 5s was measured against how long a
+// multi-item "select all, then act" actually takes to notice and react to,
+// not against a single-item toast.
+const UNDO_DURATION = 10_000;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -54,7 +59,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (t: Omit<Toast, "id">) => {
       const id = Math.random().toString(36).slice(2);
       setToasts((ts) => [...ts, { ...t, id }]);
-      const timer = window.setTimeout(() => dismiss(id), t.duration ?? DEFAULT_DURATION);
+      const fallback = t.onUndo ? UNDO_DURATION : DEFAULT_DURATION;
+      const timer = window.setTimeout(() => dismiss(id), t.duration ?? fallback);
       timers.current.set(id, timer);
       return id;
     },
