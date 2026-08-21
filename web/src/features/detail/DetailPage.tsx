@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, OctagonAlert } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpWideNarrow, OctagonAlert } from "lucide-react";
 
 import { findApi, type ApiError } from "@/lib/api";
 import { Transcript, type TranscriptMessage } from "./Transcript";
@@ -39,6 +39,11 @@ function renderValue(v: unknown): string {
 export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof DETAIL_KINDS] }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+
+  // In the URL like Find's and the project page's own sort, so a link to a
+  // conversation read newest-first stays newest-first for whoever opens it.
+  const order = (sp.get("order") === "newest" ? "newest" : "oldest") as "newest" | "oldest";
 
   const { data, isPending, error } = useQuery({
     queryKey: ["detail", kind, id],
@@ -47,14 +52,14 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
     enabled: Boolean(id),
   });
 
-  // Messages beyond the first page, appended as the reader asks for them.
+  // Messages beyond the first page, appended as they arrive.
   //
   // Held here rather than refetched with a bigger limit: re-requesting 500
-  // messages to add 500 more doubles the transfer on every click, and by the
+  // messages to add 500 more doubles the transfer on every fetch, and by the
   // tenth page of a 5,560-message session that is 5MB re-sent to show the
   // last 500.
   const [more, setMore] = useState<TranscriptMessage[]>([]);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
 
   // A new record means the accumulated tail belongs to the previous one.
   useEffect(() => {
@@ -65,18 +70,48 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
   const firstPage = (related.messages as TranscriptMessage[] | undefined) ?? [];
   const messageTotal = Number(related.message_total ?? firstPage.length);
   const shownCount = firstPage.length + more.length;
+  const complete = shownCount >= messageTotal;
 
-  async function loadMore() {
-    if (loadingMore || !id) return;
-    setLoadingMore(true);
+  // Fetches every remaining page in one go rather than one click per 500
+  // messages. "Show more" ten times over on a 5,560-message session reads as
+  // the tool rationing the transcript rather than paging through it.
+  async function loadAll() {
+    if (loadingAll || !id || complete) return;
+    setLoadingAll(true);
     try {
-      const next = await findApi.detail(kind, id, { offset: shownCount, limit: 500 });
-      const page = ((next.related ?? {}) as Record<string, unknown>).messages;
-      if (Array.isArray(page)) setMore((prev) => prev.concat(page as TranscriptMessage[]));
+      // A local running count, not `more.length`: state set inside this loop
+      // is not visible to this closure until the next render, so re-reading
+      // `more` here would re-fetch (and duplicate) the page just added.
+      let loaded = firstPage.length + more.length;
+      // Updates `more` after every page, not once at the end, so the
+      // "Loading… (X of Y)" count on the button actually moves during a long
+      // fetch instead of jumping straight from start to finished.
+      while (loaded < messageTotal) {
+        const next = await findApi.detail(kind, id, { offset: loaded, limit: 500 });
+        const page = ((next.related ?? {}) as Record<string, unknown>).messages;
+        if (!Array.isArray(page) || page.length === 0) break;
+        const chunk = page as TranscriptMessage[];
+        setMore((prev) => prev.concat(chunk));
+        loaded += chunk.length;
+      }
     } finally {
-      setLoadingMore(false);
+      setLoadingAll(false);
     }
   }
+
+  // Newest-first only means something over the complete transcript — reversing
+  // just the first loaded page would show message 500 above message 1 while
+  // silently hiding the 5,060 messages actually newer than either of them.
+  function setOrder(next: "oldest" | "newest") {
+    const p = new URLSearchParams(sp);
+    if (next === "oldest") p.delete("order");
+    else p.set("order", "newest");
+    setSp(p, { replace: true });
+    if (next === "newest" && !complete) void loadAll();
+  }
+
+  const allMessages = firstPage.concat(more);
+  const orderedMessages = order === "newest" ? [...allMessages].reverse() : allMessages;
 
   // Escape goes back — a detail view is a modal in spirit and must always
   // have a keyboard exit.
@@ -158,33 +193,56 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
       {Object.entries(data.related ?? {}).map(([name, rowsList]) =>
         rowsList.length && name === "messages" ? (
           <section key={name} className="stack-top">
-            <h2 className="section-label">
-              Transcript{" "}
-              <span className="tabular">
-                ({shownCount.toLocaleString("en-US")} of {messageTotal.toLocaleString("en-US")})
-              </span>
-            </h2>
+            <div className="detail-tx-head">
+              <h2 className="section-label">
+                Transcript{" "}
+                <span className="tabular">
+                  ({shownCount.toLocaleString("en-US")} of {messageTotal.toLocaleString("en-US")})
+                </span>
+              </h2>
+              {/* Both directions, because both questions are asked: "how did
+                  this start" and "what happened most recently". */}
+              <div className="mode-switch" role="group" aria-label="Transcript order">
+                <button
+                  type="button"
+                  className={order === "oldest" ? "is-on" : ""}
+                  aria-pressed={order === "oldest"}
+                  onClick={() => setOrder("oldest")}
+                >
+                  <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
+                </button>
+                <button
+                  type="button"
+                  className={order === "newest" ? "is-on" : ""}
+                  aria-pressed={order === "newest"}
+                  onClick={() => setOrder("newest")}
+                >
+                  <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
+                </button>
+              </div>
+            </div>
             {/* Rendered as a transcript, not as a list of content strings. The
                 generic renderer below shows `content` truncated at 400
                 characters, which on a real session hides every command the
                 model ran and every result it read back — those live in
                 `content_blocks`, and 772 of one 5,560-message session's
                 assistant messages have no `content` at all. */}
-            <Transcript messages={(rowsList as unknown as TranscriptMessage[]).concat(more)} />
+            <Transcript messages={orderedMessages} />
             {/* The endpoint returns 500 messages at a time. A 5,560-message
                 session showed its first 500 and gave no way to reach the rest,
                 which reads as "the history stops here" — the one impression a
-                transcript must not create. */}
-            {shownCount < messageTotal && (
+                transcript must not create. Loads every remaining page in one
+                go rather than one click per 500 messages. */}
+            {!complete && (
               <button
                 type="button"
                 className="button stack-top"
-                onClick={loadMore}
-                disabled={loadingMore}
+                onClick={loadAll}
+                disabled={loadingAll}
               >
-                {loadingMore
-                  ? "Loading…"
-                  : `Show more — ${shownCount.toLocaleString("en-US")} of ${messageTotal.toLocaleString("en-US")}`}
+                {loadingAll
+                  ? `Loading… (${shownCount.toLocaleString("en-US")} of ${messageTotal.toLocaleString("en-US")})`
+                  : `Load full transcript — ${shownCount.toLocaleString("en-US")} of ${messageTotal.toLocaleString("en-US")} shown`}
               </button>
             )}
           </section>

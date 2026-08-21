@@ -64,6 +64,17 @@
   overflow-wrap: anywhere;
 }
 
+.detail-tx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.detail-tx-head .section-label {
+  margin-bottom: 0;
+}
+
 /* ── Transcript ───────────────────────────────────────────────────────
    A conversation as it happened: prose, the commands that ran, and what
    they returned. The previous renderer showed `content` cut at 400
