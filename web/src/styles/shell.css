@@ -277,6 +277,17 @@
   font-size: var(--text-md);
   cursor: pointer;
 }
+/* A jump-to result's label is a memory chunk's own content, not a fixed
+   short name like "Overview" or "Run: Ingest sessions" — long entries used
+   to wrap to two or three lines with no gap between items, which read as
+   overlapping text once two long, similar-content rows sat back to back. */
+.palette-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .palette-item[data-selected="true"] {
   background: var(--accent-wash);
   color: var(--accent);

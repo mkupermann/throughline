@@ -47,6 +47,7 @@ instead of the `pg_dump | gzip` pipeline the shell version uses.
 the repo root) — nothing else.
 
 **Native install:**
+
 - Throughline installed, with `throughline` resolving in an ordinary
   PowerShell prompt (`Get-Command throughline`).
 - `pg_dump` and `pg_restore` on `PATH` (they ship with the PostgreSQL

@@ -27,6 +27,7 @@ ALLOWED: frozenset[str] = frozenset(
     {
         ".dockerignore",
         ".env.example",
+        ".gitattributes",
         ".github",
         ".gitignore",
         ".markdownlint-cli2.jsonc",
@@ -59,6 +60,7 @@ ALLOWED: frozenset[str] = frozenset(
         "tests",
         "throughline",
         "web",
+        "windows",
     }
 )
 

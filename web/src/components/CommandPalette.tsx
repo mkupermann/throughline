@@ -7,9 +7,23 @@ import { Download, Moon, Sun, Monitor, FileSearch, Play } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
-import { findApi, operateApi } from "@/lib/api";
+import { findApi, operateApi, type FindItem } from "@/lib/api";
 import { routeFor } from "@/features/find/ResultList";
 import { useToast } from "@/components/Toaster";
+
+/**
+ * What a jump-to row calls itself. A memory chunk carries no `title` — that
+ * field is a conversation's own summary — so falling back to `kind #id`
+ * (as a bare navigation link once did) named nothing a reader would
+ * recognize. Category, then a snippet, then the id, mirrors the same
+ * fallback ResultRow already uses for the full Find results list.
+ */
+function jumpHeading(item: FindItem): string {
+  if (item.title) return item.title;
+  if (item.kind === "memory" && item.category) return item.category;
+  if (item.snippet) return item.snippet.slice(0, 80);
+  return `${item.kind} #${item.id}`;
+}
 
 /**
  * Jobs worth reaching straight from the palette without a destination or a
@@ -156,7 +170,7 @@ export function CommandPalette() {
                 className="palette-item"
               >
                 <FileSearch size={15} aria-hidden />
-                <span>{item.title || `${item.kind} #${item.id}`}</span>
+                <span className="palette-item-label">{jumpHeading(item)}</span>
                 <span className="palette-hint">
                   {item.kind}
                   {item.project ? ` · ${item.project}` : ""}
