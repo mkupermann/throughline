@@ -432,6 +432,18 @@ def main() -> None:
     if args.force_conversations:
         conv_ids = _parse_id_list(args.force_conversations)
         print(f"\nForce-re-extracting {len(conv_ids)} conversation(s): {conv_ids}\n")
+        if args.dry_run:
+            for cid in conv_ids:
+                cursor.execute(
+                    "SELECT count(*) FROM memory_chunks WHERE source_type='conversation' AND source_id=%s",
+                    (cid,),
+                )
+                existing = cursor.fetchone()[0]
+                print(f"  #{cid} would clear {existing} existing chunk(s) and re-extract")
+            print("\nDry run — nichts extrahiert, nichts geschrieben.")
+            cursor.close()
+            conn.close()
+            return
         try:
             deleted, inserted, errors = _force_reextract(cursor, conv_ids)
             conn.commit()
