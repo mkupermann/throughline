@@ -1,6 +1,7 @@
 import os
 import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -75,3 +76,28 @@ def test_ensure_vibe_agent_profile_writes_readonly_toml(tmp_path, monkeypatch):
     content = path.read_text(encoding="utf-8")
     assert 'permission = "never"' in content
     assert "devstral" in content
+
+
+@pytest.mark.integration
+def test_stop_task_kills_process_and_updates_status(db_connection, tmp_path, monkeypatch):
+    # A real long-running child process to kill: a Python process sleeping
+    # for 30s via Popen directly (not through pipeline.sh) is enough to
+    # exercise the tree-kill logic. Not `sleep 30` — there is no sleep.exe
+    # reachable via a bare CreateProcess on Windows PATH.
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+
+    project = Q.create_pm_project(db_connection, name="StopP")
+    team = Q.create_team(db_connection, name="StopT")
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
+        run_id="stop-run", repo_path=str(tmp_path), log_dir=str(tmp_path),
+        pid=proc.pid,
+    )
+    Q.set_task_status(db_connection, task["id"], "running")
+
+    from throughline.jobs.pm_launch import stop_task
+    stopped = stop_task(db_connection, task["id"])
+
+    assert stopped["status"] == "stopped"
+    proc.wait(timeout=5)
+    assert proc.returncode is not None

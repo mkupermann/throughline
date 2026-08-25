@@ -26,6 +26,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from throughline.queries import pm as Q
 
 PIPELINE_SCRIPT = Path(
@@ -193,3 +195,44 @@ def launch_task(
     )
     Q.set_task_status(conn, task["id"], "running")
     return Q.get_task(conn, task["id"])
+
+
+def stop_task(conn, task_id: int) -> dict[str, Any]:
+    """Kill the whole process tree, not just the recorded PID.
+
+    pipeline.sh runs under Git Bash on Windows and spawns aider/vibe/claude
+    as children that are not reliably reachable through a POSIX process
+    group the way they would be on Linux/macOS — psutil's recursive
+    `children()` walk is the portable way to find them regardless. On
+    Windows, psutil's terminate() is a hard TerminateProcess (there is no
+    graceful SIGTERM equivalent), so the terminate-then-kill escalation
+    below still runs, it just has less room to matter there than on
+    POSIX — the wait_procs timeouts are what give a well-behaved POSIX
+    child a chance to exit cleanly before the kill() escalation.
+    """
+    task = Q.get_task(conn, task_id)
+    pid = task["pid"]
+    if pid is not None:
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            _, alive = psutil.wait_procs(children, timeout=3)
+            for child in alive:
+                child.kill()
+            parent.terminate()
+            parent.wait(timeout=3)
+        except psutil.NoSuchProcess:
+            pass  # already gone — stopping an already-dead process is not an error
+        except psutil.TimeoutExpired:
+            try:
+                parent.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+    Q.set_task_status(conn, task_id, "stopped")
+    return Q.get_task(conn, task_id)
