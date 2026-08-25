@@ -12,9 +12,9 @@ import { ProjectPage } from "@/features/projects/ProjectPage";
 import { OperatePage } from "@/features/operate/OperatePage";
 import { ConsolePage } from "@/features/console/ConsolePage";
 import { ToastProvider } from "@/components/Toaster";
-import { ProjectsOverviewPage } from "@/features/pm/ProjectsOverviewPage";
-import { ProjectDetailPage } from "@/features/pm/ProjectDetailPage";
-import { TaskDetailPage } from "@/features/pm/TaskDetailPage";
+import { DashboardPage } from "@/features/pm/DashboardPage";
+import { CockpitPage } from "@/features/pm/CockpitPage";
+import { TaskPage } from "@/features/pm/TaskPage";
 import { RolesPage } from "@/features/pm/RolesPage";
 import { MembersPage } from "@/features/pm/MembersPage";
 
@@ -53,9 +53,9 @@ const router = createBrowserRouter([
         element: <DetailPage kind={kind} />,
       })),
       { path: "console", element: <ConsolePage /> },
-      { path: "pm", element: <ProjectsOverviewPage /> },
-      { path: "pm/projects/:id", element: <ProjectDetailPage /> },
-      { path: "pm/tasks/:id", element: <TaskDetailPage /> },
+      { path: "pm", element: <DashboardPage /> },
+      { path: "pm/projects/:id", element: <CockpitPage /> },
+      { path: "pm/tasks/:id", element: <TaskPage /> },
       { path: "pm/roles", element: <RolesPage /> },
       { path: "pm/members", element: <MembersPage /> },
     ],

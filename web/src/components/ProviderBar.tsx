@@ -32,7 +32,10 @@ import { readProviders, withProviders } from "@/lib/providerScope";
  * of the whole store, not of one assistant. A per-tool worklist is not a
  * smaller version of this page — it is a different page.
  */
-const HIDDEN_ON = ["/console"];
+/* /pm added 2026-08-26: the PM surface reads its own pm_* tables, which have
+ * no provider column at all — the chips would be a scope nothing on those
+ * pages can honor (the same reasoning as Console and Overview). */
+const HIDDEN_ON = ["/console", "/pm"];
 const HIDDEN_EXACT = ["/"];
 
 // The pseudo-provider name coverage() emits for source_tool IS NULL rows
