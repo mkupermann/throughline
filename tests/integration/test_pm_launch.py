@@ -3,6 +3,7 @@ import stat
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,46 @@ def test_ensure_vibe_agent_profile_writes_readonly_toml(tmp_path, monkeypatch):
     content = path.read_text(encoding="utf-8")
     assert 'permission = "never"' in content
     assert "devstral" in content
+
+
+def test_ensure_vibe_agent_profile_comment_escapes_multiline_instructions(tmp_path, monkeypatch):
+    # resolve_assignment joins role+member instructions with "\n\n" — this
+    # is the NORMAL case, not an edge case. A raw multi-line value embedded
+    # in a single `#` comment would leak everything after the first newline
+    # as bare top-level TOML, potentially ahead of the permission="never"
+    # blocks this file exists to enforce.
+    fake_home = tmp_path / "home"
+    (fake_home / ".vibe" / "agents").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    from throughline.jobs.pm_launch import ensure_vibe_agent_profile
+
+    instructions = "Sei streng.\n\nPruefe alles doppelt."
+    resolved = {
+        "ai_model": "devstral", "instructions": instructions,
+        "skill_refs": [], "document_refs": [],
+    }
+    path = ensure_vibe_agent_profile(resolved, "pm-multiline")
+    content = path.read_text(encoding="utf-8")
+
+    # (a) the file parses as valid TOML at all
+    parsed = tomllib.loads(content)
+
+    # (b) the permission="never" blocks survive parsing intact
+    assert parsed["tools"]["write_file"]["permission"] == "never"
+    assert parsed["tools"]["edit"]["permission"] == "never"
+
+    # (c) none of the instructions text appears outside a comment line —
+    # every physical line of `content` that contains a fragment of the
+    # instructions must start (after stripping leading whitespace) with "#"
+    for raw_line in instructions.splitlines():
+        if not raw_line:
+            continue
+        for content_line in content.splitlines():
+            if raw_line in content_line:
+                assert content_line.lstrip().startswith("#"), (
+                    f"instructions text leaked outside a comment: {content_line!r}"
+                )
 
 
 @pytest.mark.integration
