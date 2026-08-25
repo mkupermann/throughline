@@ -39,7 +39,7 @@ def serve(
         print(
             "No built frontend found — serving the API only.\n  npm --prefix web install && npm --prefix web run build"
         )
-    print(f"Throughline → http://{settings.host}:{settings.port}")
+    print(f"Throughline -> http://{settings.host}:{settings.port}")
 
     if reload:
         # --reload needs an import string; the app then builds its own

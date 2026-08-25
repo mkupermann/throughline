@@ -107,14 +107,28 @@ def poll_task(conn, task: dict) -> None:
                 (task_id, iteration),
             )
             already_recorded = cur.fetchone() is not None
+        log_text = (log_dir / f"executor-{iteration}.log").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        tokens = extract_aider_tokens(log_text)
         if not already_recorded:
-            log_text = (log_dir / f"executor-{iteration}.log").read_text(
-                encoding="utf-8", errors="replace"
-            )
             Q.add_task_event(
                 conn, task_id=task_id, step="executor", event_type="log_update",
-                iteration=iteration, tokens_used=extract_aider_tokens(log_text),
+                iteration=iteration, tokens_used=tokens,
             )
+        else:
+            # Aider keeps appending "Tokens: ..." lines to the same log as
+            # the iteration progresses — re-reading and refreshing here
+            # (rather than only on first sight of the iteration) is what
+            # keeps tokens_used from freezing at whatever the log happened
+            # to contain on the very first tick after the file appeared.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE pm_task_events SET tokens_used = %s "
+                    "WHERE task_id = %s AND step = 'executor' AND iteration = %s",
+                    (tokens, task_id, iteration),
+                )
+            conn.commit()
 
         verdict = parse_verdict(log_dir, iteration)
         if verdict is not None:
@@ -155,10 +169,14 @@ def poll_task(conn, task: dict) -> None:
         # Throughline-side task. A FAIL verdict is recorded as an event
         # above and the task stays "running" until pipeline.sh itself exits.
 
-    if not _pid_alive(task["pid"]):
+    if task["pid"] is not None and not _pid_alive(task["pid"]):
         # pipeline.sh's own process exited without ever writing a PASS
         # verdict for the latest iteration — treat as crashed rather than
-        # leaving the task "running" forever.
+        # leaving the task "running" forever. Tasks Throughline did not
+        # launch itself (register_existing_run adopts a run with pid=None,
+        # by design, since there is no Throughline-owned process to track)
+        # skip this check entirely rather than being crash-marked on the
+        # very first tick.
         Q.set_task_status(conn, task_id, "crashed")
 
 
