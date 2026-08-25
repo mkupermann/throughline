@@ -632,7 +632,110 @@ export interface PmTaskEvent {
   created_at: string;
 }
 
+/** One project's aggregates on the /pm dashboard (GET /pm/overview). */
+export interface PmOverviewProject {
+  id: number;
+  name: string;
+  status: PmProject["status"];
+  token_budget: number | null;
+  tokens_used: number;
+  teams: number;
+  tasks: Record<PmTaskStatus, number>;
+  last_activity: string | null;
+}
+
+export interface PmOverview {
+  projects: PmOverviewProject[];
+  counts: { roles: number; members: number; teams: number };
+}
+
+export interface PmSkill {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+export interface PmIterationLog {
+  iteration: number;
+  log_tail: string;
+  verdict: string | null;
+}
+
+export interface PmAssignment {
+  id: number;
+  pm_project_id: number;
+  team_id: number;
+  role_id: number;
+  member_id: number;
+  ai_tool: string | null;
+  ai_model: string | null;
+}
+
 export const pmApi = {
+  overview: () => request<PmOverview>("/pm/overview"),
+  listSkills: () => request<{ skills: PmSkill[] }>("/pm/skills"),
+
+  patchRole: (id: number, body: Partial<PmRole>) =>
+    request<PmRole>(`/pm/roles/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchMember: (id: number, body: Partial<PmMember>) =>
+    request<PmMember>(`/pm/members/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchTeam: (id: number, body: Partial<PmTeam>) =>
+    request<PmTeam>(`/pm/teams/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchProject: (id: number, body: Partial<PmProject>) =>
+    request<PmProject>(`/pm/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /** Last N lines of one iteration's executor log, plus its verdict text.
+   *  Fetched on demand when a timeline card is expanded — never eagerly for
+   *  all iterations, which would be 30+ file reads per page view. */
+  iterationLog: (taskId: number, iteration: number, tail = 200) =>
+    request<PmIterationLog>(`/pm/tasks/${taskId}/iterations/${iteration}/log?tail=${tail}`),
+
+  /** The Zuordnungs-Matrix needs to READ existing assignments, but the PM
+   *  router only exposes POST /pm/assignments — there is no GET. Until the
+   *  backend grows one, this goes through the host's read-only SQL console
+   *  endpoint. `projectId` is coerced to a number before interpolation, so
+   *  no user-controlled text ever reaches the SQL string. */
+  listAssignments: async (projectId: number) => {
+    const result = await request<ConsoleResult>("/console/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sql:
+          "SELECT id, pm_project_id, team_id, role_id, member_id, ai_tool, ai_model " +
+          `FROM pm_assignments WHERE pm_project_id = ${Number(projectId)}`,
+        max_rows: 1000,
+      }),
+    });
+    if (result.error) throw new ApiError(500, "console_error", result.error);
+    return {
+      assignments: result.rows.map((r): PmAssignment => ({
+        id: r[0] as number,
+        pm_project_id: r[1] as number,
+        team_id: r[2] as number,
+        role_id: r[3] as number,
+        member_id: r[4] as number,
+        ai_tool: r[5] as string | null,
+        ai_model: r[6] as string | null,
+      })),
+    };
+  },
+
   createRole: (body: Partial<PmRole> & { name: string }) =>
     request<PmRole>("/pm/roles", {
       method: "POST",
