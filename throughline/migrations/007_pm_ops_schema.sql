@@ -8,7 +8,7 @@
 
 -- ── Catalogs (defined once, reused everywhere) ─────────────────────────────
 
-CREATE TABLE public.pm_roles (
+CREATE TABLE IF NOT EXISTS public.pm_roles (
     id BIGSERIAL PRIMARY KEY,
     name text NOT NULL,
     description text,
@@ -25,7 +25,7 @@ CREATE TABLE public.pm_roles (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.pm_members (
+CREATE TABLE IF NOT EXISTS public.pm_members (
     id BIGSERIAL PRIMARY KEY,
     name text NOT NULL,
     member_type text NOT NULL CHECK (member_type IN ('human', 'agent')),
@@ -38,7 +38,7 @@ CREATE TABLE public.pm_members (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.pm_teams (
+CREATE TABLE IF NOT EXISTS public.pm_teams (
     id BIGSERIAL PRIMARY KEY,
     name text NOT NULL,
     description text,
@@ -46,7 +46,7 @@ CREATE TABLE public.pm_teams (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.pm_projects (
+CREATE TABLE IF NOT EXISTS public.pm_projects (
     id BIGSERIAL PRIMARY KEY,
     name text NOT NULL,
     description text,
@@ -59,25 +59,25 @@ CREATE TABLE public.pm_projects (
 
 -- ── Relationships (many-to-many, per spec) ─────────────────────────────────
 
-CREATE TABLE public.pm_project_repos (
+CREATE TABLE IF NOT EXISTS public.pm_project_repos (
     pm_project_id bigint NOT NULL REFERENCES public.pm_projects(id) ON DELETE CASCADE,
     project_id    bigint NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
     PRIMARY KEY (pm_project_id, project_id)
 );
 
-CREATE TABLE public.pm_project_teams (
+CREATE TABLE IF NOT EXISTS public.pm_project_teams (
     pm_project_id bigint NOT NULL REFERENCES public.pm_projects(id) ON DELETE CASCADE,
     team_id       bigint NOT NULL REFERENCES public.pm_teams(id) ON DELETE CASCADE,
     PRIMARY KEY (pm_project_id, team_id)
 );
 
-CREATE TABLE public.pm_team_roles (
+CREATE TABLE IF NOT EXISTS public.pm_team_roles (
     team_id bigint NOT NULL REFERENCES public.pm_teams(id) ON DELETE CASCADE,
     role_id bigint NOT NULL REFERENCES public.pm_roles(id) ON DELETE CASCADE,
     PRIMARY KEY (team_id, role_id)
 );
 
-CREATE TABLE public.pm_assignments (
+CREATE TABLE IF NOT EXISTS public.pm_assignments (
     id BIGSERIAL PRIMARY KEY,
     pm_project_id bigint NOT NULL REFERENCES public.pm_projects(id) ON DELETE CASCADE,
     team_id       bigint NOT NULL REFERENCES public.pm_teams(id) ON DELETE CASCADE,
@@ -88,12 +88,12 @@ CREATE TABLE public.pm_assignments (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_pm_assignments_project_team
+CREATE INDEX IF NOT EXISTS idx_pm_assignments_project_team
     ON public.pm_assignments (pm_project_id, team_id);
 
 -- ── Execution ───────────────────────────────────────────────────────────────
 
-CREATE TABLE public.pm_tasks (
+CREATE TABLE IF NOT EXISTS public.pm_tasks (
     id BIGSERIAL PRIMARY KEY,
     pm_project_id bigint NOT NULL REFERENCES public.pm_projects(id),
     team_id       bigint NOT NULL REFERENCES public.pm_teams(id),
@@ -111,9 +111,9 @@ CREATE TABLE public.pm_tasks (
     ended_at   timestamptz
 );
 
-CREATE UNIQUE INDEX idx_pm_tasks_repo_run ON public.pm_tasks (repo_path, run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_tasks_repo_run ON public.pm_tasks (repo_path, run_id);
 
-CREATE TABLE public.pm_task_events (
+CREATE TABLE IF NOT EXISTS public.pm_task_events (
     id BIGSERIAL PRIMARY KEY,
     task_id       bigint NOT NULL REFERENCES public.pm_tasks(id) ON DELETE CASCADE,
     assignment_id bigint REFERENCES public.pm_assignments(id),
@@ -126,4 +126,4 @@ CREATE TABLE public.pm_task_events (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_pm_task_events_task ON public.pm_task_events (task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pm_task_events_task ON public.pm_task_events (task_id, created_at);
