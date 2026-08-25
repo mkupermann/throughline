@@ -100,3 +100,241 @@ a.pm-list-name:hover {
   color: var(--accent-ink);
   font-weight: 600;
 }
+
+/* ── Status pill ─────────────────────────────────────────────────────────
+   Shared by PmProject.status (active/paused/completed/archived) and
+   PmTaskStatus (pending/running/pass/fail/budget_exceeded/crashed/stopped).
+   Colour reinforces the text, which always says the state too. */
+.pm-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+.pm-status-active,
+.pm-status-running {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.pm-status-pass,
+.pm-status-completed {
+  background: var(--status-good-wash);
+  color: var(--status-good);
+}
+.pm-status-fail,
+.pm-status-crashed,
+.pm-status-budget_exceeded {
+  background: var(--status-critical-wash);
+  color: var(--status-critical);
+}
+.pm-status-pending {
+  background: var(--status-warning-wash);
+  color: var(--status-warning);
+}
+.pm-status-paused,
+.pm-status-stopped,
+.pm-status-archived {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+/* ── Project cards ───────────────────────────────────────────────────── */
+.pm-card-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.pm-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.pm-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+.pm-card-name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+/* ── Project detail ──────────────────────────────────────────────────── */
+.pm-project-detail {
+  max-width: 96ch;
+}
+.pm-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-muted);
+}
+.pm-tabs button {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.pm-tabs button:hover {
+  color: var(--text-primary);
+}
+.pm-tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.pm-teams-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.pm-team-row {
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pm-team-row h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Tasks tab ───────────────────────────────────────────────────────── */
+.pm-tasks-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pm-register {
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-register summary {
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-register .pm-form {
+  margin-top: var(--space-3);
+  margin-bottom: 0;
+}
+
+/* ── Task detail ─────────────────────────────────────────────────────── */
+.pm-task-detail {
+  max-width: 96ch;
+}
+.pm-task-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.pm-task-header h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0;
+  margin-right: auto;
+}
+.pm-tokens {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.pm-task-header button {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  border: 1px solid var(--status-critical);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--status-critical);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+.pm-task-header button:hover:not(:disabled) {
+  background: var(--status-critical-wash);
+}
+.pm-task-header button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pm-event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pm-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.pm-event-analyst { border-left-color: var(--chart-5); }
+.pm-event-executor { border-left-color: var(--chart-1); }
+.pm-event-tester { border-left-color: var(--chart-3); }
+.pm-event-step {
+  font-weight: 600;
+  text-transform: capitalize;
+  color: var(--text-primary);
+}
+.pm-event-iter,
+.pm-event-type,
+.pm-event-tokens {
+  color: var(--text-muted);
+}
+.pm-event-message {
+  flex-basis: 100%;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
