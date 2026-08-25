@@ -5,6 +5,7 @@ import {
   Cog,
   Terminal,
   CalendarRange,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,4 +32,5 @@ export const NAV: NavItem[] = [
   { to: "/curate", label: "Curate", icon: ClipboardCheck, chord: "c", hint: "Keep memory trustworthy" },
   { to: "/operate", label: "Operate", icon: Cog, chord: "p", hint: "Pipeline and jobs" },
   { to: "/console", label: "Console", icon: Terminal, chord: "s", hint: "SQL console" },
+  { to: "/pm", label: "Team", icon: Users, chord: "m", hint: "Virtual team ops" },
 ];

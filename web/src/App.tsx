@@ -12,6 +12,11 @@ import { ProjectPage } from "@/features/projects/ProjectPage";
 import { OperatePage } from "@/features/operate/OperatePage";
 import { ConsolePage } from "@/features/console/ConsolePage";
 import { ToastProvider } from "@/components/Toaster";
+import { ProjectsOverviewPage } from "@/features/pm/ProjectsOverviewPage";
+import { ProjectDetailPage } from "@/features/pm/ProjectDetailPage";
+import { TaskDetailPage } from "@/features/pm/TaskDetailPage";
+import { RolesPage } from "@/features/pm/RolesPage";
+import { MembersPage } from "@/features/pm/MembersPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +53,11 @@ const router = createBrowserRouter([
         element: <DetailPage kind={kind} />,
       })),
       { path: "console", element: <ConsolePage /> },
+      { path: "pm", element: <ProjectsOverviewPage /> },
+      { path: "pm/projects/:id", element: <ProjectDetailPage /> },
+      { path: "pm/tasks/:id", element: <TaskDetailPage /> },
+      { path: "pm/roles", element: <RolesPage /> },
+      { path: "pm/members", element: <MembersPage /> },
     ],
   },
 ]);
