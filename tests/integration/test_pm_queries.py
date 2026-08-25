@@ -54,10 +54,12 @@ def test_resolve_assignment_merges_role_and_member(db_connection):
         db_connection, name="Executor", default_ai_tool="aider",
         default_ai_model="qwen3-coder:30b",
         instructions="Follow the spec exactly.", token_budget=200_000,
+        document_refs=["spec.md", "shared.md"],
     )
     member = Q.create_member(
         db_connection, name="Michael", member_type="human",
         instructions="Prefer concise diffs.", token_budget=100_000,
+        document_refs=["shared.md", "shared.md", "notes.md"],
     )
     a = Q.create_assignment(
         db_connection, pm_project_id=project["id"], team_id=team["id"],
@@ -72,6 +74,8 @@ def test_resolve_assignment_merges_role_and_member(db_connection):
     assert resolved["member_budget"] == 100_000
     assert resolved["team_budget"] == 300_000
     assert resolved["project_budget"] == 500_000
+    # role docs first, then member's novel docs, each appearing once
+    assert resolved["document_refs"] == ["spec.md", "shared.md", "notes.md"]
 
 
 @pytest.mark.integration

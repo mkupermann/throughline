@@ -242,7 +242,12 @@ def resolve_assignment(conn, assignment_id: int) -> dict[str, Any]:
 
     role_docs = list(row["role_documents"] or [])
     member_docs = list(row["member_documents"] or [])
-    merged_docs = role_docs + [d for d in member_docs if d not in role_docs]
+    seen = set(role_docs)
+    merged_docs = list(role_docs)
+    for d in member_docs:
+        if d not in seen:
+            seen.add(d)
+            merged_docs.append(d)
 
     parts = [p for p in (row["role_instructions"], row["member_instructions"]) if p]
     instructions = "\n\n".join(parts) if parts else None
@@ -358,10 +363,11 @@ def recompute_task_tokens(conn, task_id: int) -> int:
     return int(total)
 
 
-def set_task_status(
-    conn, task_id: int, status: str, *, started_at=None, ended_at=None,
-) -> None:
-    if status == "running" and started_at is None:
+def set_task_status(conn, task_id: int, status: str) -> None:
+    """Transition a task's status, stamping `started_at`/`ended_at` on the
+    way in/out of flight. No caller currently needs to set those timestamps
+    explicitly, so this takes no override parameters for them."""
+    if status == "running":
         execute(
             conn,
             "UPDATE pm_tasks SET status = %s, started_at = COALESCE(started_at, now()) "
