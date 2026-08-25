@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from throughline.jobs import pm_launch
 from throughline.jobs.pm_launch import launch_task
 from throughline.queries import pm as Q
 
@@ -30,7 +31,12 @@ def test_launch_task_spawns_process_and_creates_task_row(db_connection, tmp_path
     fake_script = tmp_path / "fake_pipeline.sh"
     fake_script.write_text(FAKE_PIPELINE, encoding="utf-8")
     fake_script.chmod(fake_script.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("AI_PIPELINE_SCRIPT_PATH", str(fake_script))
+    # PIPELINE_SCRIPT is resolved from AI_PIPELINE_SCRIPT_PATH once at
+    # import time (throughline/jobs/pm_launch.py), so monkeypatch.setenv
+    # here would be a no-op against the already-imported module and this
+    # test would silently spawn the real ~/ai-pipeline/pipeline.sh instead
+    # of the fake one — patch the resolved module attribute directly.
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", fake_script)
 
     repo = tmp_path / "repo"
     repo.mkdir()

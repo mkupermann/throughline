@@ -45,16 +45,28 @@ _ROOT_STATIC = ("favicon.ico", "favicon.svg", "robots.txt", "manifest.webmanifes
 _PM_WATCH_INTERVAL_SECONDS = 10
 
 
+def _pm_watch_tick(settings: Settings) -> None:
+    """One synchronous poll of every running pm task: pooled psycopg2 calls
+    and file reads, none of it awaitable. Run only via `asyncio.to_thread`
+    (see `_pm_watch_loop`) — called directly on the event loop it would
+    block every other request for the tick's duration."""
+    with deps.connection(settings) as conn:
+        poll_all_running(conn)
+
+
 async def _pm_watch_loop(settings: Settings) -> None:
     """Poll every running pm task forever, one tick per interval.
 
     A bad tick must never kill the loop — the next tick tries again, and
-    `list_running_tasks` is a cheap query even right after a failure.
+    `list_running_tasks` is a cheap query even right after a failure. The
+    tick itself runs in a worker thread (`asyncio.to_thread`) so its
+    synchronous DB + file I/O never stalls request handling on the event
+    loop; `CancelledError` from either await (the thread or the sleep) is
+    left to propagate so shutdown can cancel the loop promptly.
     """
     while True:
         try:
-            with deps.connection(settings) as conn:
-                poll_all_running(conn)
+            await asyncio.to_thread(_pm_watch_tick, settings)
         except Exception:
             log.exception("pm watch loop tick failed")
         await asyncio.sleep(_PM_WATCH_INTERVAL_SECONDS)
