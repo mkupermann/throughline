@@ -144,3 +144,20 @@ def test_list_tasks_for_project_running_first(db_connection):
 
     tasks = Q.list_tasks_for_project(db_connection, project["id"])
     assert tasks[0]["id"] == running["id"]  # running sorts first regardless of age
+
+
+@pytest.mark.integration
+def test_register_existing_run_has_no_pid_and_is_running(db_connection, tmp_path):
+    project = Q.create_pm_project(db_connection, name="RegP")
+    team = Q.create_team(db_connection, name="RegT")
+    log_dir = tmp_path / ".ai-pipeline" / "20260825-184848"
+    log_dir.mkdir(parents=True)
+
+    task = Q.register_existing_run(
+        db_connection, pm_project_id=project["id"], team_id=team["id"],
+        title="razor1911-demo-tribute", repo_path=str(tmp_path),
+        run_id="20260825-184848",
+    )
+    assert task["pid"] is None
+    assert task["status"] == "running"
+    assert task["log_dir"] == str(log_dir)

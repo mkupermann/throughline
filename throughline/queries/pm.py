@@ -8,6 +8,7 @@ of independently-evolving areas that justify projects.py's own file.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from psycopg2.extras import Json
@@ -423,3 +424,19 @@ def budgets_for_task(conn, task_id: int) -> dict[str, int | None]:
         "role_budget": budget_row["role_budget"] if budget_row else None,
         "member_budget": budget_row["member_budget"] if budget_row else None,
     }
+
+
+def register_existing_run(
+    conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str, run_id: str,
+) -> dict[str, Any]:
+    """Adopt a pipeline.sh run Throughline did not launch — e.g. one started
+    by hand from the terminal, like razor1911-demo-tribute on 2026-08-25.
+    `pid=None` means stop_task has nothing to kill; the UI hides the Stop
+    button for these (Task 17)."""
+    log_dir = str(Path(repo_path) / ".ai-pipeline" / run_id)
+    task = create_task(
+        conn, pm_project_id=pm_project_id, team_id=team_id, title=title,
+        run_id=run_id, repo_path=repo_path, log_dir=log_dir, pid=None,
+    )
+    set_task_status(conn, task["id"], "running")
+    return get_task(conn, task["id"])
