@@ -192,6 +192,99 @@ def test_poll_task_marks_fail_when_pid_dead_and_latest_verdict_is_fail(db_connec
 
 
 @pytest.mark.integration
+def test_poll_task_backfills_every_iteration_on_first_poll(db_connection, tmp_path: Path):
+    """The signature backfill case (item 1 of
+    docs/superpowers/specs/2026-08-26-virtual-team-ops-ui-rebuild.md): a run
+    that already has several iterations on disk before Throughline ever
+    polled it — e.g. an adopted run, or a watcher that missed several ticks
+    — must get events for EVERY iteration on the very first poll, not just
+    the latest one."""
+    project = Q.create_pm_project(db_connection, name="BackfillP")
+    team = Q.create_team(db_connection, name="BackfillT")
+    log_dir = tmp_path / ".ai-pipeline" / "backfill-run"
+    log_dir.mkdir(parents=True)
+    (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
+    (log_dir / "executor-1.log").write_text("Tokens: 100 sent, 20 received.", encoding="utf-8")
+    (log_dir / "executor-2.log").write_text("Tokens: 50 sent, 10 received.", encoding="utf-8")
+    (log_dir / "executor-3.log").write_text("Tokens: 30 sent, 5 received.", encoding="utf-8")
+    (log_dir / "verdict-1.txt").write_text("Nicht bestanden.\n\nVERDICT: FAIL: x", encoding="utf-8")
+    (log_dir / "verdict-2.txt").write_text("Auch nicht.\n\nVERDICT: FAIL: y", encoding="utf-8")
+    # No verdict-3.txt — iteration 3 is still in progress, run stays "running".
+
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
+        run_id="backfill-run", repo_path=str(tmp_path), log_dir=str(log_dir),
+        pid=os.getpid(),
+    )
+    Q.set_task_status(db_connection, task["id"], "running")
+
+    poll_task(db_connection, Q.get_task(db_connection, task["id"]))
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT step, iteration, tokens_used FROM pm_task_events "
+            "WHERE task_id = %s AND step = 'executor' ORDER BY iteration",
+            (task["id"],),
+        )
+        executor_events = cur.fetchall()
+        cur.execute(
+            "SELECT iteration, message FROM pm_task_events "
+            "WHERE task_id = %s AND step = 'tester' ORDER BY iteration",
+            (task["id"],),
+        )
+        tester_events = cur.fetchall()
+
+    assert [e[1] for e in executor_events] == [1, 2, 3]
+    tokens_by_iteration = {row[1]: row[2] for row in executor_events}
+    assert tokens_by_iteration == {1: 120, 2: 60, 3: 35}
+
+    assert [e[0] for e in tester_events] == [1, 2]
+    assert "VERDICT: FAIL: x" in tester_events[0][1]
+    assert "VERDICT: FAIL: y" in tester_events[1][1]
+
+    assert Q.get_task(db_connection, task["id"])["tokens_used"] == 120 + 60 + 35
+    assert Q.get_task(db_connection, task["id"])["status"] == "running"
+
+
+@pytest.mark.integration
+def test_poll_task_backfill_does_not_duplicate_already_recorded_iterations(
+    db_connection, tmp_path: Path
+):
+    """A second poll after the first backfilling poll must not insert
+    duplicate executor/tester events for the iterations already recorded —
+    only the latest iteration's executor tokens get refreshed."""
+    project = Q.create_pm_project(db_connection, name="BackfillP2")
+    team = Q.create_team(db_connection, name="BackfillT2")
+    log_dir = tmp_path / ".ai-pipeline" / "backfill-run2"
+    log_dir.mkdir(parents=True)
+    (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
+    (log_dir / "executor-1.log").write_text("Tokens: 100 sent, 20 received.", encoding="utf-8")
+    (log_dir / "executor-2.log").write_text("Tokens: 50 sent, 10 received.", encoding="utf-8")
+    (log_dir / "verdict-1.txt").write_text("x\n\nVERDICT: FAIL: x", encoding="utf-8")
+
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
+        run_id="backfill-run2", repo_path=str(tmp_path), log_dir=str(log_dir),
+        pid=os.getpid(),
+    )
+    Q.set_task_status(db_connection, task["id"], "running")
+
+    poll_task(db_connection, Q.get_task(db_connection, task["id"]))
+    poll_task(db_connection, Q.get_task(db_connection, task["id"]))
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT step, iteration FROM pm_task_events WHERE task_id = %s "
+            "AND step IN ('executor', 'tester')",
+            (task["id"],),
+        )
+        pairs = cur.fetchall()
+
+    assert len(pairs) == len(set(pairs))  # no duplicates
+    assert sorted(pairs) == [("executor", 1), ("executor", 2), ("tester", 1)]
+
+
+@pytest.mark.integration
 def test_poll_all_running_isolates_task_failures(db_connection, tmp_path: Path, monkeypatch):
     """One task blowing up mid-poll (e.g. an unreadable log_dir) must not
     stop the watcher loop from polling every other running task."""

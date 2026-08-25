@@ -107,13 +107,42 @@ def poll_task(conn, task: dict) -> None:
 
     iteration = latest_iteration(log_dir)
     if iteration > 0:
+        # One combined query for every (step, iteration) pair already
+        # recorded for this task, rather than a SELECT per iteration below —
+        # both the backfill loop and the latest-iteration checks that follow
+        # consult this same set.
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM pm_task_events WHERE task_id = %s AND step = 'executor' "
-                "AND iteration = %s LIMIT 1",
-                (task_id, iteration),
+                "SELECT step, iteration FROM pm_task_events "
+                "WHERE task_id = %s AND iteration IS NOT NULL",
+                (task_id,),
             )
-            already_recorded = cur.fetchone() is not None
+            existing_pairs = {(row[0], row[1]) for row in cur.fetchall()}
+
+        # Backfill every earlier iteration not yet recorded — this is what
+        # makes an adopted run's first poll (register_existing_run, or any
+        # tick that catches up after being down) retroactively record the
+        # whole history on disk, not just the latest iteration. The latest
+        # iteration itself keeps the insert-or-refresh treatment below.
+        for n in range(1, iteration):
+            executor_log = log_dir / f"executor-{n}.log"
+            if ("executor", n) not in existing_pairs and executor_log.is_file():
+                n_tokens = extract_aider_tokens(
+                    executor_log.read_text(encoding="utf-8", errors="replace")
+                )
+                Q.add_task_event(
+                    conn, task_id=task_id, step="executor", event_type="log_update",
+                    iteration=n, tokens_used=n_tokens,
+                )
+            n_verdict = parse_verdict(log_dir, n)
+            if n_verdict is not None and ("tester", n) not in existing_pairs:
+                _, n_message = n_verdict
+                Q.add_task_event(
+                    conn, task_id=task_id, step="tester", event_type="verdict",
+                    iteration=n, message=n_message,
+                )
+
+        already_recorded = ("executor", iteration) in existing_pairs
         log_text = (log_dir / f"executor-{iteration}.log").read_text(
             encoding="utf-8", errors="replace"
         )
@@ -140,13 +169,7 @@ def poll_task(conn, task: dict) -> None:
         verdict = parse_verdict(log_dir, iteration)
         if verdict is not None:
             status, message = verdict
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM pm_task_events WHERE task_id = %s AND step = 'tester' "
-                    "AND iteration = %s LIMIT 1",
-                    (task_id, iteration),
-                )
-                already_recorded = cur.fetchone() is not None
+            already_recorded = ("tester", iteration) in existing_pairs
             if not already_recorded:
                 Q.add_task_event(
                     conn, task_id=task_id, step="tester", event_type="verdict",

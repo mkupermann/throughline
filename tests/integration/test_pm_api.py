@@ -163,6 +163,163 @@ def test_register_duplicate_run_is_409(client, tmp_path):
     assert resp.status_code == 200
 
 
+def test_log_excerpt_happy_path_with_tail_truncation(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "LogApiP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "LogApiT"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "log-run"
+    log_dir.mkdir(parents=True)
+    lines = [f"line {n}" for n in range(1, 11)]
+    (log_dir / "executor-1.log").write_text("\n".join(lines), encoding="utf-8")
+    (log_dir / "verdict-1.txt").write_text("Sieht gut aus.\n\nVERDICT: PASS", encoding="utf-8")
+
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "log-run",
+        },
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["id"]
+
+    resp = client.get(f"/api/pm/tasks/{task_id}/iterations/1/log", params={"tail": 3})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["iteration"] == 1
+    assert body["log_tail"] == "line 8\nline 9\nline 10"
+    assert "VERDICT: PASS" in body["verdict"]
+
+
+def test_log_excerpt_unknown_task_is_404(client):
+    resp = client.get("/api/pm/tasks/999999/iterations/1/log")
+    assert resp.status_code == 404
+
+
+def test_log_excerpt_missing_iteration_file_is_404(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "LogApiP2"}).json()
+    team = client.post("/api/pm/teams", json={"name": "LogApiT2"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "log-run2"
+    log_dir.mkdir(parents=True)
+
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "log-run2",
+        },
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["id"]
+
+    resp = client.get(f"/api/pm/tasks/{task_id}/iterations/1/log")
+    assert resp.status_code == 404
+
+
+def test_log_excerpt_no_verdict_yet_is_null(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "LogApiP3"}).json()
+    team = client.post("/api/pm/teams", json={"name": "LogApiT3"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "log-run3"
+    log_dir.mkdir(parents=True)
+    (log_dir / "executor-1.log").write_text("hello", encoding="utf-8")
+
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "log-run3",
+        },
+    )
+    task_id = resp.json()["id"]
+
+    resp = client.get(f"/api/pm/tasks/{task_id}/iterations/1/log")
+    assert resp.status_code == 200
+    assert resp.json()["verdict"] is None
+
+
+def test_overview_endpoint_returns_projects_and_counts(client):
+    project = client.post("/api/pm/projects", json={"name": "OvApiP", "token_budget": 500}).json()
+    team = client.post("/api/pm/teams", json={"name": "OvApiT"}).json()
+    client.post(f"/api/pm/projects/{project['id']}/teams/{team['id']}")
+
+    resp = client.get("/api/pm/overview")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "projects" in body and "counts" in body
+
+    row = next(p for p in body["projects"] if p["id"] == project["id"])
+    assert row["teams"] == 1
+    assert row["token_budget"] == 500
+    assert row["tasks"]["running"] == 0
+    assert set(body["counts"].keys()) == {"roles", "members", "teams"}
+
+
+def test_skills_endpoint_lists_seeded_skill(client, db_env):
+    import psycopg2
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO skills (name, description, path) VALUES (%s, %s, %s) RETURNING id",
+                ("api-test-skill", "a skill for the picker", "/skills/api-test-skill"),
+            )
+            skill_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/api/pm/skills")
+    assert resp.status_code == 200
+    skills = resp.json()["skills"]
+    assert any(s["id"] == skill_id and s["name"] == "api-test-skill" for s in skills)
+
+
+def test_patch_role_updates_instructions_budget_and_skills(client):
+    role = client.post("/api/pm/roles", json={"name": "PatchRole"}).json()
+
+    resp = client.patch(
+        f"/api/pm/roles/{role['id']}",
+        json={"instructions": "Sei gruendlich.", "token_budget": 12345, "skill_refs": [1, 2, 3]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["instructions"] == "Sei gruendlich."
+    assert body["token_budget"] == 12345
+    assert body["skill_refs"] == [1, 2, 3]
+    assert body["name"] == "PatchRole"  # untouched field preserved
+
+
+def test_patch_role_unknown_id_is_404(client):
+    resp = client.patch("/api/pm/roles/999999", json={"name": "whatever"})
+    assert resp.status_code == 404
+
+
+def test_patch_role_unknown_field_is_422(client):
+    role = client.post("/api/pm/roles", json={"name": "PatchRole2"}).json()
+    resp = client.patch(f"/api/pm/roles/{role['id']}", json={"not_a_real_field": "x"})
+    assert resp.status_code == 422
+
+
+def test_patch_member_project_team_roundtrip(client):
+    member = client.post("/api/pm/members", json={"name": "PatchMember", "member_type": "human"}).json()
+    resp = client.patch(f"/api/pm/members/{member['id']}", json={"token_budget": 111})
+    assert resp.status_code == 200
+    assert resp.json()["token_budget"] == 111
+
+    project = client.post("/api/pm/projects", json={"name": "PatchProject"}).json()
+    resp = client.patch(f"/api/pm/projects/{project['id']}", json={"status": "paused"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "paused"
+
+    team = client.post("/api/pm/teams", json={"name": "PatchTeam"}).json()
+    resp = client.patch(f"/api/pm/teams/{team['id']}", json={"token_budget": 222})
+    assert resp.status_code == 200
+    assert resp.json()["token_budget"] == 222
+
+
 def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     """The pm watch loop (Task 13) must run for the lifetime of the app and
     be cancelled cleanly on shutdown — no live server or 10s sleep needed to

@@ -438,6 +438,180 @@ def get_skill_names(conn, ids: list[int]) -> list[str]:
     ]
 
 
+def overview(conn) -> dict[str, Any]:
+    """Aggregate figures for the /pm dashboard: per-project team count, task
+    counts by status, tokens_used/token_budget, and last activity, plus
+    catalog-wide counts. Two subquery aggregates (teams, tasks) rather than
+    a single multi-join query — joining pm_project_teams and pm_tasks
+    directly on pm_projects would fan out (one row per team-task pair per
+    project), inflating both the token sum and the task counts."""
+    project_rows = rows(
+        conn,
+        """
+        SELECT
+            p.id, p.name, p.status, p.token_budget,
+            COALESCE(tk.tokens_used_sum, 0)::bigint AS tokens_used,
+            COALESCE(tm.teams_count, 0)::bigint AS teams,
+            COALESCE(tk.running, 0)::bigint AS running,
+            COALESCE(tk.pass, 0)::bigint AS pass,
+            COALESCE(tk.fail, 0)::bigint AS fail,
+            COALESCE(tk.budget_exceeded, 0)::bigint AS budget_exceeded,
+            COALESCE(tk.crashed, 0)::bigint AS crashed,
+            COALESCE(tk.stopped, 0)::bigint AS stopped,
+            COALESCE(tk.pending, 0)::bigint AS pending,
+            tk.last_activity
+        FROM pm_projects p
+        LEFT JOIN (
+            SELECT pm_project_id, COUNT(*) AS teams_count
+            FROM pm_project_teams
+            GROUP BY pm_project_id
+        ) tm ON tm.pm_project_id = p.id
+        LEFT JOIN (
+            SELECT
+                pm_project_id,
+                SUM(tokens_used) AS tokens_used_sum,
+                COUNT(*) FILTER (WHERE status = 'running') AS running,
+                COUNT(*) FILTER (WHERE status = 'pass') AS pass,
+                COUNT(*) FILTER (WHERE status = 'fail') AS fail,
+                COUNT(*) FILTER (WHERE status = 'budget_exceeded') AS budget_exceeded,
+                COUNT(*) FILTER (WHERE status = 'crashed') AS crashed,
+                COUNT(*) FILTER (WHERE status = 'stopped') AS stopped,
+                COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                MAX(COALESCE(ended_at, created_at)) AS last_activity
+            FROM pm_tasks
+            GROUP BY pm_project_id
+        ) tk ON tk.pm_project_id = p.id
+        ORDER BY p.created_at DESC
+        """,
+    )
+
+    projects = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "status": r["status"],
+            "token_budget": r["token_budget"],
+            "tokens_used": r["tokens_used"],
+            "teams": r["teams"],
+            "tasks": {
+                "running": r["running"],
+                "pass": r["pass"],
+                "fail": r["fail"],
+                "budget_exceeded": r["budget_exceeded"],
+                "crashed": r["crashed"],
+                "stopped": r["stopped"],
+                "pending": r["pending"],
+            },
+            "last_activity": r["last_activity"].isoformat() if r["last_activity"] else None,
+        }
+        for r in project_rows
+    ]
+
+    counts = one(
+        conn,
+        """
+        SELECT
+            (SELECT COUNT(*) FROM pm_roles)   AS roles,
+            (SELECT COUNT(*) FROM pm_members) AS members,
+            (SELECT COUNT(*) FROM pm_teams)   AS teams
+        """,
+    )
+
+    return {"projects": projects, "counts": counts}
+
+
+def list_skills(conn) -> list[Row]:
+    """Lean {id, name, description} listing, ordered by name, for the PM
+    skills picker (item 5 of
+    docs/superpowers/specs/2026-08-26-virtual-team-ops-ui-rebuild.md).
+    Deliberately not throughline.queries.skills.list_skills, which returns
+    many more fields sorted by recency for a different UI."""
+    return rows(conn, "SELECT id, name, description FROM skills ORDER BY name")
+
+
+# ── Partial updates ──────────────────────────────────────────────────────────
+
+
+def _update_row(
+    conn,
+    table: str,
+    row_id: int,
+    fields: dict[str, Any],
+    allowed: frozenset[str],
+    json_columns: frozenset[str] = frozenset(),
+    has_updated_at: bool = True,
+) -> dict[str, Any] | None:
+    """Build a parameterized ``UPDATE ... SET`` from only the keys present in
+    *fields* — the caller passes a pydantic ``model_dump(exclude_unset=True)``
+    so a field the request omitted never overwrites existing data with NULL.
+    Column names come only from *allowed* (a fixed whitelist per table, never
+    from caller input) and are never string-interpolated with a value —
+    every value travels as a parameter. Returns None if *row_id* does not
+    exist (a caller-facing 404), whether or not *fields* was empty.
+
+    *table* itself is also never caller-supplied: every call site below
+    passes a literal table name, so there is no injection surface there
+    either — the f-string is only ever built from constants this module
+    controls.
+    """
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"unknown column(s) for {table}: {sorted(unknown)}")
+    if not fields:
+        return one(conn, f"SELECT * FROM {table} WHERE id = %s", (row_id,))  # noqa: S608
+
+    set_parts = [f"{key} = %s" for key in fields]
+    if has_updated_at:
+        set_parts.append("updated_at = now()")
+    params: list[Any] = [Json(v) if k in json_columns else v for k, v in fields.items()]
+    params.append(row_id)
+
+    row = one(
+        conn,
+        f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = %s RETURNING *",  # noqa: S608
+        params,
+    )
+    conn.commit()
+    return row
+
+
+_ROLE_COLUMNS = frozenset({
+    "name", "description", "default_ai_tool", "default_ai_model",
+    "skill_refs", "instructions", "document_refs", "token_budget",
+})
+_ROLE_JSON_COLUMNS = frozenset({"document_refs"})
+
+
+def update_role(conn, role_id: int, **fields: Any) -> dict[str, Any] | None:
+    return _update_row(conn, "pm_roles", role_id, fields, _ROLE_COLUMNS, _ROLE_JSON_COLUMNS)
+
+
+_MEMBER_COLUMNS = frozenset({
+    "name", "member_type", "contact_info", "skill_refs", "instructions",
+    "document_refs", "token_budget",
+})
+_MEMBER_JSON_COLUMNS = frozenset({"contact_info", "document_refs"})
+
+
+def update_member(conn, member_id: int, **fields: Any) -> dict[str, Any] | None:
+    return _update_row(conn, "pm_members", member_id, fields, _MEMBER_COLUMNS, _MEMBER_JSON_COLUMNS)
+
+
+_PROJECT_COLUMNS = frozenset({"name", "description", "status", "token_budget"})
+
+
+def update_pm_project(conn, project_id: int, **fields: Any) -> dict[str, Any] | None:
+    return _update_row(conn, "pm_projects", project_id, fields, _PROJECT_COLUMNS)
+
+
+_TEAM_COLUMNS = frozenset({"name", "description", "token_budget"})
+
+
+def update_team(conn, team_id: int, **fields: Any) -> dict[str, Any] | None:
+    # pm_teams has no updated_at column (see migrations/007_pm_ops_schema.sql).
+    return _update_row(conn, "pm_teams", team_id, fields, _TEAM_COLUMNS, has_updated_at=False)
+
+
 def register_existing_run(
     conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str, run_id: str,
 ) -> dict[str, Any]:

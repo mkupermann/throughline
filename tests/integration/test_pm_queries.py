@@ -198,6 +198,142 @@ def test_register_existing_run_rejects_missing_log_dir(db_connection, tmp_path):
 
 
 @pytest.mark.integration
+def test_overview_aggregates_projects_teams_and_task_status_counts(db_connection):
+    project = Q.create_pm_project(db_connection, name="OverviewP", token_budget=100_000)
+    other_project = Q.create_pm_project(db_connection, name="OverviewOther")
+    team_a = Q.create_team(db_connection, name="OverviewTeamA")
+    team_b = Q.create_team(db_connection, name="OverviewTeamB")
+    Q.link_project_team(db_connection, project["id"], team_a["id"])
+    Q.link_project_team(db_connection, project["id"], team_b["id"])
+
+    running = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team_a["id"], title="r",
+        run_id="ov-run", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-run",
+    )
+    Q.set_task_status(db_connection, running["id"], "running")
+    Q.add_task_event(
+        db_connection, task_id=running["id"], step="executor", event_type="log_update",
+        iteration=1, tokens_used=1000,
+    )
+    Q.recompute_task_tokens(db_connection, running["id"])
+
+    passed = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team_a["id"], title="p",
+        run_id="ov-pass", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-pass",
+    )
+    Q.set_task_status(db_connection, passed["id"], "running")
+    Q.add_task_event(
+        db_connection, task_id=passed["id"], step="executor", event_type="log_update",
+        iteration=1, tokens_used=2000,
+    )
+    Q.recompute_task_tokens(db_connection, passed["id"])
+    Q.set_task_status(db_connection, passed["id"], "pass")
+
+    failed = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team_b["id"], title="f",
+        run_id="ov-fail", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-fail",
+    )
+    Q.set_task_status(db_connection, failed["id"], "fail")
+
+    result = Q.overview(db_connection)
+
+    projects_by_id = {p["id"]: p for p in result["projects"]}
+    assert project["id"] in projects_by_id
+    assert other_project["id"] in projects_by_id
+
+    p = projects_by_id[project["id"]]
+    assert p["name"] == "OverviewP"
+    assert p["token_budget"] == 100_000
+    assert p["teams"] == 2
+    assert p["tokens_used"] == 3000
+    assert p["tasks"]["running"] == 1
+    assert p["tasks"]["pass"] == 1
+    assert p["tasks"]["fail"] == 1
+    assert p["tasks"]["crashed"] == 0
+    assert p["last_activity"] is not None
+
+    empty = projects_by_id[other_project["id"]]
+    assert empty["teams"] == 0
+    assert empty["tokens_used"] == 0
+    assert empty["tasks"]["running"] == 0
+    assert empty["last_activity"] is None
+
+    assert result["counts"]["teams"] >= 2
+    assert isinstance(result["counts"]["roles"], int)
+    assert isinstance(result["counts"]["members"], int)
+
+
+@pytest.mark.integration
+def test_list_skills_returns_lean_shape_sorted_by_name(db_connection):
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO skills (name, description, path) VALUES (%s, %s, %s)",
+            ("zeta-skill", "does zeta things", "/skills/zeta-skill"),
+        )
+        cur.execute(
+            "INSERT INTO skills (name, description, path) VALUES (%s, %s, %s)",
+            ("alpha-skill", "does alpha things", "/skills/alpha-skill"),
+        )
+    db_connection.commit()
+
+    skills = Q.list_skills(db_connection)
+    names = [s["name"] for s in skills]
+    assert names.index("alpha-skill") < names.index("zeta-skill")
+    alpha = next(s for s in skills if s["name"] == "alpha-skill")
+    assert set(alpha.keys()) == {"id", "name", "description"}
+    assert alpha["description"] == "does alpha things"
+
+
+@pytest.mark.integration
+def test_update_role_partial_fields_and_unknown_id(db_connection):
+    role = Q.create_role(db_connection, name="Orig", token_budget=1000)
+
+    updated = Q.update_role(
+        db_connection, role["id"],
+        instructions="Sei gruendlich.", token_budget=5000, skill_refs=[1, 2],
+    )
+    assert updated["name"] == "Orig"  # untouched field survives
+    assert updated["instructions"] == "Sei gruendlich."
+    assert updated["token_budget"] == 5000
+    assert updated["skill_refs"] == [1, 2]
+
+    assert Q.update_role(db_connection, 999_999, name="whatever") is None
+
+
+@pytest.mark.integration
+def test_update_role_rejects_unknown_column(db_connection):
+    role = Q.create_role(db_connection, name="Orig2")
+    with pytest.raises(ValueError):
+        Q.update_role(db_connection, role["id"], not_a_real_column="x")
+
+
+@pytest.mark.integration
+def test_update_member_partial_fields(db_connection):
+    member = Q.create_member(db_connection, name="M", member_type="human")
+    updated = Q.update_member(db_connection, member["id"], token_budget=42, document_refs=["a.md"])
+    assert updated["token_budget"] == 42
+    assert updated["document_refs"] == ["a.md"]
+    assert updated["name"] == "M"
+
+
+@pytest.mark.integration
+def test_update_pm_project_partial_fields(db_connection):
+    project = Q.create_pm_project(db_connection, name="UpdP")
+    updated = Q.update_pm_project(db_connection, project["id"], status="paused", token_budget=9)
+    assert updated["status"] == "paused"
+    assert updated["token_budget"] == 9
+    assert updated["name"] == "UpdP"
+
+
+@pytest.mark.integration
+def test_update_team_partial_fields(db_connection):
+    team = Q.create_team(db_connection, name="UpdT")
+    updated = Q.update_team(db_connection, team["id"], token_budget=77)
+    assert updated["token_budget"] == 77
+    assert updated["name"] == "UpdT"
+
+
+@pytest.mark.integration
 def test_register_existing_run_has_no_pid_and_is_running(db_connection, tmp_path):
     project = Q.create_pm_project(db_connection, name="RegP")
     team = Q.create_team(db_connection, name="RegT")
