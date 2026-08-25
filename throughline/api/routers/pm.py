@@ -275,6 +275,25 @@ def create_assignment(body: AssignmentIn, settings: Settings = Depends(get_setti
         return Q.create_assignment(conn, **body.model_dump())
 
 
+@router.get("/pm/projects/{project_id}/assignments")
+def project_assignments(
+    project_id: int, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    with connection(settings) as conn:
+        return {"assignments": Q.list_assignments_for_project(conn, project_id)}
+
+
+@router.delete("/pm/assignments/{assignment_id}")
+def delete_assignment(
+    assignment_id: int, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    with connection(settings) as conn:
+        deleted = Q.delete_assignment(conn, assignment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no assignment with id {assignment_id}")
+    return {"deleted": True}
+
+
 @router.get("/pm/projects/{project_id}/tasks")
 def project_tasks(project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:

@@ -320,6 +320,72 @@ def test_patch_member_project_team_roundtrip(client):
     assert resp.json()["token_budget"] == 222
 
 
+def test_list_assignments_for_project_includes_names(client):
+    project = client.post("/api/pm/projects", json={"name": "AssignApiP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "AssignApiT"}).json()
+    role = client.post("/api/pm/roles", json={"name": "AssignApiRole"}).json()
+    member = client.post(
+        "/api/pm/members", json={"name": "AssignApiMember", "member_type": "human"}
+    ).json()
+
+    created = client.post(
+        "/api/pm/assignments",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"],
+            "role_id": role["id"], "member_id": member["id"], "ai_tool": "aider",
+        },
+    ).json()
+
+    resp = client.get(f"/api/pm/projects/{project['id']}/assignments")
+    assert resp.status_code == 200
+    assignments = resp.json()["assignments"]
+    assert len(assignments) == 1
+    row = assignments[0]
+    assert row["id"] == created["id"]
+    assert row["team_id"] == team["id"]
+    assert row["role_id"] == role["id"]
+    assert row["member_id"] == member["id"]
+    assert row["ai_tool"] == "aider"
+    assert row["role_name"] == "AssignApiRole"
+    assert row["member_name"] == "AssignApiMember"
+
+
+def test_list_assignments_for_project_empty_when_none(client):
+    project = client.post("/api/pm/projects", json={"name": "AssignApiEmptyP"}).json()
+    resp = client.get(f"/api/pm/projects/{project['id']}/assignments")
+    assert resp.status_code == 200
+    assert resp.json()["assignments"] == []
+
+
+def test_delete_assignment_removes_it(client):
+    project = client.post("/api/pm/projects", json={"name": "DelAssignApiP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "DelAssignApiT"}).json()
+    role = client.post("/api/pm/roles", json={"name": "DelAssignApiRole"}).json()
+    member = client.post(
+        "/api/pm/members", json={"name": "DelAssignApiMember", "member_type": "human"}
+    ).json()
+
+    created = client.post(
+        "/api/pm/assignments",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"],
+            "role_id": role["id"], "member_id": member["id"],
+        },
+    ).json()
+
+    resp = client.delete(f"/api/pm/assignments/{created['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+    resp = client.get(f"/api/pm/projects/{project['id']}/assignments")
+    assert resp.json()["assignments"] == []
+
+
+def test_delete_assignment_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/assignments/999999")
+    assert resp.status_code == 404
+
+
 def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     """The pm watch loop (Task 13) must run for the lifetime of the app and
     be cancelled cleanly on shutdown — no live server or 10s sleep needed to

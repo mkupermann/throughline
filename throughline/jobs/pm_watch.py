@@ -33,7 +33,7 @@ def parse_spec(log_dir: Path) -> str | None:
     spec = log_dir / "SPEC.md"
     if not spec.is_file():
         return None
-    return spec.read_text(encoding="utf-8")
+    return spec.read_text(encoding="utf-8", errors="replace")
 
 
 def latest_iteration(log_dir: Path) -> int:
@@ -51,7 +51,7 @@ def parse_verdict(log_dir: Path, iteration: int) -> tuple[str, str] | None:
     verdict_file = log_dir / f"verdict-{iteration}.txt"
     if not verdict_file.is_file():
         return None
-    text = verdict_file.read_text(encoding="utf-8")
+    text = verdict_file.read_text(encoding="utf-8", errors="replace")
     match = _VERDICT_RE.search(text)
     if not match:
         return None

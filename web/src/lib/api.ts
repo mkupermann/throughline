@@ -663,12 +663,13 @@ export interface PmIterationLog {
 
 export interface PmAssignment {
   id: number;
-  pm_project_id: number;
   team_id: number;
   role_id: number;
   member_id: number;
   ai_tool: string | null;
   ai_model: string | null;
+  role_name: string;
+  member_name: string;
 }
 
 export const pmApi = {
@@ -706,35 +707,13 @@ export const pmApi = {
   iterationLog: (taskId: number, iteration: number, tail = 200) =>
     request<PmIterationLog>(`/pm/tasks/${taskId}/iterations/${iteration}/log?tail=${tail}`),
 
-  /** The Zuordnungs-Matrix needs to READ existing assignments, but the PM
-   *  router only exposes POST /pm/assignments — there is no GET. Until the
-   *  backend grows one, this goes through the host's read-only SQL console
-   *  endpoint. `projectId` is coerced to a number before interpolation, so
-   *  no user-controlled text ever reaches the SQL string. */
-  listAssignments: async (projectId: number) => {
-    const result = await request<ConsoleResult>("/console/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sql:
-          "SELECT id, pm_project_id, team_id, role_id, member_id, ai_tool, ai_model " +
-          `FROM pm_assignments WHERE pm_project_id = ${Number(projectId)}`,
-        max_rows: 1000,
-      }),
-    });
-    if (result.error) throw new ApiError(500, "console_error", result.error);
-    return {
-      assignments: result.rows.map((r): PmAssignment => ({
-        id: r[0] as number,
-        pm_project_id: r[1] as number,
-        team_id: r[2] as number,
-        role_id: r[3] as number,
-        member_id: r[4] as number,
-        ai_tool: r[5] as string | null,
-        ai_model: r[6] as string | null,
-      })),
-    };
-  },
+  /** Existing assignments for one project, with role/member names joined
+   *  in server-side for the Zuordnungs-Matrix to render. */
+  listAssignments: (projectId: number) =>
+    request<{ assignments: PmAssignment[] }>(`/pm/projects/${projectId}/assignments`),
+
+  deleteAssignment: (assignmentId: number) =>
+    request<{ deleted: boolean }>(`/pm/assignments/${assignmentId}`, { method: "DELETE" }),
 
   createRole: (body: Partial<PmRole> & { name: string }) =>
     request<PmRole>("/pm/roles", {

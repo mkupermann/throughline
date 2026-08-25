@@ -49,6 +49,19 @@ def test_parse_verdict_not_yet_written(tmp_path: Path):
     assert parse_verdict(tmp_path, 5) is None
 
 
+def test_parse_verdict_tolerates_cp1252_bytes(tmp_path: Path):
+    """~19 of the real razor1911 verdict files are cp1252, not UTF-8 (an
+    umlaut like the one in "Pruefung" below encodes to an invalid UTF-8
+    byte sequence) — parse_verdict must not raise UnicodeDecodeError on
+    these, or the watcher's backfill crashes every tick."""
+    (tmp_path / "verdict-3.txt").write_bytes(
+        b"Pr\xfcfung fehlgeschlagen.\n\nVERDICT: FAIL: Umlaut-Test"
+    )
+    status, message = parse_verdict(tmp_path, 3)
+    assert status == "fail"
+    assert "Umlaut-Test" in message
+
+
 def test_extract_aider_tokens_sums_all_turns():
     log = "some output\nTokens: 3.4k sent, 130 received.\nmore output\nTokens: 500 sent, 40 received.\n"
     # 3.4k -> 3400 + 130 + 500 + 40

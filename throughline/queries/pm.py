@@ -206,6 +206,35 @@ def create_assignment(
     return row
 
 
+def list_assignments_for_project(conn, pm_project_id: int) -> list[Row]:
+    """Every assignment for one project, with the role/member names joined
+    in — the Zuordnungs-Matrix wants both the raw ids (to key off of) and
+    the human-readable names (to render) without a second round trip."""
+    return rows(
+        conn,
+        """
+        SELECT
+            a.id, a.team_id, a.role_id, a.member_id, a.ai_tool, a.ai_model,
+            r.name AS role_name, m.name AS member_name
+        FROM pm_assignments a
+        JOIN pm_roles r ON r.id = a.role_id
+        JOIN pm_members m ON m.id = a.member_id
+        WHERE a.pm_project_id = %s
+        ORDER BY a.id
+        """,
+        (pm_project_id,),
+    )
+
+
+def delete_assignment(conn, assignment_id: int) -> bool:
+    """Remove one assignment. Returns False (no exception) if *assignment_id*
+    does not exist, so the router can turn that into a 404 without a
+    round-trip SELECT first."""
+    affected = execute(conn, "DELETE FROM pm_assignments WHERE id = %s", (assignment_id,))
+    conn.commit()
+    return affected > 0
+
+
 def resolve_assignment(conn, assignment_id: int) -> dict[str, Any]:
     """The effective ai_tool/model/skills/instructions/budgets for one
     assignment: role default with a member override for AI binding, a union
