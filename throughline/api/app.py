@@ -7,8 +7,9 @@ the SPA from the same process on the same port. One command, one port —
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from throughline import __version__
+from throughline.jobs.pm_watch import poll_all_running
 
 from . import deps
 from .deps import DatabaseUnavailable, close_pool, init_pool
@@ -39,6 +41,24 @@ log = logging.getLogger("throughline.api")
 #: Filenames served straight from web/dist root rather than /assets.
 _ROOT_STATIC = ("favicon.ico", "favicon.svg", "robots.txt", "manifest.webmanifest")
 
+#: How often the pm watch loop polls running tasks for log/status changes.
+_PM_WATCH_INTERVAL_SECONDS = 10
+
+
+async def _pm_watch_loop(settings: Settings) -> None:
+    """Poll every running pm task forever, one tick per interval.
+
+    A bad tick must never kill the loop — the next tick tries again, and
+    `list_running_tasks` is a cheap query even right after a failure.
+    """
+    while True:
+        try:
+            with deps.connection(settings) as conn:
+                poll_all_running(conn)
+        except Exception:
+            log.exception("pm watch loop tick failed")
+        await asyncio.sleep(_PM_WATCH_INTERVAL_SECONDS)
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -46,9 +66,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_pool(settings)
+        watch_task = asyncio.create_task(_pm_watch_loop(settings))
+        app.state.pm_watch_task = watch_task
         try:
             yield
         finally:
+            watch_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await watch_task
             close_pool()
 
     app = FastAPI(

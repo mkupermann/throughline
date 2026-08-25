@@ -80,3 +80,21 @@ def test_launch_and_stop_task(client, tmp_path, monkeypatch):
     resp = client.get(f"/api/pm/projects/{project['id']}/tasks")
     assert resp.status_code == 200
     assert any(t["id"] == task["id"] for t in resp.json()["tasks"])
+
+
+def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
+    """The pm watch loop (Task 13) must run for the lifetime of the app and
+    be cancelled cleanly on shutdown — no live server or 10s sleep needed to
+    prove that much: TestClient's context manager runs the real lifespan."""
+    from throughline.api import deps
+
+    deps.close_pool()
+    app = create_app(Settings(web_dist=None))
+    with TestClient(app, raise_server_exceptions=False):
+        task = app.state.pm_watch_task
+        assert task is not None
+        assert not task.done()
+
+    assert task.done()
+    assert task.cancelled()
+    deps.close_pool()
