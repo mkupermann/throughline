@@ -1,0 +1,102 @@
+/* Virtual Team Ops (PM). Every colour is a token — see tokens.css. */
+
+.pm-catalog {
+  max-width: 72ch;
+}
+.pm-catalog h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-5);
+}
+
+.pm-form {
+  display: flex;
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+  flex-wrap: wrap;
+}
+.pm-form input,
+.pm-form select {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  min-height: 32px;
+}
+.pm-form input:focus-visible,
+.pm-form select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.pm-form button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+.pm-form button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.pm-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pm-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pm-list-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+}
+.pm-list-name {
+  font-weight: 600;
+  min-width: 12rem;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+a.pm-list-name:hover {
+  color: var(--accent);
+}
+.pm-list-meta {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.pm-list-empty {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  border-bottom: none;
+}
+.pm-badge {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
