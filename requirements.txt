@@ -17,6 +17,10 @@ pyyaml>=6.0
 # Pinned to 1.x: the 2.0 SDK removed mcp.server.fastmcp
 mcp>=1.2.0,<2.0
 
+# Required — Virtual Team Ops watcher (throughline/jobs/pm_watch.py) uses
+# this for PID-liveness checks (crash detection on pipeline.sh runs)
+psutil>=5.9
+
 # Optional — semantic search via OpenAI or local Ollama
 # The scripts fall back gracefully if these are missing. Uncomment to install:
 # openai>=1.30.0
