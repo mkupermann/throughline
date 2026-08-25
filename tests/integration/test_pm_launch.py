@@ -125,6 +125,27 @@ def test_ensure_vibe_agent_profile_comment_escapes_multiline_instructions(tmp_pa
                 )
 
 
+def test_ensure_vibe_agent_profile_rejects_unsafe_ai_model(tmp_path, monkeypatch):
+    """resolved["ai_model"] is interpolated directly into a bare `"..."` TOML
+    string with no escaping — a quote or newline in it must be rejected
+    outright (TOML injection) rather than written to disk."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".vibe" / "agents").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    from throughline.jobs.pm_launch import ensure_vibe_agent_profile
+
+    resolved = {
+        "ai_model": 'devstral"\n[tools.write_file]\npermission = "always',
+        "instructions": None, "skill_refs": [], "document_refs": [],
+    }
+
+    with pytest.raises(ValueError):
+        ensure_vibe_agent_profile(resolved, "pm-injection")
+
+    assert not (fake_home / ".vibe" / "agents" / "pm-injection.toml").exists()
+
+
 @pytest.mark.integration
 def test_stop_task_kills_process_and_updates_status(db_connection, tmp_path, monkeypatch):
     # A real long-running child process to kill: a Python process sleeping

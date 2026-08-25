@@ -82,6 +82,87 @@ def test_launch_and_stop_task(client, tmp_path, monkeypatch):
     assert any(t["id"] == task["id"] for t in resp.json()["tasks"])
 
 
+def test_get_task_unknown_id_is_404(client):
+    resp = client.get("/api/pm/tasks/999999")
+    assert resp.status_code == 404
+
+
+def test_stop_unknown_task_is_404(client):
+    resp = client.post("/api/pm/tasks/999999/stop")
+    assert resp.status_code == 404
+
+
+def test_launch_team_not_linked_is_404(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "LaunchApiP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "LaunchApiT"}).json()
+    # deliberately NOT linked — pm_project_teams has no row for this pair
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    resp = client.post(
+        "/api/pm/tasks/launch",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(repo),
+        },
+    )
+    assert resp.status_code == 404
+
+
+def test_register_rejects_path_traversal_run_id(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "RegApiP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "RegApiT"}).json()
+
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "../../etc/passwd",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_register_missing_log_dir_is_404(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "RegApiP2"}).json()
+    team = client.post("/api/pm/teams", json={"name": "RegApiT2"}).json()
+
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "never-existed",
+        },
+    )
+    assert resp.status_code == 404
+
+
+def test_register_duplicate_run_is_409(client, tmp_path):
+    """Also proves the endpoint's explicit conn.rollback() after the
+    IntegrityError actually clears the aborted transaction before the
+    connection goes back to the pool — a follow-up request on a fresh
+    connection from the same pool must still succeed."""
+    project = client.post("/api/pm/projects", json={"name": "RegApiP3"}).json()
+    team = client.post("/api/pm/teams", json={"name": "RegApiT3"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "dup-run"
+    log_dir.mkdir(parents=True)
+
+    body = {
+        "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+        "repo_path": str(tmp_path), "run_id": "dup-run",
+    }
+    first = client.post("/api/pm/tasks/register", json=body)
+    assert first.status_code == 200
+
+    second = client.post("/api/pm/tasks/register", json=body)
+    assert second.status_code == 409
+
+    resp = client.get("/api/pm/roles")
+    assert resp.status_code == 200
+
+
 def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     """The pm watch loop (Task 13) must run for the lifetime of the app and
     be cancelled cleanly on shutdown — no live server or 10s sleep needed to

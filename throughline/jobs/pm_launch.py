@@ -19,6 +19,7 @@ Linux/macOS) — rather than relying on the OS to dispatch by extension.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -28,6 +29,14 @@ from typing import Any
 import psutil
 
 from throughline.queries import pm as Q
+
+# TOML-safe: letters, digits, and the handful of punctuation characters a
+# real model identifier uses (e.g. "ollama_chat/qwen3-coder:30b",
+# "gpt-4.1-mini"). Nothing here can close a `"..."` string or start a new
+# TOML key/table, so a value that fails this check is rejected outright
+# rather than escaped — resolved["ai_model"] is interpolated directly into
+# a `"..."` TOML string below with no other quoting.
+_AI_MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 
 PIPELINE_SCRIPT = Path(
     os.environ.get("AI_PIPELINE_SCRIPT_PATH", str(Path.home() / "ai-pipeline" / "pipeline.sh"))
@@ -66,6 +75,18 @@ def ensure_vibe_agent_profile(resolved: dict[str, Any], profile_name: str) -> Pa
     Mirrors ~/.vibe/agents/tester-local.toml, hand-written and verified
     working against a live `vibe -p` call earlier in this project.
     """
+    ai_model = resolved["ai_model"]
+    if not ai_model or not _AI_MODEL_RE.match(ai_model):
+        # resolved["ai_model"] is interpolated into a bare `"..."` TOML
+        # string below with no escaping — a quote or newline in it would
+        # let arbitrary TOML (including reopening the write_file/edit
+        # permission="never" blocks this file exists to enforce) leak into
+        # the generated profile. Reject before touching the filesystem.
+        raise ValueError(
+            f"ai_model {ai_model!r} is not safe to write into a TOML file: "
+            "expected only letters, digits, and . _ : / -"
+        )
+
     agents_dir = Path.home() / ".vibe" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     path = agents_dir / f"{profile_name}.toml"
@@ -113,12 +134,19 @@ def ensure_vibe_agent_profile(resolved: dict[str, Any], profile_name: str) -> Pa
     return path
 
 
-def _write_context_file(tmp_dir: Path, step: str, resolved: dict[str, Any]) -> Path | None:
+def _write_context_file(
+    conn, tmp_dir: Path, step: str, resolved: dict[str, Any]
+) -> Path | None:
     lines = []
     if resolved["instructions"]:
         lines.append(resolved["instructions"])
     if resolved["skill_refs"]:
-        lines.append("Verwende diese Skills: " + ", ".join(str(s) for s in resolved["skill_refs"]))
+        # resolved["skill_refs"] holds numeric skills.id values (the union of
+        # role and member skill_refs) — the agent needs the human-readable
+        # name, not the id, so resolve through the skills table.
+        skill_names = Q.get_skill_names(conn, resolved["skill_refs"])
+        if skill_names:
+            lines.append("Verwende diese Skills: " + ", ".join(skill_names))
     if resolved["document_refs"]:
         lines.append("Relevante Dokumente: " + ", ".join(resolved["document_refs"]))
     if not lines:
@@ -179,7 +207,7 @@ def launch_task(
 
         ctx_var = _STEP_TO_CONTEXT_VAR.get(role_key)
         if ctx_var:
-            ctx_file = _write_context_file(ctx_dir, role_key, resolved)
+            ctx_file = _write_context_file(conn, ctx_dir, role_key, resolved)
             if ctx_file:
                 env[ctx_var] = str(ctx_file)
 
@@ -212,8 +240,8 @@ def launch_task(
     return Q.get_task(conn, task["id"])
 
 
-def stop_task(conn, task_id: int) -> dict[str, Any]:
-    """Kill the whole process tree, not just the recorded PID.
+def kill_process_tree(pid: int) -> None:
+    """Kill the whole process tree rooted at *pid*, not just that one PID.
 
     pipeline.sh runs under Git Bash on Windows and spawns aider/vibe/claude
     as children that are not reliably reachable through a POSIX process
@@ -224,30 +252,38 @@ def stop_task(conn, task_id: int) -> dict[str, Any]:
     below still runs, it just has less room to matter there than on
     POSIX — the wait_procs timeouts are what give a well-behaved POSIX
     child a chance to exit cleanly before the kill() escalation.
+
+    Shared by stop_task (user-requested stop) and pm_watch.poll_task (a
+    tripped budget must stop burning tokens immediately, not just get
+    marked budget_exceeded in the database while the run keeps going).
     """
-    task = Q.get_task(conn, task_id)
-    pid = task["pid"]
-    if pid is not None:
-        try:
-            parent = psutil.Process(pid)
-            children = parent.children(recursive=True)
-            for child in children:
-                try:
-                    child.terminate()
-                except psutil.NoSuchProcess:
-                    pass
-            _, alive = psutil.wait_procs(children, timeout=3)
-            for child in alive:
-                child.kill()
-            parent.terminate()
-            parent.wait(timeout=3)
-        except psutil.NoSuchProcess:
-            pass  # already gone — stopping an already-dead process is not an error
-        except psutil.TimeoutExpired:
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
             try:
-                parent.kill()
+                child.terminate()
             except psutil.NoSuchProcess:
                 pass
+        _, alive = psutil.wait_procs(children, timeout=3)
+        for child in alive:
+            child.kill()
+        parent.terminate()
+        parent.wait(timeout=3)
+    except psutil.NoSuchProcess:
+        pass  # already gone — stopping an already-dead process is not an error
+    except psutil.TimeoutExpired:
+        try:
+            parent.kill()
+        except psutil.NoSuchProcess:
+            pass
+
+
+def stop_task(conn, task_id: int) -> dict[str, Any]:
+    """Kill the whole process tree for task_id's recorded PID, if any."""
+    task = Q.get_task(conn, task_id)
+    if task["pid"] is not None:
+        kill_process_tree(task["pid"])
 
     Q.set_task_status(conn, task_id, "stopped")
     return Q.get_task(conn, task_id)

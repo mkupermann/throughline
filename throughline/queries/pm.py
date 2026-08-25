@@ -426,17 +426,43 @@ def budgets_for_task(conn, task_id: int) -> dict[str, int | None]:
     }
 
 
+def get_skill_names(conn, ids: list[int]) -> list[str]:
+    """Resolve numeric skills.id values (as stored in a role/member's
+    skill_refs) to their human-readable names, for embedding into a launched
+    agent's context file."""
+    if not ids:
+        return []
+    return [
+        r["name"]
+        for r in rows(conn, "SELECT name FROM skills WHERE id = ANY(%s) ORDER BY name", (ids,))
+    ]
+
+
 def register_existing_run(
     conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str, run_id: str,
 ) -> dict[str, Any]:
     """Adopt a pipeline.sh run Throughline did not launch — e.g. one started
     by hand from the terminal, like razor1911-demo-tribute on 2026-08-25.
     `pid=None` means stop_task has nothing to kill; the UI hides the Stop
-    button for these (Task 17)."""
-    log_dir = str(Path(repo_path) / ".ai-pipeline" / run_id)
+    button for these (Task 17).
+
+    `run_id` becomes a path component under `repo_path` unchecked, so it is
+    validated as a single path segment (no separator, no `..`, not absolute)
+    before it ever reaches the filesystem — otherwise a caller could point
+    log_dir anywhere on disk. The computed log_dir must already exist as a
+    directory: this endpoint only *adopts* a run pipeline.sh already
+    started, it never creates one.
+    """
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id or Path(run_id).is_absolute():
+        raise ValueError(f"run_id must be a single path component, got {run_id!r}")
+
+    log_dir = Path(repo_path) / ".ai-pipeline" / run_id
+    if not log_dir.is_dir():
+        raise FileNotFoundError(f"log directory does not exist: {log_dir}")
+
     task = create_task(
         conn, pm_project_id=pm_project_id, team_id=team_id, title=title,
-        run_id=run_id, repo_path=repo_path, log_dir=log_dir, pid=None,
+        run_id=run_id, repo_path=repo_path, log_dir=str(log_dir), pid=None,
     )
     set_task_status(conn, task["id"], "running")
     return get_task(conn, task["id"])

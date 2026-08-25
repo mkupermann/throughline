@@ -1,20 +1,27 @@
-"""Pure parsers over a pipeline.sh run directory.
+"""Parsers over a pipeline.sh run directory, plus the watcher loop itself.
 
-Kept dependency-free (no DB, no psycopg2) on purpose: these are exactly the
-functions the watcher loop (Task 8) calls every ~10s, and the fastest way to
-verify parsing logic against the real log format captured from
-razor1911-demo-tribute on 2026-08-25 is a plain pytest file with tmp_path
-fixtures — no database needed to test text parsing.
+The parsing functions below (parse_spec, latest_iteration, parse_verdict,
+extract_aider_tokens) are kept dependency-free (no DB, no psycopg2) on
+purpose: the fastest way to verify parsing logic against the real log format
+captured from razor1911-demo-tribute on 2026-08-25 is a plain pytest file
+with tmp_path fixtures — no database needed to test text parsing. poll_task
+and poll_all_running, which the watcher loop calls every ~10s, are NOT
+dependency-free — they need a live DB connection (via throughline.queries.pm)
+and psutil for process-liveness checks.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import psutil
 
+from throughline.jobs.pm_launch import kill_process_tree
 from throughline.queries import pm as Q
+
+log = logging.getLogger("throughline.pm_watch")
 
 _VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)(?::\s*(.*))?", re.MULTILINE)
 # Aider prints e.g. "Tokens: 3.4k sent, 130 received." — the "k" suffix
@@ -154,14 +161,26 @@ def poll_task(conn, task: dict) -> None:
 
     budgets = Q.budgets_for_task(conn, task_id)
     used = fresh["tokens_used"]
-    for _name, limit in budgets.items():
+    for name, limit in budgets.items():
         if limit is not None and used >= limit:
+            # Hard stop: a tripped budget must stop the run from burning
+            # more tokens right now, not just get flagged in the database
+            # while pipeline.sh keeps going in the background. Tasks
+            # Throughline did not launch itself (pid=None, adopted via
+            # register_existing_run) have nothing of ours to kill.
+            if task["pid"] is not None:
+                kill_process_tree(task["pid"])
+            Q.add_task_event(
+                conn, task_id=task_id, step="executor", event_type="error",
+                message=f"{name.replace('_', ' ')} {limit} exceeded (used {used})",
+            )
             Q.set_task_status(conn, task_id, "budget_exceeded")
             return
 
+    latest_verdict = None
     if iteration > 0:
-        verdict = parse_verdict(log_dir, iteration)
-        if verdict is not None and verdict[0] == "pass":
+        latest_verdict = parse_verdict(log_dir, iteration)
+        if latest_verdict is not None and latest_verdict[0] == "pass":
             Q.set_task_status(conn, task_id, "pass")
             return
         # A "fail" verdict alone is not terminal — pipeline.sh retries up to
@@ -171,15 +190,34 @@ def poll_task(conn, task: dict) -> None:
 
     if task["pid"] is not None and not _pid_alive(task["pid"]):
         # pipeline.sh's own process exited without ever writing a PASS
-        # verdict for the latest iteration — treat as crashed rather than
-        # leaving the task "running" forever. Tasks Throughline did not
-        # launch itself (register_existing_run adopts a run with pid=None,
-        # by design, since there is no Throughline-owned process to track)
-        # skip this check entirely rather than being crash-marked on the
-        # very first tick.
-        Q.set_task_status(conn, task_id, "crashed")
+        # verdict for the latest iteration. If the last thing recorded was a
+        # FAIL verdict, that is the true terminal state — report it as such
+        # rather than the generic "crashed", which should mean pipeline.sh
+        # itself died mid-run with no verdict at all. Tasks Throughline did
+        # not launch itself (register_existing_run adopts a run with
+        # pid=None, by design, since there is no Throughline-owned process
+        # to track) skip this check entirely rather than being crash-marked
+        # on the very first tick.
+        if latest_verdict is not None and latest_verdict[0] == "fail":
+            Q.set_task_status(conn, task_id, "fail")
+        else:
+            Q.set_task_status(conn, task_id, "crashed")
 
 
 def poll_all_running(conn) -> None:
+    """Poll every running task, isolating one task's failure from the rest.
+
+    A single task with a broken log_dir (or any other unexpected error)
+    must not stall the watcher loop for every other running task — log and
+    move on to the next one instead of letting the exception propagate out
+    of the loop.
+    """
     for task in Q.list_running_tasks(conn):
-        poll_task(conn, task)
+        try:
+            poll_task(conn, task)
+        except Exception:
+            log.exception("poll_task failed for task_id=%s", task.get("id"))
+            try:
+                conn.rollback()
+            except Exception:
+                pass

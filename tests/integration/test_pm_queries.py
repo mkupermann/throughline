@@ -147,6 +147,57 @@ def test_list_tasks_for_project_running_first(db_connection):
 
 
 @pytest.mark.integration
+def test_get_skill_names_resolves_ids_to_names_sorted(db_connection):
+    # skills.name and skills.path are NOT NULL per sql/schema.sql — insert
+    # directly rather than going through a skills-import job that does not
+    # exist in this domain.
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO skills (name, path) VALUES (%s, %s) RETURNING id",
+            ("zebra-skill", "/skills/zebra-skill"),
+        )
+        zebra_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO skills (name, path) VALUES (%s, %s) RETURNING id",
+            ("apple-skill", "/skills/apple-skill"),
+        )
+        apple_id = cur.fetchone()[0]
+    db_connection.commit()
+
+    names = Q.get_skill_names(db_connection, [zebra_id, apple_id])
+    assert names == ["apple-skill", "zebra-skill"]  # ORDER BY name
+
+
+@pytest.mark.integration
+def test_get_skill_names_empty_ids_returns_empty_list(db_connection):
+    assert Q.get_skill_names(db_connection, []) == []
+
+
+@pytest.mark.integration
+def test_register_existing_run_rejects_path_traversal_run_id(db_connection, tmp_path):
+    project = Q.create_pm_project(db_connection, name="RegTravP")
+    team = Q.create_team(db_connection, name="RegTravT")
+
+    with pytest.raises(ValueError):
+        Q.register_existing_run(
+            db_connection, pm_project_id=project["id"], team_id=team["id"],
+            title="t", repo_path=str(tmp_path), run_id="../../etc/passwd",
+        )
+
+
+@pytest.mark.integration
+def test_register_existing_run_rejects_missing_log_dir(db_connection, tmp_path):
+    project = Q.create_pm_project(db_connection, name="RegMissP")
+    team = Q.create_team(db_connection, name="RegMissT")
+
+    with pytest.raises(FileNotFoundError):
+        Q.register_existing_run(
+            db_connection, pm_project_id=project["id"], team_id=team["id"],
+            title="t", repo_path=str(tmp_path), run_id="never-existed",
+        )
+
+
+@pytest.mark.integration
 def test_register_existing_run_has_no_pid_and_is_running(db_connection, tmp_path):
     project = Q.create_pm_project(db_connection, name="RegP")
     team = Q.create_team(db_connection, name="RegT")
