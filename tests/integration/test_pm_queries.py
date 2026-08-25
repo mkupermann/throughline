@@ -87,3 +87,56 @@ def test_resolve_assignment_ai_override_wins(db_connection):
     resolved = Q.resolve_assignment(db_connection, a["id"])
     assert resolved["ai_tool"] == "aider"       # inherited, no override given
     assert resolved["ai_model"] == "devstral"   # override wins
+
+
+@pytest.mark.integration
+def test_task_lifecycle_and_token_rollup(db_connection):
+    project = Q.create_pm_project(db_connection, name="P3")
+    team = Q.create_team(db_connection, name="T3")
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"],
+        title="Add subtract()", run_id="run-abc", repo_path="/tmp/x",
+        log_dir="/tmp/x/.ai-pipeline/run-abc", pid=1234,
+    )
+    assert task["status"] == "pending"
+
+    Q.set_task_status(db_connection, task["id"], "running")
+    assert Q.get_task(db_connection, task["id"])["status"] == "running"
+    assert any(t["id"] == task["id"] for t in Q.list_running_tasks(db_connection))
+
+    Q.add_task_event(db_connection, task_id=task["id"], step="analyst", event_type="started")
+    Q.add_task_event(
+        db_connection, task_id=task["id"], step="executor", event_type="log_update",
+        iteration=1, tokens_used=340,
+    )
+    Q.add_task_event(
+        db_connection, task_id=task["id"], step="tester", event_type="verdict",
+        iteration=1, message="VERDICT: PASS", tokens_used=210,
+    )
+
+    total = Q.recompute_task_tokens(db_connection, task["id"])
+    assert total == 550
+    assert Q.get_task(db_connection, task["id"])["tokens_used"] == 550
+
+    Q.set_task_status(db_connection, task["id"], "pass")
+    assert Q.get_task(db_connection, task["id"])["status"] == "pass"
+    assert not any(t["id"] == task["id"] for t in Q.list_running_tasks(db_connection))
+
+
+@pytest.mark.integration
+def test_list_tasks_for_project_running_first(db_connection):
+    project = Q.create_pm_project(db_connection, name="P4")
+    team = Q.create_team(db_connection, name="T4")
+    old_done = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="old",
+        run_id="r-old", repo_path="/tmp/x", log_dir="/tmp/x/.ai-pipeline/r-old",
+    )
+    Q.set_task_status(db_connection, old_done["id"], "pass")
+    running = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="new",
+        run_id="r-new", repo_path="/tmp/x", log_dir="/tmp/x/.ai-pipeline/r-new",
+    )
+    Q.set_task_status(db_connection, running["id"], "running")
+
+    tasks = Q.list_tasks_for_project(db_connection, project["id"])
+    assert tasks[0]["id"] == running["id"]  # running sorts first regardless of age

@@ -12,7 +12,7 @@ from typing import Any
 
 from psycopg2.extras import Json
 
-from ._exec import Row, execute, one, rows
+from ._exec import Row, execute, one, rows, scalar
 
 # ── Catalogs ─────────────────────────────────────────────────────────────────
 
@@ -258,4 +258,162 @@ def resolve_assignment(conn, assignment_id: int) -> dict[str, Any]:
         "member_budget": row["member_budget"],
         "team_budget": row["team_budget"],
         "project_budget": row["project_budget"],
+    }
+
+
+# ── Tasks and events ─────────────────────────────────────────────────────────
+
+
+def create_task(
+    conn,
+    *,
+    pm_project_id: int,
+    team_id: int,
+    title: str,
+    run_id: str,
+    repo_path: str,
+    log_dir: str,
+    pid: int | None = None,
+) -> dict[str, Any]:
+    row = one(
+        conn,
+        """
+        INSERT INTO pm_tasks
+            (pm_project_id, team_id, title, run_id, repo_path, log_dir, pid)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (pm_project_id, team_id, title, run_id, repo_path, log_dir, pid),
+    )
+    conn.commit()
+    return row
+
+
+def get_task(conn, task_id: int) -> dict[str, Any]:
+    row = one(conn, "SELECT * FROM pm_tasks WHERE id = %s", (task_id,))
+    if row is None:
+        raise ValueError(f"No task with id {task_id}")
+    return row
+
+
+def list_running_tasks(conn) -> list[Row]:
+    return rows(conn, "SELECT * FROM pm_tasks WHERE status = 'running' ORDER BY started_at")
+
+
+def list_tasks_for_project(conn, pm_project_id: int) -> list[Row]:
+    return rows(
+        conn,
+        """
+        SELECT * FROM pm_tasks WHERE pm_project_id = %s
+        ORDER BY (status = 'running') DESC, created_at DESC
+        """,
+        (pm_project_id,),
+    )
+
+
+def add_task_event(
+    conn,
+    *,
+    task_id: int,
+    step: str,
+    event_type: str,
+    assignment_id: int | None = None,
+    iteration: int | None = None,
+    message: str | None = None,
+    detail_path: str | None = None,
+    tokens_used: int | None = None,
+) -> dict[str, Any]:
+    row = one(
+        conn,
+        """
+        INSERT INTO pm_task_events
+            (task_id, assignment_id, step, iteration, event_type, message,
+             detail_path, tokens_used)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (task_id, assignment_id, step, iteration, event_type, message,
+         detail_path, tokens_used),
+    )
+    conn.commit()
+    return row
+
+
+def recompute_task_tokens(conn, task_id: int) -> int:
+    """`pm_tasks.tokens_used` is always derived, never written directly
+    elsewhere, so it can never drift from the events it is a sum of."""
+    total = scalar(
+        conn,
+        """
+        UPDATE pm_tasks SET tokens_used = COALESCE((
+            SELECT SUM(tokens_used) FROM pm_task_events
+            WHERE task_id = %s AND tokens_used IS NOT NULL
+        ), 0)
+        WHERE id = %s
+        RETURNING tokens_used
+        """,
+        (task_id, task_id),
+    )
+    conn.commit()
+    return int(total)
+
+
+def set_task_status(
+    conn, task_id: int, status: str, *, started_at=None, ended_at=None,
+) -> None:
+    if status == "running" and started_at is None:
+        execute(
+            conn,
+            "UPDATE pm_tasks SET status = %s, started_at = COALESCE(started_at, now()) "
+            "WHERE id = %s",
+            (status, task_id),
+        )
+    elif status in ("pass", "fail", "budget_exceeded", "crashed", "stopped"):
+        execute(
+            conn,
+            "UPDATE pm_tasks SET status = %s, ended_at = COALESCE(ended_at, now()) "
+            "WHERE id = %s",
+            (status, task_id),
+        )
+    else:
+        execute(conn, "UPDATE pm_tasks SET status = %s WHERE id = %s", (status, task_id))
+    conn.commit()
+
+
+def budgets_for_task(conn, task_id: int) -> dict[str, int | None]:
+    """The applicable project/team budgets for this task, plus the
+    strictest role and member budget among every assignment its events have
+    referenced so far. Any of the four may be None (unbounded)."""
+    row = one(
+        conn,
+        """
+        SELECT p.token_budget AS project_budget, t.token_budget AS team_budget
+        FROM pm_tasks tk
+        JOIN pm_projects p ON p.id = tk.pm_project_id
+        JOIN pm_teams t ON t.id = tk.team_id
+        WHERE tk.id = %s
+        """,
+        (task_id,),
+    )
+    project_budget = row["project_budget"] if row else None
+    team_budget = row["team_budget"] if row else None
+
+    budget_row = one(
+        conn,
+        """
+        SELECT MIN(r.token_budget) AS role_budget, MIN(m.token_budget) AS member_budget
+        FROM pm_task_events e
+        JOIN pm_assignments a ON a.id = e.assignment_id
+        JOIN pm_roles r ON r.id = a.role_id
+        JOIN pm_members m ON m.id = a.member_id
+        WHERE e.task_id = %s
+        """,
+        (task_id,),
+    )
+
+    return {
+        "project_budget": project_budget,
+        "team_budget": team_budget,
+        "role_budget": budget_row["role_budget"] if budget_row else None,
+        "member_budget": budget_row["member_budget"] if budget_row else None,
     }
