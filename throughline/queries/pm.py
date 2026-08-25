@@ -100,3 +100,79 @@ def create_team(
 
 def list_teams(conn) -> list[Row]:
     return rows(conn, "SELECT * FROM pm_teams ORDER BY name")
+
+
+# ── Project / team / role relationships ─────────────────────────────────────
+
+
+def create_pm_project(
+    conn, *, name: str, description: str | None = None, token_budget: int | None = None,
+) -> dict[str, Any]:
+    row = one(
+        conn,
+        "INSERT INTO pm_projects (name, description, token_budget) "
+        "VALUES (%s, %s, %s) RETURNING *",
+        (name, description, token_budget),
+    )
+    conn.commit()
+    return row
+
+
+def list_pm_projects(conn) -> list[Row]:
+    return rows(conn, "SELECT * FROM pm_projects ORDER BY created_at DESC")
+
+
+def link_project_repo(conn, pm_project_id: int, project_id: int) -> None:
+    execute(
+        conn,
+        "INSERT INTO pm_project_repos (pm_project_id, project_id) "
+        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (pm_project_id, project_id),
+    )
+    conn.commit()
+
+
+def link_project_team(conn, pm_project_id: int, team_id: int) -> None:
+    execute(
+        conn,
+        "INSERT INTO pm_project_teams (pm_project_id, team_id) "
+        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (pm_project_id, team_id),
+    )
+    conn.commit()
+
+
+def link_team_role(conn, team_id: int, role_id: int) -> None:
+    execute(
+        conn,
+        "INSERT INTO pm_team_roles (team_id, role_id) "
+        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (team_id, role_id),
+    )
+    conn.commit()
+
+
+def get_project_teams(conn, pm_project_id: int) -> list[dict[str, Any]]:
+    """Teams linked to a project, each with its linked roles nested under `roles`."""
+    teams = rows(
+        conn,
+        """
+        SELECT t.* FROM pm_teams t
+        JOIN pm_project_teams pt ON pt.team_id = t.id
+        WHERE pt.pm_project_id = %s
+        ORDER BY t.name
+        """,
+        (pm_project_id,),
+    )
+    for team in teams:
+        team["roles"] = rows(
+            conn,
+            """
+            SELECT r.* FROM pm_roles r
+            JOIN pm_team_roles tr ON tr.role_id = r.id
+            WHERE tr.team_id = %s
+            ORDER BY r.name
+            """,
+            (team["id"],),
+        )
+    return teams
