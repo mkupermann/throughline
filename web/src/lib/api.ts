@@ -560,3 +560,151 @@ export const exportApi = {
   browse: (path?: string) =>
     request<BrowseResult>(`/export/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 };
+
+
+// ── PM (Virtual Team Ops) ───────────────────────────────────────────────────
+
+export interface PmRole {
+  id: number;
+  name: string;
+  description: string | null;
+  default_ai_tool: string | null;
+  default_ai_model: string | null;
+  skill_refs: number[];
+  instructions: string | null;
+  document_refs: string[];
+  token_budget: number | null;
+}
+
+export interface PmMember {
+  id: number;
+  name: string;
+  member_type: "human" | "agent";
+  contact_info: Record<string, unknown>;
+  skill_refs: number[];
+  instructions: string | null;
+  document_refs: string[];
+  token_budget: number | null;
+}
+
+export interface PmTeam {
+  id: number;
+  name: string;
+  description: string | null;
+  token_budget: number | null;
+  roles?: PmRole[];
+}
+
+export interface PmProject {
+  id: number;
+  name: string;
+  description: string | null;
+  status: "active" | "paused" | "completed" | "archived";
+  token_budget: number | null;
+}
+
+export type PmTaskStatus =
+  | "pending" | "running" | "pass" | "fail" | "budget_exceeded" | "crashed" | "stopped";
+
+export interface PmTask {
+  id: number;
+  pm_project_id: number;
+  team_id: number;
+  title: string;
+  status: PmTaskStatus;
+  run_id: string;
+  repo_path: string;
+  log_dir: string;
+  pid: number | null;
+  tokens_used: number;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface PmTaskEvent {
+  id: number;
+  task_id: number;
+  step: "analyst" | "executor" | "tester";
+  iteration: number | null;
+  event_type: "started" | "log_update" | "verdict" | "error";
+  message: string | null;
+  tokens_used: number | null;
+  created_at: string;
+}
+
+export const pmApi = {
+  createRole: (body: Partial<PmRole> & { name: string }) =>
+    request<PmRole>("/pm/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listRoles: () => request<{ roles: PmRole[] }>("/pm/roles"),
+
+  createMember: (body: Partial<PmMember> & { name: string; member_type: string }) =>
+    request<PmMember>("/pm/members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listMembers: () => request<{ members: PmMember[] }>("/pm/members"),
+
+  createTeam: (body: Partial<PmTeam> & { name: string }) =>
+    request<PmTeam>("/pm/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listTeams: () => request<{ teams: PmTeam[] }>("/pm/teams"),
+
+  createProject: (body: Partial<PmProject> & { name: string }) =>
+    request<PmProject>("/pm/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listProjects: () => request<{ projects: PmProject[] }>("/pm/projects"),
+  projectTeams: (projectId: number) =>
+    request<{ teams: PmTeam[] }>(`/pm/projects/${projectId}/teams`),
+  linkProjectTeam: (projectId: number, teamId: number) =>
+    request<{ linked: boolean }>(`/pm/projects/${projectId}/teams/${teamId}`, { method: "POST" }),
+  linkTeamRole: (teamId: number, roleId: number) =>
+    request<{ linked: boolean }>(`/pm/teams/${teamId}/roles/${roleId}`, { method: "POST" }),
+
+  createAssignment: (body: {
+    pm_project_id: number;
+    team_id: number;
+    role_id: number;
+    member_id: number;
+    ai_tool?: string | null;
+    ai_model?: string | null;
+  }) =>
+    request<{ id: number }>("/pm/assignments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  projectTasks: (projectId: number) => request<{ tasks: PmTask[] }>(`/pm/projects/${projectId}/tasks`),
+  getTask: (taskId: number) => request<PmTask>(`/pm/tasks/${taskId}`),
+  taskEvents: (taskId: number) => request<{ events: PmTaskEvent[] }>(`/pm/tasks/${taskId}/events`),
+  launch: (body: { pm_project_id: number; team_id: number; title: string; repo_path: string }) =>
+    request<PmTask>("/pm/tasks/launch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  stop: (taskId: number) => request<PmTask>(`/pm/tasks/${taskId}/stop`, { method: "POST" }),
+  register: (body: {
+    pm_project_id: number;
+    team_id: number;
+    title: string;
+    repo_path: string;
+    run_id: string;
+  }) =>
+    request<PmTask>("/pm/tasks/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+};
