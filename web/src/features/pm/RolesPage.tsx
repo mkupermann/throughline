@@ -1,68 +1,162 @@
-// web/src/features/pm/RolesPage.tsx
+/** /pm/roles — Rollen-Katalog: list with configuration summaries and full
+ *  create/edit-in-place editors (AI binding, skills, prompt, documents,
+ *  budget). Saved values round-trip through PATCH /pm/roles/{id}. */
+
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 
-import { pmApi } from "@/lib/api";
+import { pmApi, type PmRole } from "@/lib/api";
+import { RoleForm, type RoleDraft } from "./CatalogForms";
+import {
+  Breadcrumbs,
+  EmptyState,
+  ErrorState,
+  SkeletonRows,
+  fmtInt,
+  plural,
+  useSkills,
+} from "./shared";
 import "@/styles/pm.css";
 
-// Role names "Executor"/"Tester" (case-insensitive) are what
-// pm_launch.launch_task recognizes to route AI bindings into pipeline.sh's
-// AI_PIPELINE_EXECUTOR_MODEL/AI_PIPELINE_TESTER_AGENT — flagged in-form so
-// the connection isn't invisible to whoever is naming roles.
-const ROUTED_ROLE_NAMES = ["executor", "tester"];
+function RoleSummary({ role }: { role: PmRole }) {
+  const ai =
+    role.default_ai_tool || role.default_ai_model
+      ? [role.default_ai_tool, role.default_ai_model].filter(Boolean).join(" · ")
+      : null;
+  return (
+    <div className="pm-cat-summary">
+      {role.description && <span className="pm-cat-desc">{role.description}</span>}
+      {ai ? (
+        <code className="pm-cat-ai">{ai}</code>
+      ) : (
+        <span className="pm-cat-none">Kein KI-Werkzeug gesetzt</span>
+      )}
+      <span className="pm-cat-fact tabular">{plural(role.skill_refs.length, "Skill", "Skills")}</span>
+      <span className="pm-cat-fact tabular">{plural(role.document_refs.length, "Dokument", "Dokumente")}</span>
+      <span className="pm-cat-fact tabular">
+        {role.token_budget !== null ? `${fmtInt(role.token_budget)} Tokens Budget` : "Kein Budget"}
+      </span>
+      <span className="pm-cat-fact">
+        {role.instructions ? "Anweisungen gesetzt" : "Keine Anweisungen"}
+      </span>
+    </div>
+  );
+}
 
-export function RolesPage() {
+function RoleRow({ role }: { role: PmRole }) {
   const queryClient = useQueryClient();
-  const { data } = useQuery({ queryKey: ["pm-roles"], queryFn: pmApi.listRoles });
-  const [name, setName] = useState("");
-  const [aiTool, setAiTool] = useState("");
-  const [aiModel, setAiModel] = useState("");
+  const [editing, setEditing] = useState(false);
 
-  const create = useMutation({
-    mutationFn: () =>
-      pmApi.createRole({
-        name,
-        default_ai_tool: aiTool || null,
-        default_ai_model: aiModel || null,
-      }),
+  const patch = useMutation({
+    mutationFn: (draft: RoleDraft) => pmApi.patchRole(role.id, draft),
     onSuccess: () => {
-      setName("");
-      setAiTool("");
-      setAiModel("");
+      setEditing(false);
       queryClient.invalidateQueries({ queryKey: ["pm-roles"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-project-teams"] });
     },
   });
 
   return (
-    <section aria-labelledby="roles-h" className="pm-catalog">
-      <h1 id="roles-h">Rollen</h1>
-      <form
-        className="pm-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) create.mutate();
-        }}
-      >
-        <input placeholder="Name (z.B. Executor)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="Standard-Tool (z.B. aider)" value={aiTool} onChange={(e) => setAiTool(e.target.value)} />
-        <input placeholder="Standard-Modell" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
-        <button type="submit" disabled={create.isPending}>Rolle anlegen</button>
-      </form>
-      <ul className="pm-list">
-        {(data?.roles ?? []).map((r) => (
-          <li key={r.id} className="pm-list-row">
-            <span className="pm-list-name">{r.name}</span>
-            <span className="pm-list-meta">
-              {r.default_ai_tool ?? "—"} / {r.default_ai_model ?? "—"}
-            </span>
-            {ROUTED_ROLE_NAMES.includes(r.name.trim().toLowerCase()) && (
-              <span className="pm-badge" title="Wird automatisch an pipeline.sh weitergereicht">
-                pipeline.sh
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+    <li className="pm-cat-row">
+      <div className="pm-cat-head">
+        <span className="pm-cat-name">{role.name}</span>
+        <button
+          type="button"
+          className="pm-linklike"
+          aria-expanded={editing}
+          onClick={() => setEditing((e) => !e)}
+        >
+          {editing ? "Schließen" : "Bearbeiten"}
+        </button>
+      </div>
+      {editing ? (
+        <RoleForm
+          initial={role}
+          submitLabel="Änderungen speichern"
+          busy={patch.isPending}
+          error={patch.isError ? patch.error : null}
+          onSubmit={(draft) => patch.mutate(draft)}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <RoleSummary role={role} />
+      )}
+    </li>
+  );
+}
+
+export function RolesPage() {
+  const queryClient = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["pm-roles"],
+    queryFn: pmApi.listRoles,
+  });
+  // Warm the skills cache before an editor opens, so the picker is ready.
+  useSkills();
+
+  const create = useMutation({
+    mutationFn: (draft: RoleDraft) => pmApi.createRole(draft),
+    onSuccess: () => {
+      setCreating(false);
+      queryClient.invalidateQueries({ queryKey: ["pm-roles"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+    },
+  });
+
+  return (
+    <section className="pm-page">
+      <header className="page-header">
+        <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Rollen" }]} />
+        <div className="page-header-row pm-header-row">
+          <div>
+            <h1 className="page-title">Rollen</h1>
+            <p className="page-subtitle">
+              Eine Rolle bündelt KI-Werkzeug, Skills, Anweisungen und Budget für einen Sitz in der
+              Pipeline.
+            </p>
+          </div>
+          {!creating && (
+            <button
+              type="button"
+              className="button pm-button-flush"
+              onClick={() => setCreating(true)}
+            >
+              <Plus size={14} aria-hidden />
+              Rolle anlegen
+            </button>
+          )}
+        </div>
+      </header>
+
+      {creating && (
+        <div className="pm-cat-create">
+          <RoleForm
+            submitLabel="Rolle anlegen"
+            busy={create.isPending}
+            error={create.isError ? create.error : null}
+            onSubmit={(draft) => create.mutate(draft)}
+            onCancel={() => setCreating(false)}
+          />
+        </div>
+      )}
+
+      {isPending ? (
+        <SkeletonRows n={3} />
+      ) : error ? (
+        <ErrorState title="Rollen können nicht geladen werden" error={error} onRetry={refetch} />
+      ) : data.roles.length === 0 ? (
+        <EmptyState title="Noch keine Rollen">
+          <p>Rollen definieren die Sitze einer Team-Pipeline — oben die erste anlegen.</p>
+        </EmptyState>
+      ) : (
+        <ul className="pm-cat-list">
+          {data.roles.map((r) => (
+            <RoleRow key={r.id} role={r} />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
