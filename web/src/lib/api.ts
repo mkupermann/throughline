@@ -646,7 +646,7 @@ export interface PmOverviewProject {
 
 export interface PmOverview {
   projects: PmOverviewProject[];
-  counts: { roles: number; members: number; teams: number };
+  counts: { roles: number; members: number; teams: number; models: number };
 }
 
 export interface PmSkill {
@@ -675,16 +675,45 @@ export interface PmAssignment {
 /** One AI tool the launch pipeline understands, with the models it can
  *  currently be pointed at, resolved server-side at request time (GET
  *  /pm/ai-catalog). `unavailable` means the source behind this tool's
- *  models (e.g. the local Ollama daemon) could not be reached. */
+ *  models (e.g. the local Ollama daemon) could not be reached. A
+ *  user-defined provider (Welle D) shows up here too, as `tool: "provider:
+ *  <id>"` with `provider_id` set. */
 export interface PmAiCatalogTool {
   tool: string;
   label: string;
   models: string[];
   unavailable: boolean;
+  provider_id?: number;
 }
 
 export interface PmAiCatalog {
   tools: PmAiCatalogTool[];
+}
+
+// ── AI providers (Welle D: user-managed providers & models) ────────────────
+
+export type PmAiProviderType =
+  | "openai" | "anthropic" | "mistral" | "google" | "openrouter" | "ollama" | "openai_compatible";
+
+/** A user-configured AI provider. `api_key` is never sent by the server —
+ *  `api_key_set` reports whether one is stored, without ever exposing it. */
+export interface PmAiProvider {
+  id: number;
+  name: string;
+  provider_type: PmAiProviderType;
+  base_url: string | null;
+  api_key_set: boolean;
+  custom_models: string[];
+  enabled: boolean;
+}
+
+/** POST /pm/ai-providers/{id}/models/refresh — a live fetch, not a stored
+ *  list. `unavailable` + `error` describe why `models` may be empty rather
+ *  than failing the request outright. */
+export interface PmAiProviderModelsRefresh {
+  models: string[];
+  unavailable: boolean;
+  error: string | null;
 }
 
 /** One `projects` (memory-layer) row enriched with its conversations
@@ -853,4 +882,45 @@ export const pmApi = {
     request<{ deleted: boolean }>(`/pm/projects/${pmProjectId}/repos/${projectId}`, {
       method: "DELETE",
     }),
+
+  // ── AI providers (Welle D) ──────────────────────────────────────────────
+
+  listAiProviders: () => request<{ providers: PmAiProvider[] }>("/pm/ai-providers"),
+  createAiProvider: (body: {
+    name: string;
+    provider_type: PmAiProviderType;
+    base_url?: string | null;
+    api_key?: string | null;
+    custom_models?: string[];
+    enabled?: boolean;
+  }) =>
+    request<PmAiProvider>("/pm/ai-providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** `api_key` omitted leaves the stored key untouched; `api_key: null`
+   *  clears it; a non-empty string replaces it. */
+  patchAiProvider: (
+    id: number,
+    body: Partial<{
+      name: string;
+      provider_type: PmAiProviderType;
+      base_url: string | null;
+      api_key: string | null;
+      custom_models: string[];
+      enabled: boolean;
+    }>,
+  ) =>
+    request<PmAiProvider>(`/pm/ai-providers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteAiProvider: (id: number) =>
+    request<{ deleted: boolean }>(`/pm/ai-providers/${id}`, { method: "DELETE" }),
+  /** Live-fetches the provider's model list server-side — never a stored
+   *  value, so nothing here is cached beyond the request itself. */
+  refreshAiProviderModels: (id: number) =>
+    request<PmAiProviderModelsRefresh>(`/pm/ai-providers/${id}/models/refresh`, { method: "POST" }),
 };

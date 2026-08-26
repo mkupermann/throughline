@@ -1346,3 +1346,59 @@ a.pm-catalog-link:hover {
 .pm-doclist-add .pm-input {
   flex: 1;
 }
+
+/* ── AI providers page (/pm/models, Welle D) ────────────────────────────── */
+.pm-provider-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+/* Inside .pm-editor-grid, the enabled checkbox sits alongside label+input
+   fields — align it to their bottom edge rather than stretching to fill
+   the grid cell's full height. */
+.pm-provider-toggle-field {
+  align-self: end;
+  min-height: 32px;
+}
+.pm-provider-badge {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-muted);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pm-provider-badge.is-set {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+.pm-provider-models {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pm-provider-models-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pm-provider-models-list li {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+}

@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, Users, IdCard, Boxes } from "lucide-react";
+import { Plus, Users, IdCard, Boxes, Cpu } from "lucide-react";
 
 import { pmApi, type PmOverviewProject, type PmProject, type PmRepoProject } from "@/lib/api";
 import { useLang } from "./i18n";
@@ -357,6 +357,11 @@ export function DashboardPage() {
           <Boxes size={15} aria-hidden />
           <span>{t.dashboard.catalogTeams}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.teams)}</span>
+        </Link>
+        <Link to="/pm/models" className="pm-catalog-link">
+          <Cpu size={15} aria-hidden />
+          <span>{t.dashboard.catalogModels}</span>
+          <span className="tabular pm-catalog-count">{fmtInt(counts.models)}</span>
         </Link>
       </div>
 
