@@ -13,7 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ChevronRight, Languages, OctagonAlert, RefreshCw, X } from "lucide-react";
 
-import { ApiError, pmApi, type PmProject, type PmTaskStatus } from "@/lib/api";
+import { ApiError, pmApi, type PmAiCatalogTool, type PmProject, type PmTaskStatus } from "@/lib/api";
 import { getLang, useLang } from "./i18n";
 
 // ── Formatting (locale follows the current language) ────────────────────
@@ -458,6 +458,95 @@ export function SkillPicker({
         </>
       )}
     </div>
+  );
+}
+
+// ── AI tool/model binding ────────────────────────────────────────────────
+// GET /pm/ai-catalog resolves, at request time, what the launch pipeline
+// actually understands right now (Ollama models it has pulled, ~/.vibe
+// agent profiles, the static Claude Code entry) — replacing what used to be
+// two free-text inputs where a typo only surfaced as a launch-time failure.
+
+export function useAiCatalog() {
+  return useQuery({
+    queryKey: ["pm-ai-catalog"],
+    queryFn: pmApi.aiCatalog,
+    staleTime: 60_000,
+  });
+}
+
+/** Tool + model selects fed by the AI catalog. A stored value the catalog
+ *  no longer lists (Ollama down, a profile deleted, ...) is kept as an
+ *  extra "(saved: X)" option rather than silently dropped — editing must
+ *  never destroy data the form didn't intend to change. */
+export function AiBindingPicker({
+  tool,
+  model,
+  onChange,
+}: {
+  tool: string | null;
+  model: string | null;
+  onChange: (next: { tool: string | null; model: string | null }) => void;
+}) {
+  const { t } = useLang();
+  const { data, isPending, error, refetch } = useAiCatalog();
+  const tools = data?.tools ?? [];
+  const selectedTool: PmAiCatalogTool | undefined = tools.find((tl) => tl.tool === tool);
+  const toolKnown = tool === null || tools.some((tl) => tl.tool === tool);
+
+  const modelOptions = selectedTool ? [...selectedTool.models] : [];
+  if (model !== null && !modelOptions.includes(model)) modelOptions.push(model);
+
+  return (
+    <>
+      <label className="pm-field">
+        <span className="pm-label">{t.forms.aiToolLabel}</span>
+        <select
+          className="pm-input"
+          value={tool ?? ""}
+          disabled={isPending}
+          onChange={(e) => onChange({ tool: e.target.value || null, model: null })}
+        >
+          <option value="">{t.aiPicker.toolNone}</option>
+          {tools.map((tl) => (
+            <option key={tl.tool} value={tl.tool}>
+              {tl.label}
+            </option>
+          ))}
+          {!toolKnown && tool !== null && <option value={tool}>{t.aiPicker.storedOption(tool)}</option>}
+        </select>
+      </label>
+      <label className="pm-field">
+        <span className="pm-label">{t.forms.aiModelLabel}</span>
+        <select
+          className="pm-input"
+          value={model ?? ""}
+          disabled={isPending || tool === null}
+          onChange={(e) => onChange({ tool, model: e.target.value || null })}
+        >
+          <option value="">{t.aiPicker.modelNone}</option>
+          {modelOptions.map((m) => (
+            <option key={m} value={m}>
+              {m === model && !selectedTool?.models.includes(m) ? t.aiPicker.storedOption(m) : m}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error ? (
+        <p className="pm-field-error pm-field-span" role="alert">
+          {t.aiPicker.loadError}{" "}
+          <button type="button" className="pm-linklike" onClick={() => refetch()}>
+            {t.common.retry}
+          </button>
+        </p>
+      ) : (
+        selectedTool?.unavailable && (
+          <p className="pm-field-hint pm-field-span">
+            {selectedTool.tool === "aider" ? t.aiPicker.ollamaUnavailable : t.aiPicker.toolUnavailable(selectedTool.label)}
+          </p>
+        )
+      )}
+    </>
   );
 }
 

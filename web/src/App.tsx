@@ -17,6 +17,7 @@ import { CockpitPage } from "@/features/pm/CockpitPage";
 import { TaskPage } from "@/features/pm/TaskPage";
 import { RolesPage } from "@/features/pm/RolesPage";
 import { MembersPage } from "@/features/pm/MembersPage";
+import { TeamsPage } from "@/features/pm/TeamsPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,6 +59,7 @@ const router = createBrowserRouter([
       { path: "pm/tasks/:id", element: <TaskPage /> },
       { path: "pm/roles", element: <RolesPage /> },
       { path: "pm/members", element: <MembersPage /> },
+      { path: "pm/teams", element: <TeamsPage /> },
     ],
   },
 ]);

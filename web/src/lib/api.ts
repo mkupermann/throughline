@@ -672,9 +672,25 @@ export interface PmAssignment {
   member_name: string;
 }
 
+/** One AI tool the launch pipeline understands, with the models it can
+ *  currently be pointed at, resolved server-side at request time (GET
+ *  /pm/ai-catalog). `unavailable` means the source behind this tool's
+ *  models (e.g. the local Ollama daemon) could not be reached. */
+export interface PmAiCatalogTool {
+  tool: string;
+  label: string;
+  models: string[];
+  unavailable: boolean;
+}
+
+export interface PmAiCatalog {
+  tools: PmAiCatalogTool[];
+}
+
 export const pmApi = {
   overview: () => request<PmOverview>("/pm/overview"),
   listSkills: () => request<{ skills: PmSkill[] }>("/pm/skills"),
+  aiCatalog: () => request<PmAiCatalog>("/pm/ai-catalog"),
 
   patchRole: (id: number, body: Partial<PmRole>) =>
     request<PmRole>(`/pm/roles/${id}`, {

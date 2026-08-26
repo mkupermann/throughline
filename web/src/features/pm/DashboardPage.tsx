@@ -205,11 +205,11 @@ export function DashboardPage() {
           <span>{t.dashboard.catalogMembers}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.members)}</span>
         </Link>
-        <span className="pm-catalog-link pm-catalog-link-static" title={t.dashboard.catalogTeamsTitle}>
+        <Link to="/pm/teams" className="pm-catalog-link">
           <Boxes size={15} aria-hidden />
           <span>{t.dashboard.catalogTeams}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.teams)}</span>
-        </span>
+        </Link>
       </div>
 
       {projects.length === 0 ? (
