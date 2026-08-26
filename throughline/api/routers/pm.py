@@ -358,6 +358,52 @@ def link_project_team(
     return {"linked": True}
 
 
+# ── Repo projects (existing memory-layer projects, surfaced as PM catalog) ──
+
+
+@router.get("/pm/repo-projects")
+def list_repo_projects(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        return {"repo_projects": Q.list_repo_projects(conn)}
+
+
+@router.post("/pm/repo-projects/{project_id}/adopt")
+def adopt_repo_project(project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            return Q.adopt_repo_project(conn, project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Q.RepoProjectAlreadyLinked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/pm/projects/{pm_project_id}/repos")
+def project_repos(pm_project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        return {"repo_projects": Q.list_repos_for_pm_project(conn, pm_project_id)}
+
+
+@router.post("/pm/projects/{pm_project_id}/repos/{project_id}")
+def link_project_repo(
+    pm_project_id: int, project_id: int, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    with connection(settings) as conn:
+        Q.link_project_repo(conn, pm_project_id, project_id)
+    return {"linked": True}
+
+
+@router.delete("/pm/projects/{pm_project_id}/repos/{project_id}")
+def unlink_project_repo(
+    pm_project_id: int, project_id: int, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    with connection(settings) as conn:
+        deleted = Q.unlink_project_repo(conn, pm_project_id, project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="no such repo project link")
+    return {"deleted": True}
+
+
 @router.post("/pm/teams/{team_id}/roles/{role_id}")
 def link_team_role(
     team_id: int, role_id: int, settings: Settings = Depends(get_settings)

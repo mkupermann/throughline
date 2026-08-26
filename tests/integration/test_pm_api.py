@@ -683,6 +683,119 @@ def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     deps.close_pool()
 
 
+def _seed_repo_project(db_env, *, name: str, project_path: str, sessions: int = 1) -> int:
+    """A `projects` row plus *sessions* `conversations` rows whose
+    project_path's last segment is *name* — the generated project_name
+    column (sql/schema.sql) is what joins the two tables, so the path must
+    actually end in *name* for the row to show up as linked activity."""
+    import psycopg2
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO projects (name, description, status) "
+                "VALUES (%s, %s, 'active') RETURNING id",
+                (name, f"{name} description"),
+            )
+            project_id = cur.fetchone()[0]
+            for _ in range(sessions):
+                cur.execute(
+                    "INSERT INTO conversations (session_id, project_path, started_at, message_count) "
+                    "VALUES (gen_random_uuid(), %s, now(), 1)",
+                    (project_path,),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    return project_id
+
+
+def test_repo_projects_lists_enriched_rows(client, db_env):
+    project_id = _seed_repo_project(db_env, name="RepoProjA", project_path="/repo/RepoProjA")
+
+    resp = client.get("/api/pm/repo-projects")
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["repo_projects"] if r["id"] == project_id)
+    assert row["name"] == "RepoProjA"
+    assert row["sessions"] == 1
+    assert row["repo_path"] == "/repo/RepoProjA"
+    assert row["last_active"] is not None
+    assert row["linked_pm_project_id"] is None
+    assert row["linked_pm_project_name"] is None
+
+
+def test_adopt_repo_project_creates_and_links_pm_project(client, db_env):
+    project_id = _seed_repo_project(db_env, name="RepoProjB", project_path="/repo/RepoProjB")
+
+    resp = client.post(f"/api/pm/repo-projects/{project_id}/adopt")
+    assert resp.status_code == 200
+    pm_project = resp.json()
+    assert pm_project["name"] == "RepoProjB"
+
+    resp = client.get("/api/pm/repo-projects")
+    row = next(r for r in resp.json()["repo_projects"] if r["id"] == project_id)
+    assert row["linked_pm_project_id"] == pm_project["id"]
+    assert row["linked_pm_project_name"] == "RepoProjB"
+
+
+def test_adopt_repo_project_already_linked_is_409(client, db_env):
+    """Also proves the router's job — no explicit rollback is needed here
+    since RepoProjectAlreadyLinked is raised before any write, but the
+    connection must still come back usable for the next request either
+    way."""
+    project_id = _seed_repo_project(db_env, name="RepoProjC", project_path="/repo/RepoProjC")
+
+    resp = client.post(f"/api/pm/repo-projects/{project_id}/adopt")
+    assert resp.status_code == 200
+
+    resp = client.post(f"/api/pm/repo-projects/{project_id}/adopt")
+    assert resp.status_code == 409
+
+    resp = client.get("/api/pm/roles")
+    assert resp.status_code == 200
+
+
+def test_adopt_repo_project_unknown_id_is_404(client):
+    resp = client.post("/api/pm/repo-projects/999999/adopt")
+    assert resp.status_code == 404
+
+
+def test_link_project_repo_is_idempotent_and_lists_and_unlinks(client, db_env):
+    project_id = _seed_repo_project(db_env, name="RepoProjD", project_path="/repo/RepoProjD")
+    pm_project = client.post("/api/pm/projects", json={"name": "LinkRepoApiP"}).json()
+
+    resp = client.post(f"/api/pm/projects/{pm_project['id']}/repos/{project_id}")
+    assert resp.status_code == 200
+    assert resp.json()["linked"] is True
+
+    # Idempotent: linking the same pair again is still a 200, not a conflict.
+    resp = client.post(f"/api/pm/projects/{pm_project['id']}/repos/{project_id}")
+    assert resp.status_code == 200
+
+    resp = client.get(f"/api/pm/projects/{pm_project['id']}/repos")
+    assert resp.status_code == 200
+    repos = resp.json()["repo_projects"]
+    row = next(r for r in repos if r["id"] == project_id)
+    assert row["linked_pm_project_id"] == pm_project["id"]
+    assert row["linked_pm_project_name"] == "LinkRepoApiP"
+
+    resp = client.delete(f"/api/pm/projects/{pm_project['id']}/repos/{project_id}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+    resp = client.get(f"/api/pm/projects/{pm_project['id']}/repos")
+    assert resp.json()["repo_projects"] == []
+
+
+def test_unlink_project_repo_unknown_link_is_404(client, db_env):
+    project_id = _seed_repo_project(db_env, name="RepoProjE", project_path="/repo/RepoProjE")
+    pm_project = client.post("/api/pm/projects", json={"name": "UnlinkRepoApiP"}).json()
+
+    resp = client.delete(f"/api/pm/projects/{pm_project['id']}/repos/{project_id}")
+    assert resp.status_code == 404
+
+
 def test_normalize_ollama_url_handles_bare_host_forms():
     """The Windows Ollama installer sets OLLAMA_HOST=127.0.0.1 (no scheme,
     no port) system-wide — the catalog must still reach a valid URL."""

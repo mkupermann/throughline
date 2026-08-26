@@ -183,6 +183,141 @@ def get_project_teams(conn, pm_project_id: int) -> list[dict[str, Any]]:
     return teams
 
 
+# ── Repo projects (existing memory-layer projects, surfaced as PM catalog) ──
+#
+# `projects` (120 curated rows) and `conversations` (per-session aggregates,
+# see throughline/queries/projects.py's module docstring) are joined on
+# projects.name = conversations.project_name — conversations.project_name is
+# a generated column (sql/schema.sql), the last path segment of
+# conversations.project_path. pm_project_repos is the bridge table that lets
+# one such repo project be adopted as (or linked to) a pm_projects row.
+#
+# A repo project can be linked to at most one pm_project in practice —
+# enforced here in application code (adopt_repo_project's pre-check), not by
+# a DB constraint, since pm_project_repos' primary key is
+# (pm_project_id, project_id) and permits a project_id to appear under
+# several pm_project_ids at the schema level.
+
+
+class RepoProjectAlreadyLinked(Exception):
+    """Raised by adopt_repo_project when the target repo project already has
+    a pm_project_repos row — the router turns this into a 409 rather than
+    silently creating a second pm_project for the same repo."""
+
+
+#: Sessions/last-activity/most-recent-repo-path for one repo project, as a
+#: single LATERAL aggregate — a plain GROUP BY join would fan out once
+#: `projects` and `conversations` are joined together with the
+#: pm_project_repos/pm_projects link, inflating the session count.
+#: `array_agg(... ORDER BY started_at DESC)[1]` picks the project_path of the
+#: single most recent conversation without a second round trip.
+_REPO_PROJECT_AGG = """
+    LEFT JOIN LATERAL (
+        SELECT
+            count(*) AS sessions,
+            max(co.started_at) AS last_active,
+            (array_agg(co.project_path ORDER BY co.started_at DESC))[1] AS repo_path
+        FROM conversations co
+        WHERE co.project_name = p.name
+    ) agg ON true
+"""
+
+
+def list_repo_projects(conn, limit: int = 200) -> list[Row]:
+    """Every curated `projects` row enriched with its conversations
+    aggregates and (if any) its pm_project_repos link — the source list for
+    the dashboard's "repository projects" section and the adopt flow.
+    Ordered by last activity, most recent first, unlinked-and-inactive rows
+    trailing at the end."""
+    return rows(
+        conn,
+        f"""
+        SELECT
+            p.id, p.name, p.description, p.status,
+            COALESCE(agg.sessions, 0)::bigint AS sessions,
+            agg.last_active,
+            agg.repo_path,
+            link.pm_project_id AS linked_pm_project_id,
+            link.pm_project_name AS linked_pm_project_name
+        FROM projects p
+        {_REPO_PROJECT_AGG}
+        LEFT JOIN LATERAL (
+            SELECT pr.pm_project_id, pp.name AS pm_project_name
+            FROM pm_project_repos pr
+            JOIN pm_projects pp ON pp.id = pr.pm_project_id
+            WHERE pr.project_id = p.id
+            ORDER BY pr.pm_project_id
+            LIMIT 1
+        ) link ON true
+        ORDER BY agg.last_active DESC NULLS LAST, p.name
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+
+def list_repos_for_pm_project(conn, pm_project_id: int) -> list[Row]:
+    """Repo projects linked to *pm_project_id*, in the same enriched shape as
+    list_repo_projects — for the cockpit's linked-repos chips."""
+    return rows(
+        conn,
+        f"""
+        SELECT
+            p.id, p.name, p.description, p.status,
+            COALESCE(agg.sessions, 0)::bigint AS sessions,
+            agg.last_active,
+            agg.repo_path,
+            pr.pm_project_id AS linked_pm_project_id,
+            pp.name AS linked_pm_project_name
+        FROM pm_project_repos pr
+        JOIN projects p ON p.id = pr.project_id
+        JOIN pm_projects pp ON pp.id = pr.pm_project_id
+        {_REPO_PROJECT_AGG}
+        WHERE pr.pm_project_id = %s
+        ORDER BY agg.last_active DESC NULLS LAST, p.name
+        """,
+        (pm_project_id,),
+    )
+
+
+def adopt_repo_project(conn, project_id: int) -> dict[str, Any]:
+    """Create a new pm_project named after *project_id* (a `projects` row)
+    and link it, in one step — the dashboard's "adopt as PM project" action.
+
+    Refuses (RepoProjectAlreadyLinked) when the repo project is already
+    linked to some pm_project rather than creating a duplicate; unknown
+    *project_id* raises ValueError (404 at the router)."""
+    project = one(conn, "SELECT id, name, description FROM projects WHERE id = %s", (project_id,))
+    if project is None:
+        raise ValueError(f"no repo project with id {project_id}")
+
+    existing = one(
+        conn, "SELECT pm_project_id FROM pm_project_repos WHERE project_id = %s", (project_id,)
+    )
+    if existing is not None:
+        raise RepoProjectAlreadyLinked(
+            f"repo project {project_id} is already linked to "
+            f"pm_project {existing['pm_project_id']}"
+        )
+
+    pm_project = create_pm_project(conn, name=project["name"], description=project["description"])
+    link_project_repo(conn, pm_project["id"], project_id)
+    return pm_project
+
+
+def unlink_project_repo(conn, pm_project_id: int, project_id: int) -> bool:
+    """Remove one pm_project<->repo-project link. Returns False (no
+    exception) if no such link exists, so the router can turn that into a
+    404."""
+    affected = execute(
+        conn,
+        "DELETE FROM pm_project_repos WHERE pm_project_id = %s AND project_id = %s",
+        (pm_project_id, project_id),
+    )
+    conn.commit()
+    return affected > 0
+
+
 # ── Assignments ──────────────────────────────────────────────────────────────
 
 
