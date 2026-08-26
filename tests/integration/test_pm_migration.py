@@ -22,6 +22,8 @@ PM_TABLES = {
                  "repo_path", "log_dir", "pid", "tokens_used"},
     "pm_task_events": {"id", "task_id", "assignment_id", "step", "iteration",
                         "event_type", "message", "detail_path", "tokens_used"},
+    "pm_ai_providers": {"id", "name", "provider_type", "base_url", "api_key",
+                         "custom_models", "enabled"},
 }
 
 
@@ -45,5 +47,16 @@ def test_pm_member_type_check_constraint(db_connection):
             cur.execute(
                 "INSERT INTO pm_members (name, member_type) VALUES (%s, %s)",
                 ("bad", "not-a-real-type"),
+            )
+    db_connection.rollback()
+
+
+@pytest.mark.integration
+def test_pm_ai_providers_provider_type_check_constraint(db_connection):
+    with db_connection.cursor() as cur:
+        with pytest.raises(Exception):
+            cur.execute(
+                "INSERT INTO pm_ai_providers (name, provider_type) VALUES (%s, %s)",
+                ("bad", "not-a-real-provider"),
             )
     db_connection.rollback()

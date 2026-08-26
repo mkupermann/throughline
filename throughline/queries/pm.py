@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -720,9 +722,10 @@ def overview(conn) -> dict[str, Any]:
         conn,
         """
         SELECT
-            (SELECT COUNT(*) FROM pm_roles)   AS roles,
-            (SELECT COUNT(*) FROM pm_members) AS members,
-            (SELECT COUNT(*) FROM pm_teams)   AS teams
+            (SELECT COUNT(*) FROM pm_roles)         AS roles,
+            (SELECT COUNT(*) FROM pm_members)       AS members,
+            (SELECT COUNT(*) FROM pm_teams)         AS teams,
+            (SELECT COUNT(*) FROM pm_ai_providers)  AS models
         """,
     )
 
@@ -790,13 +793,20 @@ _OLLAMA_TIMEOUT_S = 2.0
 _VIBE_BUILTIN_AGENTS = ("ask", "plan", "accept-edits", "auto-approve")
 
 
-def _ollama_models() -> tuple[list[str], bool]:
+def _ollama_models(base_url: str | None = None) -> tuple[list[str], bool]:
     """(model names as aider/LiteLLM expects them, prefixed "ollama_chat/",
     unavailable). A short timeout and a broad except: a slow or unreachable
     Ollama must never hang or fail this request — it just means aider has no
-    models to offer right now."""
+    models to offer right now.
+
+    *base_url* defaults to the process-wide Ollama daemon (OLLAMA_HOST,
+    resolved once at import time) for the built-in "aider" tool. A
+    pm_ai_providers row of type 'ollama' passes its own base_url override
+    instead (refresh_provider_models / ai_catalog), normalized the same way.
+    """
+    url = _normalize_ollama_url(base_url) if base_url else _OLLAMA_URL
     try:
-        with urllib.request.urlopen(f"{_OLLAMA_URL}/api/tags", timeout=_OLLAMA_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(f"{url}/api/tags", timeout=_OLLAMA_TIMEOUT_S) as resp:
             if resp.status != 200:
                 return [], True
             data = json.loads(resp.read().decode())
@@ -819,36 +829,216 @@ def _vibe_agent_profiles() -> list[str]:
     return sorted(written | set(_VIBE_BUILTIN_AGENTS))
 
 
-def ai_catalog() -> dict[str, Any]:
+# ── AI providers (Welle D) ────────────────────────────────────────────────
+#
+# Cline/Cursor-style provider & model management: a user adds a STANDARD
+# provider (name, type, optional base URL, API key) whose model list is
+# fetched live from the provider itself, plus CUSTOM model ids of their own.
+# Both are folded into ai_catalog() below as one extra "provider:<id>" tool
+# entry per enabled row, and throughline/jobs/pm_launch.py resolves that
+# same "provider:<id>" ai_tool at launch time to inject the right
+# credentials into the spawned pipeline's environment.
+
+_PROVIDER_TYPES = (
+    "openai", "anthropic", "mistral", "google", "openrouter", "ollama", "openai_compatible",
+)
+
+#: Base URL used when a provider row leaves base_url empty. ollama/
+#: openai_compatible have no sensible default (enforced as required at the
+#: router) and are absent here on purpose.
+_PROVIDER_DEFAULT_BASE = {
+    "openai": "https://api.openai.com/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "anthropic": "https://api.anthropic.com",
+    "google": "https://generativelanguage.googleapis.com",
+}
+
+#: LiteLLM/aider model-string prefix per provider type — this is what makes
+#: a model chosen through the Role editor actually runnable by the pipeline
+#: (see pm_launch.py's AI_PIPELINE_EXECUTOR_MODEL).
+_PROVIDER_LITELLM_PREFIX = {
+    "openai": "openai/",
+    "anthropic": "anthropic/",
+    "mistral": "mistral/",
+    "google": "gemini/",
+    "openrouter": "openrouter/",
+    "ollama": "ollama_chat/",
+    "openai_compatible": "openai/",
+}
+
+_PROVIDER_TIMEOUT_S = 5.0
+
+
+def create_ai_provider(
+    conn,
+    *,
+    name: str,
+    provider_type: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    custom_models: list[str] | None = None,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    row = one(
+        conn,
+        """
+        INSERT INTO pm_ai_providers (name, provider_type, base_url, api_key, custom_models, enabled)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (name, provider_type, base_url, api_key, Json(custom_models or []), enabled),
+    )
+    conn.commit()
+    return row
+
+
+def list_ai_providers(conn) -> list[Row]:
+    return rows(conn, "SELECT * FROM pm_ai_providers ORDER BY name")
+
+
+def get_ai_provider(conn, provider_id: int) -> dict[str, Any] | None:
+    return one(conn, "SELECT * FROM pm_ai_providers WHERE id = %s", (provider_id,))
+
+
+def delete_ai_provider(conn, provider_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_ai_providers WHERE id = %s", (provider_id,))
+    conn.commit()
+    return affected > 0
+
+
+_PROVIDER_COLUMNS = frozenset({
+    "name", "provider_type", "base_url", "api_key", "custom_models", "enabled",
+})
+_PROVIDER_JSON_COLUMNS = frozenset({"custom_models"})
+
+
+def update_ai_provider(conn, provider_id: int, **fields: Any) -> dict[str, Any] | None:
+    return _update_row(conn, "pm_ai_providers", provider_id, fields, _PROVIDER_COLUMNS, _PROVIDER_JSON_COLUMNS)
+
+
+def _fetch_json_models(
+    url: str, headers: dict[str, str], extract: Callable[[Any], list[Any]]
+) -> tuple[list[str], bool, str | None]:
+    """GET *url* with *headers*, parse the JSON body and run *extract* over
+    it to pull out raw model ids. Returns (ids, unavailable, error) — a
+    broad except on every network/parse failure, same policy as
+    _ollama_models: an unreachable or misconfigured provider must never 500
+    this request, only report itself unavailable with a reason."""
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=_PROVIDER_TIMEOUT_S) as resp:
+            if resp.status != 200:
+                return [], True, f"HTTP {resp.status}"
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return [], True, str(exc)
+    try:
+        ids = sorted({str(x) for x in extract(data) if x})
+    except (KeyError, TypeError) as exc:
+        return [], True, f"unexpected response shape: {exc}"
+    return ids, False, None
+
+
+def _provider_model_ids(provider: dict[str, Any]) -> tuple[list[str], bool, str | None]:
+    """(raw model ids — no litellm prefix, unavailable, error) for one
+    pm_ai_providers row, fetched live from the provider itself. Callers
+    that need the litellm-format strings apply _PROVIDER_LITELLM_PREFIX
+    themselves (ai_catalog, refresh_provider_models) — kept separate so a
+    caller can also compare/union raw ids against custom_models, which are
+    stored unprefixed too."""
+    ptype = provider["provider_type"]
+    base_url = (provider.get("base_url") or "").strip().rstrip("/")
+    api_key = provider.get("api_key") or ""
+
+    if ptype == "ollama":
+        models, unavailable = _ollama_models(base_url or None)
+        ids = [m.removeprefix("ollama_chat/") for m in models]
+        return ids, unavailable, ("Ollama nicht erreichbar" if unavailable else None)
+
+    if ptype == "anthropic":
+        url = (base_url or _PROVIDER_DEFAULT_BASE["anthropic"]) + "/v1/models"
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        return _fetch_json_models(url, headers, lambda d: [m.get("id") for m in d.get("data", [])])
+
+    if ptype == "google":
+        base = base_url or _PROVIDER_DEFAULT_BASE["google"]
+        url = f"{base}/v1beta/models?key={urllib.parse.quote(api_key)}"
+        return _fetch_json_models(
+            url, {},
+            lambda d: [str(m.get("name", "")).removeprefix("models/") for m in d.get("models", [])],
+        )
+
+    # openai, mistral, openrouter, openai_compatible: all OpenAI-shaped
+    # `GET {base}/v1/models` (or `{base}/models` when base already ends in
+    # /v1, e.g. a custom OpenAI-compatible gateway configured with its own
+    # /v1 suffix already included).
+    base = base_url or _PROVIDER_DEFAULT_BASE.get(ptype, "")
+    if not base:
+        return [], True, "no base_url configured"
+    path = "/models" if base.endswith("/v1") else "/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    return _fetch_json_models(base + path, headers, lambda d: [m.get("id") for m in d.get("data", [])])
+
+
+def refresh_provider_models(conn, provider_id: int) -> dict[str, Any]:
+    """Live-fetch one provider's model list — POST /pm/ai-providers/{id}/
+    models/refresh. Raises ValueError (404 at the router) for an unknown
+    provider id; every other failure (network, auth, bad response shape)
+    comes back as {"unavailable": True, "error": "..."} rather than an
+    exception, matching _provider_model_ids' own contract."""
+    provider = get_ai_provider(conn, provider_id)
+    if provider is None:
+        raise ValueError(f"no provider with id {provider_id}")
+    ids, unavailable, error = _provider_model_ids(provider)
+    prefix = _PROVIDER_LITELLM_PREFIX[provider["provider_type"]]
+    return {"models": [f"{prefix}{m}" for m in ids], "unavailable": unavailable, "error": error}
+
+
+def ai_catalog(conn) -> dict[str, Any]:
     """{"tools": [{tool, label, models, unavailable}, ...]} — the real,
     currently-resolvable AI tool/model choices for the Role/Member editors'
-    selects. No database access: everything here comes from the local
-    Ollama daemon, the local ~/.vibe/agents/ directory, and a static entry
-    for Claude Code (the pipeline calls `claude -p` with no model choice
-    today)."""
+    selects. The three built-in tools (aider/claude/vibe) need no database
+    access at all — they come from the local Ollama daemon, the local
+    ~/.vibe/agents/ directory, and a static entry for Claude Code (the
+    pipeline calls `claude -p` with no model choice today). *conn* is only
+    needed for the user-defined pm_ai_providers rows appended after them
+    (Welle D)."""
     ollama_models, ollama_unavailable = _ollama_models()
-    return {
-        "tools": [
-            {
-                "tool": "aider",
-                "label": "Aider + Ollama (lokal)",
-                "models": ollama_models,
-                "unavailable": ollama_unavailable,
-            },
-            {
-                "tool": "claude",
-                "label": "Claude Code",
-                "models": ["claude -p (Standard)"],
-                "unavailable": False,
-            },
-            {
-                "tool": "vibe",
-                "label": "Vibe",
-                "models": _vibe_agent_profiles(),
-                "unavailable": False,
-            },
-        ]
-    }
+    tools: list[dict[str, Any]] = [
+        {
+            "tool": "aider",
+            "label": "Aider + Ollama (lokal)",
+            "models": ollama_models,
+            "unavailable": ollama_unavailable,
+        },
+        {
+            "tool": "claude",
+            "label": "Claude Code",
+            "models": ["claude -p (Standard)"],
+            "unavailable": False,
+        },
+        {
+            "tool": "vibe",
+            "label": "Vibe",
+            "models": _vibe_agent_profiles(),
+            "unavailable": False,
+        },
+    ]
+    for provider in list_ai_providers(conn):
+        if not provider["enabled"]:
+            continue
+        live_ids, unavailable, _error = _provider_model_ids(provider)
+        prefix = _PROVIDER_LITELLM_PREFIX[provider["provider_type"]]
+        models = sorted({f"{prefix}{m}" for m in live_ids} | {f"{prefix}{m}" for m in provider["custom_models"]})
+        tools.append({
+            "tool": f"provider:{provider['id']}",
+            "label": f"{provider['name']} ({provider['provider_type']})",
+            "models": models,
+            "unavailable": unavailable,
+            "provider_id": provider["id"],
+        })
+    return {"tools": tools}
 
 
 # ── Partial updates ──────────────────────────────────────────────────────────

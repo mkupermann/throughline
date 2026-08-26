@@ -1177,6 +1177,26 @@ CREATE TABLE public.pm_task_events (
 
 CREATE INDEX idx_pm_task_events_task ON public.pm_task_events (task_id, created_at);
 
+--
+-- Welle D: Cline/Cursor-style AI provider & model management. See
+-- migrations/008_pm_ai_providers.sql.
+--
+
+CREATE TABLE public.pm_ai_providers (
+    id BIGSERIAL PRIMARY KEY,
+    name text NOT NULL,
+    provider_type text NOT NULL CHECK (provider_type IN (
+        'openai', 'anthropic', 'mistral', 'google', 'openrouter',
+        'ollama', 'openai_compatible'
+    )),
+    base_url text,
+    api_key text,
+    custom_models jsonb NOT NULL DEFAULT '[]',
+    enabled boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 
 --
 -- PostgreSQL database dump complete

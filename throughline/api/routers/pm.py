@@ -6,7 +6,7 @@ docs/superpowers/specs/2026-08-25-virtual-team-ops-design.md.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import psycopg2
 from fastapi import APIRouter, Depends, HTTPException
@@ -83,6 +83,55 @@ class RegisterIn(BaseModel):
     title: str
     repo_path: str
     run_id: str
+
+
+# ── AI providers (Welle D) ──────────────────────────────────────────────────
+
+PmProviderType = Literal[
+    "openai", "anthropic", "mistral", "google", "openrouter", "ollama", "openai_compatible",
+]
+
+#: base_url has no sensible default for these two — ollama needs a host to
+#: talk to and openai_compatible has no fixed API by definition.
+_BASE_URL_REQUIRED_TYPES = {"ollama", "openai_compatible"}
+
+
+class ProviderIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    provider_type: PmProviderType
+    base_url: str | None = None
+    api_key: str | None = None
+    custom_models: list[str] = []
+    enabled: bool = True
+
+
+class ProviderPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    provider_type: PmProviderType | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    custom_models: list[str] | None = None
+    enabled: bool | None = None
+
+
+def _validate_provider_base_url(provider_type: str, base_url: str | None) -> None:
+    if provider_type in _BASE_URL_REQUIRED_TYPES and not (base_url or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"base_url is required for provider_type={provider_type!r}",
+        )
+
+
+def _public_provider(row: dict[str, Any]) -> dict[str, Any]:
+    """Never return api_key — report only whether one is set."""
+    row = dict(row)
+    api_key = row.pop("api_key", None)
+    row["api_key_set"] = bool(api_key)
+    return row
 
 
 # ── Partial-update ("PATCH") bodies ─────────────────────────────────────────
@@ -337,10 +386,82 @@ def list_skills(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
 
 
 @router.get("/pm/ai-catalog")
-def ai_catalog() -> dict[str, Any]:
+def ai_catalog(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """Real, request-time-resolved AI tool/model choices for the Role/Member
-    editors — no database access, so no `connection(settings)` here."""
-    return Q.ai_catalog()
+    editors: the three built-in tools plus one entry per enabled
+    pm_ai_providers row (Welle D)."""
+    with connection(settings) as conn:
+        return Q.ai_catalog(conn)
+
+
+# ── AI providers (Welle D) ──────────────────────────────────────────────────
+
+
+@router.get("/pm/ai-providers")
+def list_ai_providers(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        provider_rows = Q.list_ai_providers(conn)
+    return {"providers": [_public_provider(r) for r in provider_rows]}
+
+
+@router.post("/pm/ai-providers")
+def create_ai_provider(body: ProviderIn, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    _validate_provider_base_url(body.provider_type, body.base_url)
+    with connection(settings) as conn:
+        row = Q.create_ai_provider(conn, **body.model_dump())
+    return _public_provider(row)
+
+
+@router.patch("/pm/ai-providers/{provider_id}")
+def patch_ai_provider(
+    provider_id: int, body: ProviderPatch, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    fields = body.model_dump(exclude_unset=True)
+    # api_key is only overwritten when the caller sends a non-empty string;
+    # an explicit `null` still clears it (falls through to _update_row,
+    # which writes NULL for any key present in `fields`) — this lets the
+    # frontend's password field submit "" to mean "leave unchanged" (its
+    # "unverändert lassen" placeholder) without the caller having to know to
+    # omit the field entirely.
+    if fields.get("api_key") == "":
+        del fields["api_key"]
+
+    with connection(settings) as conn:
+        existing = Q.get_ai_provider(conn, provider_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"no provider with id {provider_id}")
+
+        effective_type = fields.get("provider_type", existing["provider_type"])
+        effective_base = fields["base_url"] if "base_url" in fields else existing["base_url"]
+        _validate_provider_base_url(effective_type, effective_base)
+
+        row = Q.update_ai_provider(conn, provider_id, **fields)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no provider with id {provider_id}")
+    return _public_provider(row)
+
+
+@router.delete("/pm/ai-providers/{provider_id}")
+def delete_ai_provider(provider_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        deleted = Q.delete_ai_provider(conn, provider_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no provider with id {provider_id}")
+    return {"deleted": True}
+
+
+@router.post("/pm/ai-providers/{provider_id}/models/refresh")
+def refresh_ai_provider_models(
+    provider_id: int, settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    """Live-fetch this provider's model list. Never a 500 for a network/auth
+    failure — those come back as {"unavailable": true, "error": "..."};
+    only an unknown provider_id is a 404."""
+    with connection(settings) as conn:
+        try:
+            return Q.refresh_provider_models(conn, provider_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/pm/projects/{project_id}/teams")

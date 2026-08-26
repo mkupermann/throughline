@@ -254,7 +254,7 @@ def test_overview_endpoint_returns_projects_and_counts(client):
     assert row["teams"] == 1
     assert row["token_budget"] == 500
     assert row["tasks"]["running"] == 0
-    assert set(body["counts"].keys()) == {"roles", "members", "teams"}
+    assert set(body["counts"].keys()) == {"roles", "members", "teams", "models"}
 
 
 def test_skills_endpoint_lists_seeded_skill(client, db_env):
@@ -806,3 +806,245 @@ def test_normalize_ollama_url_handles_bare_host_forms():
     assert _normalize_ollama_url("http://127.0.0.1:11434") == "http://127.0.0.1:11434"
     assert _normalize_ollama_url("http://myhost:9999/") == "http://myhost:9999"
     assert _normalize_ollama_url("") == "http://127.0.0.1:11434"
+
+
+# ── AI providers (Welle D) ────────────────────────────────────────────────
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes, status: int = 200):
+        self.status = status
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_create_list_patch_delete_ai_provider_never_leaks_api_key(client):
+    resp = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "My OpenAI", "provider_type": "openai", "api_key": "sk-secret-123"},
+    )
+    assert resp.status_code == 200
+    provider = resp.json()
+    assert "api_key" not in provider
+    assert provider["api_key_set"] is True
+    assert provider["enabled"] is True
+    assert provider["custom_models"] == []
+
+    resp = client.get("/api/pm/ai-providers")
+    assert resp.status_code == 200
+    listed = next(p for p in resp.json()["providers"] if p["id"] == provider["id"])
+    assert "api_key" not in listed
+    assert listed["api_key_set"] is True
+
+    # Empty-string api_key on PATCH means "leave unchanged".
+    resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"api_key": "", "name": "Renamed"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Renamed"
+    assert resp.json()["api_key_set"] is True
+
+    # Explicit null clears it.
+    resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"api_key": None})
+    assert resp.status_code == 200
+    assert resp.json()["api_key_set"] is False
+
+    resp = client.delete(f"/api/pm/ai-providers/{provider['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+    resp = client.get("/api/pm/ai-providers")
+    assert not any(p["id"] == provider["id"] for p in resp.json()["providers"])
+
+
+def test_ai_provider_unknown_type_is_422(client):
+    resp = client.post(
+        "/api/pm/ai-providers", json={"name": "Bad", "provider_type": "not-a-real-provider"}
+    )
+    assert resp.status_code == 422
+
+
+def test_ai_provider_patch_unknown_field_is_422(client):
+    provider = client.post(
+        "/api/pm/ai-providers", json={"name": "PatchProv", "provider_type": "openai"}
+    ).json()
+    resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"not_a_real_field": "x"})
+    assert resp.status_code == 422
+
+
+def test_ai_provider_patch_unknown_id_is_404(client):
+    resp = client.patch("/api/pm/ai-providers/999999", json={"name": "x"})
+    assert resp.status_code == 404
+
+
+def test_delete_ai_provider_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/ai-providers/999999")
+    assert resp.status_code == 404
+
+
+def test_ai_provider_ollama_requires_base_url_on_create(client):
+    resp = client.post("/api/pm/ai-providers", json={"name": "LocalOllama", "provider_type": "ollama"})
+    assert resp.status_code == 400
+
+    resp = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "LocalOllama", "provider_type": "ollama", "base_url": "http://127.0.0.1:11434"},
+    )
+    assert resp.status_code == 200
+
+
+def test_ai_provider_openai_compatible_requires_base_url_on_create(client):
+    resp = client.post(
+        "/api/pm/ai-providers", json={"name": "Gateway", "provider_type": "openai_compatible"}
+    )
+    assert resp.status_code == 400
+
+
+def test_ai_provider_patch_changing_type_to_ollama_requires_base_url(client):
+    provider = client.post(
+        "/api/pm/ai-providers", json={"name": "WasOpenAI", "provider_type": "openai"}
+    ).json()
+    resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"provider_type": "ollama"})
+    assert resp.status_code == 400
+
+
+def test_refresh_openai_shaped_provider_models(client, monkeypatch):
+    from throughline.queries import pm as Q
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "OpenAIProv", "provider_type": "openai", "api_key": "sk-x"},
+    ).json()
+
+    body = b'{"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4o"}]}'
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    resp = client.post(f"/api/pm/ai-providers/{provider['id']}/models/refresh")
+    assert resp.status_code == 200
+    result = resp.json()
+    assert set(result["models"]) == {"openai/gpt-4o-mini", "openai/gpt-4o"}
+    assert result["unavailable"] is False
+    assert result["error"] is None
+
+
+def test_refresh_anthropic_provider_models(client, monkeypatch):
+    from throughline.queries import pm as Q
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "AnthropicProv", "provider_type": "anthropic", "api_key": "sk-ant"},
+    ).json()
+
+    body = b'{"data": [{"id": "claude-opus-4"}]}'
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    resp = client.post(f"/api/pm/ai-providers/{provider['id']}/models/refresh")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["anthropic/claude-opus-4"]
+
+
+def test_refresh_google_provider_models_strips_models_prefix(client, monkeypatch):
+    from throughline.queries import pm as Q
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "GoogleProv", "provider_type": "google", "api_key": "AIza-x"},
+    ).json()
+
+    body = b'{"models": [{"name": "models/gemini-1.5-pro"}, {"name": "models/gemini-2.0-flash"}]}'
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    resp = client.post(f"/api/pm/ai-providers/{provider['id']}/models/refresh")
+    assert resp.status_code == 200
+    assert set(resp.json()["models"]) == {"gemini/gemini-1.5-pro", "gemini/gemini-2.0-flash"}
+
+
+def test_refresh_ollama_provider_uses_its_own_base_url(client, monkeypatch):
+    from throughline.queries import pm as Q
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "OllamaProv", "provider_type": "ollama", "base_url": "http://localhost:11434"},
+    ).json()
+
+    body = b'{"models": [{"name": "qwen3-coder:30b"}]}'
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    resp = client.post(f"/api/pm/ai-providers/{provider['id']}/models/refresh")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["ollama_chat/qwen3-coder:30b"]
+
+
+def test_refresh_unreachable_provider_is_unavailable_not_500(client, monkeypatch):
+    from throughline.queries import pm as Q
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "DownProv", "provider_type": "openai", "api_key": "sk-x"},
+    ).json()
+
+    def boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(Q.urllib.request, "urlopen", boom)
+
+    resp = client.post(f"/api/pm/ai-providers/{provider['id']}/models/refresh")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unavailable"] is True
+    assert body["models"] == []
+    assert body["error"]
+
+
+def test_refresh_unknown_provider_is_404(client):
+    resp = client.post("/api/pm/ai-providers/999999/models/refresh")
+    assert resp.status_code == 404
+
+
+def test_ai_catalog_includes_enabled_provider_with_live_and_custom_models(client, monkeypatch, tmp_path):
+    from throughline.queries import pm as Q
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-vibe-here")
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={
+            "name": "CatalogProv", "provider_type": "openai", "api_key": "sk-x",
+            "custom_models": ["my-finetune"],
+        },
+    ).json()
+
+    body = b'{"data": [{"id": "gpt-4o-mini"}]}'
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    resp = client.get("/api/pm/ai-catalog")
+    assert resp.status_code == 200
+    tools = {t["tool"]: t for t in resp.json()["tools"]}
+
+    key = f"provider:{provider['id']}"
+    assert key in tools
+    entry = tools[key]
+    assert entry["label"] == "CatalogProv (openai)"
+    assert set(entry["models"]) == {"openai/gpt-4o-mini", "openai/my-finetune"}
+    assert entry["unavailable"] is False
+    assert entry["provider_id"] == provider["id"]
+
+
+def test_ai_catalog_excludes_disabled_provider(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-vibe-here")
+
+    provider = client.post(
+        "/api/pm/ai-providers",
+        json={"name": "DisabledProv", "provider_type": "openai", "enabled": False},
+    ).json()
+
+    resp = client.get("/api/pm/ai-catalog")
+    assert resp.status_code == 200
+    tools = {t["tool"] for t in resp.json()["tools"]}
+    assert f"provider:{provider['id']}" not in tools
