@@ -29,6 +29,34 @@ _VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)(?::\s*(.*))?", re.MULTILINE)
 # needs its own branch since int() can't parse it directly.
 _TOKENS_RE = re.compile(r"Tokens:\s*([\d.]+)(k)?\s*sent,\s*([\d.]+)(k)?\s*received")
 
+
+def read_run_text(path: Path) -> str:
+    """Decode a pipeline.sh-produced text file leniently, in three steps
+    rather than the blunt `errors="replace"` this used to be: strict UTF-8
+    first (the modern, expected encoding), then strict cp1252 (~19 of the
+    real razor1911-demo-tribute verdict files are cp1252 — an umlaut like
+    the one in "Pruefung" encodes to a byte sequence that is invalid UTF-8
+    but perfectly valid cp1252), and only if both fail, UTF-8 with
+    errors="replace" so a genuinely corrupt file still can't crash a
+    watcher tick — it just loses the unreadable bytes as U+FFFD instead of
+    the whole file's umlauts.
+
+    Reads raw bytes (no text-mode newline translation) and then applies
+    Python's own universal-newlines normalization by hand, so callers see
+    the same "\\n"-only text `Path.read_text()` used to hand them —
+    otherwise a CRLF file on Windows would round-trip with literal "\\r\\n"
+    still in it."""
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("cp1252")
+        except UnicodeDecodeError:
+            text = raw.decode("utf-8", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 #: How long a pid=None (adopted) task's log_dir may sit untouched before the
 #: watcher decides the external pipeline.sh run ended without anyone telling
 #: Throughline — the razor1911-demo-tribute task that inspired this stayed
@@ -40,7 +68,7 @@ def parse_spec(log_dir: Path) -> str | None:
     spec = log_dir / "SPEC.md"
     if not spec.is_file():
         return None
-    return spec.read_text(encoding="utf-8", errors="replace")
+    return read_run_text(spec)
 
 
 def latest_iteration(log_dir: Path) -> int:
@@ -58,7 +86,7 @@ def parse_verdict(log_dir: Path, iteration: int) -> tuple[str, str] | None:
     verdict_file = log_dir / f"verdict-{iteration}.txt"
     if not verdict_file.is_file():
         return None
-    text = verdict_file.read_text(encoding="utf-8", errors="replace")
+    text = read_run_text(verdict_file)
     match = _VERDICT_RE.search(text)
     if not match:
         return None
@@ -149,9 +177,7 @@ def poll_task(conn, task: dict) -> None:
         for n in range(1, iteration):
             executor_log = log_dir / f"executor-{n}.log"
             if ("executor", n) not in existing_pairs and executor_log.is_file():
-                n_tokens = extract_aider_tokens(
-                    executor_log.read_text(encoding="utf-8", errors="replace")
-                )
+                n_tokens = extract_aider_tokens(read_run_text(executor_log))
                 Q.add_task_event(
                     conn, task_id=task_id, step="executor", event_type="log_update",
                     iteration=n, tokens_used=n_tokens,
@@ -165,9 +191,7 @@ def poll_task(conn, task: dict) -> None:
                 )
 
         already_recorded = ("executor", iteration) in existing_pairs
-        log_text = (log_dir / f"executor-{iteration}.log").read_text(
-            encoding="utf-8", errors="replace"
-        )
+        log_text = read_run_text(log_dir / f"executor-{iteration}.log")
         tokens = extract_aider_tokens(log_text)
         if not already_recorded:
             Q.add_task_event(

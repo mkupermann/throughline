@@ -5,6 +5,7 @@ from throughline.jobs.pm_watch import (
     latest_iteration,
     parse_spec,
     parse_verdict,
+    read_run_text,
 )
 
 
@@ -53,13 +54,52 @@ def test_parse_verdict_tolerates_cp1252_bytes(tmp_path: Path):
     """~19 of the real razor1911 verdict files are cp1252, not UTF-8 (an
     umlaut like the one in "Pruefung" below encodes to an invalid UTF-8
     byte sequence) — parse_verdict must not raise UnicodeDecodeError on
-    these, or the watcher's backfill crashes every tick."""
+    these, or the watcher's backfill crashes every tick. And now that the
+    decoder tries cp1252 before falling back to replacement, the umlaut
+    itself must come through correctly rather than as U+FFFD (mojibake)."""
     (tmp_path / "verdict-3.txt").write_bytes(
         b"Pr\xfcfung fehlgeschlagen.\n\nVERDICT: FAIL: Umlaut-Test"
     )
     status, message = parse_verdict(tmp_path, 3)
     assert status == "fail"
     assert "Umlaut-Test" in message
+    assert "Prüfung" in message
+    assert "�" not in message
+
+
+# ── read_run_text: the UTF-8 → cp1252 → replace decoder chain ──────────────
+
+
+def test_read_run_text_cp1252_umlauts_decode_correctly(tmp_path: Path):
+    """cp1252 bytes that are invalid UTF-8 (an umlaut here) must decode to
+    the real character, not U+FFFD — this is the whole point of trying
+    cp1252 before falling back to errors="replace"."""
+    f = tmp_path / "cp1252.txt"
+    f.write_bytes("Prüfung bestanden – Änderungen übernommen".encode("cp1252"))
+    text = read_run_text(f)
+    assert text == "Prüfung bestanden – Änderungen übernommen"
+    assert "�" not in text
+
+
+def test_read_run_text_valid_utf8_is_exact(tmp_path: Path):
+    """A well-formed UTF-8 file must round-trip exactly — the cp1252
+    fallback must never be tried when UTF-8 already succeeds."""
+    f = tmp_path / "utf8.txt"
+    original = "Prüfung bestanden — Ünïcödé"
+    f.write_bytes(original.encode("utf-8"))
+    assert read_run_text(f) == original
+
+
+def test_read_run_text_mixed_garbage_falls_back_to_replace(tmp_path: Path):
+    """Bytes that are valid in neither UTF-8 nor cp1252 (cp1252 leaves a
+    handful of codepoints, e.g. 0x81/0x8D/0x8F/0x90/0x9D, undefined) must
+    not raise — the decoder falls back to UTF-8 with errors="replace"."""
+    f = tmp_path / "garbage.txt"
+    f.write_bytes(b"before \x81\x8d\x8f\x90\x9d after")
+    text = read_run_text(f)  # must not raise
+    assert "before " in text
+    assert " after" in text
+    assert "�" in text
 
 
 def test_extract_aider_tokens_sums_all_turns():

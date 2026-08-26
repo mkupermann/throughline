@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from throughline.jobs.pm_launch import launch_task, stop_task
-from throughline.jobs.pm_watch import parse_verdict
+from throughline.jobs.pm_watch import parse_verdict, read_run_text
 from throughline.queries import pm as Q
 
 from ..deps import connection
@@ -443,7 +443,7 @@ def task_iteration_log(
             status_code=404, detail=f"no log for task {task_id} iteration {iteration}"
         )
 
-    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = read_run_text(log_path).splitlines()
     log_tail = "\n".join(lines[-tail:])
 
     parsed_verdict = parse_verdict(log_dir, iteration)
