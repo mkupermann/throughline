@@ -1,23 +1,25 @@
 /** /pm — Projekt-Dashboard: every PM project as a card with real aggregates
  *  (GET /pm/overview), plus the catalog entry points and project creation. */
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, Users, IdCard, Boxes } from "lucide-react";
 
-import { pmApi, type PmOverviewProject } from "@/lib/api";
+import { pmApi, type PmOverviewProject, type PmRepoProject } from "@/lib/api";
 import { useLang } from "./i18n";
 import {
   BudgetBar,
   EmptyState,
   ErrorState,
+  InlineConfirmButton,
   LangToggle,
   ProjectStatusChip,
   SkeletonRows,
   TASK_STATUSES,
   fmtInt,
   fmtRelative,
+  plural,
 } from "./shared";
 import "@/styles/pm.css";
 
@@ -144,6 +146,138 @@ function CreateProjectForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+/** Client-side name+description substring match, case-insensitive — same
+ *  look and feel as the catalog filters (RolesPage/MembersPage). */
+function matchesRepoFilter(q: string, rp: PmRepoProject): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return rp.name.toLowerCase().includes(needle) || (rp.description ?? "").toLowerCase().includes(needle);
+}
+
+function RepoProjectRow({ rp }: { rp: PmRepoProject }) {
+  const { t } = useLang();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const adopt = useMutation({
+    mutationFn: () => pmApi.adoptRepoProject(rp.id),
+    onSuccess: (pmProject) => {
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-repo-projects"] });
+      navigate(`/pm/projects/${pmProject.id}`);
+    },
+  });
+
+  return (
+    <li className="pm-repo-row">
+      <span className="pm-repo-row-name">{rp.name}</span>
+      <span className="pm-repo-row-meta tabular">
+        {plural(rp.sessions, t.dashboard.repoProjects.sessionOne, t.dashboard.repoProjects.sessionMany)}
+      </span>
+      <span className="pm-repo-row-meta">
+        {rp.last_active ? t.dashboard.repoProjects.lastActive(fmtRelative(rp.last_active)) : t.dashboard.repoProjects.neverActive}
+      </span>
+      {rp.linked_pm_project_id !== null ? (
+        <Link to={`/pm/projects/${rp.linked_pm_project_id}`} className="pm-repo-row-linked">
+          {t.dashboard.repoProjects.linkedBadge(rp.linked_pm_project_name ?? rp.name)}
+        </Link>
+      ) : (
+        <InlineConfirmButton
+          className="button pm-button-flush pm-button-quiet"
+          confirmLabel={t.dashboard.repoProjects.adoptConfirm}
+          disabled={adopt.isPending}
+          pending={adopt.isPending}
+          onConfirm={() => adopt.mutate()}
+        >
+          {adopt.isPending ? t.dashboard.repoProjects.adopting : t.dashboard.repoProjects.adopt}
+        </InlineConfirmButton>
+      )}
+      {adopt.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.dashboard.repoProjects.adoptFailed((adopt.error as Error).message)}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/** Existing memory-layer projects, adoptable/linkable as PM projects — the
+ *  schema bridge (pm_project_repos) already existed and was unused before
+ *  this section. Collapsed behind a <details> once the list gets long
+ *  (>10 rows): the dashboard's job is calm at-a-glance status, not another
+ *  full catalog to scroll through. */
+function RepoProjectsSection() {
+  const { t } = useLang();
+  const [filter, setFilter] = useState("");
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["pm-repo-projects"],
+    queryFn: pmApi.listRepoProjects,
+  });
+
+  const all = data?.repo_projects ?? [];
+  const filtered = useMemo(() => all.filter((rp) => matchesRepoFilter(filter, rp)), [all, filter]);
+
+  if (isPending) {
+    return (
+      <section className="pm-repo-section" aria-labelledby="pm-repo-h">
+        <h2 id="pm-repo-h" className="section-label">{t.dashboard.repoProjects.h2}</h2>
+        <SkeletonRows n={2} />
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="pm-repo-section" aria-labelledby="pm-repo-h">
+        <h2 id="pm-repo-h" className="section-label">{t.dashboard.repoProjects.h2}</h2>
+        <ErrorState title={t.dashboard.repoProjects.errorTitle} error={error} onRetry={refetch} />
+      </section>
+    );
+  }
+
+  if (all.length === 0) {
+    return null;
+  }
+
+  const body = (
+    <>
+      <input
+        type="search"
+        className="pm-input pm-cat-filter pm-repo-filter"
+        placeholder={t.dashboard.repoProjects.searchPlaceholder}
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        aria-label={t.dashboard.repoProjects.searchLabel}
+      />
+      {filtered.length === 0 ? (
+        <p className="pm-cat-filter-none">{t.dashboard.repoProjects.filterNone}</p>
+      ) : (
+        <ul className="pm-repo-list">
+          {filtered.map((rp) => (
+            <RepoProjectRow key={rp.id} rp={rp} />
+          ))}
+        </ul>
+      )}
+    </>
+  );
+
+  if (all.length > 10) {
+    return (
+      <details className="pm-repo-section">
+        <summary>{t.dashboard.repoProjects.summary(fmtInt(all.length))}</summary>
+        <div className="pm-repo-section-body">{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <section className="pm-repo-section" aria-labelledby="pm-repo-h">
+      <h2 id="pm-repo-h" className="section-label">{t.dashboard.repoProjects.h2}</h2>
+      {body}
+    </section>
+  );
+}
+
 export function DashboardPage() {
   const { t } = useLang();
   const queryClient = useQueryClient();
@@ -229,6 +363,8 @@ export function DashboardPage() {
           ))}
         </ul>
       )}
+
+      <RepoProjectsSection />
     </section>
   );
 }

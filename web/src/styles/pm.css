@@ -795,6 +795,106 @@ a.pm-catalog-link:hover {
   list-style: none;
 }
 
+/* ── Dashboard: repository projects (existing memory-layer projects) ────── */
+.pm-repo-section {
+  margin-top: var(--space-5);
+}
+.pm-repo-section > summary {
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-repo-section > summary:hover {
+  color: var(--text-primary);
+}
+.pm-repo-section-body {
+  margin-top: var(--space-3);
+}
+.pm-repo-filter {
+  margin-bottom: var(--space-2);
+  max-width: 360px;
+}
+.pm-repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.pm-repo-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+  flex-wrap: wrap;
+}
+.pm-repo-row:last-child {
+  border-bottom: none;
+}
+.pm-repo-row-name {
+  flex: 1 1 200px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pm-repo-row-meta {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-repo-row-linked {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: none;
+}
+.pm-repo-row-linked:hover {
+  text-decoration: underline;
+}
+
+/* ── Cockpit: linked repository chips ────────────────────────────────── */
+.pm-repo-links {
+  margin: var(--space-4) 0;
+}
+.pm-repo-chips {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pm-repo-chip {
+  cursor: default;
+}
+.pm-repo-chip-sessions {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.pm-repo-chip-remove {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.pm-repo-chip-remove:hover {
+  opacity: 1;
+}
+.pm-repo-link-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 /* ── Task drill-down ─────────────────────────────────────────────────── */
 .pm-task-runid code {
   font-family: var(--font-mono);

@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import { X } from "lucide-react";
 
 import { pmApi, type PmProject } from "@/lib/api";
 import { useLang } from "./i18n";
@@ -20,6 +21,118 @@ import {
 import { TeamsSection } from "./TeamsSection";
 import { TasksSection } from "./TasksSection";
 import "@/styles/pm.css";
+
+/** Linked repo projects as chips, plus a select to link another unlinked
+ *  one — the cockpit's half of the repo <-> pm_project bridge
+ *  (pm_project_repos). Candidates offered by the select are repo projects
+ *  not currently linked to *any* pm_project: a repo already adopted
+ *  elsewhere isn't offered a second time. */
+function RepoLinksSection({ projectId }: { projectId: number }) {
+  const { t } = useLang();
+  const queryClient = useQueryClient();
+  const [pickId, setPickId] = useState<number | "">("");
+
+  const linkedQuery = useQuery({
+    queryKey: ["pm-project-repos", projectId],
+    queryFn: () => pmApi.projectRepos(projectId),
+  });
+  const allQuery = useQuery({
+    queryKey: ["pm-repo-projects"],
+    queryFn: pmApi.listRepoProjects,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["pm-project-repos", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["pm-repo-projects"] });
+  };
+
+  const link = useMutation({
+    mutationFn: (repoProjectId: number) => pmApi.linkProjectRepo(projectId, repoProjectId),
+    onSuccess: () => {
+      setPickId("");
+      invalidate();
+    },
+  });
+
+  const unlink = useMutation({
+    mutationFn: (repoProjectId: number) => pmApi.unlinkProjectRepo(projectId, repoProjectId),
+    onSuccess: invalidate,
+  });
+
+  if (linkedQuery.isPending) return null;
+
+  const linked = linkedQuery.data?.repo_projects ?? [];
+  const linkedIds = new Set(linked.map((r) => r.id));
+  const candidates = (allQuery.data?.repo_projects ?? []).filter(
+    (r) => r.linked_pm_project_id === null && !linkedIds.has(r.id),
+  );
+
+  if (linked.length === 0 && candidates.length === 0) return null;
+
+  return (
+    <div className="pm-repo-links">
+      <h2 className="section-label">{t.cockpit.repos.h2}</h2>
+      {linked.length === 0 ? (
+        <p className="pm-card-quiet">{t.cockpit.repos.none}</p>
+      ) : (
+        <ul className="pm-repo-chips">
+          {linked.map((r) => (
+            <li key={r.id} className="pm-chip pm-repo-chip">
+              <span>{r.name}</span>
+              <span className="pm-repo-chip-sessions tabular">{fmtInt(r.sessions)}</span>
+              <InlineConfirmButton
+                className="pm-repo-chip-remove"
+                ariaLabel={t.cockpit.repos.unlinkAria(r.name)}
+                title={t.cockpit.repos.unlinkTitle(r.name)}
+                pending={unlink.isPending}
+                onConfirm={() => unlink.mutate(r.id)}
+              >
+                <X size={12} aria-hidden />
+              </InlineConfirmButton>
+            </li>
+          ))}
+        </ul>
+      )}
+      {candidates.length > 0 && (
+        <form
+          className="pm-repo-link-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (pickId !== "") link.mutate(pickId);
+          }}
+        >
+          <select
+            className="pm-input pm-input-compact"
+            value={pickId}
+            disabled={link.isPending}
+            onChange={(e) => setPickId(e.target.value ? Number(e.target.value) : "")}
+            aria-label={t.cockpit.repos.linkAria}
+          >
+            <option value="">{t.cockpit.repos.linkPlaceholder}</option>
+            {candidates.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="button pm-button-flush" disabled={pickId === "" || link.isPending}>
+            {t.cockpit.repos.linkSubmit}
+          </button>
+        </form>
+      )}
+      {link.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.cockpit.repos.linkFailed((link.error as Error).message)}
+        </p>
+      )}
+      {unlink.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.cockpit.repos.unlinkFailed((unlink.error as Error).message)}
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** Click-to-edit token budget, shared by the project header and team rows. */
 export function InlineBudget({
@@ -261,6 +374,8 @@ export function CockpitPage() {
           </div>
         )}
       </header>
+
+      <RepoLinksSection projectId={projectId} />
 
       <TeamsSection
         projectId={projectId}

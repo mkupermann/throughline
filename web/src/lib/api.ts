@@ -687,6 +687,23 @@ export interface PmAiCatalog {
   tools: PmAiCatalogTool[];
 }
 
+/** One `projects` (memory-layer) row enriched with its conversations
+ *  aggregates and (if any) its pm_project_repos link — GET /pm/repo-projects
+ *  and GET /pm/projects/{id}/repos share this shape. `repo_path` is the
+ *  project_path of the most recent conversation and may be null (a project
+ *  with a registry row but no sessions yet). */
+export interface PmRepoProject {
+  id: number;
+  name: string;
+  description: string | null;
+  status: PmProject["status"];
+  sessions: number;
+  last_active: string | null;
+  repo_path: string | null;
+  linked_pm_project_id: number | null;
+  linked_pm_project_name: string | null;
+}
+
 export const pmApi = {
   overview: () => request<PmOverview>("/pm/overview"),
   listSkills: () => request<{ skills: PmSkill[] }>("/pm/skills"),
@@ -815,5 +832,25 @@ export const pmApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }),
+
+  /** Every existing memory-layer project, enriched with session
+   *  aggregates and (if any) its pm_project link — the dashboard's
+   *  "repository projects" section and the cockpit's link picker. */
+  listRepoProjects: () => request<{ repo_projects: PmRepoProject[] }>("/pm/repo-projects"),
+  /** Repo projects already linked to one pm_project, in the same shape. */
+  projectRepos: (pmProjectId: number) =>
+    request<{ repo_projects: PmRepoProject[] }>(`/pm/projects/${pmProjectId}/repos`),
+  /** Creates a pm_project named after the repo project and links it in one
+   *  step. 409 if that repo project is already linked to some pm_project. */
+  adoptRepoProject: (projectId: number) =>
+    request<PmProject>(`/pm/repo-projects/${projectId}/adopt`, { method: "POST" }),
+  linkProjectRepo: (pmProjectId: number, projectId: number) =>
+    request<{ linked: boolean }>(`/pm/projects/${pmProjectId}/repos/${projectId}`, {
+      method: "POST",
+    }),
+  unlinkProjectRepo: (pmProjectId: number, projectId: number) =>
+    request<{ deleted: boolean }>(`/pm/projects/${pmProjectId}/repos/${projectId}`, {
+      method: "DELETE",
     }),
 };

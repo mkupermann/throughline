@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Play } from "lucide-react";
 
@@ -91,6 +91,18 @@ export function TasksSection({
   const [repoPath, setRepoPath] = useState("");
   const [runId, setRunId] = useState("");
 
+  // Linked repo projects with a known repo_path let the form prefill the
+  // Repo-Pfad input instead of the user having to remember/retype it — the
+  // same query key as CockpitPage's RepoLinksSection, so react-query
+  // dedupes the request once both have mounted.
+  const linkedRepos = useQuery({
+    queryKey: ["pm-project-repos", projectId],
+    queryFn: () => pmApi.projectRepos(projectId),
+  });
+  const repoChoices = (linkedRepos.data?.repo_projects ?? []).filter(
+    (r): r is typeof r & { repo_path: string } => r.repo_path !== null,
+  );
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["pm-project-tasks", projectId] });
     queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
@@ -172,6 +184,26 @@ export function TasksSection({
               required
             />
           </label>
+          {repoChoices.length > 0 && (
+            <label className="pm-field">
+              <span className="pm-label">{t.tasksSection.repoPick.label}</span>
+              <select
+                className="pm-input"
+                value=""
+                onChange={(e) => {
+                  const picked = repoChoices.find((r) => String(r.id) === e.target.value);
+                  if (picked) setRepoPath(picked.repo_path);
+                }}
+              >
+                <option value="">{t.tasksSection.repoPick.placeholder}</option>
+                {repoChoices.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="pm-field pm-field-grow">
             <span className="pm-label">{t.tasksSection.repoLabel}</span>
             <input
