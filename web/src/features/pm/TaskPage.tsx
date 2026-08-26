@@ -9,11 +9,12 @@ import { useParams } from "react-router-dom";
 import { ChevronDown, ChevronRight, Square } from "lucide-react";
 
 import { pmApi, type PmTask, type PmTaskEvent } from "@/lib/api";
+import { useLang } from "./i18n";
 import {
-  Breadcrumbs,
   BudgetBar,
   ErrorState,
   Markdown,
+  PmHeaderBar,
   SkeletonRows,
   TERMINAL_STATUSES,
   TaskStatusChip,
@@ -39,9 +40,10 @@ function parseVerdictText(text: string | null | undefined): {
 }
 
 function VerdictBadge({ result }: { result: "pass" | "fail" }) {
+  const { t } = useLang();
   return (
     <span className={`pm-verdict pm-verdict-${result}`}>
-      {result === "pass" ? "BESTANDEN" : "ABGELEHNT"}
+      {result === "pass" ? t.taskPage.verdictPass : t.taskPage.verdictFail}
     </span>
   );
 }
@@ -50,6 +52,7 @@ function VerdictBadge({ result }: { result: "pass" | "fail" }) {
  *  fail for individual iterations (e.g. an unreadable verdict file on the
  *  server side) — that failure stays inside this card. */
 function LogExcerpt({ taskId, iteration }: { taskId: number; iteration: number }) {
+  const { t } = useLang();
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["pm-iteration-log", taskId, iteration],
     queryFn: () => pmApi.iterationLog(taskId, iteration, 200),
@@ -57,14 +60,14 @@ function LogExcerpt({ taskId, iteration }: { taskId: number; iteration: number }
     retry: false,
   });
 
-  if (isPending) return <div className="skeleton pm-log-skeleton" aria-label="Log lädt" />;
+  if (isPending) return <div className="skeleton pm-log-skeleton" aria-label={t.taskPage.logLoading} />;
 
   if (error) {
     return (
       <div className="pm-log-error" role="alert">
-        <p>Log-Auszug kann nicht geladen werden (Server meldet einen Fehler für diese Iteration).</p>
+        <p>{t.taskPage.logError}</p>
         <button type="button" className="pm-linklike" onClick={() => refetch()}>
-          Erneut versuchen
+          {t.common.retry}
         </button>
       </div>
     );
@@ -72,8 +75,8 @@ function LogExcerpt({ taskId, iteration }: { taskId: number; iteration: number }
 
   return (
     <div className="pm-log">
-      <div className="pm-log-caption">Letzte 200 Zeilen von executor-{iteration}.log</div>
-      <pre className="pm-log-pre">{data.log_tail || "(leer)"}</pre>
+      <div className="pm-log-caption">{t.taskPage.logCaption(iteration)}</div>
+      <pre className="pm-log-pre">{data.log_tail || t.taskPage.logEmpty}</pre>
     </div>
   );
 }
@@ -128,6 +131,7 @@ function IterationCard({
   isLatest: boolean;
   running: boolean;
 }) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const verdict = parseVerdictText(it.verdictText);
   const live = isLatest && running;
@@ -141,10 +145,10 @@ function IterationCard({
       <span className="pm-iter-node" aria-hidden />
       <div className="pm-iter-card">
         <div className="pm-iter-head">
-          <span className="pm-iter-n tabular">Iteration {it.n}</span>
-          {live && <span className="pm-status pm-status-running">läuft</span>}
+          <span className="pm-iter-n tabular">{t.taskPage.iteration(it.n)}</span>
+          {live && <span className="pm-status pm-status-running">{t.status.task.running}</span>}
           <span className="pm-iter-tokens tabular">
-            {it.tokens !== null ? `${fmtInt(it.tokens)} Tokens` : "Tokens unbekannt"}
+            {it.tokens !== null ? `${fmtInt(it.tokens)} ${t.common.tokens}` : t.taskPage.tokensUnknown}
           </span>
           {verdict.result && <VerdictBadge result={verdict.result} />}
         </div>
@@ -160,7 +164,7 @@ function IterationCard({
           ) : (
             <ChevronRight size={14} aria-hidden />
           )}
-          {open ? "Log ausblenden" : "Log ansehen"}
+          {open ? t.taskPage.logHide : t.taskPage.logShow}
         </button>
         {open && <LogExcerpt taskId={taskId} iteration={it.n} />}
       </div>
@@ -169,9 +173,10 @@ function IterationCard({
 }
 
 function SpecPanel({ spec }: { spec: string }) {
+  const { t } = useLang();
   return (
     <details className="pm-spec">
-      <summary>Spezifikation (SPEC.md)</summary>
+      <summary>{t.taskPage.specSummary}</summary>
       <div className="pm-spec-body">
         <Markdown text={spec} />
       </div>
@@ -190,6 +195,7 @@ function TaskHeader({
   teamBudget: number | null;
   projectBudget: number | null;
 }) {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const stop = useMutation({
     mutationFn: () => pmApi.stop(task.id),
@@ -202,8 +208,8 @@ function TaskHeader({
   // The strictest applicable budget drives the gauge; without any budget the
   // spend stands alone.
   const budgets = [
-    { label: "Team-Budget", value: teamBudget },
-    { label: "Projekt-Budget", value: projectBudget },
+    { label: t.taskPage.teamBudgetLabel, value: teamBudget },
+    { label: t.taskPage.projectBudgetLabel, value: projectBudget },
   ].filter((b): b is { label: string; value: number } => b.value !== null);
   const strictest =
     budgets.length > 0
@@ -214,10 +220,10 @@ function TaskHeader({
 
   return (
     <header className="page-header">
-      <Breadcrumbs
+      <PmHeaderBar
         items={[
-          { label: "Project Management", to: "/pm" },
-          { label: projectName ?? "Projekt", to: `/pm/projects/${task.pm_project_id}` },
+          { label: t.common.projectManagement, to: "/pm" },
+          { label: projectName ?? t.cockpit.breadcrumbFallback, to: `/pm/projects/${task.pm_project_id}` },
           { label: task.title },
         ]}
       />
@@ -234,28 +240,28 @@ function TaskHeader({
             disabled={stop.isPending}
           >
             <Square size={13} aria-hidden />
-            {stop.isPending ? "Stoppt…" : "Task stoppen"}
+            {stop.isPending ? t.taskPage.stopping : t.taskPage.stop}
           </button>
         )}
       </div>
       <div className="pm-cockpit-meta">
-        <span className="tabular">{fmtInt(task.tokens_used)} Tokens</span>
+        <span className="tabular">{fmtInt(task.tokens_used)} {t.common.tokens}</span>
         <span aria-hidden>·</span>
         <span>
           {task.status === "running"
-            ? `gestartet ${fmtRelative(task.started_at)}`
+            ? t.taskPage.startedAt(fmtRelative(task.started_at))
             : task.ended_at
-              ? `beendet ${fmtRelative(task.ended_at)}`
-              : `angelegt ${fmtRelative(task.started_at)}`}
+              ? t.taskPage.endedAt(fmtRelative(task.ended_at))
+              : t.taskPage.createdAt(fmtRelative(task.started_at))}
         </span>
         <span aria-hidden>·</span>
         <span className="pm-task-runid">
-          Run <code>{task.run_id}</code>
+          {t.taskPage.runLabel} <code>{task.run_id}</code>
         </span>
       </div>
       {stop.isError && (
         <p className="pm-field-error" role="alert">
-          Stoppen fehlgeschlagen: {(stop.error as Error).message}
+          {t.taskPage.stopFailed((stop.error as Error).message)}
         </p>
       )}
       {strictest && (
@@ -268,6 +274,7 @@ function TaskHeader({
 }
 
 export function TaskPage() {
+  const { t } = useLang();
   const { id } = useParams<{ id: string }>();
   const taskId = Number(id);
 
@@ -299,7 +306,7 @@ export function TaskPage() {
     return (
       <section className="pm-page">
         <header className="page-header">
-          <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Task" }]} />
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.taskPage.breadcrumbFallback }]} />
         </header>
         <SkeletonRows n={4} header />
       </section>
@@ -310,10 +317,10 @@ export function TaskPage() {
     return (
       <section className="pm-page">
         <header className="page-header">
-          <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Task" }]} />
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.taskPage.breadcrumbFallback }]} />
         </header>
         <ErrorState
-          title="Task kann nicht geladen werden"
+          title={t.taskPage.errorTitle}
           error={task.error}
           onRetry={task.refetch}
         />
@@ -321,9 +328,9 @@ export function TaskPage() {
     );
   }
 
-  const t = task.data;
-  const project = projects.data?.projects.find((p) => p.id === t.pm_project_id);
-  const team = teams.data?.teams.find((x) => x.id === t.team_id);
+  const taskData = task.data;
+  const project = projects.data?.projects.find((p) => p.id === taskData.pm_project_id);
+  const team = teams.data?.teams.find((x) => x.id === taskData.team_id);
   const eventList = events.data?.events ?? [];
 
   const spec = eventList.find((e) => e.step === "analyst" && e.event_type === "started")?.message;
@@ -333,7 +340,7 @@ export function TaskPage() {
   return (
     <section className="pm-page pm-task-page">
       <TaskHeader
-        task={t}
+        task={taskData}
         projectName={project?.name}
         teamBudget={team?.token_budget ?? null}
         projectBudget={project?.token_budget ?? null}
@@ -345,7 +352,7 @@ export function TaskPage() {
         <div className="pm-task-errors" role="alert">
           {errors.map((e) => (
             <p key={e.id}>
-              <strong>Hinweis:</strong> {e.message ?? "Fehler ohne Meldung"} (
+              <strong>{t.taskPage.noteLabel}</strong> {e.message ?? t.taskPage.errorNoMessage} (
               {fmtRelative(e.created_at)})
             </p>
           ))}
@@ -354,20 +361,20 @@ export function TaskPage() {
 
       <section className="pm-section" aria-labelledby="pm-iter-h">
         <h2 id="pm-iter-h" className="section-label">
-          Iterationen
+          {t.taskPage.iterH2}
         </h2>
         {events.isPending ? (
           <SkeletonRows n={3} />
         ) : events.error ? (
           <ErrorState
-            title="Iterationen können nicht geladen werden"
+            title={t.taskPage.iterErrorTitle}
             error={events.error}
             onRetry={events.refetch}
           />
         ) : iterations.length === 0 ? (
           <p className="pm-task-list-none">
-            Noch keine Iteration aufgezeichnet
-            {t.status === "running" ? " — die Pipeline läuft an, die Seite aktualisiert sich selbst." : "."}
+            {t.taskPage.noIterations}
+            {taskData.status === "running" ? t.taskPage.noIterationsRunning : "."}
           </p>
         ) : (
           <ol className="pm-iter-list">
@@ -377,7 +384,7 @@ export function TaskPage() {
                 taskId={taskId}
                 it={it}
                 isLatest={idx === 0}
-                running={t.status === "running"}
+                running={taskData.status === "running"}
               />
             ))}
           </ol>

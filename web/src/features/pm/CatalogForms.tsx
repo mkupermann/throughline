@@ -5,6 +5,7 @@
 import { useState } from "react";
 
 import type { PmMember, PmRole } from "@/lib/api";
+import { useLang } from "./i18n";
 import { DocListEditor, SkillPicker } from "./shared";
 
 // ── Role ─────────────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ export function RoleForm({
   onSubmit: (draft: RoleDraft) => void;
   onCancel: () => void;
 }) {
+  const { t } = useLang();
   const [d, setD] = useState<RoleDraft>(() => roleDraftFrom(initial));
   const set = <K extends keyof RoleDraft>(k: K, v: RoleDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: v }));
@@ -64,44 +66,44 @@ export function RoleForm({
     >
       <div className="pm-editor-grid">
         <label className="pm-field">
-          <span className="pm-label">Name</span>
+          <span className="pm-label">{t.forms.nameLabel}</span>
           <input
             className="pm-input"
             value={d.name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="z. B. Analyst"
+            placeholder={t.forms.roleNamePlaceholder}
             required
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">Beschreibung</span>
+          <span className="pm-label">{t.forms.descriptionLabel}</span>
           <input
             className="pm-input"
             value={d.description ?? ""}
             onChange={(e) => set("description", strOrNull(e.target.value))}
-            placeholder="Wofür diese Rolle zuständig ist"
+            placeholder={t.forms.descriptionPlaceholder}
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">KI-Werkzeug</span>
+          <span className="pm-label">{t.forms.aiToolLabel}</span>
           <input
             className="pm-input"
             value={d.default_ai_tool ?? ""}
             onChange={(e) => set("default_ai_tool", strOrNull(e.target.value))}
-            placeholder="z. B. aider, claude, vibe"
+            placeholder={t.forms.aiToolPlaceholder}
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">KI-Modell</span>
+          <span className="pm-label">{t.forms.aiModelLabel}</span>
           <input
             className="pm-input"
             value={d.default_ai_model ?? ""}
             onChange={(e) => set("default_ai_model", strOrNull(e.target.value))}
-            placeholder="z. B. ollama_chat/qwen3-coder:30b"
+            placeholder={t.forms.aiModelPlaceholder}
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">Token-Budget</span>
+          <span className="pm-label">{t.forms.budgetLabel}</span>
           <input
             className="pm-input pm-input-number"
             type="number"
@@ -110,43 +112,43 @@ export function RoleForm({
             onChange={(e) =>
               set("token_budget", e.target.value.trim() === "" ? null : Number(e.target.value))
             }
-            placeholder="unbegrenzt"
+            placeholder={t.common.unlimited}
           />
         </label>
       </div>
 
       <div className="pm-field">
-        <span className="pm-label">Skills</span>
+        <span className="pm-label">{t.forms.skillsLabel}</span>
         <SkillPicker value={d.skill_refs} onChange={(ids) => set("skill_refs", ids)} />
       </div>
 
       <label className="pm-field">
-        <span className="pm-label">Anweisungen (Prompt)</span>
+        <span className="pm-label">{t.forms.instructionsLabel}</span>
         <textarea
           className="pm-input pm-textarea"
           rows={5}
           value={d.instructions ?? ""}
           onChange={(e) => set("instructions", strOrNull(e.target.value))}
-          placeholder="Mandat der Rolle — wird dem Agenten beim Start mitgegeben."
+          placeholder={t.forms.roleInstructionsPlaceholder}
         />
       </label>
 
       <div className="pm-field">
-        <span className="pm-label">Dokumente</span>
+        <span className="pm-label">{t.forms.documentsLabel}</span>
         <DocListEditor value={d.document_refs} onChange={(docs) => set("document_refs", docs)} />
       </div>
 
       <div className="pm-editor-actions">
         <button type="submit" className="button" disabled={busy || !d.name.trim()}>
-          {busy ? "Speichert…" : submitLabel}
+          {busy ? t.common.saving : submitLabel}
         </button>
         <button type="button" className="button pm-button-quiet" onClick={onCancel}>
-          Abbrechen
+          {t.forms.cancel}
         </button>
       </div>
       {error != null && (
         <p className="pm-field-error" role="alert">
-          Speichern fehlgeschlagen: {(error as Error).message}
+          {t.forms.saveFailed((error as Error).message)}
         </p>
       )}
     </form>
@@ -155,8 +157,8 @@ export function RoleForm({
 
 // ── Member ───────────────────────────────────────────────────────────────
 // Members carry no AI binding of their own — that lives on the role, with a
-// per-assignment override in the Zuordnungs-Matrix. Everything else (skills,
-// prompt, documents, budget) is configurable here.
+// per-assignment override made in the team pipeline. Everything else
+// (skills, prompt, documents, budget) is configurable here.
 
 export interface MemberDraft {
   name: string;
@@ -195,6 +197,7 @@ export function MemberForm({
   onSubmit: (draft: MemberDraft) => void;
   onCancel: () => void;
 }) {
+  const { t } = useLang();
   const [d, setD] = useState<MemberDraft>(() => memberDraftFrom(initial));
   const set = <K extends keyof MemberDraft>(k: K, v: MemberDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: v }));
@@ -209,37 +212,37 @@ export function MemberForm({
     >
       <div className="pm-editor-grid">
         <label className="pm-field">
-          <span className="pm-label">Name</span>
+          <span className="pm-label">{t.forms.nameLabel}</span>
           <input
             className="pm-input"
             value={d.name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="z. B. Claude Code"
+            placeholder={t.forms.memberNamePlaceholder}
             required
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">Typ</span>
+          <span className="pm-label">{t.forms.typeLabel}</span>
           <select
             className="pm-input"
             value={d.member_type}
             onChange={(e) => set("member_type", e.target.value as "human" | "agent")}
           >
-            <option value="agent">Agent</option>
-            <option value="human">Mensch</option>
+            <option value="agent">{t.membersPage.typeAgent}</option>
+            <option value="human">{t.membersPage.typeHuman}</option>
           </select>
         </label>
         <label className="pm-field">
-          <span className="pm-label">Kontakt</span>
+          <span className="pm-label">{t.forms.contactLabel}</span>
           <input
             className="pm-input"
             value={d.contact}
             onChange={(e) => set("contact", e.target.value)}
-            placeholder="E-Mail, Handle o. Ä."
+            placeholder={t.forms.contactPlaceholder}
           />
         </label>
         <label className="pm-field">
-          <span className="pm-label">Token-Budget</span>
+          <span className="pm-label">{t.forms.budgetLabel}</span>
           <input
             className="pm-input pm-input-number"
             type="number"
@@ -248,43 +251,43 @@ export function MemberForm({
             onChange={(e) =>
               set("token_budget", e.target.value.trim() === "" ? null : Number(e.target.value))
             }
-            placeholder="unbegrenzt"
+            placeholder={t.common.unlimited}
           />
         </label>
       </div>
 
       <div className="pm-field">
-        <span className="pm-label">Skills</span>
+        <span className="pm-label">{t.forms.skillsLabel}</span>
         <SkillPicker value={d.skill_refs} onChange={(ids) => set("skill_refs", ids)} />
       </div>
 
       <label className="pm-field">
-        <span className="pm-label">Anweisungen (Prompt)</span>
+        <span className="pm-label">{t.forms.instructionsLabel}</span>
         <textarea
           className="pm-input pm-textarea"
           rows={5}
           value={d.instructions ?? ""}
           onChange={(e) => set("instructions", strOrNull(e.target.value))}
-          placeholder="Individuelle Arbeitsweise — wird an das Rollen-Mandat angehängt."
+          placeholder={t.forms.memberInstructionsPlaceholder}
         />
       </label>
 
       <div className="pm-field">
-        <span className="pm-label">Dokumente</span>
+        <span className="pm-label">{t.forms.documentsLabel}</span>
         <DocListEditor value={d.document_refs} onChange={(docs) => set("document_refs", docs)} />
       </div>
 
       <div className="pm-editor-actions">
         <button type="submit" className="button" disabled={busy || !d.name.trim()}>
-          {busy ? "Speichert…" : submitLabel}
+          {busy ? t.common.saving : submitLabel}
         </button>
         <button type="button" className="button pm-button-quiet" onClick={onCancel}>
-          Abbrechen
+          {t.forms.cancel}
         </button>
       </div>
       {error != null && (
         <p className="pm-field-error" role="alert">
-          Speichern fehlgeschlagen: {(error as Error).message}
+          {t.forms.saveFailed((error as Error).message)}
         </p>
       )}
     </form>

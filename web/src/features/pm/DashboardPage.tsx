@@ -7,30 +7,31 @@ import { Link } from "react-router-dom";
 import { Plus, Users, IdCard, Boxes } from "lucide-react";
 
 import { pmApi, type PmOverviewProject } from "@/lib/api";
+import { useLang } from "./i18n";
 import {
   BudgetBar,
-  Breadcrumbs,
   EmptyState,
   ErrorState,
+  PmHeaderBar,
   ProjectStatusChip,
   SkeletonRows,
-  TASK_STATUS_LABEL,
+  TASK_STATUSES,
   fmtInt,
   fmtRelative,
 } from "./shared";
 import "@/styles/pm.css";
 
 function TaskCountChips({ tasks }: { tasks: PmOverviewProject["tasks"] }) {
-  const entries = (Object.keys(TASK_STATUS_LABEL) as (keyof typeof TASK_STATUS_LABEL)[])
-    .filter((s) => tasks[s] > 0);
+  const { t } = useLang();
+  const entries = TASK_STATUSES.filter((s) => tasks[s] > 0);
   if (entries.length === 0) {
-    return <span className="pm-card-quiet">Noch keine Tasks</span>;
+    return <span className="pm-card-quiet">{t.dashboard.noTasksYet}</span>;
   }
   return (
     <div className="pm-card-tasks">
       {entries.map((s) => (
         <span key={s} className={`pm-status pm-status-${s}`}>
-          {fmtInt(tasks[s])} {TASK_STATUS_LABEL[s]}
+          {fmtInt(tasks[s])} {t.status.task[s]}
         </span>
       ))}
     </div>
@@ -38,6 +39,7 @@ function TaskCountChips({ tasks }: { tasks: PmOverviewProject["tasks"] }) {
 }
 
 function ProjectCard({ p }: { p: PmOverviewProject }) {
+  const { t } = useLang();
   return (
     <li>
       <Link to={`/pm/projects/${p.id}`} className="pm-card">
@@ -46,9 +48,9 @@ function ProjectCard({ p }: { p: PmOverviewProject }) {
           <ProjectStatusChip status={p.status} />
         </div>
         <div className="pm-card-meta">
-          <span>{fmtInt(p.teams)} {p.teams === 1 ? "Team" : "Teams"}</span>
+          <span>{fmtInt(p.teams)} {p.teams === 1 ? t.dashboard.teamOne : t.dashboard.teamMany}</span>
           <span aria-hidden>·</span>
-          <span>Aktivität {fmtRelative(p.last_activity)}</span>
+          <span>{t.dashboard.activity(fmtRelative(p.last_activity))}</span>
         </div>
         <TaskCountChips tasks={p.tasks} />
         <BudgetBar used={p.tokens_used} budget={p.token_budget} />
@@ -58,6 +60,7 @@ function ProjectCard({ p }: { p: PmOverviewProject }) {
 }
 
 function CreateProjectForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [budget, setBudget] = useState("");
@@ -89,7 +92,7 @@ function CreateProjectForm({ onCreated }: { onCreated: () => void }) {
         }}
       >
         <Plus size={14} aria-hidden />
-        Projekt anlegen
+        {t.dashboard.createProject}
       </button>
     );
   }
@@ -103,38 +106,38 @@ function CreateProjectForm({ onCreated }: { onCreated: () => void }) {
       }}
     >
       <label className="pm-field pm-field-inline">
-        <span className="pm-label">Name</span>
+        <span className="pm-label">{t.dashboard.nameLabel}</span>
         <input
           ref={nameRef}
           className="pm-input"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="z. B. Demoscene Tribute"
+          placeholder={t.dashboard.namePlaceholder}
           required
         />
       </label>
       <label className="pm-field pm-field-inline">
-        <span className="pm-label">Token-Budget (optional)</span>
+        <span className="pm-label">{t.dashboard.budgetLabel}</span>
         <input
           className="pm-input pm-input-number"
           type="number"
           min={0}
           value={budget}
           onChange={(e) => setBudget(e.target.value)}
-          placeholder="unbegrenzt"
+          placeholder={t.common.unlimited}
         />
       </label>
       <div className="pm-inline-form-actions">
         <button type="submit" className="button" disabled={create.isPending || !name.trim()}>
-          Anlegen
+          {t.dashboard.createSubmit}
         </button>
         <button type="button" className="button pm-button-quiet" onClick={() => setOpen(false)}>
-          Abbrechen
+          {t.common.cancel}
         </button>
       </div>
       {create.isError && (
         <p className="pm-field-error" role="alert">
-          Projekt konnte nicht angelegt werden: {(create.error as Error).message}
+          {t.dashboard.createFailed((create.error as Error).message)}
         </p>
       )}
     </form>
@@ -142,6 +145,7 @@ function CreateProjectForm({ onCreated }: { onCreated: () => void }) {
 }
 
 export function DashboardPage() {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["pm-overview"],
@@ -153,11 +157,11 @@ export function DashboardPage() {
 
   const header = (
     <header className="page-header">
-      <Breadcrumbs items={[{ label: "Project Management" }]} />
+      <PmHeaderBar items={[{ label: t.common.projectManagement }]} />
       <div className="page-header-row pm-header-row">
         <div>
-          <h1 className="page-title">Project Management</h1>
-          <p className="page-subtitle">Virtuelle Teams, Pipelines und Budgets im Blick.</p>
+          <h1 className="page-title">{t.common.projectManagement}</h1>
+          <p className="page-subtitle">{t.dashboard.subtitle}</p>
         </div>
         <CreateProjectForm
           onCreated={() => queryClient.invalidateQueries({ queryKey: ["pm-overview"] })}
@@ -179,7 +183,7 @@ export function DashboardPage() {
     return (
       <section className="pm-page">
         {header}
-        <ErrorState title="Übersicht kann nicht geladen werden" error={error} onRetry={refetch} />
+        <ErrorState title={t.dashboard.errorTitle} error={error} onRetry={refetch} />
       </section>
     );
   }
@@ -190,27 +194,27 @@ export function DashboardPage() {
     <section className="pm-page">
       {header}
 
-      <div className="pm-catalog-links" role="group" aria-label="Kataloge">
+      <div className="pm-catalog-links" role="group" aria-label={t.dashboard.catalogGroupLabel}>
         <Link to="/pm/roles" className="pm-catalog-link">
           <IdCard size={15} aria-hidden />
-          <span>Rollen</span>
+          <span>{t.dashboard.catalogRoles}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.roles)}</span>
         </Link>
         <Link to="/pm/members" className="pm-catalog-link">
           <Users size={15} aria-hidden />
-          <span>Mitglieder</span>
+          <span>{t.dashboard.catalogMembers}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.members)}</span>
         </Link>
-        <span className="pm-catalog-link pm-catalog-link-static" title="Teams werden im Projekt-Cockpit verwaltet">
+        <span className="pm-catalog-link pm-catalog-link-static" title={t.dashboard.catalogTeamsTitle}>
           <Boxes size={15} aria-hidden />
-          <span>Teams</span>
+          <span>{t.dashboard.catalogTeams}</span>
           <span className="tabular pm-catalog-count">{fmtInt(counts.teams)}</span>
         </span>
       </div>
 
       {projects.length === 0 ? (
-        <EmptyState title="Noch keine Projekte">
-          <p>Ein Projekt bündelt Teams, Tasks und Budgets. Lege das erste an, um zu starten.</p>
+        <EmptyState title={t.dashboard.emptyTitle}>
+          <p>{t.dashboard.emptyBody}</p>
         </EmptyState>
       ) : (
         <ul className="pm-card-grid">

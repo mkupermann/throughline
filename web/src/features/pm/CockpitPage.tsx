@@ -1,22 +1,22 @@
 /** /pm/projects/:id — Projekt-Cockpit: header with editable status/budget,
- *  team pipeline rows (the signature element), Zuordnungs-Matrix and tasks. */
+ *  team pipeline rows (the signature element; seats double as the
+ *  assignment UI) and tasks. */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import { pmApi, type PmProject } from "@/lib/api";
+import { useLang } from "./i18n";
 import {
-  Breadcrumbs,
   BudgetBar,
   ErrorState,
-  PROJECT_STATUS_LABEL,
+  PmHeaderBar,
   ProjectStatusChip,
   SkeletonRows,
   fmtInt,
 } from "./shared";
 import { TeamsSection } from "./TeamsSection";
-import { MatrixSection } from "./MatrixSection";
 import { TasksSection } from "./TasksSection";
 import "@/styles/pm.css";
 
@@ -25,21 +25,23 @@ export function InlineBudget({
   value,
   onSave,
   saving,
-  label = "Budget",
+  label,
 }: {
   value: number | null;
   onSave: (budget: number | null) => void;
   saving: boolean;
   label?: string;
 }) {
+  const { t } = useLang();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const shownLabel = label ?? t.budget.label;
 
   if (!editing) {
     return (
       <span className="pm-inline-budget">
         <span className="pm-inline-budget-value tabular">
-          {label}: {value === null ? "unbegrenzt" : `${fmtInt(value)} Tokens`}
+          {shownLabel}: {value === null ? t.common.unlimited : `${fmtInt(value)} ${t.common.tokens}`}
         </span>
         <button
           type="button"
@@ -49,7 +51,7 @@ export function InlineBudget({
             setEditing(true);
           }}
         >
-          Bearbeiten
+          {t.common.edit}
         </button>
       </span>
     );
@@ -70,19 +72,19 @@ export function InlineBudget({
         min={0}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="unbegrenzt"
-        aria-label={`${label} in Tokens`}
+        placeholder={t.common.unlimited}
+        aria-label={`${shownLabel} ${t.cockpit.budgetAriaSuffix}`}
         autoFocus
       />
       <button type="submit" className="button pm-button-flush" disabled={saving}>
-        Speichern
+        {t.common.save}
       </button>
       <button
         type="button"
         className="button pm-button-flush pm-button-quiet"
         onClick={() => setEditing(false)}
       >
-        Abbrechen
+        {t.common.cancel}
       </button>
     </form>
   );
@@ -97,18 +99,20 @@ function StatusSelect({
   onChange: (status: PmProject["status"]) => void;
   saving: boolean;
 }) {
+  const { t } = useLang();
+  const statuses: PmProject["status"][] = ["active", "paused", "completed", "archived"];
   return (
     <label className="pm-status-select">
-      <span>Status:</span>
+      <span>{t.cockpit.statusLabel}</span>
       <select
         className="pm-input pm-input-compact"
         value={project.status}
         disabled={saving}
         onChange={(e) => onChange(e.target.value as PmProject["status"])}
       >
-        {(Object.keys(PROJECT_STATUS_LABEL) as PmProject["status"][]).map((s) => (
+        {statuses.map((s) => (
           <option key={s} value={s}>
-            {PROJECT_STATUS_LABEL[s]}
+            {t.status.project[s]}
           </option>
         ))}
       </select>
@@ -117,6 +121,7 @@ function StatusSelect({
 }
 
 export function CockpitPage() {
+  const { t } = useLang();
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
   const queryClient = useQueryClient();
@@ -153,7 +158,7 @@ export function CockpitPage() {
     return (
       <section className="pm-page">
         <header className="page-header">
-          <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Projekt" }]} />
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
         </header>
         <SkeletonRows n={4} header />
       </section>
@@ -164,10 +169,10 @@ export function CockpitPage() {
     return (
       <section className="pm-page">
         <header className="page-header">
-          <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Projekt" }]} />
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
         </header>
         <ErrorState
-          title="Projekt kann nicht geladen werden"
+          title={t.cockpit.errorTitle}
           error={projects.error}
           onRetry={projects.refetch}
         />
@@ -179,25 +184,24 @@ export function CockpitPage() {
     return (
       <section className="pm-page">
         <header className="page-header">
-          <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Projekt" }]} />
-          <h1 className="page-title">Projekt nicht gefunden</h1>
-          <p className="page-subtitle">
-            Unter dieser Adresse liegt kein Projekt. Zurück zur Übersicht, um eines auszuwählen.
-          </p>
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
+          <h1 className="page-title">{t.cockpit.notFoundTitle}</h1>
+          <p className="page-subtitle">{t.cockpit.notFoundBody}</p>
         </header>
       </section>
     );
   }
 
   const taskList = tasks.data?.tasks ?? [];
-  const running = taskList.filter((t) => t.status === "running").length;
-  const tokensUsed = taskList.reduce((sum, t) => sum + t.tokens_used, 0);
+  const running = taskList.filter((tk) => tk.status === "running").length;
+  const tokensUsed = taskList.reduce((sum, tk) => sum + tk.tokens_used, 0);
+  const teamCount = teams.data?.teams.length ?? 0;
 
   return (
     <section className="pm-page">
       <header className="page-header">
-        <Breadcrumbs
-          items={[{ label: "Project Management", to: "/pm" }, { label: project.name }]}
+        <PmHeaderBar
+          items={[{ label: t.common.projectManagement, to: "/pm" }, { label: project.name }]}
         />
         <div className="page-header-row pm-header-row">
           <div className="pm-cockpit-title">
@@ -213,13 +217,12 @@ export function CockpitPage() {
           />
           <span aria-hidden>·</span>
           <span className="tabular">
-            {fmtInt(teams.data?.teams.length ?? 0)}{" "}
-            {(teams.data?.teams.length ?? 0) === 1 ? "Team" : "Teams"}
+            {fmtInt(teamCount)} {teamCount === 1 ? t.cockpit.teamOne : t.cockpit.teamMany}
           </span>
           <span aria-hidden>·</span>
           <span className="tabular">
-            {fmtInt(taskList.length)} {taskList.length === 1 ? "Task" : "Tasks"}
-            {running > 0 && `, ${fmtInt(running)} läuft`}
+            {fmtInt(taskList.length)} {taskList.length === 1 ? t.cockpit.taskOne : t.cockpit.taskMany}
+            {running > 0 && `, ${fmtInt(running)} ${t.status.task.running}`}
           </span>
           <span aria-hidden>·</span>
           <InlineBudget
@@ -241,13 +244,6 @@ export function CockpitPage() {
         assignments={assignments}
         members={members}
         tasks={taskList}
-      />
-
-      <MatrixSection
-        projectId={projectId}
-        teams={teams}
-        assignments={assignments}
-        members={members}
       />
 
       <TasksSection projectId={projectId} teams={teams.data?.teams ?? []} tasks={tasks} />

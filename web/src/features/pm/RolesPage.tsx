@@ -8,10 +8,11 @@ import { Plus } from "lucide-react";
 
 import { pmApi, type PmRole } from "@/lib/api";
 import { RoleForm, type RoleDraft } from "./CatalogForms";
+import { useLang } from "./i18n";
 import {
-  Breadcrumbs,
   EmptyState,
   ErrorState,
+  PmHeaderBar,
   SkeletonRows,
   fmtInt,
   plural,
@@ -20,6 +21,7 @@ import {
 import "@/styles/pm.css";
 
 function RoleSummary({ role }: { role: PmRole }) {
+  const { t } = useLang();
   const ai =
     role.default_ai_tool || role.default_ai_model
       ? [role.default_ai_tool, role.default_ai_model].filter(Boolean).join(" · ")
@@ -30,21 +32,22 @@ function RoleSummary({ role }: { role: PmRole }) {
       {ai ? (
         <code className="pm-cat-ai">{ai}</code>
       ) : (
-        <span className="pm-cat-none">Kein KI-Werkzeug gesetzt</span>
+        <span className="pm-cat-none">{t.catalog.noAiTool}</span>
       )}
-      <span className="pm-cat-fact tabular">{plural(role.skill_refs.length, "Skill", "Skills")}</span>
-      <span className="pm-cat-fact tabular">{plural(role.document_refs.length, "Dokument", "Dokumente")}</span>
+      <span className="pm-cat-fact tabular">{plural(role.skill_refs.length, t.common.skillOne, t.common.skillMany)}</span>
+      <span className="pm-cat-fact tabular">{plural(role.document_refs.length, t.common.documentOne, t.common.documentMany)}</span>
       <span className="pm-cat-fact tabular">
-        {role.token_budget !== null ? `${fmtInt(role.token_budget)} Tokens Budget` : "Kein Budget"}
+        {role.token_budget !== null ? t.catalog.budgetTokens(fmtInt(role.token_budget)) : t.catalog.noBudget}
       </span>
       <span className="pm-cat-fact">
-        {role.instructions ? "Anweisungen gesetzt" : "Keine Anweisungen"}
+        {role.instructions ? t.catalog.instructionsSet : t.catalog.noInstructions}
       </span>
     </div>
   );
 }
 
 function RoleRow({ role }: { role: PmRole }) {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
 
@@ -67,13 +70,13 @@ function RoleRow({ role }: { role: PmRole }) {
           aria-expanded={editing}
           onClick={() => setEditing((e) => !e)}
         >
-          {editing ? "Schließen" : "Bearbeiten"}
+          {editing ? t.common.close : t.common.edit}
         </button>
       </div>
       {editing ? (
         <RoleForm
           initial={role}
-          submitLabel="Änderungen speichern"
+          submitLabel={t.catalog.saveChanges}
           busy={patch.isPending}
           error={patch.isError ? patch.error : null}
           onSubmit={(draft) => patch.mutate(draft)}
@@ -87,6 +90,7 @@ function RoleRow({ role }: { role: PmRole }) {
 }
 
 export function RolesPage() {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const { data, isPending, error, refetch } = useQuery({
@@ -108,14 +112,11 @@ export function RolesPage() {
   return (
     <section className="pm-page">
       <header className="page-header">
-        <Breadcrumbs items={[{ label: "Project Management", to: "/pm" }, { label: "Rollen" }]} />
+        <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.breadcrumb.roles }]} />
         <div className="page-header-row pm-header-row">
           <div>
-            <h1 className="page-title">Rollen</h1>
-            <p className="page-subtitle">
-              Eine Rolle bündelt KI-Werkzeug, Skills, Anweisungen und Budget für einen Sitz in der
-              Pipeline.
-            </p>
+            <h1 className="page-title">{t.rolesPage.h1}</h1>
+            <p className="page-subtitle">{t.rolesPage.subtitle}</p>
           </div>
           {!creating && (
             <button
@@ -124,7 +125,7 @@ export function RolesPage() {
               onClick={() => setCreating(true)}
             >
               <Plus size={14} aria-hidden />
-              Rolle anlegen
+              {t.rolesPage.create}
             </button>
           )}
         </div>
@@ -133,7 +134,7 @@ export function RolesPage() {
       {creating && (
         <div className="pm-cat-create">
           <RoleForm
-            submitLabel="Rolle anlegen"
+            submitLabel={t.rolesPage.create}
             busy={create.isPending}
             error={create.isError ? create.error : null}
             onSubmit={(draft) => create.mutate(draft)}
@@ -145,10 +146,10 @@ export function RolesPage() {
       {isPending ? (
         <SkeletonRows n={3} />
       ) : error ? (
-        <ErrorState title="Rollen können nicht geladen werden" error={error} onRetry={refetch} />
+        <ErrorState title={t.rolesPage.errorTitle} error={error} onRetry={refetch} />
       ) : data.roles.length === 0 ? (
-        <EmptyState title="Noch keine Rollen">
-          <p>Rollen definieren die Sitze einer Team-Pipeline — oben die erste anlegen.</p>
+        <EmptyState title={t.rolesPage.emptyTitle}>
+          <p>{t.rolesPage.emptyBody}</p>
         </EmptyState>
       ) : (
         <ul className="pm-cat-list">

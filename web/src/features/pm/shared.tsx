@@ -1,38 +1,42 @@
 /** Shared furniture for the PM ("Project Management") surface.
  *
- * The PM pages are written in German, so numbers, dates and relative times
- * are formatted in de-DE here — deliberately different from lib/format.ts,
- * which formats en-US to match the English copy of the host surfaces. The
- * rule is the same in both places: numbers follow the language of the words
- * around them.
+ * The PM pages are bilingual (Deutsch/English, see ./i18n.ts), so numbers,
+ * dates and relative times are formatted in de-DE or en-US here to match the
+ * current language — deliberately different from lib/format.ts, which is
+ * fixed to en-US for the host app's English-only surfaces. The rule is the
+ * same in both places: numbers follow the language of the words around
+ * them; here that language can change at runtime.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ChevronRight, OctagonAlert, RefreshCw, X } from "lucide-react";
+import { ChevronRight, Languages, OctagonAlert, RefreshCw, X } from "lucide-react";
 
 import { ApiError, pmApi, type PmProject, type PmTaskStatus } from "@/lib/api";
+import { getLang, useLang } from "./i18n";
 
-// ── Formatting (de-DE) ───────────────────────────────────────────────────
+// ── Formatting (locale follows the current language) ────────────────────
 
-const nf = new Intl.NumberFormat("de-DE");
-const nfCompact = new Intl.NumberFormat("de-DE", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const rtf = new Intl.RelativeTimeFormat("de-DE", { numeric: "auto" });
+const nfDe = new Intl.NumberFormat("de-DE");
+const nfEn = new Intl.NumberFormat("en-US");
+const nfCompactDe = new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 });
+const nfCompactEn = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const rtfDe = new Intl.RelativeTimeFormat("de-DE", { numeric: "auto" });
+const rtfEn = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
+const dtfDe = new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short", year: "numeric" });
+const dtfEn = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" });
 
 export function fmtInt(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return nf.format(n);
+  return (getLang() === "de" ? nfDe : nfEn).format(n);
 }
 
 /** Compact token figures for gauges and chips; full precision stays in rows. */
 export function fmtCompact(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  if (Math.abs(n) < 10_000) return nf.format(n);
-  return nfCompact.format(n);
+  if (Math.abs(n) < 10_000) return (getLang() === "de" ? nfDe : nfEn).format(n);
+  return (getLang() === "de" ? nfCompactDe : nfCompactEn).format(n);
 }
 
 /** "1 Skill" / "3 Skills" — a count with a unit that agrees with it. */
@@ -44,50 +48,60 @@ export function fmtRelative(iso: string | null | undefined): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
+  const rtf = getLang() === "de" ? rtfDe : rtfEn;
   const s = Math.round((then - Date.now()) / 1000);
   const abs = Math.abs(s);
   if (abs < 60) return rtf.format(Math.trunc(s / 1), "second");
   if (abs < 3600) return rtf.format(Math.trunc(s / 60), "minute");
   if (abs < 86_400) return rtf.format(Math.trunc(s / 3600), "hour");
   if (abs < 30 * 86_400) return rtf.format(Math.trunc(s / 86_400), "day");
-  return new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short", year: "numeric" })
-    .format(new Date(iso));
+  return (getLang() === "de" ? dtfDe : dtfEn).format(new Date(iso));
 }
 
 // ── Status vocabulary ────────────────────────────────────────────────────
-// One consistent German word per state, everywhere. PASS/FAIL verdicts are
-// rendered as BESTANDEN/ABGELEHNT (see TaskPage), never mixed with these.
+// One consistent word per state and language, everywhere. PASS/FAIL
+// verdicts are rendered as BESTANDEN/ABGELEHNT (PASSED/REJECTED) — see
+// TaskPage — never mixed with these.
 
-export const TASK_STATUS_LABEL: Record<PmTaskStatus, string> = {
-  pending: "ausstehend",
-  running: "läuft",
-  pass: "bestanden",
-  fail: "fehlgeschlagen",
-  budget_exceeded: "Budget erschöpft",
-  crashed: "abgestürzt",
-  stopped: "gestoppt",
-};
-
-export const PROJECT_STATUS_LABEL: Record<PmProject["status"], string> = {
-  active: "aktiv",
-  paused: "pausiert",
-  completed: "abgeschlossen",
-  archived: "archiviert",
-};
+export const TASK_STATUSES: PmTaskStatus[] = [
+  "pending", "running", "pass", "fail", "budget_exceeded", "crashed", "stopped",
+];
 
 export const TERMINAL_STATUSES: PmTaskStatus[] = [
   "pass", "fail", "budget_exceeded", "crashed", "stopped",
 ];
 
 export function TaskStatusChip({ status }: { status: PmTaskStatus }) {
+  const { t } = useLang();
   return (
-    <span className={`pm-status pm-status-${status}`}>{TASK_STATUS_LABEL[status]}</span>
+    <span className={`pm-status pm-status-${status}`}>{t.status.task[status]}</span>
   );
 }
 
 export function ProjectStatusChip({ status }: { status: PmProject["status"] }) {
+  const { t } = useLang();
   return (
-    <span className={`pm-status pm-status-${status}`}>{PROJECT_STATUS_LABEL[status]}</span>
+    <span className={`pm-status pm-status-${status}`}>{t.status.project[status]}</span>
+  );
+}
+
+// ── Language toggle ──────────────────────────────────────────────────────
+
+export function LangToggle() {
+  const { lang, toggle } = useLang();
+  return (
+    <button
+      type="button"
+      className="pm-lang-toggle"
+      onClick={toggle}
+      aria-label={lang === "de" ? "Switch to English" : "Auf Deutsch umschalten"}
+      title={lang === "de" ? "Switch to English" : "Auf Deutsch umschalten"}
+    >
+      <Languages size={13} aria-hidden />
+      <span className={lang === "de" ? "is-active" : undefined}>DE</span>
+      <span aria-hidden className="pm-lang-toggle-sep">|</span>
+      <span className={lang === "en" ? "is-active" : undefined}>EN</span>
+    </button>
   );
 }
 
@@ -99,8 +113,9 @@ export interface Crumb {
 }
 
 export function Breadcrumbs({ items }: { items: Crumb[] }) {
+  const { t } = useLang();
   return (
-    <nav aria-label="Pfad" className="pm-crumbs">
+    <nav aria-label={t.common.path} className="pm-crumbs">
       {items.map((c, i) => (
         <span key={`${c.label}-${i}`} className="pm-crumb">
           {i > 0 && <ChevronRight size={13} aria-hidden className="pm-crumb-sep" />}
@@ -112,6 +127,18 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
         </span>
       ))}
     </nav>
+  );
+}
+
+/** Breadcrumbs plus the language toggle, in the placement every PM page
+ *  shares: a row at the top of the header, breadcrumb trail on the left and
+ *  DE|EN on the right. */
+export function PmHeaderBar({ items }: { items: Crumb[] }) {
+  return (
+    <div className="pm-headerbar">
+      <Breadcrumbs items={items} />
+      <LangToggle />
+    </div>
   );
 }
 
@@ -128,11 +155,12 @@ export function BudgetBar({
   budget: number | null;
   label?: string;
 }) {
+  const { t } = useLang();
   if (budget === null || budget <= 0) {
     return (
       <div className="pm-budget pm-budget-unbounded">
         <span className="pm-budget-figures tabular">
-          {fmtInt(used)} Tokens{label ? ` · ${label}` : ""} · kein Budget gesetzt
+          {fmtInt(used)} {t.common.tokens}{label ? ` · ${label}` : ""} · {t.budget.noBudgetSet}
         </span>
       </div>
     );
@@ -145,12 +173,12 @@ export function BudgetBar({
       <div
         className="pm-budget-track"
         role="img"
-        aria-label={`${fmtInt(used)} von ${fmtInt(budget)} Tokens verbraucht`}
+        aria-label={t.budget.usedOfLabel(fmtInt(used), fmtInt(budget))}
       >
         <div className="pm-budget-fill" style={{ width: `${pct}%` }} />
       </div>
       <span className="pm-budget-figures tabular">
-        {fmtCompact(used)} / {fmtCompact(budget)} Tokens{label ? ` · ${label}` : ""}
+        {fmtCompact(used)} / {fmtCompact(budget)} {t.common.tokens}{label ? ` · ${label}` : ""}
       </span>
     </div>
   );
@@ -178,6 +206,7 @@ export function ErrorState({
   error: unknown;
   onRetry: () => void;
 }) {
+  const { t } = useLang();
   const e = error instanceof ApiError ? error : null;
   return (
     <div className="empty-state" role="alert">
@@ -187,7 +216,7 @@ export function ErrorState({
       {e?.hint && <p className="empty-hint">{e.hint}</p>}
       <button type="button" className="button" onClick={onRetry}>
         <RefreshCw size={14} aria-hidden />
-        Erneut versuchen
+        {t.common.retry}
       </button>
     </div>
   );
@@ -342,6 +371,7 @@ export function SkillPicker({
   value: number[];
   onChange: (ids: number[]) => void;
 }) {
+  const { t } = useLang();
   const { data, isPending, error, refetch } = useSkills();
   const [q, setQ] = useState("");
 
@@ -364,9 +394,9 @@ export function SkillPicker({
     return (
       <div className="pm-skillpicker">
         <p className="pm-field-error">
-          Skills können nicht geladen werden.{" "}
+          {t.skillPicker.loadError}{" "}
           <button type="button" className="pm-linklike" onClick={() => refetch()}>
-            Erneut versuchen
+            {t.common.retry}
           </button>
         </p>
       </div>
@@ -383,7 +413,7 @@ export function SkillPicker({
               type="button"
               className="pm-chip"
               onClick={() => toggle(id)}
-              title="Skill entfernen"
+              title={t.skillPicker.removeTitle}
             >
               {byId.get(id)?.name ?? `Skill ${id}`}
               <X size={12} aria-hidden />
@@ -394,10 +424,10 @@ export function SkillPicker({
       <input
         type="search"
         className="pm-input"
-        placeholder="Skills durchsuchen…"
+        placeholder={t.skillPicker.searchPlaceholder}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        aria-label="Skills durchsuchen"
+        aria-label={t.skillPicker.searchLabel}
       />
       {isPending ? (
         <div className="skeleton pm-skillpicker-skeleton" />
@@ -417,12 +447,12 @@ export function SkillPicker({
               </li>
             ))}
             {matches.shown.length === 0 && (
-              <li className="pm-skillpicker-none">Keine Skills gefunden.</li>
+              <li className="pm-skillpicker-none">{t.skillPicker.none}</li>
             )}
           </ul>
           {matches.total > matches.shown.length && (
             <p className="pm-skillpicker-more">
-              {fmtInt(matches.shown.length)} von {fmtInt(matches.total)} Treffern — Suche eingrenzen.
+              {t.skillPicker.more(fmtInt(matches.shown.length), fmtInt(matches.total))}
             </p>
           )}
         </>
@@ -440,6 +470,7 @@ export function DocListEditor({
   value: string[];
   onChange: (docs: string[]) => void;
 }) {
+  const { t } = useLang();
   const [draft, setDraft] = useState("");
 
   function add() {
@@ -460,9 +491,9 @@ export function DocListEditor({
                 type="button"
                 className="pm-linklike"
                 onClick={() => onChange(value.filter((v) => v !== d))}
-                aria-label={`${d} entfernen`}
+                aria-label={t.docList.removeAria(d)}
               >
-                Entfernen
+                {t.docList.remove}
               </button>
             </li>
           ))}
@@ -471,7 +502,7 @@ export function DocListEditor({
       <div className="pm-doclist-add">
         <input
           className="pm-input"
-          placeholder="Pfad zu einem Dokument"
+          placeholder={t.docList.placeholder}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -482,7 +513,7 @@ export function DocListEditor({
           }}
         />
         <button type="button" className="button pm-button-flush" onClick={add} disabled={!draft.trim()}>
-          Hinzufügen
+          {t.docList.add}
         </button>
       </div>
     </div>

@@ -8,10 +8,11 @@ import { Plus } from "lucide-react";
 
 import { pmApi, type PmMember } from "@/lib/api";
 import { MemberForm, type MemberDraft } from "./CatalogForms";
+import { useLang } from "./i18n";
 import {
-  Breadcrumbs,
   EmptyState,
   ErrorState,
+  PmHeaderBar,
   SkeletonRows,
   fmtInt,
   plural,
@@ -32,27 +33,29 @@ function bodyFrom(draft: MemberDraft) {
 }
 
 function MemberSummary({ member }: { member: PmMember }) {
+  const { t } = useLang();
   const contact =
     typeof member.contact_info?.contact === "string" ? (member.contact_info.contact as string) : null;
   return (
     <div className="pm-cat-summary">
-      <span className="pm-cat-fact">{member.member_type === "agent" ? "Agent" : "Mensch"}</span>
+      <span className="pm-cat-fact">{member.member_type === "agent" ? t.membersPage.typeAgent : t.membersPage.typeHuman}</span>
       {contact && <span className="pm-cat-desc">{contact}</span>}
-      <span className="pm-cat-fact tabular">{plural(member.skill_refs.length, "Skill", "Skills")}</span>
-      <span className="pm-cat-fact tabular">{plural(member.document_refs.length, "Dokument", "Dokumente")}</span>
+      <span className="pm-cat-fact tabular">{plural(member.skill_refs.length, t.common.skillOne, t.common.skillMany)}</span>
+      <span className="pm-cat-fact tabular">{plural(member.document_refs.length, t.common.documentOne, t.common.documentMany)}</span>
       <span className="pm-cat-fact tabular">
         {member.token_budget !== null
-          ? `${fmtInt(member.token_budget)} Tokens Budget`
-          : "Kein Budget"}
+          ? t.catalog.budgetTokens(fmtInt(member.token_budget))
+          : t.catalog.noBudget}
       </span>
       <span className="pm-cat-fact">
-        {member.instructions ? "Anweisungen gesetzt" : "Keine Anweisungen"}
+        {member.instructions ? t.catalog.instructionsSet : t.catalog.noInstructions}
       </span>
     </div>
   );
 }
 
 function MemberRow({ member }: { member: PmMember }) {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
 
@@ -74,13 +77,13 @@ function MemberRow({ member }: { member: PmMember }) {
           aria-expanded={editing}
           onClick={() => setEditing((e) => !e)}
         >
-          {editing ? "Schließen" : "Bearbeiten"}
+          {editing ? t.common.close : t.common.edit}
         </button>
       </div>
       {editing ? (
         <MemberForm
           initial={member}
-          submitLabel="Änderungen speichern"
+          submitLabel={t.catalog.saveChanges}
           busy={patch.isPending}
           error={patch.isError ? patch.error : null}
           onSubmit={(draft) => patch.mutate(draft)}
@@ -94,6 +97,7 @@ function MemberRow({ member }: { member: PmMember }) {
 }
 
 export function MembersPage() {
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const { data, isPending, error, refetch } = useQuery({
@@ -114,15 +118,13 @@ export function MembersPage() {
   return (
     <section className="pm-page">
       <header className="page-header">
-        <Breadcrumbs
-          items={[{ label: "Project Management", to: "/pm" }, { label: "Mitglieder" }]}
+        <PmHeaderBar
+          items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.breadcrumb.members }]}
         />
         <div className="page-header-row pm-header-row">
           <div>
-            <h1 className="page-title">Mitglieder</h1>
-            <p className="page-subtitle">
-              Menschen und Agenten, die in der Zuordnungs-Matrix eine Rolle besetzen.
-            </p>
+            <h1 className="page-title">{t.membersPage.h1}</h1>
+            <p className="page-subtitle">{t.membersPage.subtitle}</p>
           </div>
           {!creating && (
             <button
@@ -131,7 +133,7 @@ export function MembersPage() {
               onClick={() => setCreating(true)}
             >
               <Plus size={14} aria-hidden />
-              Mitglied anlegen
+              {t.membersPage.create}
             </button>
           )}
         </div>
@@ -140,7 +142,7 @@ export function MembersPage() {
       {creating && (
         <div className="pm-cat-create">
           <MemberForm
-            submitLabel="Mitglied anlegen"
+            submitLabel={t.membersPage.create}
             busy={create.isPending}
             error={create.isError ? create.error : null}
             onSubmit={(draft) => create.mutate(draft)}
@@ -153,13 +155,13 @@ export function MembersPage() {
         <SkeletonRows n={3} />
       ) : error ? (
         <ErrorState
-          title="Mitglieder können nicht geladen werden"
+          title={t.membersPage.errorTitle}
           error={error}
           onRetry={refetch}
         />
       ) : data.members.length === 0 ? (
-        <EmptyState title="Noch keine Mitglieder">
-          <p>Mitglieder besetzen die Sitze der Pipeline — oben das erste anlegen.</p>
+        <EmptyState title={t.membersPage.emptyTitle}>
+          <p>{t.membersPage.emptyBody}</p>
         </EmptyState>
       ) : (
         <ul className="pm-cat-list">

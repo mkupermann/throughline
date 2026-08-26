@@ -42,6 +42,43 @@
   margin-inline: 2px;
 }
 
+/* ── Header bar (breadcrumbs + language toggle) ─────────────────────── */
+.pm-headerbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.pm-headerbar .pm-crumbs {
+  margin-bottom: 0;
+}
+.pm-lang-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.pm-lang-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.pm-lang-toggle-sep {
+  color: var(--text-muted);
+}
+.pm-lang-toggle .is-active {
+  color: var(--accent);
+}
+
 .pm-header-row {
   display: flex;
   align-items: flex-start;
@@ -462,8 +499,14 @@ a.pm-catalog-link:hover {
   text-transform: uppercase;
   color: var(--text-secondary);
 }
-.pm-seat-member {
+.pm-seat-member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
   margin-top: var(--space-1);
+}
+.pm-seat-member {
   font-size: var(--text-base);
   font-weight: 600;
   color: var(--text-primary);
@@ -471,6 +514,30 @@ a.pm-catalog-link:hover {
 .pm-seat-empty .pm-seat-member {
   color: var(--text-muted);
   font-weight: 500;
+}
+.pm-seat-unassign {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.pm-seat-unassign:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--status-bad, var(--accent));
+  background: var(--surface-hover);
+}
+.pm-seat-unassign:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 .pm-seat-ai {
   margin-top: 2px;
@@ -485,6 +552,12 @@ a.pm-catalog-link:hover {
 }
 .pm-seat-ai-none {
   color: var(--text-muted);
+}
+.pm-seat-assign {
+  margin-top: var(--space-2);
+}
+.pm-seat-assign .pm-input {
+  width: 100%;
 }
 
 .pm-live-dot {
@@ -516,97 +589,6 @@ a.pm-catalog-link:hover {
   gap: var(--space-3);
   flex-wrap: wrap;
   margin-top: var(--space-3);
-}
-
-/* ── Zuordnungs-Matrix ───────────────────────────────────────────────── */
-.pm-matrix {
-  margin-bottom: var(--space-4);
-}
-.pm-matrix-team {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.pm-matrix-table {
-  border-collapse: collapse;
-  min-width: 480px;
-}
-.pm-matrix-table th,
-.pm-matrix-table td {
-  border: 1px solid var(--border-muted);
-  padding: var(--space-2) var(--space-3);
-  text-align: left;
-  font-size: var(--text-sm);
-  vertical-align: top;
-}
-.pm-matrix-corner {
-  background: transparent;
-  border: 0;
-}
-.pm-matrix-role {
-  background: var(--surface-raised);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: var(--text-xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-top: 2px solid var(--seat-hue, var(--border-strong));
-}
-.pm-matrix-member {
-  background: var(--surface-raised);
-  color: var(--text-primary);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.pm-matrix-member-type {
-  display: block;
-  font-size: var(--text-xs);
-  font-weight: 400;
-  color: var(--text-muted);
-}
-.pm-matrix-cell {
-  min-width: 120px;
-}
-.pm-matrix-cell-set {
-  background: var(--accent-wash);
-}
-.pm-matrix-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--accent);
-  font-weight: 600;
-}
-.pm-matrix-override {
-  display: block;
-  margin-top: 2px;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-.pm-matrix-assign {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-.pm-matrix-assign:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-wash);
-}
-.pm-matrix-assign:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 /* ── Tasks (cockpit) ─────────────────────────────────────────────────── */
