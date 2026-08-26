@@ -59,6 +59,11 @@ function Seat({
   const queryClient = useQueryClient();
   const occupied = assignment !== undefined;
   const ai = effectiveAi(role, assignment);
+  const isAnalyst = role.name.trim().toLowerCase() === "analyst";
+  // Same fallback the visible seat card uses (pipeline-fixed hint for an
+  // unbound analyst seat, generic "no AI tool" otherwise) — reused here so
+  // the aria-label says exactly what's on screen, not a paraphrase of it.
+  const aiLabel = ai ?? (isAnalyst ? t.teams.seat.analystFixedAi : t.teams.seat.noAiTool);
   const memberName = occupied ? member?.name ?? t.teams.seat.memberFallback(assignment!.member_id) : null;
 
   const assign = useMutation({
@@ -81,6 +86,7 @@ function Seat({
     <div
       className={`pm-seat pm-seat-hue-${index % 3}${occupied ? "" : " pm-seat-empty"}`}
       data-live={live && occupied ? "true" : undefined}
+      aria-label={t.teams.seat.cardAria(role.name, memberName ?? t.teams.seat.unassigned, aiLabel)}
     >
       <div className="pm-seat-role">
         {role.name}
@@ -104,7 +110,7 @@ function Seat({
         )}
       </div>
       <div className="pm-seat-ai">
-        {ai ? <code>{ai}</code> : <span className="pm-seat-ai-none">{t.teams.seat.noAiTool}</span>}
+        {ai ? <code>{ai}</code> : <span className="pm-seat-ai-none">{aiLabel}</span>}
       </div>
       {!occupied && (
         <div className="pm-seat-assign">

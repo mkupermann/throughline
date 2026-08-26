@@ -2,7 +2,7 @@
  *  full create/edit-in-place editors (type, contact, skills, prompt,
  *  documents, budget). Saved values round-trip through PATCH /pm/members. */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
@@ -20,6 +20,17 @@ import {
   useSkills,
 } from "./shared";
 import "@/styles/pm.css";
+
+/** Client-side name+contact substring match, case-insensitive — members
+ *  have no free-text "description" field, so contact info (the other
+ *  distinguishing text shown in the summary row) fills that role. Same
+ *  look and feel as the skills search in the editor. */
+function matchesFilter(q: string, member: PmMember): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  const contact = typeof member.contact_info?.contact === "string" ? member.contact_info.contact : "";
+  return member.name.toLowerCase().includes(needle) || contact.toLowerCase().includes(needle);
+}
 
 function bodyFrom(draft: MemberDraft) {
   return {
@@ -124,11 +135,17 @@ export function MembersPage() {
   const { t } = useLang();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [filter, setFilter] = useState("");
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["pm-members"],
     queryFn: pmApi.listMembers,
   });
   useSkills();
+
+  const filtered = useMemo(
+    () => (data?.members ?? []).filter((m) => matchesFilter(filter, m)),
+    [data, filter],
+  );
 
   const create = useMutation({
     mutationFn: (draft: MemberDraft) => pmApi.createMember(bodyFrom(draft)),
@@ -188,11 +205,25 @@ export function MembersPage() {
           <p>{t.membersPage.emptyBody}</p>
         </EmptyState>
       ) : (
-        <ul className="pm-cat-list">
-          {data.members.map((m) => (
-            <MemberRow key={m.id} member={m} />
-          ))}
-        </ul>
+        <>
+          <input
+            type="search"
+            className="pm-input pm-cat-filter"
+            placeholder={t.catalog.filterPlaceholder}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label={t.catalog.filterLabel}
+          />
+          {filtered.length === 0 ? (
+            <p className="pm-cat-filter-none">{t.catalog.filterNone}</p>
+          ) : (
+            <ul className="pm-cat-list">
+              {filtered.map((m) => (
+                <MemberRow key={m.id} member={m} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );

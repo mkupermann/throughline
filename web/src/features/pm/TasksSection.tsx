@@ -213,7 +213,19 @@ export function TasksSection({
                 value={runId}
                 onChange={(e) => setRunId(e.target.value)}
                 placeholder={t.tasksSection.runIdPlaceholder}
+                // Matches the server-side rule in register_existing_run
+                // (throughline/queries/pm.py): a single path component, no
+                // "/" or "\". The ".." check isn't expressible cleanly as
+                // part of this character-class pattern, so it stays a
+                // server-side check plus the hint below rather than a
+                // more elaborate regex here.
+                pattern="[^/\\\\]+"
+                title={t.tasksSection.runIdHint}
+                aria-describedby="pm-run-id-hint"
               />
+              <p id="pm-run-id-hint" className="pm-field-hint">
+                {t.tasksSection.runIdHint}
+              </p>
             </label>
             <div className="pm-field pm-field-submit">
               <span className="pm-label" aria-hidden>

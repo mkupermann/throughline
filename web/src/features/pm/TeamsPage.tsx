@@ -3,7 +3,7 @@
  *  or more projects from the cockpit — mirrors RolesPage/MembersPage.
  *  Saved values round-trip through PATCH /pm/teams/{id}. */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
@@ -19,6 +19,14 @@ import {
   fmtInt,
 } from "./shared";
 import "@/styles/pm.css";
+
+/** Client-side name+description substring match, case-insensitive — same
+ *  look and feel as the skills search in the role/member editor. */
+function matchesFilter(q: string, name: string, description: string | null): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return name.toLowerCase().includes(needle) || (description ?? "").toLowerCase().includes(needle);
+}
 
 function TeamSummary({ team }: { team: PmTeam }) {
   const { t } = useLang();
@@ -103,10 +111,16 @@ export function TeamsPage() {
   const { t } = useLang();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [filter, setFilter] = useState("");
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["pm-teams"],
     queryFn: pmApi.listTeams,
   });
+
+  const filtered = useMemo(
+    () => (data?.teams ?? []).filter((tm) => matchesFilter(filter, tm.name, tm.description)),
+    [data, filter],
+  );
 
   const create = useMutation({
     mutationFn: (draft: TeamDraft) => pmApi.createTeam(draft),
@@ -160,11 +174,25 @@ export function TeamsPage() {
           <p>{t.teamsPage.emptyBody}</p>
         </EmptyState>
       ) : (
-        <ul className="pm-cat-list">
-          {data.teams.map((tm) => (
-            <TeamRow key={tm.id} team={tm} />
-          ))}
-        </ul>
+        <>
+          <input
+            type="search"
+            className="pm-input pm-cat-filter"
+            placeholder={t.catalog.filterPlaceholder}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label={t.catalog.filterLabel}
+          />
+          {filtered.length === 0 ? (
+            <p className="pm-cat-filter-none">{t.catalog.filterNone}</p>
+          ) : (
+            <ul className="pm-cat-list">
+              {filtered.map((tm) => (
+                <TeamRow key={tm.id} team={tm} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );

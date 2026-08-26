@@ -12,7 +12,7 @@ import {
   BudgetBar,
   EmptyState,
   ErrorState,
-  PmHeaderBar,
+  LangToggle,
   ProjectStatusChip,
   SkeletonRows,
   TASK_STATUSES,
@@ -157,7 +157,13 @@ export function DashboardPage() {
 
   const header = (
     <header className="page-header">
-      <PmHeaderBar items={[{ label: t.common.projectManagement }]} />
+      {/* No breadcrumb eyebrow here — on the dashboard itself, a single
+          "Project Management" crumb would just repeat the H1 right below
+          it. Subpages keep PmHeaderBar's breadcrumb; it earns its place
+          there as an actual trail (Project Management › Roles, etc.). */}
+      <div className="pm-headerbar pm-headerbar-end">
+        <LangToggle />
+      </div>
       <div className="page-header-row pm-header-row">
         <div>
           <h1 className="page-title">{t.common.projectManagement}</h1>

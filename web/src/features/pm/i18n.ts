@@ -38,6 +38,9 @@ const de = {
     skillMany: "Skills",
     documentOne: "Dokument",
     documentMany: "Dokumente",
+    // Bleibt in beiden Sprachen unübersetzt — explizite Nutzervorgabe aus
+    // der zweiten UI/UX-Review-Runde (Vibe-Kritikpunkt 7 wird bewusst NICHT
+    // umgesetzt, siehe Paket 3.4 im Verbesserungsplan). Kein Übersetzungsfehler.
     projectManagement: "Project Management",
     confirmQuestion: "Wirklich?",
   },
@@ -133,12 +136,14 @@ const de = {
       unassigned: "Nicht besetzt",
       memberFallback: (id: number) => `Mitglied ${id}`,
       noAiTool: "Kein KI-Werkzeug gesetzt",
+      analystFixedAi: "Claude Code (durch Pipeline vorgegeben)",
       pickPlaceholder: "Mitglied zuweisen…",
       pickAria: (role: string) => `Mitglied für ${role} zuweisen`,
       removeTitle: (member: string) => `${member} entfernen`,
       removeAria: (member: string, role: string) => `${member} als ${role} entfernen`,
       assignError: (msg: string) => `Zuweisung fehlgeschlagen: ${msg}`,
       removeError: (msg: string) => `Entfernen fehlgeschlagen: ${msg}`,
+      cardAria: (role: string, member: string, ai: string) => `${role} · ${member} · ${ai}`,
     },
     linkRole: {
       srLabel: (team: string) => `Rolle für ${team}`,
@@ -173,6 +178,7 @@ const de = {
     registerHint: "Übernimmt einen bereits laufenden pipeline.sh-Lauf. Team, Titel und Repo-Pfad oben ausfüllen, dazu die Run-ID (der Ordnername unter",
     runIdLabel: "Run-ID",
     runIdPlaceholder: "z. B. 20260825-184848",
+    runIdHint: "Ein einzelnes Pfadsegment, ohne Schrägstrich oder Backslash und ohne zwei Punkte hintereinander.",
     registerSubmit: "Lauf registrieren",
     registering: "Registriert…",
     registerFailed: (msg: string) => `Registrieren fehlgeschlagen: ${msg}`,
@@ -230,6 +236,9 @@ const de = {
     delete: "Löschen",
     deleting: "Löscht…",
     deleteFailed: (msg: string) => `Löschen fehlgeschlagen: ${msg}`,
+    filterPlaceholder: "Nach Name oder Beschreibung filtern…",
+    filterLabel: "Liste filtern",
+    filterNone: "Kein Eintrag passt zum Filter.",
   },
   rolesPage: {
     h1: "Rollen",
@@ -306,6 +315,10 @@ const en: typeof de = {
     skillMany: "skills",
     documentOne: "document",
     documentMany: "documents",
+    // Stays untranslated in both languages on purpose — explicit user
+    // mandate from the second UI/UX review round (Vibe critique item 7 is
+    // deliberately NOT applied, see Paket 3.4 in the improvement plan).
+    // Not a translation gap.
     projectManagement: "Project Management",
     confirmQuestion: "Really?",
   },
@@ -401,12 +414,14 @@ const en: typeof de = {
       unassigned: "Unassigned",
       memberFallback: (id: number) => `Member ${id}`,
       noAiTool: "No AI tool set",
+      analystFixedAi: "Claude Code (fixed by the pipeline)",
       pickPlaceholder: "Assign member…",
       pickAria: (role: string) => `Assign a member to ${role}`,
       removeTitle: (member: string) => `Remove ${member}`,
       removeAria: (member: string, role: string) => `Remove ${member} as ${role}`,
       assignError: (msg: string) => `Assignment failed: ${msg}`,
       removeError: (msg: string) => `Removal failed: ${msg}`,
+      cardAria: (role: string, member: string, ai: string) => `${role} · ${member} · ${ai}`,
     },
     linkRole: {
       srLabel: (team: string) => `Role for ${team}`,
@@ -441,6 +456,7 @@ const en: typeof de = {
     registerHint: "Adopts an already-running pipeline.sh run. Fill in team, title and repo path above, plus the run ID (the folder name under",
     runIdLabel: "Run ID",
     runIdPlaceholder: "e.g. 20260825-184848",
+    runIdHint: "A single path segment — no slash or backslash, and no two dots in a row.",
     registerSubmit: "Register run",
     registering: "Registering…",
     registerFailed: (msg: string) => `Registration failed: ${msg}`,
@@ -498,6 +514,9 @@ const en: typeof de = {
     delete: "Delete",
     deleting: "Deleting…",
     deleteFailed: (msg: string) => `Deletion failed: ${msg}`,
+    filterPlaceholder: "Filter by name or description…",
+    filterLabel: "Filter list",
+    filterNone: "No entry matches the filter.",
   },
   rolesPage: {
     h1: "Roles",

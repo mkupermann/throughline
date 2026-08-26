@@ -49,6 +49,12 @@
   justify-content: space-between;
   gap: var(--space-3);
 }
+/* The dashboard's header bar has no breadcrumb (see DashboardPage.tsx) —
+   just the language toggle, which without this would sit flush left under
+   space-between's single-child behavior. */
+.pm-headerbar-end {
+  justify-content: flex-end;
+}
 .pm-headerbar .pm-crumbs {
   margin-bottom: 0;
 }
@@ -200,9 +206,6 @@
 .pm-inline-budget-value {
   color: var(--text-secondary);
 }
-.pm-inline-budget-editing .pm-input {
-  width: 12ch;
-}
 
 /* ── Forms ───────────────────────────────────────────────────────────── */
 .pm-field {
@@ -242,6 +245,12 @@
 }
 .pm-input-number {
   width: 16ch;
+}
+/* One width for every token-budget field — the project header's inline
+   editor and the role/member/team editors used to diverge (12ch vs 16ch)
+   for no reason tied to their content; both hold the same kind of number. */
+.pm-budget-input {
+  width: 14ch;
 }
 .pm-input-compact {
   min-height: 26px;
@@ -515,6 +524,21 @@ a.pm-catalog-link:hover {
   margin-top: var(--space-3);
   flex-wrap: wrap;
   row-gap: var(--space-3);
+}
+/* Below 720px a wrapped pipeline row turns into a stack of near-full-width
+   cards — the actual pipeline order (Analyst → Executor → Tester) gets
+   lost between rows. A horizontally scrollable single row keeps that order
+   readable at any width, at the cost of a scroll gesture instead of a
+   glance. */
+@media (max-width: 720px) {
+  .pm-pipeline-seats {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+  }
+  .pm-seat {
+    min-width: 140px;
+  }
 }
 .pm-seat-slot {
   display: flex;
@@ -1020,6 +1044,17 @@ a.pm-catalog-link:hover {
 /* ── Catalog pages (Rollen / Mitglieder) ─────────────────────────────── */
 .pm-cat-create {
   margin-bottom: var(--space-4);
+}
+.pm-cat-filter {
+  width: 100%;
+  max-width: 360px;
+  margin-bottom: var(--space-3);
+}
+.pm-cat-filter-none {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 .pm-cat-list {
   list-style: none;

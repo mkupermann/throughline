@@ -94,7 +94,7 @@ export function RoleForm({
         <label className="pm-field">
           <span className="pm-label">{t.forms.budgetLabel}</span>
           <input
-            className="pm-input pm-input-number"
+            className="pm-input pm-budget-input"
             type="number"
             min={0}
             value={d.token_budget ?? ""}
@@ -233,7 +233,7 @@ export function MemberForm({
         <label className="pm-field">
           <span className="pm-label">{t.forms.budgetLabel}</span>
           <input
-            className="pm-input pm-input-number"
+            className="pm-input pm-budget-input"
             type="number"
             min={0}
             value={d.token_budget ?? ""}
@@ -354,7 +354,7 @@ export function TeamForm({
         <label className="pm-field">
           <span className="pm-label">{t.forms.budgetLabel}</span>
           <input
-            className="pm-input pm-input-number"
+            className="pm-input pm-budget-input"
             type="number"
             min={0}
             value={d.token_budget ?? ""}

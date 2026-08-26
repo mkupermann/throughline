@@ -255,6 +255,7 @@ function TaskHeader({
             className="button pm-button-danger"
             disabled={stop.isPending}
             pending={stop.isPending}
+            title={stop.isPending ? t.taskPage.stopping : adopted ? t.taskPage.markEnded : t.taskPage.stop}
             onConfirm={() => stop.mutate()}
           >
             <Square size={13} aria-hidden />

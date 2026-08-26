@@ -68,7 +68,7 @@ export function InlineBudget({
       }}
     >
       <input
-        className="pm-input pm-input-number"
+        className="pm-input pm-budget-input"
         type="number"
         min={0}
         value={draft}

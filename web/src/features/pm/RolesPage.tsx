@@ -2,7 +2,7 @@
  *  create/edit-in-place editors (AI binding, skills, prompt, documents,
  *  budget). Saved values round-trip through PATCH /pm/roles/{id}. */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
@@ -20,6 +20,15 @@ import {
   useSkills,
 } from "./shared";
 import "@/styles/pm.css";
+
+/** Client-side name+description substring match, case-insensitive — same
+ *  look and feel as the skills search in the role/member editor, over the
+ *  much shorter catalog lists themselves. */
+function matchesFilter(q: string, name: string, description: string | null): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return name.toLowerCase().includes(needle) || (description ?? "").toLowerCase().includes(needle);
+}
 
 function RoleSummary({ role }: { role: PmRole }) {
   const { t } = useLang();
@@ -118,12 +127,18 @@ export function RolesPage() {
   const { t } = useLang();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [filter, setFilter] = useState("");
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["pm-roles"],
     queryFn: pmApi.listRoles,
   });
   // Warm the skills cache before an editor opens, so the picker is ready.
   useSkills();
+
+  const filtered = useMemo(
+    () => (data?.roles ?? []).filter((r) => matchesFilter(filter, r.name, r.description)),
+    [data, filter],
+  );
 
   const create = useMutation({
     mutationFn: (draft: RoleDraft) => pmApi.createRole(draft),
@@ -177,11 +192,25 @@ export function RolesPage() {
           <p>{t.rolesPage.emptyBody}</p>
         </EmptyState>
       ) : (
-        <ul className="pm-cat-list">
-          {data.roles.map((r) => (
-            <RoleRow key={r.id} role={r} />
-          ))}
-        </ul>
+        <>
+          <input
+            type="search"
+            className="pm-input pm-cat-filter"
+            placeholder={t.catalog.filterPlaceholder}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label={t.catalog.filterLabel}
+          />
+          {filtered.length === 0 ? (
+            <p className="pm-cat-filter-none">{t.catalog.filterNone}</p>
+          ) : (
+            <ul className="pm-cat-list">
+              {filtered.map((r) => (
+                <RoleRow key={r.id} role={r} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );
