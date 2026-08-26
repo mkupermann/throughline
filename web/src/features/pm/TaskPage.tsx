@@ -12,6 +12,7 @@ import { pmApi, type PmTask, type PmTaskEvent } from "@/lib/api";
 import { useLang } from "./i18n";
 import {
   BudgetBar,
+  Disclosure,
   ErrorState,
   InlineConfirmButton,
   Markdown,
@@ -187,12 +188,11 @@ function IterationCard({
 function SpecPanel({ spec }: { spec: string }) {
   const { t } = useLang();
   return (
-    <details className="pm-spec">
-      <summary>{t.taskPage.specSummary}</summary>
+    <Disclosure className="pm-spec" summary={t.taskPage.specSummary}>
       <div className="pm-spec-body">
         <Markdown text={spec} />
       </div>
-    </details>
+    </Disclosure>
   );
 }
 

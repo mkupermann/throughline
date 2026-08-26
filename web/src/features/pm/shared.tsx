@@ -14,7 +14,7 @@ import { Link } from "react-router-dom";
 import { ChevronRight, Languages, OctagonAlert, RefreshCw, X } from "lucide-react";
 
 import { ApiError, pmApi, type PmAiCatalogTool, type PmProject, type PmTaskStatus } from "@/lib/api";
-import { getLang, useLang } from "./i18n";
+import { getLang, useLang, type Dict } from "./i18n";
 
 // ── Formatting (locale follows the current language) ────────────────────
 
@@ -174,6 +174,12 @@ export function BudgetBar({
         className="pm-budget-track"
         role="img"
         aria-label={t.budget.usedOfLabel(fmtInt(used), fmtInt(budget))}
+        // The dashboard/cockpit refetch every 8-15s, so a budget crossing
+        // into "serious"/"critical" while the page is open changed the
+        // bar's colour and label with nothing announced to a screen-reader
+        // user (UI audit full-app... PM audit L2). Budgets move slowly in
+        // practice, so `polite` — never interrupting — is enough.
+        aria-live="polite"
       >
         <div className="pm-budget-fill" style={{ width: `${pct}%` }} />
       </div>
@@ -328,6 +334,40 @@ export function EmptyState({
   );
 }
 
+// ── Disclosure (a controlled <details>, with aria-expanded stated) ───────
+// Native <details>/<summary> already carries an implicit disclosure
+// semantic in every current browser/AT combination, but nothing on the page
+// stated it explicitly, and the accessibility-tree snapshot the UI audit
+// took showed these as bare `generic` nodes with no exposed expanded state
+// — unlike the RoleRow/MemberRow/TeamRow "Edit" buttons a few lines away,
+// which do expose `aria-expanded` (PM audit M4). This wrapper controls
+// `open` itself so `aria-expanded` on the summary always matches it,
+// closing the gap regardless of how a given AT surfaces <details> on its
+// own.
+export function Disclosure({
+  summary,
+  children,
+  className,
+  defaultOpen = false,
+}: {
+  summary: ReactNode;
+  children: ReactNode;
+  className?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details
+      className={className}
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary aria-expanded={open}>{summary}</summary>
+      {children}
+    </details>
+  );
+}
+
 // ── Minimal markdown rendering ───────────────────────────────────────────
 // Headings, lists, fenced code, bold and inline code — enough to make a
 // SPEC.md readable as typography instead of a raw blob. Deliberately not an
@@ -455,6 +495,20 @@ export function useSkills() {
 
 const SKILL_RESULT_CAP = 40;
 
+/** Some skill descriptions are raw YAML block-scalar artifacts (literally
+ *  `">-"` or `"|"`) rather than real prose — a source-data quality issue
+ *  the UI has no control over, but it must not leak through as an
+ *  accessible name or a visible description. Guards against that shape and
+ *  treats it as "no description" instead (UI audit PM H1). */
+const YAML_SCALAR_LEAK = /^[|>][-+0-9]{0,2}$/;
+
+function cleanSkillDescription(desc: string | null | undefined): string | null {
+  if (!desc) return null;
+  const trimmed = desc.trim();
+  if (!trimmed || YAML_SCALAR_LEAK.test(trimmed)) return null;
+  return desc;
+}
+
 export function SkillPicker({
   value,
   onChange,
@@ -465,6 +519,17 @@ export function SkillPicker({
   const { t } = useLang();
   const { data, isPending, error, refetch } = useSkills();
   const [q, setQ] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus the search box the moment the picker has something to filter,
+  // so the common path (type to narrow, then click) rarely needs to tab
+  // through the up-to-40-row checkbox list below at all (UI audit PM H2).
+  useEffect(() => {
+    if (!isPending && !error) searchRef.current?.focus();
+    // Only on the picker's own mount/data-ready transition, not on every
+    // keystroke into the search box itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPending]);
 
   const skills = data?.skills ?? [];
   const byId = useMemo(() => new Map(skills.map((s) => [s.id, s])), [skills]);
@@ -513,6 +578,7 @@ export function SkillPicker({
         </div>
       )}
       <input
+        ref={searchRef}
         type="search"
         className="pm-input"
         placeholder={t.skillPicker.searchPlaceholder}
@@ -525,18 +591,34 @@ export function SkillPicker({
       ) : (
         <>
           <ul className="pm-skillpicker-list">
-            {matches.shown.map((s) => (
-              <li key={s.id}>
-                <label className="pm-skillpicker-option" title={s.description ?? undefined}>
-                  <input
-                    type="checkbox"
-                    checked={value.includes(s.id)}
-                    onChange={() => toggle(s.id)}
-                  />
-                  <span>{s.name}</span>
-                </label>
-              </li>
-            ))}
+            {matches.shown.map((s) => {
+              // The description moves to a visually-hidden span referenced by
+              // aria-describedby on the checkbox itself (not the wrapping
+              // label) — a `title` attribute silently became the option's
+              // accessible name for AT, so a malformed or huge description
+              // drowned out or replaced the skill's own short name (UI audit
+              // PM H1).
+              const desc = cleanSkillDescription(s.description);
+              const descId = desc ? `pm-skill-desc-${s.id}` : undefined;
+              return (
+                <li key={s.id}>
+                  <label className="pm-skillpicker-option">
+                    <input
+                      type="checkbox"
+                      checked={value.includes(s.id)}
+                      onChange={() => toggle(s.id)}
+                      aria-describedby={descId}
+                    />
+                    <span>{s.name}</span>
+                    {desc && (
+                      <span id={descId} className="sr-only">
+                        {desc}
+                      </span>
+                    )}
+                  </label>
+                </li>
+              );
+            })}
             {matches.shown.length === 0 && (
               <li className="pm-skillpicker-none">{t.skillPicker.none}</li>
             )}
@@ -564,6 +646,27 @@ export function useAiCatalog() {
     queryFn: pmApi.aiCatalog,
     staleTime: 60_000,
   });
+}
+
+/** The three built-in tools' machine keys (`aider`/`claude`/`vibe`) are
+ *  stable — see ai_catalog() in queries/pm.py — but their `label` and
+ *  static model strings come straight from the server with no localization
+ *  pass, so the EN locale still showed "Aider + Ollama (lokal)" verbatim
+ *  (UI audit PM H3). The backend stays untouched (its label is a stable
+ *  machine-adjacent string, not user data); the client maps the known keys
+ *  through `t.aiPicker` and falls back to the server string for anything it
+ *  doesn't recognise — a user-defined provider's `provider:<id>` label is
+ *  the operator's own text and is shown as-is. */
+function localizedToolLabel(tl: PmAiCatalogTool, t: Dict): string {
+  if (tl.tool === "aider") return t.aiPicker.toolLabelAider;
+  if (tl.tool === "claude") return t.aiPicker.toolLabelClaude;
+  if (tl.tool === "vibe") return t.aiPicker.toolLabelVibe;
+  return tl.label;
+}
+
+function localizedModelLabel(model: string, t: Dict): string {
+  if (model === "claude -p (Standard)") return t.aiPicker.modelLabelClaudeDefault;
+  return model;
 }
 
 /** Tool + model selects fed by the AI catalog. A stored value the catalog
@@ -601,7 +704,7 @@ export function AiBindingPicker({
           <option value="">{t.aiPicker.toolNone}</option>
           {tools.map((tl) => (
             <option key={tl.tool} value={tl.tool}>
-              {tl.label}
+              {localizedToolLabel(tl, t)}
             </option>
           ))}
           {!toolKnown && tool !== null && <option value={tool}>{t.aiPicker.storedOption(tool)}</option>}
@@ -618,7 +721,9 @@ export function AiBindingPicker({
           <option value="">{t.aiPicker.modelNone}</option>
           {modelOptions.map((m) => (
             <option key={m} value={m}>
-              {m === model && !selectedTool?.models.includes(m) ? t.aiPicker.storedOption(m) : m}
+              {m === model && !selectedTool?.models.includes(m)
+                ? t.aiPicker.storedOption(m)
+                : localizedModelLabel(m, t)}
             </option>
           ))}
         </select>

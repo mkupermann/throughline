@@ -164,6 +164,13 @@ export function InlineBudget({
             setDraft(value === null ? "" : String(value));
             setEditing(true);
           }}
+          // `InlineBudget` is reused by the project header AND every team's
+          // pipeline row — a screen-reader user tabbing button-by-button hit
+          // several identically-named "Edit" controls per page with no way
+          // to tell them apart (UI audit PM M5). The label passed in by the
+          // caller (project name / team name) disambiguates it, the same
+          // way the input right beside it already does.
+          aria-label={t.budget.editAria(shownLabel)}
         >
           {t.common.edit}
         </button>
@@ -332,24 +339,26 @@ export function CockpitPage() {
             <h1 className="page-title">{project.name}</h1>
             <ProjectStatusChip status={project.status} />
           </div>
-          <InlineConfirmButton
-            className="button pm-button-quiet"
-            disabled={patchProject.isPending}
-            pending={patchProject.isPending}
-            onConfirm={() =>
-              patchProject.mutate({ status: project.status === "archived" ? "active" : "archived" })
-            }
-          >
-            {project.status === "archived" ? t.cockpit.reactivateProject : t.cockpit.archiveProject}
-          </InlineConfirmButton>
-          <InlineConfirmButton
-            className="button pm-button-danger"
-            disabled={deleteProject.isPending}
-            pending={deleteProject.isPending}
-            onConfirm={() => deleteProject.mutate()}
-          >
-            {deleteProject.isPending ? t.cockpit.deleting : t.cockpit.deleteProject}
-          </InlineConfirmButton>
+          <div className="pm-header-actions">
+            <InlineConfirmButton
+              className="button pm-button-quiet"
+              disabled={patchProject.isPending}
+              pending={patchProject.isPending}
+              onConfirm={() =>
+                patchProject.mutate({ status: project.status === "archived" ? "active" : "archived" })
+              }
+            >
+              {project.status === "archived" ? t.cockpit.reactivateProject : t.cockpit.archiveProject}
+            </InlineConfirmButton>
+            <InlineConfirmButton
+              className="button pm-button-danger"
+              disabled={deleteProject.isPending}
+              pending={deleteProject.isPending}
+              onConfirm={() => deleteProject.mutate()}
+            >
+              {deleteProject.isPending ? t.cockpit.deleting : t.cockpit.deleteProject}
+            </InlineConfirmButton>
+          </div>
         </div>
         {patchProject.isError && (
           <p className="pm-field-error" role="alert">

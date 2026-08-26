@@ -86,7 +86,13 @@ function Seat({
     <div
       className={`pm-seat pm-seat-hue-${index % 3}${occupied ? "" : " pm-seat-empty"}`}
       data-live={live && occupied ? "true" : undefined}
-      aria-label={t.teams.seat.cardAria(role.name, memberName ?? t.teams.seat.unassigned, aiLabel)}
+      // Was one run-on aria-label restating the role, member and AI binding
+      // as a single string — redundant with the role heading, member name
+      // and AI code element a few nodes below, each already individually
+      // readable (UI audit PM M2). A `group` with a short, role-only label
+      // gives the seat a structured landmark without duplicating content.
+      role="group"
+      aria-label={role.name}
     >
       <div className="pm-seat-role">
         {role.name}
@@ -245,6 +251,11 @@ function PipelineRow({
             value={team.token_budget}
             saving={patchTeam.isPending}
             onSave={(b) => patchTeam.mutate(b)}
+            // Distinguishes this team's Edit control from the project
+            // header's and every other team's (UI audit PM M5) — both
+            // visually ("Core team: 1,000 tokens") and in the aria-label
+            // InlineBudget builds from it.
+            label={team.name}
           />
         </div>
       </header>

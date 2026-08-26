@@ -92,6 +92,17 @@
   gap: var(--space-4);
   flex-wrap: wrap;
 }
+/* Archive + Delete as one flex sub-group after the title, so `.pm-header-row`'s
+ * `justify-content: space-between` has exactly two children (title, actions)
+ * instead of three — with three direct children, Archive floated alone in
+ * the middle of the header, disconnected from both the title and Delete
+ * (UI audit PM C1). */
+.pm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
 
 .pm-cockpit-title {
   display: flex;
@@ -302,10 +313,22 @@
 .pm-button-flush {
   margin-top: 0;
 }
+/* Modeled on the host app's own `.button` (overview.css): a visible resting
+ * border, not just a colour shift on hover. Before this fix the button had
+ * `border-color: transparent; background: transparent` at rest, which read
+ * as plain unstyled text with no boundary at all — failing WCAG 1.4.11
+ * (a UI component needs >=3:1 non-text contrast to be perceivable as
+ * interactive) and leaving Archive/Cancel-style actions the least-affordant
+ * controls on the page (UI audit PM C1/M1). */
 .pm-button-quiet {
-  border-color: transparent;
+  border-color: var(--border-muted);
   background: transparent;
   color: var(--text-secondary);
+}
+.pm-button-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
 }
 .pm-button-danger {
   margin-top: 0;
@@ -934,6 +957,7 @@ a.pm-catalog-link:hover {
   margin: var(--space-4) 0 var(--space-2);
   color: var(--text-primary);
   line-height: var(--leading-tight);
+  text-wrap: balance;
 }
 .pm-md-h1 { font-size: var(--text-lg); font-weight: 700; }
 .pm-md-h2 { font-size: var(--text-md); font-weight: 700; }

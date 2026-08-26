@@ -10,6 +10,7 @@ import { Play } from "lucide-react";
 import { pmApi, type PmTask, type PmTaskStatus, type PmTeam } from "@/lib/api";
 import { useLang } from "./i18n";
 import {
+  Disclosure,
   EmptyState,
   ErrorState,
   InlineConfirmButton,
@@ -231,8 +232,7 @@ export function TasksSection({
         )}
       </form>
 
-      <details className="pm-register">
-        <summary>{t.tasksSection.registerSummary}</summary>
+      <Disclosure className="pm-register" summary={t.tasksSection.registerSummary}>
         <div className="pm-register-body">
           <p className="pm-register-hint">
             {t.tasksSection.registerHint} <code>.ai-pipeline/</code>).
@@ -279,7 +279,7 @@ export function TasksSection({
             </p>
           )}
         </div>
-      </details>
+      </Disclosure>
 
       {tasks.isPending ? (
         <SkeletonRows n={3} />

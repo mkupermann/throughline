@@ -10,6 +10,7 @@ import { pmApi, type PmOverviewProject, type PmProject, type PmRepoProject } fro
 import { useLang } from "./i18n";
 import {
   BudgetBar,
+  Disclosure,
   EmptyState,
   ErrorState,
   InlineConfirmButton,
@@ -48,8 +49,7 @@ function ArchiveSection({ projects }: { projects: PmOverviewProject[] }) {
   const { t } = useLang();
   if (projects.length === 0) return null;
   return (
-    <details className="pm-archive pm-repo-section">
-      <summary>{t.dashboard.archive.summary(fmtInt(projects.length))}</summary>
+    <Disclosure className="pm-archive pm-repo-section" summary={t.dashboard.archive.summary(fmtInt(projects.length))}>
       <div className="pm-repo-section-body">
         <ul className="pm-repo-list">
           {projects.map((p) => (
@@ -65,7 +65,7 @@ function ArchiveSection({ projects }: { projects: PmOverviewProject[] }) {
           ))}
         </ul>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -300,10 +300,9 @@ function RepoProjectsSection() {
 
   if (all.length > 10) {
     return (
-      <details className="pm-repo-section">
-        <summary>{t.dashboard.repoProjects.summary(fmtInt(all.length))}</summary>
+      <Disclosure className="pm-repo-section" summary={t.dashboard.repoProjects.summary(fmtInt(all.length))}>
         <div className="pm-repo-section-body">{body}</div>
-      </details>
+      </Disclosure>
     );
   }
 

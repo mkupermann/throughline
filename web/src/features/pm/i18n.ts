@@ -65,6 +65,7 @@ const de = {
     noBudgetSet: "kein Budget gesetzt",
     usedOfLabel: (used: string, budget: string) => `${used} von ${budget} Tokens verbraucht`,
     label: "Budget",
+    editAria: (label: string) => `${label} bearbeiten`,
   },
   breadcrumb: {
     project: "Projekt",
@@ -181,7 +182,6 @@ const de = {
       removeAria: (member: string, role: string) => `${member} als ${role} entfernen`,
       assignError: (msg: string) => `Zuweisung fehlgeschlagen: ${msg}`,
       removeError: (msg: string) => `Entfernen fehlgeschlagen: ${msg}`,
-      cardAria: (role: string, member: string, ai: string) => `${role} · ${member} · ${ai}`,
     },
     linkRole: {
       srLabel: (team: string) => `Rolle für ${team}`,
@@ -346,6 +346,14 @@ const de = {
     loadError: "KI-Katalog kann nicht geladen werden.",
     ollamaUnavailable: "Ollama nicht erreichbar — Modelle können nicht geladen werden.",
     toolUnavailable: (label: string) => `${label} nicht erreichbar — Modelle können nicht geladen werden.`,
+    // The built-in tools' machine keys (aider/claude/vibe, see
+    // queries/pm.py's ai_catalog()) mapped to a label in the current
+    // language — the server's own `label` string is not localized, so the
+    // EN locale showed "Aider + Ollama (lokal)" verbatim (UI audit PM H3).
+    toolLabelAider: "Aider + Ollama (lokal)",
+    toolLabelClaude: "Claude Code",
+    toolLabelVibe: "Vibe",
+    modelLabelClaudeDefault: "claude -p (Standard)",
   },
   forms: {
     nameLabel: "Name",
@@ -415,6 +423,7 @@ const en: typeof de = {
     noBudgetSet: "no budget set",
     usedOfLabel: (used: string, budget: string) => `${used} of ${budget} tokens used`,
     label: "Budget",
+    editAria: (label: string) => `Edit ${label}`,
   },
   breadcrumb: {
     project: "Project",
@@ -531,7 +540,6 @@ const en: typeof de = {
       removeAria: (member: string, role: string) => `Remove ${member} as ${role}`,
       assignError: (msg: string) => `Assignment failed: ${msg}`,
       removeError: (msg: string) => `Removal failed: ${msg}`,
-      cardAria: (role: string, member: string, ai: string) => `${role} · ${member} · ${ai}`,
     },
     linkRole: {
       srLabel: (team: string) => `Role for ${team}`,
@@ -696,6 +704,10 @@ const en: typeof de = {
     loadError: "AI catalog cannot be loaded.",
     ollamaUnavailable: "Ollama is unreachable — models cannot be loaded.",
     toolUnavailable: (label: string) => `${label} is unreachable — models cannot be loaded.`,
+    toolLabelAider: "Aider + Ollama (local)",
+    toolLabelClaude: "Claude Code",
+    toolLabelVibe: "Vibe",
+    modelLabelClaudeDefault: "claude -p (default)",
   },
   forms: {
     nameLabel: "Name",
