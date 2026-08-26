@@ -42,6 +42,48 @@ export function formatDay(iso: string): string {
   return new Intl.DateTimeFormat(UI_LOCALE, { month: "short", day: "numeric" }).format(d);
 }
 
+const dtf = new Intl.DateTimeFormat(UI_LOCALE, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/**
+ * A full timestamp (date + time), in the same fixed UI_LOCALE as every
+ * other formatter here. `DetailPage`'s generic field renderer used to print
+ * whatever ISO-8601 string the API returned verbatim — microseconds, UTC
+ * offset and all (`2026-08-25T18:42:40.747073+00:00`) — the one place in the
+ * app that didn't honour this file's own stated contract. Returns the raw
+ * string unchanged when it isn't a parseable date, so a non-date field never
+ * silently renders as "Invalid Date".
+ */
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return dtf.format(d);
+}
+
+/** True for a string shaped like an ISO-8601 timestamp (date, optionally
+ *  time) — enough to decide whether a generic API field should be run
+ *  through `formatDateTime` rather than printed as-is. */
+export function looksLikeIsoDate(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?/.test(v);
+}
+
+const tf = new Intl.DateTimeFormat(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
+
+/** HH:MM only, in the same fixed UI_LOCALE as every other formatter here —
+ *  for a list of same-day rows where the date is already known from
+ *  context and only the time distinguishes one row from the next
+ *  (Timeline's day-detail panel). */
+export function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return tf.format(d);
+}
+
 /**
  * `n` with a unit that agrees with it: "1 session", "2 sessions".
  *

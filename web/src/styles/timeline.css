@@ -89,17 +89,31 @@
   /* Carries the grid's `cell` role (ARIA table structure, unchanged from
      the read-only version); the interactive element goes inside it rather
      than overriding this cell's role onto the button, which would make it
-     unfindable as a button. */
+     unfindable as a button.
+     >=24px minimum, independent of the visual bar's own width — WCAG 2.5.8's
+     target-size floor. The default 90-day view divided the available width
+     across ~90 columns down to a few px each, well under the 24px minimum
+     with no other cue the cells were even clickable (UI audit full-app H2).
+     The visual bar stays a thin density stripe (see .timeline-cell's
+     max-width below); the wrap is invisible hit-slop around it, centred via
+     flex. A range wide enough that 90 columns * 24px overflows the viewport
+     scrolls horizontally — .timeline-grid already sets overflow-x: auto for
+     exactly this, the same trade-off .pm-pipeline-seats makes below 720px. */
   display: flex;
-  flex: 1 0 4px;
-  min-width: 4px;
+  justify-content: center;
+  flex: 1 0 24px;
+  min-width: 24px;
 }
 .timeline-cell {
   /* A real <button> (spec: clickable cells must be real buttons with an
      accessible name, not divs with onClick — keyboard-reachable natively),
      so the usual button chrome needs resetting to keep the density-strip
-     look. */
-  flex: 1;
+     look. Sized independently of its wrap (see .timeline-cell-wrap above):
+     a fixed narrow bar centred inside a >=24px hit area, rather than
+     stretching to fill it. */
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 8px;
   min-width: 4px;
   /* Was 18px, which packed five lanes into ~90px and left the rest of the
      viewport empty. A timeline is the page's subject here, not a strip of
@@ -130,8 +144,10 @@
   margin-bottom: 2px;
 }
 .timeline-axis-label {
-  flex: 1 0 4px;
-  min-width: 4px;
+  /* Must match .timeline-cell-wrap's flex sizing exactly, or the axis
+     labels drift out of alignment with the columns they name. */
+  flex: 1 0 24px;
+  min-width: 24px;
   overflow: visible;
   text-align: center;
   white-space: nowrap;
@@ -201,6 +217,12 @@
 }
 .timeline-detail-row:hover {
   background: var(--surface-hover);
+}
+.timeline-detail-time {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  min-width: 4ch;
 }
 .timeline-detail-title {
   overflow: hidden;

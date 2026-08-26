@@ -74,18 +74,23 @@
   /* Facets · results · preview. The third column is what turns Find from a
      list of links into something you can work in: inspecting a result used to
      cost a navigation away and a navigation back, and the way back lost the
-     scroll position. Below 1400px the preview would squeeze the results into
-     an unreadable column, so it drops and results widen instead. */
+     scroll position. Below the breakpoint the preview would squeeze the
+     results into an unreadable column, so it drops and results widen instead.
+     Was 1400px / 340px minimum, which excluded very common laptop widths
+     (1366x768, 1280x800, and effectively most 1440x900 windows once browser
+     chrome and OS scaling are subtracted) with the page giving no indication
+     the column existed at all (UI audit full-app H3). Lowered so the
+     flagship preview pane survives on those widths too. */
   grid-template-columns: 208px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
 }
-@media (min-width: 1400px) {
+@media (min-width: 1180px) {
   .find-layout:has(.preview) {
-    grid-template-columns: 208px minmax(0, 1fr) minmax(340px, 0.85fr);
+    grid-template-columns: 208px minmax(0, 1fr) minmax(300px, 0.85fr);
   }
 }
-@media (max-width: 1399px) {
+@media (max-width: 1179px) {
   .preview {
     display: none;
   }

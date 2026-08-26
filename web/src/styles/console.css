@@ -150,6 +150,10 @@
 .graph-node { cursor: pointer; }
 .graph-circle { stroke: var(--surface-raised); stroke-width: 2; }
 .graph-node:hover .graph-circle { stroke: var(--text-primary); }
+/* Keyboard-focus parity with hover -- nodes are now real tab stops (UI audit
+   full-app C2), and SVG groups have no native focus ring of their own. */
+.graph-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.graph-node:focus-visible .graph-circle { stroke: var(--accent); }
 .graph-label {
   fill: var(--text-secondary);
   font-size: 10px;

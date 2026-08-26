@@ -4,14 +4,22 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowDownWideNarrow, ArrowLeft, ArrowUpWideNarrow, OctagonAlert } from "lucide-react";
 
 import { findApi, type ApiError } from "@/lib/api";
+import { formatDateTime, looksLikeIsoDate } from "@/lib/format";
 import { Transcript, type TranscriptMessage } from "./Transcript";
 
-/** URL prefix -> API kind. Short prefixes keep deep links pasteable. */
+/** URL prefix -> API kind. Short prefixes keep deep links pasteable.
+ *
+ * "project" is deliberately absent: it used to be reachable at `/p/:id`
+ * through this generic renderer -- a bare field grid with raw snake_case
+ * labels and unformatted ISO timestamps -- while `/project/:name` already
+ * routed to the purpose-built ProjectPage for the same entity. Every caller
+ * (Find's routeFor, the command palette, Ask citations) now points at
+ * ProjectPage directly; see ResultList.tsx's routeFor (UI audit
+ * full-app H1). */
 export const DETAIL_KINDS = {
   c: "conversation",
   m: "memory",
   e: "entity",
-  p: "project",
   s: "skill",
   pr: "prompt",
 } as const;
@@ -20,7 +28,6 @@ const TITLE: Record<string, string> = {
   conversation: "Conversation",
   memory: "Memory chunk",
   entity: "Entity",
-  project: "Project",
   skill: "Skill",
   prompt: "Prompt",
 };
@@ -29,11 +36,28 @@ const TITLE: Record<string, string> = {
 const LONG_FIELDS = new Set(["content", "description", "summary", "reasoning"]);
 const HIDDEN_FIELDS = new Set(["id"]);
 
-function renderValue(v: unknown): string {
+/** Any field name ending `_at` is a timestamp by this codebase's own
+ *  convention (created_at, occurred_at, last_activity...); `looksLikeIsoDate`
+ *  catches the rest by shape, so a field this generic renderer has never
+ *  seen still gets formatted correctly. */
+function renderValue(key: string, v: unknown): string {
   if (v === null || v === undefined) return "—";
   if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
   if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "string" && (key.endsWith("_at") || looksLikeIsoDate(v))) {
+    return formatDateTime(v);
+  }
   return String(v);
+}
+
+/** "created_at" -> "Created at" — matches the app's sentence-case
+ *  convention everywhere else instead of the raw snake_case field name
+ *  (UI audit full-app H1). `.detail-field dt` still renders it in small
+ *  caps via CSS, but the underlying text (and anything reading it, like a
+ *  screen reader) sees words, not an identifier. */
+function humanizeLabel(key: string): string {
+  const words = key.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof DETAIL_KINDS] }) {
@@ -47,8 +71,7 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
 
   const { data, isPending, error } = useQuery({
     queryKey: ["detail", kind, id],
-    // Projects are addressed by name, everything else by numeric id.
-    queryFn: () => (kind === "project" ? findApi.projectByName(id!) : findApi.detail(kind, id!)),
+    queryFn: () => findApi.detail(kind, id!),
     enabled: Boolean(id),
   });
 
@@ -162,18 +185,15 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
           Back
         </button>
         <h1 className="page-title">
-          {TITLE[kind]}{" "}
-          <span className={kind === "project" ? "detail-id" : "detail-id tabular"}>
-            {kind === "project" ? id : `#${id}`}
-          </span>
+          {TITLE[kind]} <span className="detail-id tabular">#{id}</span>
         </h1>
       </header>
 
       {longs.map(([k, v]) =>
         v ? (
           <section key={k} className="detail-long">
-            <h2 className="section-label">{k}</h2>
-            <p>{renderValue(v)}</p>
+            <h2 className="section-label">{humanizeLabel(k)}</h2>
+            <p>{renderValue(k, v)}</p>
           </section>
         ) : null,
       )}
@@ -183,8 +203,8 @@ export function DetailPage({ kind }: { kind: (typeof DETAIL_KINDS)[keyof typeof 
         <dl className="detail-grid">
           {shorts.map(([k, v]) => (
             <div key={k} className="detail-field">
-              <dt>{k}</dt>
-              <dd className={typeof v === "number" ? "tabular" : undefined}>{renderValue(v)}</dd>
+              <dt>{humanizeLabel(k)}</dt>
+              <dd className={typeof v === "number" ? "tabular" : undefined}>{renderValue(k, v)}</dd>
             </div>
           ))}
         </dl>

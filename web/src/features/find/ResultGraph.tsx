@@ -8,7 +8,7 @@ import {
   forceSimulation,
   type SimulationNodeDatum,
 } from "d3-force";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Network } from "lucide-react";
 
 import { findApi, type FindItem } from "@/lib/api";
@@ -80,6 +80,7 @@ export function ResultGraph({ items }: { items: FindItem[] }) {
   });
 
   const [hover, setHover] = useState<GraphNode | null>(null);
+  const navigate = useNavigate();
 
   /**
    * Layout is computed synchronously, once, rather than animated.
@@ -183,6 +184,25 @@ export function ResultGraph({ items }: { items: FindItem[] }) {
                 transform={`translate(${n.x ?? 0},${n.y ?? 0})`}
                 onMouseEnter={() => setHover(n)}
                 onMouseLeave={() => setHover(null)}
+                onFocus={() => setHover(n)}
+                onBlur={() => setHover(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/e/${n.id}`);
+                  }
+                }}
+                // Node identity and the "Open" link previously lived only
+                // behind onMouseEnter/onMouseLeave -- a keyboard or switch
+                // user could open Graph mode and never learn what a single
+                // node represented, or reach any of them (UI audit
+                // full-app C2). tabIndex + role="button" make each node a
+                // real stop in the tab order; Enter/Space navigate directly
+                // rather than requiring a second click on the hover-only
+                // "Open" link.
+                tabIndex={0}
+                role="button"
+                aria-label={`${n.name}, ${n.entity_type}, ${n.hits_in_results} in results, ${n.mention_count} mentions total`}
                 className="graph-node"
               >
                 <circle

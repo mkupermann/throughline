@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Download, Info, LayoutList, MessageCircleQuestion, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
@@ -77,6 +77,13 @@ export function FindPage() {
     placeholderData: keepPreviousData,
   });
   const { data: facets } = useQuery({ queryKey: ["facets"], queryFn: findApi.facets });
+  // The real category vocabulary, for ResultList to tell a message's actual
+  // category apart from its internal role leaking through the same field
+  // (UI audit full-app L1).
+  const knownCategories = useMemo(
+    () => new Set((facets?.categories ?? []).map((c) => c.value)),
+    [facets],
+  );
 
   const terms = state.q.split(/\s+/).filter((t) => t.length > 1);
   const pageCount = data ? Math.ceil(data.total / state.perPage) : 0;
@@ -335,6 +342,7 @@ export function FindPage() {
                   terms={terms}
                   selected={selected}
                   onSelect={setSelected}
+                  knownCategories={knownCategories}
                 />
               )}
 

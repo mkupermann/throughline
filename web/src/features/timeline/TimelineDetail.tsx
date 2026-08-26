@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { OctagonAlert } from "lucide-react";
 
 import { ApiError, type TimelineDayItem } from "@/lib/api";
-import { formatCount } from "@/lib/format";
+import { formatCount, formatTime } from "@/lib/format";
 
 /** Where a timeline row opens.
  *
@@ -116,6 +116,7 @@ export function TimelineDetail({
               const to = timelineRouteFor(item);
               const body = (
                 <>
+                  <span className="timeline-detail-time tabular">{formatTime(item.ts)}</span>
                   <span className={`kind kind-${item.kind}`}>{item.kind}</span>
                   <span className="timeline-detail-title">{item.title}</span>
                   <span className="timeline-detail-provider">{item.provider}</span>
