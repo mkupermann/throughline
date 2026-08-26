@@ -1,0 +1,83 @@
+1
+00:00:00,710 --> 00:00:04,732
+Project Management: virtual AI teams working real engineering tasks.
+
+2
+00:00:04,733 --> 00:00:08,558
+Three projects total — two active, one archived.
+
+3
+00:00:08,558 --> 00:00:13,099
+Each card shows the project's teams, task states and token spend.
+
+4
+00:00:13,099 --> 00:00:17,620
+Acme Storefront Relaunch has burned 747K of its 5M token budget.
+
+5
+00:00:17,620 --> 00:00:21,649
+Six repositories the CLI already tracks show up here too.
+
+6
+00:00:21,649 --> 00:00:26,174
+Any of them can be adopted into a PM project in one click.
+
+7
+00:00:26,879 --> 00:00:32,206
+Acme's Delivery Squad: Analyst → Executor → Tester, plus human reviewer Sam Rivera.
+
+8
+00:00:32,206 --> 00:00:36,527
+Three tasks so far: one passed, one running, one over budget.
+
+9
+00:00:37,175 --> 00:00:42,006
+Opening the Executor role — its AI tool, model and budget live here.
+
+10
+00:00:42,006 --> 00:00:47,032
+It runs Aider against a local qwen3-coder:30b model, capped at 500K tokens.
+
+11
+00:00:47,033 --> 00:00:50,549
+Skills are picked from the indexed catalog.
+
+12
+00:00:50,549 --> 00:00:54,771
+Two are attached: db-migration-safety and pricing-money-math.
+
+13
+00:00:55,384 --> 00:01:00,208
+AI providers are bring-your-own: a local Ollama and a team OpenAI key.
+
+14
+00:01:00,208 --> 00:01:05,039
+The local Ollama endpoint serves qwen3-coder and devstral at no API cost.
+
+15
+00:01:05,716 --> 00:01:09,934
+‘Add product search with typo tolerance’ passed after six iterations.
+
+16
+00:01:09,934 --> 00:01:14,755
+Iteration 6 passes — all acceptance criteria verified, p95 down to 94 ms.
+
+17
+00:01:14,755 --> 00:01:20,079
+Iteration 5 was rejected: 96 ms with the debounce, but the flag defaulted to on.
+
+18
+00:01:20,079 --> 00:01:24,700
+Iteration 4 failed before that: p95 latency hit 210 ms with no keystroke debounce.
+
+19
+00:01:25,935 --> 00:01:30,254
+Back on the cockpit: ‘Fix cart total rounding’ is running right now.
+
+20
+00:01:30,254 --> 00:01:34,573
+‘Migrate checkout to new API’ hit its token budget before finishing.
+
+21
+00:01:34,573 --> 00:01:38,892
+Stop, archive, or launch the next task straight from this list.
