@@ -333,6 +333,16 @@ export function CockpitPage() {
             <ProjectStatusChip status={project.status} />
           </div>
           <InlineConfirmButton
+            className="button pm-button-quiet"
+            disabled={patchProject.isPending}
+            pending={patchProject.isPending}
+            onConfirm={() =>
+              patchProject.mutate({ status: project.status === "archived" ? "active" : "archived" })
+            }
+          >
+            {project.status === "archived" ? t.cockpit.reactivateProject : t.cockpit.archiveProject}
+          </InlineConfirmButton>
+          <InlineConfirmButton
             className="button pm-button-danger"
             disabled={deleteProject.isPending}
             pending={deleteProject.isPending}
@@ -341,6 +351,11 @@ export function CockpitPage() {
             {deleteProject.isPending ? t.cockpit.deleting : t.cockpit.deleteProject}
           </InlineConfirmButton>
         </div>
+        {patchProject.isError && (
+          <p className="pm-field-error" role="alert">
+            {t.cockpit.archiveFailed((patchProject.error as Error).message)}
+          </p>
+        )}
         {deleteProject.isError && (
           <p className="pm-field-error" role="alert">
             {t.cockpit.deleteFailed((deleteProject.error as Error).message)}

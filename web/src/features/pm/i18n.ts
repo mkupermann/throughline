@@ -108,6 +108,9 @@ const de = {
     teamOne: "Team",
     teamMany: "Teams",
     activity: (rel: string) => `Aktivität ${rel}`,
+    archive: {
+      summary: (n: string) => `Archiv (${n})`,
+    },
     repoProjects: {
       h2: "Repository-Projekte",
       summary: (n: string) => `Repository-Projekte anzeigen (${n})`,
@@ -143,6 +146,9 @@ const de = {
     deleteProject: "Projekt löschen",
     deleting: "Löscht…",
     deleteFailed: (msg: string) => `Löschen fehlgeschlagen: ${msg}`,
+    archiveProject: "Archivieren",
+    reactivateProject: "Reaktivieren",
+    archiveFailed: (msg: string) => `Aktion fehlgeschlagen: ${msg}`,
     repos: {
       h2: "Verknüpfte Repositories",
       none: "Kein Repository verknüpft.",
@@ -452,6 +458,9 @@ const en: typeof de = {
     teamOne: "team",
     teamMany: "teams",
     activity: (rel: string) => `Activity ${rel}`,
+    archive: {
+      summary: (n: string) => `Archive (${n})`,
+    },
     repoProjects: {
       h2: "Repository projects",
       summary: (n: string) => `Show repository projects (${n})`,
@@ -487,6 +496,9 @@ const en: typeof de = {
     deleteProject: "Delete project",
     deleting: "Deleting…",
     deleteFailed: (msg: string) => `Deletion failed: ${msg}`,
+    archiveProject: "Archive",
+    reactivateProject: "Reactivate",
+    archiveFailed: (msg: string) => `Action failed: ${msg}`,
     repos: {
       h2: "Linked repositories",
       none: "No repository linked.",

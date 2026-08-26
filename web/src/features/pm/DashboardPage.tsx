@@ -40,6 +40,35 @@ function TaskCountChips({ tasks }: { tasks: PmOverviewProject["tasks"] }) {
   );
 }
 
+/** Archived projects, tucked below the live grid: still linkable and
+ *  identifiable at a glance (status chip, tokens spent), but out of the way
+ *  of the cards that matter day to day. Collapsed by default — <details>,
+ *  no fetch of its own, same rows the repo-projects section already uses. */
+function ArchiveSection({ projects }: { projects: PmOverviewProject[] }) {
+  const { t } = useLang();
+  if (projects.length === 0) return null;
+  return (
+    <details className="pm-archive pm-repo-section">
+      <summary>{t.dashboard.archive.summary(fmtInt(projects.length))}</summary>
+      <div className="pm-repo-section-body">
+        <ul className="pm-repo-list">
+          {projects.map((p) => (
+            <li key={p.id} className="pm-repo-row">
+              <Link to={`/pm/projects/${p.id}`} className="pm-repo-row-name">
+                {p.name}
+              </Link>
+              <ProjectStatusChip status={p.status} />
+              <span className="pm-repo-row-meta tabular">
+                {fmtInt(p.tokens_used)} {t.common.tokens}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 function ProjectCard({ p }: { p: PmOverviewProject }) {
   const { t } = useLang();
   return (
@@ -337,6 +366,8 @@ export function DashboardPage() {
   }
 
   const { projects, counts } = data;
+  const liveProjects = projects.filter((p) => p.status !== "archived");
+  const archivedProjects = projects.filter((p) => p.status === "archived");
 
   return (
     <section className="pm-page">
@@ -369,13 +400,15 @@ export function DashboardPage() {
         <EmptyState title={t.dashboard.emptyTitle}>
           <p>{t.dashboard.emptyBody}</p>
         </EmptyState>
-      ) : (
+      ) : liveProjects.length > 0 ? (
         <ul className="pm-card-grid">
-          {projects.map((p) => (
+          {liveProjects.map((p) => (
             <ProjectCard key={p.id} p={p} />
           ))}
         </ul>
-      )}
+      ) : null}
+
+      <ArchiveSection projects={archivedProjects} />
 
       <RepoProjectsSection />
     </section>
