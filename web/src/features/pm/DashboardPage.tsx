@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, Users, IdCard, Boxes } from "lucide-react";
 
-import { pmApi, type PmOverviewProject, type PmRepoProject } from "@/lib/api";
+import { pmApi, type PmOverviewProject, type PmProject, type PmRepoProject } from "@/lib/api";
 import { useLang } from "./i18n";
 import {
   BudgetBar,
@@ -162,6 +162,14 @@ function RepoProjectRow({ rp }: { rp: PmRepoProject }) {
   const adopt = useMutation({
     mutationFn: () => pmApi.adoptRepoProject(rp.id),
     onSuccess: (pmProject) => {
+      // Seed the projects cache with the fresh row BEFORE navigating: the
+      // cockpit resolves its project from ["pm-projects"], and a stale cached
+      // list (staleTime 30s) without the just-created id rendered a false
+      // "Project not found" (live-gemeldeter Bug beim Adoptieren).
+      queryClient.setQueryData<{ projects: PmProject[] }>(["pm-projects"], (old) =>
+        old ? { projects: [pmProject, ...old.projects] } : { projects: [pmProject] },
+      );
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
       queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
       queryClient.invalidateQueries({ queryKey: ["pm-repo-projects"] });
       navigate(`/pm/projects/${pmProject.id}`);
