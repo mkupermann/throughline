@@ -43,6 +43,27 @@ Adapters degrade gracefully. A tool that is not installed is reported as "not pr
 
 ---
 
+## Project Management — run virtual AI teams on your own machine
+
+Memory is half the story. The **Project Management** area (the "Project Management" entry in the sidebar, `/pm`) turns Throughline from a passive record into a control plane: you define **projects**, staff them with **teams**, give each team a pipeline of **roles** (for example Analyst → Executor → Tester), and fill each seat with a **member** — human or agent. Every role carries its own configuration: which AI tool and model it runs on, which skills it may use, its own instructions, reference documents, and a **token budget**. Budgets are not decorative — a run that exhausts its project, team, role, or member budget is stopped, process tree and all.
+
+**How a run works.** A task hands your description to the Analyst (Claude Code), which writes a specification with acceptance criteria. The Executor (Aider driving a local Ollama model, or any provider you configure) implements it iteration by iteration. The Tester (Vibe, locked to read-only tools) checks each iteration against the spec and returns PASS or FAIL with reasons; failures feed the next iteration. Every step lands in the dashboard as it happens: iteration timeline, verdict badges with the tester's reasoning, per-iteration log excerpts, token counters against every applicable budget. Runs started outside the dashboard can be **adopted** and watched the same way — including runs that are already hours old; their full history is backfilled.
+
+**Bring your own models.** Under *AI models* you register providers the way you would in Cline or Cursor: OpenAI, Anthropic, Mistral, Google Gemini, OpenRouter, Ollama, or any OpenAI-compatible endpoint. Store a key, fetch the provider's live model list, add custom model ids by hand. Registered providers appear in the role editor, and their credentials are injected into the pipeline environment at launch — the Executor genuinely runs on whatever you picked.
+
+**Step by step:**
+
+1. Open `/pm` and create a project — or adopt one of your existing repository projects (Throughline already knows them from your session history) with one click.
+2. Create roles under *Roles*: pick the AI tool and model (live-listed from Ollama and your registered providers), select skills, write the role's instructions, attach documents, set a budget.
+3. Create members under *Members*, then open the project cockpit and assign a member to each seat of the team pipeline.
+4. Set budgets where you want hard cost ceilings: project, team, role, or member — the strictest one wins.
+5. Start a task from the cockpit (title + repository path, prefilled from a linked repository project), or register an already-running external run.
+6. Click into the task and watch it work: iterations appear live, each with its verdict; expand any iteration's log; stop the run at any time.
+
+The three pipeline CLIs (Claude Code, Aider, Vibe) are optional — without them, Project Management still works as a live dashboard over adopted runs. The interface is bilingual (German/English, toggle on every page), and archived projects fold away out of sight without losing their history.
+
+---
+
 ## Quick start
 
 **Requirements.** Docker route: Docker with Compose v2, and 2 GB of free disk for the image and database. Native route: Python 3.10+, PostgreSQL 16 with the pgvector extension, and the `psql`/`createdb` client tools. macOS and Linux are tested. Windows with Docker Desktop is tested end to end, ingest, backup, Markdown export, and Ask, including its own background job runner ([`windows/`](windows/), below).
