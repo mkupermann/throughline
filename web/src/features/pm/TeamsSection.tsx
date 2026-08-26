@@ -22,7 +22,7 @@ import {
   type PmTeam,
 } from "@/lib/api";
 import { useLang } from "./i18n";
-import { BudgetBar, EmptyState, ErrorState, SkeletonRows, plural } from "./shared";
+import { BudgetBar, EmptyState, ErrorState, InlineConfirmButton, SkeletonRows, plural } from "./shared";
 import { InlineBudget } from "./CockpitPage";
 
 /** The effective AI binding for a seat: assignment override, else the
@@ -91,16 +91,16 @@ function Seat({
       <div className="pm-seat-member-row">
         <span className="pm-seat-member">{occupied ? memberName : t.teams.seat.unassigned}</span>
         {occupied && (
-          <button
-            type="button"
+          <InlineConfirmButton
             className="pm-seat-unassign"
-            onClick={() => unassign.mutate(assignment!.id)}
             disabled={unassign.isPending}
+            pending={unassign.isPending}
             title={t.teams.seat.removeTitle(memberName ?? "")}
-            aria-label={t.teams.seat.removeAria(memberName ?? "", role.name)}
+            ariaLabel={t.teams.seat.removeAria(memberName ?? "", role.name)}
+            onConfirm={() => unassign.mutate(assignment!.id)}
           >
             <X size={11} aria-hidden />
-          </button>
+          </InlineConfirmButton>
         )}
       </div>
       <div className="pm-seat-ai">

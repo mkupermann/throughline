@@ -731,6 +731,17 @@ export const pmApi = {
   deleteAssignment: (assignmentId: number) =>
     request<{ deleted: boolean }>(`/pm/assignments/${assignmentId}`, { method: "DELETE" }),
 
+  deleteProject: (projectId: number) =>
+    request<{ deleted: boolean }>(`/pm/projects/${projectId}`, { method: "DELETE" }),
+  deleteTeam: (teamId: number) =>
+    request<{ deleted: boolean }>(`/pm/teams/${teamId}`, { method: "DELETE" }),
+  deleteRole: (roleId: number) =>
+    request<{ deleted: boolean }>(`/pm/roles/${roleId}`, { method: "DELETE" }),
+  deleteMember: (memberId: number) =>
+    request<{ deleted: boolean }>(`/pm/members/${memberId}`, { method: "DELETE" }),
+  deleteTask: (taskId: number) =>
+    request<{ deleted: boolean }>(`/pm/tasks/${taskId}`, { method: "DELETE" }),
+
   createRole: (body: Partial<PmRole> & { name: string }) =>
     request<PmRole>("/pm/roles", {
       method: "POST",

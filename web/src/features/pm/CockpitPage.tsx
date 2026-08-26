@@ -4,13 +4,14 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { pmApi, type PmProject } from "@/lib/api";
 import { useLang } from "./i18n";
 import {
   BudgetBar,
   ErrorState,
+  InlineConfirmButton,
   PmHeaderBar,
   ProjectStatusChip,
   SkeletonRows,
@@ -125,6 +126,7 @@ export function CockpitPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const projects = useQuery({ queryKey: ["pm-projects"], queryFn: pmApi.listProjects });
   const teams = useQuery({
@@ -149,6 +151,15 @@ export function CockpitPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
       queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+    },
+  });
+
+  const deleteProject = useMutation({
+    mutationFn: () => pmApi.deleteProject(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+      navigate("/pm");
     },
   });
 
@@ -208,7 +219,20 @@ export function CockpitPage() {
             <h1 className="page-title">{project.name}</h1>
             <ProjectStatusChip status={project.status} />
           </div>
+          <InlineConfirmButton
+            className="button pm-button-danger"
+            disabled={deleteProject.isPending}
+            pending={deleteProject.isPending}
+            onConfirm={() => deleteProject.mutate()}
+          >
+            {deleteProject.isPending ? t.cockpit.deleting : t.cockpit.deleteProject}
+          </InlineConfirmButton>
         </div>
+        {deleteProject.isError && (
+          <p className="pm-field-error" role="alert">
+            {t.cockpit.deleteFailed((deleteProject.error as Error).message)}
+          </p>
+        )}
         <div className="pm-cockpit-meta">
           <StatusSelect
             project={project}

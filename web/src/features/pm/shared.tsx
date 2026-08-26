@@ -8,7 +8,7 @@
  * them; here that language can change at runtime.
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ChevronRight, Languages, OctagonAlert, RefreshCw, X } from "lucide-react";
@@ -181,6 +181,97 @@ export function BudgetBar({
         {fmtCompact(used)} / {fmtCompact(budget)} {t.common.tokens}{label ? ` · ${label}` : ""}
       </span>
     </div>
+  );
+}
+
+// ── Inline confirm (no window.confirm, no modal) ─────────────────────────
+// A two-step button: the first click "arms" it — the button's own content is
+// replaced in place by a small confirm/cancel pair — and only the confirm
+// click fires `onConfirm`. Arming auto-expires after a few seconds, and
+// losing focus (blur on the whole group) disarms immediately, so an armed
+// button never lingers as a trap for an unrelated later click.
+
+const INLINE_CONFIRM_TIMEOUT_MS = 4000;
+
+export function InlineConfirmButton({
+  className,
+  children,
+  confirmLabel,
+  cancelLabel,
+  title,
+  ariaLabel,
+  disabled,
+  pending,
+  onConfirm,
+}: {
+  className?: string;
+  children: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  title?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+  pending?: boolean;
+  onConfirm: () => void;
+}) {
+  const { t } = useLang();
+  const [armed, setArmed] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  function arm() {
+    setArmed(true);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setArmed(false), INLINE_CONFIRM_TIMEOUT_MS);
+  }
+  function disarm() {
+    clearTimeout(timerRef.current);
+    setArmed(false);
+  }
+
+  if (armed) {
+    return (
+      <span
+        className="pm-inline-confirm"
+        // A blur that leaves the whole confirm/cancel pair (not just moves
+        // from one of its buttons to the other) disarms — losing focus
+        // entirely should not leave an armed "really delete?" button
+        // sitting around for a later, unrelated click to land on.
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) disarm();
+        }}
+      >
+        <button
+          type="button"
+          className={`${className ?? ""} pm-inline-confirm-yes`}
+          onClick={() => {
+            disarm();
+            onConfirm();
+          }}
+          disabled={pending}
+          autoFocus
+        >
+          {confirmLabel ?? t.common.confirmQuestion}
+        </button>
+        <button type="button" className="pm-inline-confirm-no" onClick={disarm}>
+          {cancelLabel ?? t.common.cancel}
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={arm}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
   );
 }
 

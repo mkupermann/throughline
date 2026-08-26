@@ -12,6 +12,7 @@ import { useLang } from "./i18n";
 import {
   EmptyState,
   ErrorState,
+  InlineConfirmButton,
   PmHeaderBar,
   SkeletonRows,
   fmtInt,
@@ -60,18 +61,37 @@ function RoleRow({ role }: { role: PmRole }) {
     },
   });
 
+  const del = useMutation({
+    mutationFn: () => pmApi.deleteRole(role.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pm-roles"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-project-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+    },
+  });
+
   return (
     <li className="pm-cat-row">
       <div className="pm-cat-head">
         <span className="pm-cat-name">{role.name}</span>
-        <button
-          type="button"
-          className="pm-linklike"
-          aria-expanded={editing}
-          onClick={() => setEditing((e) => !e)}
-        >
-          {editing ? t.common.close : t.common.edit}
-        </button>
+        <div className="pm-cat-head-actions">
+          <button
+            type="button"
+            className="pm-linklike"
+            aria-expanded={editing}
+            onClick={() => setEditing((e) => !e)}
+          >
+            {editing ? t.common.close : t.common.edit}
+          </button>
+          <InlineConfirmButton
+            className="pm-linklike pm-linklike-danger"
+            disabled={del.isPending}
+            pending={del.isPending}
+            onConfirm={() => del.mutate()}
+          >
+            {del.isPending ? t.catalog.deleting : t.catalog.delete}
+          </InlineConfirmButton>
+        </div>
       </div>
       {editing ? (
         <RoleForm
@@ -84,6 +104,11 @@ function RoleRow({ role }: { role: PmRole }) {
         />
       ) : (
         <RoleSummary role={role} />
+      )}
+      {del.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.catalog.deleteFailed((del.error as Error).message)}
+        </p>
       )}
     </li>
   );

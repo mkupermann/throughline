@@ -39,6 +39,7 @@ const de = {
     documentOne: "Dokument",
     documentMany: "Dokumente",
     projectManagement: "Project Management",
+    confirmQuestion: "Wirklich?",
   },
   status: {
     task: {
@@ -115,6 +116,9 @@ const de = {
     teamMany: "Teams",
     editBudget: "Bearbeiten",
     budgetAriaSuffix: "in Tokens",
+    deleteProject: "Projekt löschen",
+    deleting: "Löscht…",
+    deleteFailed: (msg: string) => `Löschen fehlgeschlagen: ${msg}`,
   },
   teams: {
     h2: "Teams",
@@ -180,13 +184,18 @@ const de = {
     noneWithStatus: "Kein Task mit diesem Status.",
     startedAt: (rel: string) => `gestartet ${rel}`,
     endedAt: (rel: string) => `beendet ${rel}`,
+    deleteTask: "Löschen",
+    deleteTitle: "Task löschen",
+    deleteFailed: (msg: string) => `Löschen fehlgeschlagen: ${msg}`,
   },
   taskPage: {
     breadcrumbFallback: "Task",
     errorTitle: "Task kann nicht geladen werden",
     stop: "Task stoppen",
+    markEnded: "Als beendet markieren",
     stopping: "Stoppt…",
     stopFailed: (msg: string) => `Stoppen fehlgeschlagen: ${msg}`,
+    verdictEmpty: "Kein Prüfergebnis aufgezeichnet — der Tester lieferte keine Ausgabe.",
     startedAt: (rel: string) => `gestartet ${rel}`,
     endedAt: (rel: string) => `beendet ${rel}`,
     createdAt: (rel: string) => `angelegt ${rel}`,
@@ -218,6 +227,9 @@ const de = {
     instructionsSet: "Anweisungen gesetzt",
     noInstructions: "Keine Anweisungen",
     saveChanges: "Änderungen speichern",
+    delete: "Löschen",
+    deleting: "Löscht…",
+    deleteFailed: (msg: string) => `Löschen fehlgeschlagen: ${msg}`,
   },
   rolesPage: {
     h1: "Rollen",
@@ -295,6 +307,7 @@ const en: typeof de = {
     documentOne: "document",
     documentMany: "documents",
     projectManagement: "Project Management",
+    confirmQuestion: "Really?",
   },
   status: {
     task: {
@@ -371,6 +384,9 @@ const en: typeof de = {
     teamMany: "teams",
     editBudget: "Edit",
     budgetAriaSuffix: "in tokens",
+    deleteProject: "Delete project",
+    deleting: "Deleting…",
+    deleteFailed: (msg: string) => `Deletion failed: ${msg}`,
   },
   teams: {
     h2: "Teams",
@@ -436,13 +452,18 @@ const en: typeof de = {
     noneWithStatus: "No task with this status.",
     startedAt: (rel: string) => `started ${rel}`,
     endedAt: (rel: string) => `ended ${rel}`,
+    deleteTask: "Delete",
+    deleteTitle: "Delete task",
+    deleteFailed: (msg: string) => `Deletion failed: ${msg}`,
   },
   taskPage: {
     breadcrumbFallback: "Task",
     errorTitle: "Task cannot be loaded",
     stop: "Stop task",
+    markEnded: "Mark as ended",
     stopping: "Stopping…",
     stopFailed: (msg: string) => `Stopping failed: ${msg}`,
+    verdictEmpty: "No verdict recorded — the tester produced no output.",
     startedAt: (rel: string) => `started ${rel}`,
     endedAt: (rel: string) => `ended ${rel}`,
     createdAt: (rel: string) => `created ${rel}`,
@@ -474,6 +495,9 @@ const en: typeof de = {
     instructionsSet: "Instructions set",
     noInstructions: "No instructions",
     saveChanges: "Save changes",
+    delete: "Delete",
+    deleting: "Deleting…",
+    deleteFailed: (msg: string) => `Deletion failed: ${msg}`,
   },
   rolesPage: {
     h1: "Roles",

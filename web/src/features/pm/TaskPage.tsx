@@ -13,6 +13,7 @@ import { useLang } from "./i18n";
 import {
   BudgetBar,
   ErrorState,
+  InlineConfirmButton,
   Markdown,
   PmHeaderBar,
   SkeletonRows,
@@ -135,6 +136,14 @@ function IterationCard({
   const [open, setOpen] = useState(false);
   const verdict = parseVerdictText(it.verdictText);
   const live = isLatest && running;
+  // A verdict event was recorded (it.verdictText is not null) but carried
+  // neither a VERDICT: marker nor any reasoning text — an empty or
+  // marker-less verdict-N.txt. Rendering nothing here used to look
+  // identical to "no verdict yet", which is a different, non-terminal
+  // state — this line says plainly that the tester ran and produced
+  // nothing usable, rather than leaving silence that reads as a bug.
+  const verdictRecordedButEmpty =
+    it.verdictText !== null && verdict.result === null && verdict.reasoning.trim() === "";
 
   return (
     <li
@@ -153,6 +162,9 @@ function IterationCard({
           {verdict.result && <VerdictBadge result={verdict.result} />}
         </div>
         {verdict.reasoning && <p className="pm-iter-reason">{verdict.reasoning}</p>}
+        {verdictRecordedButEmpty && (
+          <p className="pm-iter-reason pm-iter-reason-empty">{t.taskPage.verdictEmpty}</p>
+        )}
         <button
           type="button"
           className="pm-iter-logtoggle"
@@ -216,7 +228,13 @@ function TaskHeader({
       ? budgets.reduce((a, b) => (b.value < a.value ? b : a))
       : null;
 
-  const canStop = task.status === "running" && task.pid !== null;
+  // Stop actually kills a process, and pipeline.sh runs Throughline
+  // launched itself have one (pid !== null). An adopted run (pid === null,
+  // register_existing_run) has nothing of ours to kill — the button still
+  // shows so a task that lied about "running" forever can be closed out,
+  // just labeled honestly: it only marks the status, it stops nothing.
+  const canStop = task.status === "running";
+  const adopted = task.pid === null;
 
   return (
     <header className="page-header">
@@ -233,15 +251,15 @@ function TaskHeader({
           <TaskStatusChip status={task.status} />
         </div>
         {canStop && (
-          <button
-            type="button"
+          <InlineConfirmButton
             className="button pm-button-danger"
-            onClick={() => stop.mutate()}
             disabled={stop.isPending}
+            pending={stop.isPending}
+            onConfirm={() => stop.mutate()}
           >
             <Square size={13} aria-hidden />
-            {stop.isPending ? t.taskPage.stopping : t.taskPage.stop}
-          </button>
+            {stop.isPending ? t.taskPage.stopping : adopted ? t.taskPage.markEnded : t.taskPage.stop}
+          </InlineConfirmButton>
         )}
       </div>
       <div className="pm-cockpit-meta">

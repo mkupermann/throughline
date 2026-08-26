@@ -12,8 +12,10 @@ import { useLang } from "./i18n";
 import {
   EmptyState,
   ErrorState,
+  InlineConfirmButton,
   SkeletonRows,
   TASK_STATUSES,
+  TERMINAL_STATUSES,
   TaskStatusChip,
   fmtInt,
   fmtRelative,
@@ -21,8 +23,22 @@ import {
 
 type Filter = PmTaskStatus | "all";
 
-function TaskRow({ task }: { task: PmTask }) {
+function TaskRow({ task, projectId }: { task: PmTask; projectId: number }) {
   const { t } = useLang();
+  const queryClient = useQueryClient();
+  // Deleting a running/pending task would either orphan a live process or
+  // remove a task the watcher hasn't even had a chance to record anything
+  // for — the affordance only ever shows once a task has actually finished.
+  const canDelete = TERMINAL_STATUSES.includes(task.status);
+
+  const del = useMutation({
+    mutationFn: () => pmApi.deleteTask(task.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pm-project-tasks", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+    },
+  });
+
   return (
     <li className="pm-task-row">
       <Link to={`/pm/tasks/${task.id}`} className="pm-task-row-title">
@@ -37,6 +53,22 @@ function TaskRow({ task }: { task: PmTask }) {
             ? t.tasksSection.endedAt(fmtRelative(task.ended_at))
             : fmtRelative(task.started_at)}
       </span>
+      {canDelete && (
+        <InlineConfirmButton
+          className="pm-linklike pm-linklike-danger"
+          disabled={del.isPending}
+          pending={del.isPending}
+          title={t.tasksSection.deleteTitle}
+          onConfirm={() => del.mutate()}
+        >
+          {t.tasksSection.deleteTask}
+        </InlineConfirmButton>
+      )}
+      {del.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.tasksSection.deleteFailed((del.error as Error).message)}
+        </p>
+      )}
     </li>
   );
 }
@@ -244,7 +276,7 @@ export function TasksSection({
           )}
           <ul className="pm-task-list">
             {filtered.map((tk) => (
-              <TaskRow key={tk.id} task={tk} />
+              <TaskRow key={tk.id} task={tk} projectId={projectId} />
             ))}
             {filtered.length === 0 && (
               <li className="pm-task-list-none">{t.tasksSection.noneWithStatus}</li>

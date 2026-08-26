@@ -312,6 +312,56 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+.pm-linklike-danger {
+  color: var(--status-critical);
+}
+.pm-linklike-danger:hover {
+  color: var(--status-critical);
+}
+
+/* ── Inline confirm (two-step buttons, no window.confirm/modal) ─────── */
+.pm-inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pm-inline-confirm-yes {
+  margin-top: 0;
+  border-color: var(--status-critical);
+  color: var(--status-critical-fg, #fff);
+  background: var(--status-critical);
+}
+.pm-inline-confirm-yes:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pm-inline-confirm-yes:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pm-inline-confirm-no {
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.pm-inline-confirm-no:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+/* A seat's unassign confirm pair sits in a tight 18px-tall row — shrink the
+   buttons to match rather than blowing out the seat card's layout. */
+.pm-seat-member-row .pm-inline-confirm {
+  gap: var(--space-1);
+}
+.pm-seat-member-row .pm-inline-confirm-yes,
+.pm-seat-member-row .pm-inline-confirm-no {
+  padding: 1px var(--space-1);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+}
 
 .pm-inline-form {
   display: flex;
@@ -710,6 +760,10 @@ a.pm-catalog-link:hover {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
+.pm-task-row .pm-field-error {
+  flex-basis: 100%;
+  margin-top: 0;
+}
 .pm-task-list-none {
   padding: var(--space-3);
   color: var(--text-muted);
@@ -901,6 +955,10 @@ a.pm-catalog-link:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.pm-iter-reason-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
 .pm-iter-logtoggle {
   display: inline-flex;
   align-items: center;
@@ -982,6 +1040,12 @@ a.pm-catalog-link:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+.pm-cat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
 }
 .pm-cat-name {
   font-weight: 600;
