@@ -62,6 +62,49 @@ _STEP_TO_CONTEXT_VAR = {
     "tester": "AI_PIPELINE_TESTER_CONTEXT",
 }
 
+# A role/member bound to a pm_ai_providers row (Welle D) carries
+# ai_tool == "provider:<id>" instead of one of the fixed "aider"/"claude"/
+# "vibe" tool names — resolve_assignment's ai_model is already the
+# LiteLLM-format string (throughline/queries/pm.py's ai_catalog built it
+# that way), so the only extra work here is injecting that provider's
+# credentials into the spawned pipeline's environment.
+_PROVIDER_TOOL_RE = re.compile(r"^provider:(\d+)$")
+
+#: Env var each provider type's API key lands in — matching what aider/
+#: LiteLLM itself reads for that provider prefix (openai/, anthropic/, ...).
+#: ollama and openai_compatible are handled separately below: ollama has no
+#: API key at all, and openai_compatible reuses OPENAI_API_KEY.
+_PROVIDER_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "openai_compatible": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+
+def _inject_provider_env(env: dict[str, str], provider: dict[str, Any]) -> None:
+    """Set the credentials a pm_ai_providers row's litellm-prefixed model
+    string needs to actually run, in the spawned pipeline's env dict."""
+    ptype = provider["provider_type"]
+    base_url = (provider.get("base_url") or "").strip()
+    api_key = provider.get("api_key") or ""
+
+    if ptype == "ollama":
+        # No API key — OLLAMA_API_BASE is the only thing ollama_chat/ needs.
+        env["OLLAMA_API_BASE"] = base_url or "http://127.0.0.1:11434"
+        return
+
+    env_var = _PROVIDER_API_KEY_ENV.get(ptype)
+    if env_var and api_key:
+        env[env_var] = api_key
+    # openai/openai_compatible both point at OPENAI_API_BASE when the
+    # provider overrides the default endpoint (required for
+    # openai_compatible, an optional override for openai).
+    if ptype in ("openai", "openai_compatible") and base_url:
+        env["OPENAI_API_BASE"] = base_url
+
 
 def ensure_vibe_agent_profile(resolved: dict[str, Any], profile_name: str) -> Path:
     """Write ~/.vibe/agents/<profile_name>.toml so a role/member's resolved
@@ -219,6 +262,12 @@ def launch_task(
                 env[model_var] = profile_name
             else:
                 env[model_var] = resolved["ai_model"]
+
+            provider_match = _PROVIDER_TOOL_RE.match(resolved["ai_tool"] or "")
+            if provider_match:
+                provider = Q.get_ai_provider(conn, int(provider_match.group(1)))
+                if provider is not None:
+                    _inject_provider_env(env, provider)
 
     # Windows note (controller ruling): Popen cannot exec a .sh file via
     # shebang, so pipeline.sh is always invoked through bash explicitly —

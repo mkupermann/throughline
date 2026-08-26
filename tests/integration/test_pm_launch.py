@@ -146,6 +146,67 @@ def test_ensure_vibe_agent_profile_rejects_unsafe_ai_model(tmp_path, monkeypatch
     assert not (fake_home / ".vibe" / "agents" / "pm-injection.toml").exists()
 
 
+FAKE_PIPELINE_ENV_DUMP = """#!/usr/bin/env bash
+set -u
+{
+  echo "EXECUTOR_MODEL=${AI_PIPELINE_EXECUTOR_MODEL:-}"
+  echo "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
+  echo "OPENAI_API_BASE=${OPENAI_API_BASE:-}"
+} > "$2/env-dump.txt"
+mkdir -p "$2/.ai-pipeline/$AI_PIPELINE_RUN_ID"
+sleep 0.2
+"""
+
+
+@pytest.mark.integration
+def test_launch_task_injects_provider_credentials_for_provider_bound_role(
+    db_connection, tmp_path, monkeypatch
+):
+    """A role/member bound to a pm_ai_providers row (ai_tool == "provider:
+    <id>") must reach the spawned pipeline with both the litellm-format
+    model string AND that provider's credentials in its environment — not
+    just the model string, which is useless to aider/litellm without an API
+    key to authenticate with."""
+    fake_script = tmp_path / "fake_pipeline_env.sh"
+    fake_script.write_text(FAKE_PIPELINE_ENV_DUMP, encoding="utf-8")
+    fake_script.chmod(fake_script.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", fake_script)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)])
+
+    provider = Q.create_ai_provider(
+        db_connection, name="MyOpenAI", provider_type="openai", api_key="sk-test-123",
+        base_url="https://api.openai.com/v1",
+    )
+
+    project = Q.create_pm_project(db_connection, name="ProvLaunchP")
+    team = Q.create_team(db_connection, name="ProvLaunchT")
+    role = Q.create_role(
+        db_connection, name="Executor", default_ai_tool=f"provider:{provider['id']}",
+        default_ai_model="openai/gpt-4o-mini",
+    )
+    member = Q.create_member(db_connection, name="Agent B", member_type="agent")
+    Q.link_project_team(db_connection, project["id"], team["id"])
+    Q.link_team_role(db_connection, team["id"], role["id"])
+    Q.create_assignment(
+        db_connection, pm_project_id=project["id"], team_id=team["id"],
+        role_id=role["id"], member_id=member["id"],
+    )
+
+    launch_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"],
+        title="provider run", repo_path=str(repo),
+    )
+    time.sleep(0.5)  # let the fake script finish writing env-dump.txt
+
+    dump = (repo / "env-dump.txt").read_text(encoding="utf-8")
+    assert "EXECUTOR_MODEL=openai/gpt-4o-mini" in dump
+    assert "OPENAI_API_KEY=sk-test-123" in dump
+    assert "OPENAI_API_BASE=https://api.openai.com/v1" in dump
+
+
 @pytest.mark.integration
 def test_stop_task_kills_process_and_updates_status(db_connection, tmp_path, monkeypatch):
     # A real long-running child process to kill: a Python process sleeping
