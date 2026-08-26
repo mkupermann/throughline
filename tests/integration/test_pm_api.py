@@ -509,3 +509,15 @@ def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     assert task.done()
     assert task.cancelled()
     deps.close_pool()
+
+
+def test_normalize_ollama_url_handles_bare_host_forms():
+    """The Windows Ollama installer sets OLLAMA_HOST=127.0.0.1 (no scheme,
+    no port) system-wide — the catalog must still reach a valid URL."""
+    from throughline.queries.pm import _normalize_ollama_url
+
+    assert _normalize_ollama_url("127.0.0.1") == "http://127.0.0.1:11434"
+    assert _normalize_ollama_url("127.0.0.1:11434") == "http://127.0.0.1:11434"
+    assert _normalize_ollama_url("http://127.0.0.1:11434") == "http://127.0.0.1:11434"
+    assert _normalize_ollama_url("http://myhost:9999/") == "http://myhost:9999"
+    assert _normalize_ollama_url("") == "http://127.0.0.1:11434"

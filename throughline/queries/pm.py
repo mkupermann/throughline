@@ -589,7 +589,23 @@ def list_skills(conn) -> list[Row]:
 # source degrades to an empty/static list rather than failing the whole
 # endpoint — one tool being unreachable should not block picking another.
 
-_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+def _normalize_ollama_url(raw: str) -> str:
+    """Ollama's own convention allows OLLAMA_HOST to be a bare host
+    ("127.0.0.1"), host:port, or a full URL — the Windows installer sets the
+    bare-host form system-wide. Normalize to a full base URL with Ollama's
+    default port so urlopen gets something valid."""
+    value = raw.strip().rstrip("/")
+    if not value:
+        return "http://127.0.0.1:11434"
+    if "://" not in value:
+        value = f"http://{value}"
+    scheme, _, rest = value.partition("://")
+    if ":" not in rest:
+        value = f"{scheme}://{rest}:11434"
+    return value
+
+
+_OLLAMA_URL = _normalize_ollama_url(os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"))
 _OLLAMA_TIMEOUT_S = 2.0
 
 #: Vibe's built-in --agent profiles, always valid even before any
