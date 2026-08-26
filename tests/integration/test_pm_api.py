@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-08-25-virtual-team-ops-design.md.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -275,6 +276,112 @@ def test_skills_endpoint_lists_seeded_skill(client, db_env):
     assert resp.status_code == 200
     skills = resp.json()["skills"]
     assert any(s["id"] == skill_id and s["name"] == "api-test-skill" for s in skills)
+
+
+def test_skills_endpoint_deduplicates_same_name_from_multiple_paths(client, db_env):
+    """scan_skills indexes the same skill name from several filesystem
+    locations (project-local, user-level, plugin), producing multiple
+    skills rows sharing one name. The picker must show each name once,
+    preferring the most recently modified path."""
+    import psycopg2
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO skills (name, description, path, file_modified)
+                VALUES (%s, %s, %s, now() - interval '1 day')
+                RETURNING id
+                """,
+                ("dup-skill", "older path", "/skills/dup-skill-old"),
+            )
+            older_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO skills (name, description, path, file_modified)
+                VALUES (%s, %s, %s, now())
+                RETURNING id
+                """,
+                ("dup-skill", "newer path", "/skills/dup-skill-new"),
+            )
+            newer_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/api/pm/skills")
+    assert resp.status_code == 200
+    skills = resp.json()["skills"]
+    matches = [s for s in skills if s["name"] == "dup-skill"]
+    assert len(matches) == 1
+    assert matches[0]["id"] == newer_id
+    assert matches[0]["id"] != older_id
+
+
+def test_ai_catalog_reports_ollama_models_and_vibe_profiles(client, monkeypatch, tmp_path):
+    """GET /pm/ai-catalog resolves real, currently-available choices —
+    Ollama models (for aider), ~/.vibe/agents/*.toml profiles plus builtins
+    (for vibe), and the static claude entry — rather than leaving the
+    Role/Member editors' ai_tool/ai_model as unchecked free text."""
+    from throughline.queries import pm as Q
+
+    class FakeResponse:
+        status = 200
+
+        def read(self):
+            return b'{"models": [{"name": "qwen3-coder:30b"}, {"name": "devstral:latest"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(Q.urllib.request, "urlopen", lambda *a, **k: FakeResponse())
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".vibe" / "agents").mkdir(parents=True)
+    (fake_home / ".vibe" / "agents" / "tester-local.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    resp = client.get("/api/pm/ai-catalog")
+    assert resp.status_code == 200
+    tools = {t["tool"]: t for t in resp.json()["tools"]}
+
+    assert set(tools) == {"aider", "claude", "vibe"}
+
+    aider = tools["aider"]
+    assert aider["unavailable"] is False
+    assert set(aider["models"]) == {"ollama_chat/qwen3-coder:30b", "ollama_chat/devstral:latest"}
+
+    claude = tools["claude"]
+    assert claude["models"] == ["claude -p (Standard)"]
+    assert claude["unavailable"] is False
+
+    vibe = tools["vibe"]
+    assert "tester-local" in vibe["models"]
+    for builtin in ("ask", "plan", "accept-edits", "auto-approve"):
+        assert builtin in vibe["models"]
+
+
+def test_ai_catalog_reports_ollama_unavailable_when_unreachable(client, monkeypatch, tmp_path):
+    from throughline.queries import pm as Q
+
+    def boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(Q.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-vibe-here")
+
+    resp = client.get("/api/pm/ai-catalog")
+    assert resp.status_code == 200
+    tools = {t["tool"]: t for t in resp.json()["tools"]}
+
+    assert tools["aider"]["models"] == []
+    assert tools["aider"]["unavailable"] is True
+    # Vibe's builtins are always offered even with no ~/.vibe/agents/ dir.
+    assert "ask" in tools["vibe"]["models"]
 
 
 def test_patch_role_updates_instructions_budget_and_skills(client):

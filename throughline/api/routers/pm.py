@@ -245,6 +245,13 @@ def list_skills(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
         return {"skills": Q.list_skills(conn)}
 
 
+@router.get("/pm/ai-catalog")
+def ai_catalog() -> dict[str, Any]:
+    """Real, request-time-resolved AI tool/model choices for the Role/Member
+    editors — no database access, so no `connection(settings)` here."""
+    return Q.ai_catalog()
+
+
 @router.get("/pm/projects/{project_id}/teams")
 def project_teams(project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:

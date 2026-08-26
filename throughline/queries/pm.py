@@ -8,6 +8,10 @@ of independently-evolving areas that justify projects.py's own file.
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -554,8 +558,105 @@ def list_skills(conn) -> list[Row]:
     skills picker (item 5 of
     docs/superpowers/specs/2026-08-26-virtual-team-ops-ui-rebuild.md).
     Deliberately not throughline.queries.skills.list_skills, which returns
-    many more fields sorted by recency for a different UI."""
-    return rows(conn, "SELECT id, name, description FROM skills ORDER BY name")
+    many more fields sorted by recency for a different UI.
+
+    scan_skills indexes the same skill name from multiple filesystem paths
+    (project-local, user-level, plugin-provided, ...), which left the
+    underlying skills table with many rows sharing one name. DISTINCT ON
+    collapses those down to a single row per name, preferring whichever
+    path was modified most recently."""
+    return rows(
+        conn,
+        """
+        SELECT id, name, description
+        FROM (
+            SELECT DISTINCT ON (name) id, name, description
+            FROM skills
+            ORDER BY name, file_modified DESC NULLS LAST
+        ) deduped
+        ORDER BY name
+        """,
+    )
+
+
+# ── AI binding catalog ───────────────────────────────────────────────────────
+#
+# The Role/Member editors used to accept ai_tool/ai_model as free text — a
+# typo (or a model name that quietly stopped being pulled) only surfaced as a
+# launch-time failure. This resolves, at request time, what each tool the
+# pipeline actually understands (see throughline/jobs/pm_launch.py) can
+# currently be pointed at, so the frontend can offer selects instead. Every
+# source degrades to an empty/static list rather than failing the whole
+# endpoint — one tool being unreachable should not block picking another.
+
+_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+_OLLAMA_TIMEOUT_S = 2.0
+
+#: Vibe's built-in --agent profiles, always valid even before any
+#: role/member-derived profile has been written to ~/.vibe/agents/ by
+#: ensure_vibe_agent_profile.
+_VIBE_BUILTIN_AGENTS = ("ask", "plan", "accept-edits", "auto-approve")
+
+
+def _ollama_models() -> tuple[list[str], bool]:
+    """(model names as aider/LiteLLM expects them, prefixed "ollama_chat/",
+    unavailable). A short timeout and a broad except: a slow or unreachable
+    Ollama must never hang or fail this request — it just means aider has no
+    models to offer right now."""
+    try:
+        with urllib.request.urlopen(f"{_OLLAMA_URL}/api/tags", timeout=_OLLAMA_TIMEOUT_S) as resp:
+            if resp.status != 200:
+                return [], True
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return [], True
+    names = sorted({str(m["name"]) for m in data.get("models", []) if m.get("name")})
+    return [f"ollama_chat/{n}" for n in names], False
+
+
+def _vibe_agent_profiles() -> list[str]:
+    """Stems of ~/.vibe/agents/*.toml (role/member-derived profiles written
+    by ensure_vibe_agent_profile) plus vibe's static builtins, deduplicated
+    and sorted. A missing ~/.vibe/agents/ directory is not an error — it
+    just means no profile has been generated yet."""
+    agents_dir = Path.home() / ".vibe" / "agents"
+    try:
+        written = {p.stem for p in agents_dir.glob("*.toml")}
+    except OSError:
+        written = set()
+    return sorted(written | set(_VIBE_BUILTIN_AGENTS))
+
+
+def ai_catalog() -> dict[str, Any]:
+    """{"tools": [{tool, label, models, unavailable}, ...]} — the real,
+    currently-resolvable AI tool/model choices for the Role/Member editors'
+    selects. No database access: everything here comes from the local
+    Ollama daemon, the local ~/.vibe/agents/ directory, and a static entry
+    for Claude Code (the pipeline calls `claude -p` with no model choice
+    today)."""
+    ollama_models, ollama_unavailable = _ollama_models()
+    return {
+        "tools": [
+            {
+                "tool": "aider",
+                "label": "Aider + Ollama (lokal)",
+                "models": ollama_models,
+                "unavailable": ollama_unavailable,
+            },
+            {
+                "tool": "claude",
+                "label": "Claude Code",
+                "models": ["claude -p (Standard)"],
+                "unavailable": False,
+            },
+            {
+                "tool": "vibe",
+                "label": "Vibe",
+                "models": _vibe_agent_profiles(),
+                "unavailable": False,
+            },
+        ]
+    }
 
 
 # ── Partial updates ──────────────────────────────────────────────────────────
