@@ -251,4 +251,147 @@ describe("route API states", () => {
     expect(await screen.findByRole("heading", { name: "Not found" })).toBeTruthy();
     expect(screen.getByText("Memory chunk 404 was not found.")).toBeTruthy();
   });
+
+  it("renders a memory as a memory — content first, human labels, linked source", async () => {
+    reply({
+      "/api/detail/memory/2740": json({
+        kind: "memory",
+        record: {
+          id: 2740,
+          source_type: "conversation",
+          source_id: 5668,
+          content: "Kein 'RAZOR 1911 TRIBUTE' String",
+          category: "error_solution",
+          tags: ["criterion-5-fail"],
+          confidence: "1.00",
+          project_name: null,
+          expires_at: null,
+          created_at: "2026-08-25T19:03:41.200081+00:00",
+          superseded_by: null,
+          superseded_at: null,
+          status: "active",
+          merged_from: [],
+          access_count: 0,
+          last_accessed: null,
+        },
+        related: {},
+      }),
+    });
+    renderRoute(
+      <Routes>
+        <Route path="/m/:id" element={<DetailPage kind="memory" />} />
+      </Routes>,
+      "/m/2740",
+    );
+
+    // The category, humanised, is the page title — not a raw identifier.
+    expect(await screen.findByRole("heading", { level: 1, name: "Error solution" })).toBeTruthy();
+    expect(screen.queryByText("error_solution")).toBeNull();
+    // Content leads.
+    expect(screen.getByText("Kein 'RAZOR 1911 TRIBUTE' String")).toBeTruthy();
+    // The source conversation is a real link, not a bare id field.
+    const sourceLinks = screen.getAllByRole("link", { name: /conversation #5668/i });
+    expect(sourceLinks.some((a) => a.getAttribute("href") === "/c/5668")).toBe(true);
+    // Breadcrumb + raw JSON escape hatch.
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toBeTruthy();
+    expect(screen.getByText("Raw data")).toBeTruthy();
+    // No raw snake_case field labels in the metadata list (the collapsed
+    // raw-JSON escape hatch is allowed to contain them — that is its job).
+    const labels = Array.from(document.querySelectorAll("dt")).map((d) => d.textContent ?? "");
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels.every((l) => !l.includes("_"))).toBe(true);
+  });
+
+  it("renders a conversation as a conversation — title, meta, transcript with human roles", async () => {
+    reply({
+      "/api/detail/conversation/6084": json({
+        kind: "conversation",
+        record: {
+          id: 6084,
+          session_id: "421dee03",
+          project_path: "C:\\repo",
+          project_name: "razor1911-demo-tribute",
+          model: null,
+          entrypoint: "",
+          git_branch: "master",
+          started_at: "2026-08-25T20:17:18+00:00",
+          ended_at: "2026-08-25T20:18:07+00:00",
+          message_count: 2,
+          token_count_in: 365390,
+          token_count_out: 3552,
+          cost_usd: null,
+          summary: null,
+          tags: [],
+          metadata: { title: "Demo review session", source: "vibe", stats: { session_cost: 0.12 } },
+        },
+        related: {
+          messages: [
+            { id: 1, role: "user", content: "Please review the demo", created_at: "2026-08-25T20:17:19+00:00" },
+            { id: 2, role: "assistant", content: "Reviewing now", created_at: "2026-08-25T20:17:30+00:00" },
+          ],
+          message_total: 2,
+          message_offset: 0,
+          message_returned: 2,
+          has_more: false,
+          chunks: [],
+        },
+      }),
+    });
+    renderRoute(
+      <Routes>
+        <Route path="/c/:id" element={<DetailPage kind="conversation" />} />
+      </Routes>,
+      "/c/6084",
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Demo review session" })).toBeTruthy();
+    // The project is a real link to its ProjectPage.
+    const projLinks = screen.getAllByRole("link", { name: "razor1911-demo-tribute" });
+    expect(projLinks.some((a) => a.getAttribute("href") === "/project/razor1911-demo-tribute")).toBe(true);
+    // Transcript with humanised role labels, not raw column values.
+    expect(screen.getByText("Transcript")).toBeTruthy();
+    expect(screen.getByText("User")).toBeTruthy();
+    expect(screen.getByText("Assistant")).toBeTruthy();
+    // Token counts formatted through Intl.
+    expect(screen.getByText("365,390")).toBeTruthy();
+  });
+
+  it("renders a skill as a skill — name, description, triggers, use stats", async () => {
+    reply({
+      "/api/detail/skill/1": json({
+        kind: "skill",
+        record: {
+          id: 1,
+          name: "sharepoint-video-downloader",
+          version: "1.0.0",
+          description: "Downloads SharePoint Stream videos.",
+          path: "/Users/mk/.claude/skills/sharepoint-video-downloader",
+          triggers: ["download video from sharepoint"],
+          last_used: null,
+          use_count: 0,
+          config: { skill_type: "global" },
+          created_at: "2026-04-17T13:05:32+00:00",
+          updated_at: "2026-06-07T21:00:00+00:00",
+          file_created: null,
+          file_modified: null,
+        },
+        related: {},
+      }),
+    });
+    renderRoute(
+      <Routes>
+        <Route path="/s/:id" element={<DetailPage kind="skill" />} />
+      </Routes>,
+      "/s/1",
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "sharepoint-video-downloader" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Never used")).toBeTruthy();
+    expect(screen.getByText("Downloads SharePoint Stream videos.")).toBeTruthy();
+    expect(screen.getByText("download video from sharepoint")).toBeTruthy();
+    const labels = Array.from(document.querySelectorAll("dt")).map((d) => d.textContent ?? "");
+    expect(labels.every((l) => !l.includes("_"))).toBe(true);
+  });
 });

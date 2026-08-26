@@ -87,6 +87,26 @@ function when(iso: string | null | undefined): string {
   }).format(d);
 }
 
+/** Who spoke, in words rather than the raw role identifier ("tool_result"
+ *  is a column value, "Tool result" is a label). Unknown roles fall back to
+ *  the same sentence-case humanisation the rest of the detail pages use. */
+function roleLabel(role: string): string {
+  switch (role) {
+    case "user":
+      return "User";
+    case "assistant":
+      return "Assistant";
+    case "tool_result":
+      return "Tool result";
+    case "system":
+      return "System";
+    default: {
+      const words = role.replace(/_/g, " ");
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    }
+  }
+}
+
 /** Output collapsed behind its own first line. */
 function Collapsible({ label, body }: { label: string; body: string }) {
   const [open, setOpen] = useState(false);
@@ -124,7 +144,20 @@ function ToolCall({ block }: { block: Block }) {
   );
 }
 
-export function Transcript({ messages }: { messages: TranscriptMessage[] }) {
+/**
+ * `targetId` is a message anchor ("m390596") from the URL hash: Find's
+ * message results link to `/c/{conversation}#m{id}`, so the linked message
+ * must exist as a real element id and be visibly the one the reader was
+ * sent to. `tabIndex={-1}` lets the page move keyboard focus there after
+ * scrolling, so Tab continues from the message, not from the page top.
+ */
+export function Transcript({
+  messages,
+  targetId,
+}: {
+  messages: TranscriptMessage[];
+  targetId?: string | null;
+}) {
   return (
     <ol className="tx">
       {messages.map((m) => {
@@ -139,13 +172,25 @@ export function Transcript({ messages }: { messages: TranscriptMessage[] }) {
 
         const Icon = m.role === "user" ? User : m.role === "tool_result" ? CornerUpRight : Bot;
 
+        const anchor = `m${m.id}`;
+        const isTarget = targetId === anchor;
+
         return (
-          <li key={m.id} className={`tx-msg tx-${m.role}`}>
+          <li
+            key={m.id}
+            id={anchor}
+            tabIndex={isTarget ? -1 : undefined}
+            className={`tx-msg tx-${m.role}${isTarget ? " is-target" : ""}`}
+          >
             <div className="tx-meta">
               <Icon size={13} aria-hidden />
-              <span className="tx-role">{m.role}</span>
+              <span className="tx-role">{roleLabel(m.role)}</span>
               {m.model && <span className="tx-model">{m.model}</span>}
-              <time className="tx-time">{when(m.created_at)}</time>
+              {m.created_at && (
+                <time className="tx-time" dateTime={m.created_at}>
+                  {when(m.created_at)}
+                </time>
+              )}
             </div>
 
             {prose && <div className="tx-prose">{prose}</div>}
