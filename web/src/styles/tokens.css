@@ -29,7 +29,13 @@
 
   --text-primary: #1f2328;
   --text-secondary: #59636e;
-  --text-muted: #6b727a;
+  /* Was #6b727a (4.87:1 on white, but only 4.37:1 on --surface-sunken and
+     4.29:1 on --surface-hover — under the 4.5:1 AA floor the moment this
+     composites over anything but pure white, per the UI audit's M3 finding).
+     Darkened one step so the worst realistic composite (--surface-hover)
+     clears 4.5:1 with margin (4.90:1) — verified against every surface
+     token, not just --surface-base. */
+  --text-muted: #63696f;
   --text-inverted: #ffffff;
 
   --accent: #0969da;
@@ -179,7 +185,11 @@
 
     --text-primary: #c9d1d9;
     --text-secondary: #8b949e;
-    --text-muted: #80878f;
+    /* Was #80878f (5.21:1 on the base surface, but 4.45:1 on --surface-hover
+       — under the 4.5:1 AA floor once composited off the base surface).
+       Lightened one step so the worst realistic composite clears 4.5:1 with
+       margin (4.82:1). */
+    --text-muted: #868d95;
     --text-inverted: #0d1117;
 
     --accent: #58a6ff;
@@ -249,7 +259,9 @@
 
   --text-primary: #c9d1d9;
   --text-secondary: #8b949e;
-  --text-muted: #80878f;
+  /* Same fix as the media-query dark block above — kept in sync so the
+     explicit-dark toggle matches system-dark. */
+  --text-muted: #868d95;
   --text-inverted: #0d1117;
 
   --accent: #58a6ff;

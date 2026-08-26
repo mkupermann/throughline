@@ -341,7 +341,17 @@
   padding: 0 1px;
 }
 
-/* Kind chips always carry their label, so colour is never the only cue. */
+/* Kind chips always carry their label, so colour is never the only cue.
+ *
+ * The `--chart-*` tokens are validated for 3:1 non-text contrast (their
+ * declared purpose: chart lines/points/bars, WCAG 1.4.11) — NOT for the
+ * 4.5:1 normal-text floor (WCAG 1.4.3). Using a chart hue as this chip's
+ * TEXT colour failed AA for half the palette depending on theme (UI audit
+ * full-app C1). Fixed at the token-usage level: the hue now only has to
+ * clear the 3:1 bar it was actually validated for (the border, and a low-
+ * alpha wash background built from it via `color-mix`), while the text
+ * itself is always `--text-primary` — verified >=10:1 against every
+ * wash+surface combination in both themes, see the audit fix-wave notes. */
 .kind {
   flex-shrink: 0;
   padding: 1px 7px;
@@ -349,19 +359,21 @@
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
-  border: 1px solid currentColor;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--kind-hue, var(--chart-other)) 16%, transparent);
+  border: 1px solid var(--kind-hue, var(--chart-other));
 }
-.kind-memory { color: var(--chart-1); }
-.kind-message { color: var(--chart-5); }
-.kind-conversation { color: var(--chart-6); }
-.kind-skill { color: var(--chart-4); }
-.kind-project { color: var(--chart-3); }
-.kind-prompt { color: var(--chart-2); }
+.kind-memory { --kind-hue: var(--chart-1); }
+.kind-message { --kind-hue: var(--chart-5); }
+.kind-conversation { --kind-hue: var(--chart-6); }
+.kind-skill { --kind-hue: var(--chart-4); }
+.kind-project { --kind-hue: var(--chart-3); }
+.kind-prompt { --kind-hue: var(--chart-2); }
 /* Timeline-only kinds (TimelineKind adds these three to Find's six) fold
    into --chart-other, same as any 7th+ category in the categorical palette. */
 .kind-entity,
 .kind-reflection,
-.kind-ingestion { color: var(--chart-other); }
+.kind-ingestion { --kind-hue: var(--chart-other); }
 
 /* ── Table ───────────────────────────────────────────────────────────── */
 .table-wrap {
