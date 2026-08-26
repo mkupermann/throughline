@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import psutil
@@ -115,6 +116,66 @@ def test_poll_task_adopted_task_with_no_pid_stays_running(db_connection, tmp_pat
     task = Q.create_task(
         db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
         run_id="run4", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
+    )
+    Q.set_task_status(db_connection, task["id"], "running")
+
+    poll_task(db_connection, Q.get_task(db_connection, task["id"]))
+
+    assert Q.get_task(db_connection, task["id"])["status"] == "running"
+
+
+@pytest.mark.integration
+def test_poll_task_marks_stale_adopted_task_as_stopped(db_connection, tmp_path: Path):
+    """P1.2: an adopted task (pid=None, register_existing_run) has no
+    process for _pid_alive to check — the only signal that the external
+    pipeline.sh run actually ended is its log_dir going quiet. 30+ minutes
+    of total silence across every file in log_dir is treated as 'ended
+    externally', with an error event naming the inactivity and a terminal
+    'stopped' status — not left showing 'running' forever."""
+    project = Q.create_pm_project(db_connection, name="StaleP")
+    team = Q.create_team(db_connection, name="StaleT")
+    log_dir = tmp_path / ".ai-pipeline" / "stale-run"
+    log_dir.mkdir(parents=True)
+    (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
+
+    two_hours_ago = time.time() - 2 * 60 * 60
+    for f in log_dir.glob("*"):
+        os.utime(f, (two_hours_ago, two_hours_ago))
+
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
+        run_id="stale-run", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
+    )
+    Q.set_task_status(db_connection, task["id"], "running")
+
+    poll_task(db_connection, Q.get_task(db_connection, task["id"]))
+
+    assert Q.get_task(db_connection, task["id"])["status"] == "stopped"
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT message FROM pm_task_events WHERE task_id = %s AND event_type = 'error'",
+            (task["id"],),
+        )
+        messages = [row[0] for row in cur.fetchall()]
+    assert len(messages) == 1
+    assert "extern beendet" in messages[0]
+    assert "120 Minuten" in messages[0]
+
+
+@pytest.mark.integration
+def test_poll_task_adopted_task_with_fresh_mtimes_stays_running(db_connection, tmp_path: Path):
+    """The counterpart to the staleness test above: an adopted task whose
+    log_dir was just touched must not be marked stopped."""
+    project = Q.create_pm_project(db_connection, name="FreshP")
+    team = Q.create_team(db_connection, name="FreshT")
+    log_dir = tmp_path / ".ai-pipeline" / "fresh-run"
+    log_dir.mkdir(parents=True)
+    (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
+
+    task = Q.create_task(
+        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
+        run_id="fresh-run", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 

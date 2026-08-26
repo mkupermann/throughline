@@ -493,6 +493,178 @@ def test_delete_assignment_unknown_id_is_404(client):
     assert resp.status_code == 404
 
 
+def test_delete_project_removes_it(client):
+    project = client.post("/api/pm/projects", json={"name": "DelProjP"}).json()
+
+    resp = client.delete(f"/api/pm/projects/{project['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+    resp = client.get("/api/pm/projects")
+    assert not any(p["id"] == project["id"] for p in resp.json()["projects"])
+
+
+def test_delete_project_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/projects/999999")
+    assert resp.status_code == 404
+
+
+def test_delete_project_with_task_is_409(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "DelProjTaskP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "DelProjTaskT"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "del-proj-run"
+    log_dir.mkdir(parents=True)
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "del-proj-run",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = client.delete(f"/api/pm/projects/{project['id']}")
+    assert resp.status_code == 409
+
+    # The connection must still be usable afterwards — proves the explicit
+    # conn.rollback() actually cleared the aborted transaction.
+    resp = client.get("/api/pm/roles")
+    assert resp.status_code == 200
+
+
+def test_delete_team_removes_it(client):
+    team = client.post("/api/pm/teams", json={"name": "DelTeamP"}).json()
+
+    resp = client.delete(f"/api/pm/teams/{team['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+
+def test_delete_team_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/teams/999999")
+    assert resp.status_code == 404
+
+
+def test_delete_team_with_task_is_409(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "DelTeamTaskP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "DelTeamTaskT"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "del-team-run"
+    log_dir.mkdir(parents=True)
+    resp = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "del-team-run",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = client.delete(f"/api/pm/teams/{team['id']}")
+    assert resp.status_code == 409
+
+    resp = client.get("/api/pm/roles")
+    assert resp.status_code == 200
+
+
+def test_delete_role_removes_it(client):
+    role = client.post("/api/pm/roles", json={"name": "DelRoleP"}).json()
+
+    resp = client.delete(f"/api/pm/roles/{role['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+
+def test_delete_role_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/roles/999999")
+    assert resp.status_code == 404
+
+
+def test_delete_member_removes_it(client):
+    member = client.post(
+        "/api/pm/members", json={"name": "DelMemberP", "member_type": "human"}
+    ).json()
+
+    resp = client.delete(f"/api/pm/members/{member['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+
+def test_delete_member_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/members/999999")
+    assert resp.status_code == 404
+
+
+def test_delete_member_with_eventful_assignment_is_409(client, db_env, tmp_path):
+    """pm_assignments.member_id cascades on member delete, but
+    pm_task_events.assignment_id has no ON DELETE clause — a member whose
+    assignment already has recorded task history must 409, not 500."""
+    import psycopg2
+
+    from throughline.queries import pm as Q
+
+    project = client.post("/api/pm/projects", json={"name": "DelMemberEvP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "DelMemberEvT"}).json()
+    role = client.post("/api/pm/roles", json={"name": "DelMemberEvRole"}).json()
+    member = client.post(
+        "/api/pm/members", json={"name": "DelMemberEvMember", "member_type": "human"}
+    ).json()
+    assignment = client.post(
+        "/api/pm/assignments",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"],
+            "role_id": role["id"], "member_id": member["id"],
+        },
+    ).json()
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        task = Q.create_task(
+            conn, pm_project_id=project["id"], team_id=team["id"], title="t",
+            run_id="del-member-ev-run", repo_path=str(tmp_path), log_dir=str(tmp_path),
+        )
+        Q.add_task_event(
+            conn, task_id=task["id"], step="executor", event_type="log_update",
+            assignment_id=assignment["id"],
+        )
+    finally:
+        conn.close()
+
+    resp = client.delete(f"/api/pm/members/{member['id']}")
+    assert resp.status_code == 409
+
+    resp = client.get("/api/pm/roles")
+    assert resp.status_code == 200
+
+
+def test_delete_task_removes_it(client, tmp_path):
+    project = client.post("/api/pm/projects", json={"name": "DelTaskP"}).json()
+    team = client.post("/api/pm/teams", json={"name": "DelTaskT"}).json()
+
+    log_dir = tmp_path / ".ai-pipeline" / "del-task-run"
+    log_dir.mkdir(parents=True)
+    task = client.post(
+        "/api/pm/tasks/register",
+        json={
+            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "repo_path": str(tmp_path), "run_id": "del-task-run",
+        },
+    ).json()
+
+    resp = client.delete(f"/api/pm/tasks/{task['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+
+    resp = client.get(f"/api/pm/tasks/{task['id']}")
+    assert resp.status_code == 404
+
+
+def test_delete_task_unknown_id_is_404(client):
+    resp = client.delete("/api/pm/tasks/999999")
+    assert resp.status_code == 404
+
+
 def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     """The pm watch loop (Task 13) must run for the lifetime of the app and
     be cancelled cleanly on shutdown — no live server or 10s sleep needed to

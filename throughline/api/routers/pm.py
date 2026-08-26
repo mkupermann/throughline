@@ -233,6 +233,97 @@ def patch_project(
     return row
 
 
+@router.delete("/pm/projects/{project_id}")
+def delete_project(project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            deleted = Q.delete_pm_project(conn, project_id)
+        except psycopg2.IntegrityError as exc:
+            # pm_tasks.pm_project_id has no ON DELETE clause (RESTRICT by
+            # default) — a project with any task still on record blocks
+            # this delete rather than silently orphaning the task's history.
+            conn.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Projekt hat noch Tasks — erst Tasks löschen",
+            ) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no project with id {project_id}")
+    return {"deleted": True}
+
+
+@router.delete("/pm/teams/{team_id}")
+def delete_team(team_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            deleted = Q.delete_team(conn, team_id)
+        except psycopg2.IntegrityError as exc:
+            # pm_tasks.team_id has no ON DELETE clause either — same
+            # RESTRICT story as the project delete above.
+            conn.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Team hat noch Tasks — erst Tasks löschen",
+            ) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no team with id {team_id}")
+    return {"deleted": True}
+
+
+@router.delete("/pm/roles/{role_id}")
+def delete_role(role_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            deleted = Q.delete_role(conn, role_id)
+        except psycopg2.IntegrityError as exc:
+            # pm_assignments.role_id cascades, but pm_task_events
+            # .assignment_id does not — a role whose assignments already
+            # have recorded task history blocks the delete instead of
+            # crashing with a raw 500.
+            conn.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Rolle wird noch von Task-Verlauf referenziert — kann nicht gelöscht werden",
+            ) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no role with id {role_id}")
+    return {"deleted": True}
+
+
+@router.delete("/pm/members/{member_id}")
+def delete_member(member_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            deleted = Q.delete_member(conn, member_id)
+        except psycopg2.IntegrityError as exc:
+            # Same story as delete_role: pm_assignments.member_id cascades,
+            # pm_task_events.assignment_id (RESTRICT) does not.
+            conn.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Mitglied wird noch von Task-Verlauf referenziert — kann nicht gelöscht werden",
+            ) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no member with id {member_id}")
+    return {"deleted": True}
+
+
+@router.delete("/pm/tasks/{task_id}")
+def delete_task(task_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    with connection(settings) as conn:
+        try:
+            deleted = Q.delete_task(conn, task_id)
+        except psycopg2.IntegrityError as exc:
+            conn.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Task kann nicht gelöscht werden — noch referenziert",
+            ) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no task with id {task_id}")
+    return {"deleted": True}
+
+
 @router.get("/pm/overview")
 def overview(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:

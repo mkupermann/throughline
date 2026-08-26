@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 
 import psutil
@@ -27,6 +28,12 @@ _VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)(?::\s*(.*))?", re.MULTILINE)
 # Aider prints e.g. "Tokens: 3.4k sent, 130 received." — the "k" suffix
 # needs its own branch since int() can't parse it directly.
 _TOKENS_RE = re.compile(r"Tokens:\s*([\d.]+)(k)?\s*sent,\s*([\d.]+)(k)?\s*received")
+
+#: How long a pid=None (adopted) task's log_dir may sit untouched before the
+#: watcher decides the external pipeline.sh run ended without anyone telling
+#: Throughline — the razor1911-demo-tribute task that inspired this stayed
+#: "running" for days after its actual pipeline.sh process was long gone.
+_STALE_THRESHOLD_S = 30 * 60
 
 
 def parse_spec(log_dir: Path) -> str | None:
@@ -71,6 +78,21 @@ def extract_aider_tokens(log_text: str) -> int:
     for sent_val, sent_k, recv_val, recv_k in _TOKENS_RE.findall(log_text):
         total += _to_int(sent_val, sent_k) + _to_int(recv_val, recv_k)
     return total
+
+
+def _log_dir_staleness_seconds(log_dir: Path) -> float:
+    """Seconds since the most recently modified file directly in *log_dir*
+    (non-recursive — a subdirectory itself, e.g. the context/ dir, doesn't
+    count, only files). A missing log_dir, or one with no files in it at
+    all, is treated as maximally stale (`inf`) rather than raising or being
+    silently skipped — an external run's directory disappearing is itself a
+    strong signal the run is over."""
+    if not log_dir.is_dir():
+        return float("inf")
+    mtimes = [f.stat().st_mtime for f in log_dir.glob("*") if f.is_file()]
+    if not mtimes:
+        return float("inf")
+    return time.time() - max(mtimes)
 
 
 def _pid_alive(pid: int | None) -> bool:
@@ -225,6 +247,18 @@ def poll_task(conn, task: dict) -> None:
             Q.set_task_status(conn, task_id, "fail")
         else:
             Q.set_task_status(conn, task_id, "crashed")
+    elif task["pid"] is None:
+        # Adopted tasks (register_existing_run, pid=None) have no process
+        # for _pid_alive to check — the only signal that the external
+        # pipeline.sh run has actually ended is its log_dir going quiet.
+        stale_seconds = _log_dir_staleness_seconds(log_dir)
+        if stale_seconds > _STALE_THRESHOLD_S:
+            minutes = int(stale_seconds // 60)
+            Q.add_task_event(
+                conn, task_id=task_id, step="executor", event_type="error",
+                message=f"Lauf extern beendet — keine Aktivität seit {minutes} Minuten",
+            )
+            Q.set_task_status(conn, task_id, "stopped")
 
 
 def poll_all_running(conn) -> None:

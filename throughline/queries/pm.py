@@ -239,6 +239,47 @@ def delete_assignment(conn, assignment_id: int) -> bool:
     return affected > 0
 
 
+# ── Deletes (catalog + project + task) ──────────────────────────────────────
+#
+# Every function here is a plain DELETE that returns whether a row existed
+# (False, no exception, means the router turns that into a 404). None of
+# these catch psycopg2.IntegrityError themselves — a FK RESTRICT violation
+# (pm_tasks.pm_project_id/team_id have no ON DELETE clause; pm_task_events
+# .assignment_id likewise) is left to propagate so the router can catch it
+# the same way /pm/tasks/register already does, roll the connection back,
+# and answer 409 with a message naming what still references the row.
+
+
+def delete_pm_project(conn, project_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_projects WHERE id = %s", (project_id,))
+    conn.commit()
+    return affected > 0
+
+
+def delete_team(conn, team_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_teams WHERE id = %s", (team_id,))
+    conn.commit()
+    return affected > 0
+
+
+def delete_role(conn, role_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_roles WHERE id = %s", (role_id,))
+    conn.commit()
+    return affected > 0
+
+
+def delete_member(conn, member_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_members WHERE id = %s", (member_id,))
+    conn.commit()
+    return affected > 0
+
+
+def delete_task(conn, task_id: int) -> bool:
+    affected = execute(conn, "DELETE FROM pm_tasks WHERE id = %s", (task_id,))
+    conn.commit()
+    return affected > 0
+
+
 def resolve_assignment(conn, assignment_id: int) -> dict[str, Any]:
     """The effective ai_tool/model/skills/instructions/budgets for one
     assignment: role default with a member override for AI binding, a union
