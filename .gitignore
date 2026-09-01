@@ -62,6 +62,10 @@ web/dist/
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
 
+# Isolated Codex feature worktrees. They protect the user's active checkout
+# and its uncommitted local configuration from implementation changes.
+.worktrees/
+
 # Knowledge-graph build output (~9 MB of derived nodes/edges, rebuilt on demand
 # from the working tree — see .graphifyignore for what it skips)
 graphify-out/
