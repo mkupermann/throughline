@@ -8,11 +8,23 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+POSIX_SHELL_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="requires a POSIX shell and Unix filesystem semantics; covered by Linux CI",
+)
+
+
+def _host_identity() -> tuple[str, str]:
+    uid = str(os.getuid()) if hasattr(os, "getuid") else "1000"
+    gid = str(os.getgid()) if hasattr(os, "getgid") else "1000"
+    return uid, gid
 
 
 @pytest.fixture()
@@ -112,6 +124,31 @@ def test_dockerfile_handles_an_existing_gid_without_assuming_its_group_name() ->
     assert "install -d -m 700 -o throughline -g throughline /var/lib/throughline/backups" not in dockerfile
 
 
+def test_dockerfile_normalises_shell_scripts_after_copying_the_build_context() -> None:
+    """CRLF checkout bytes must not reach shell entry points in the image."""
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    copy_context = dockerfile.index("COPY . .")
+    normalise_scripts = dockerfile.index("find . -type f -name '*.sh'")
+    install_package = dockerfile.index("pip install -e .")
+
+    assert copy_context < normalise_scripts < install_package
+    assert "sed -i 's/\\r$//'" in dockerfile[normalise_scripts:install_package]
+
+
+def test_ci_checks_every_tracked_shell_script(ci_workflow: dict) -> None:
+    """Packaged shell entry points outside scripts/ need the same syntax gate."""
+    syntax_step = next(
+        step
+        for step in ci_workflow["jobs"]["shell-syntax"]["steps"]
+        if step.get("name") == "bash -n on every shell script"
+    )
+
+    command = syntax_step["run"]
+    assert "git ls-files '*.sh'" in command
+    assert "scripts/*.sh" not in command
+
+
 @pytest.mark.integration
 def test_docker_build_accepts_a_colliding_host_gid() -> None:
     """The application image must build for the common macOS numeric GID 20."""
@@ -138,6 +175,76 @@ def test_docker_build_accepts_a_colliding_host_gid() -> None:
         capture_output=True,
         text=True,
     )
+
+
+@pytest.mark.integration
+def test_docker_image_runs_a_crlf_normalised_packaged_shell_script(tmp_path: Path) -> None:
+    """A CRLF checkout must still yield a runnable packaged backup script."""
+    if shutil.which("docker") is None:
+        pytest.skip("Docker CLI is not installed")
+    probe = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    if probe.returncode:
+        pytest.skip("Docker daemon is not available to this test user")
+
+    context = tmp_path / "crlf-context"
+    shutil.copytree(
+        ROOT,
+        context,
+        ignore=shutil.ignore_patterns(
+            ".git", ".pytest_cache", ".venv", ".superpowers", "__pycache__", "node_modules", "*.pyc"
+        ),
+    )
+    script = context / "throughline" / "shell" / "backup.sh"
+    script.write_bytes(script.read_bytes().replace(b"\n", b"\r\n"))
+    assert b"\r\n" in script.read_bytes()
+
+    fake_pg_dump = context / ".task1-test-pg-dump.sh"
+    fake_pg_dump.write_bytes(b"#!/bin/sh\nprintf 'COPY sample (id) FROM stdin;\\n1\\n\\\\.\\n'\n")
+    image_tag = f"throughline-crlf-runtime-test:{uuid4().hex}"
+    image_built = False
+    try:
+        subprocess.run(
+            ["docker", "build", "--file", str(ROOT / "Dockerfile"), "--tag", image_tag, str(context)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        image_built = True
+
+        runtime = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--entrypoint",
+                "/bin/bash",
+                image_tag,
+                "-c",
+                """
+set -eu
+python -c "from pathlib import Path; assert b'\\r' not in Path('/app/throughline/shell/backup.sh').read_bytes()"
+cp /app/.task1-test-pg-dump.sh /tmp/pg_dump
+chmod +x /tmp/pg_dump
+CLAUDE_MEMORY_BACKUP_DIR=/tmp/backups \\
+CLAUDE_MEMORY_BACKUP_MIN_BYTES=1 \\
+PG_DUMP_BIN=/tmp/pg_dump \\
+bash /app/throughline/shell/backup.sh
+test -n "$(find /tmp/backups -type f -name '*.sql.gz' -print -quit)"
+""",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert runtime.returncode == 0, runtime.stderr
+    finally:
+        if image_built:
+            subprocess.run(
+                ["docker", "image", "rm", "--force", image_tag],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
 
 def test_current_outbound_templates_do_not_advertise_an_unused_anthropic_key() -> None:
@@ -171,6 +278,7 @@ def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: 
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
     )
 
     values = dict(
@@ -178,12 +286,14 @@ def test_compose_bootstrap_creates_private_self_contained_environment(tmp_path: 
         for line in env_file.read_text(encoding="utf-8").splitlines()
         if line and not line.startswith("#")
     )
-    assert values["THROUGHLINE_UID"] == str(os.getuid())
-    assert values["THROUGHLINE_GID"] == str(os.getgid())
+    expected_uid, expected_gid = _host_identity()
+    assert values["THROUGHLINE_UID"] == expected_uid
+    assert values["THROUGHLINE_GID"] == expected_gid
     assert values["POSTGRES_DB"] == "throughline"
     assert values["POSTGRES_USER"] == "throughline"
     assert values["POSTGRES_PASSWORD"] not in {"", "replace-with-a-unique-local-secret"}
-    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
 
     subprocess.run(
         ["docker", "compose", "--env-file", str(env_file), "config", "--quiet"],
@@ -207,14 +317,17 @@ def test_compose_bootstrap_refreshes_stale_identity_without_rotating_secret(tmp_
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
     )
 
     values = dict(line.split("=", 1) for line in env_file.read_text(encoding="utf-8").splitlines())
     assert values["POSTGRES_PASSWORD"] == "preserve-this-secret"
-    assert values["THROUGHLINE_UID"] == str(os.getuid())
-    assert values["THROUGHLINE_GID"] == str(os.getgid())
+    expected_uid, expected_gid = _host_identity()
+    assert values["THROUGHLINE_UID"] == expected_uid
+    assert values["THROUGHLINE_GID"] == expected_gid
 
 
+@POSIX_SHELL_ONLY
 def test_credential_rotation_uses_legacy_connection_and_never_exposes_new_secret_in_argv(
     tmp_path: Path,
 ) -> None:
@@ -253,6 +366,7 @@ def test_credential_rotation_uses_legacy_connection_and_never_exposes_new_secret
     assert statement == "ALTER ROLE CURRENT_USER PASSWORD 'new''password';"
 
 
+@POSIX_SHELL_ONLY
 def test_credential_rotation_refuses_to_rename_an_existing_role_or_database(tmp_path: Path) -> None:
     """Password rotation must not claim to migrate immutable Postgres names."""
     fake_psql = tmp_path / "psql"
@@ -395,6 +509,7 @@ def test_systemd_ingest_uses_the_packaged_cli_and_shared_environment() -> None:
 
 
 @pytest.mark.parametrize("script", ["scripts/backup.sh", "throughline/shell/backup.sh"])
+@POSIX_SHELL_ONLY
 def test_backup_creates_owner_only_dump_files(script: str, tmp_path: Path) -> None:
     """A permissive umask would leak a full database dump to local users."""
     fake_bin = tmp_path / "bin"
@@ -421,6 +536,7 @@ def test_backup_creates_owner_only_dump_files(script: str, tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("script", ["scripts/backup.sh", "throughline/shell/backup.sh"])
+@POSIX_SHELL_ONLY
 def test_backup_discovers_pg_dump_on_path_without_a_homebrew_location(script: str, tmp_path: Path) -> None:
     """Packaged backup must work on Linux and non-Homebrew installations."""
     fake_bin = tmp_path / "bin"
@@ -529,9 +645,11 @@ def test_the_compose_bootstrap_runs_where_there_is_no_getuid(monkeypatch, tmp_pa
     import os as os_module
 
     from scripts import init_compose_env
+    from throughline.adapters import cline
 
     monkeypatch.delattr(os_module, "getuid", raising=False)
     monkeypatch.delattr(os_module, "getgid", raising=False)
+    monkeypatch.setattr(cline, "_candidate_task_roots", lambda: [])
 
     env_file = tmp_path / ".env"
     init_compose_env.main(["--env-file", str(env_file)])
@@ -582,9 +700,11 @@ def test_the_bootstrap_creates_a_placeholder_when_cline_is_absent(tmp_path):
 
 def test_the_bootstrap_writes_the_cline_directory_into_the_env(monkeypatch, tmp_path):
     from scripts import init_compose_env
+    from throughline.adapters import cline
 
     env_file = tmp_path / ".env"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cline, "_candidate_task_roots", lambda: [])
     init_compose_env.main(["--env-file", str(env_file)])
 
     assert "THROUGHLINE_CLINE_DIR=" in env_file.read_text(encoding="utf-8")

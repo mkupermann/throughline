@@ -46,9 +46,14 @@ def create_role(
         RETURNING *
         """,
         (
-            name, description, default_ai_tool, default_ai_model,
-            skill_refs or [], instructions,
-            Json(document_refs or []), token_budget,
+            name,
+            description,
+            default_ai_tool,
+            default_ai_model,
+            skill_refs or [],
+            instructions,
+            Json(document_refs or []),
+            token_budget,
         ),
     )
     conn.commit()
@@ -80,8 +85,13 @@ def create_member(
         RETURNING *
         """,
         (
-            name, member_type, Json(contact_info or {}), skill_refs or [],
-            instructions, Json(document_refs or []), token_budget,
+            name,
+            member_type,
+            Json(contact_info or {}),
+            skill_refs or [],
+            instructions,
+            Json(document_refs or []),
+            token_budget,
         ),
     )
     conn.commit()
@@ -93,12 +103,15 @@ def list_members(conn) -> list[Row]:
 
 
 def create_team(
-    conn, *, name: str, description: str | None = None, token_budget: int | None = None,
+    conn,
+    *,
+    name: str,
+    description: str | None = None,
+    token_budget: int | None = None,
 ) -> dict[str, Any]:
     row = one(
         conn,
-        "INSERT INTO pm_teams (name, description, token_budget) "
-        "VALUES (%s, %s, %s) RETURNING *",
+        "INSERT INTO pm_teams (name, description, token_budget) " "VALUES (%s, %s, %s) RETURNING *",
         (name, description, token_budget),
     )
     conn.commit()
@@ -113,12 +126,15 @@ def list_teams(conn) -> list[Row]:
 
 
 def create_pm_project(
-    conn, *, name: str, description: str | None = None, token_budget: int | None = None,
+    conn,
+    *,
+    name: str,
+    description: str | None = None,
+    token_budget: int | None = None,
 ) -> dict[str, Any]:
     row = one(
         conn,
-        "INSERT INTO pm_projects (name, description, token_budget) "
-        "VALUES (%s, %s, %s) RETURNING *",
+        "INSERT INTO pm_projects (name, description, token_budget) " "VALUES (%s, %s, %s) RETURNING *",
         (name, description, token_budget),
     )
     conn.commit()
@@ -132,8 +148,7 @@ def list_pm_projects(conn) -> list[Row]:
 def link_project_repo(conn, pm_project_id: int, project_id: int) -> None:
     execute(
         conn,
-        "INSERT INTO pm_project_repos (pm_project_id, project_id) "
-        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        "INSERT INTO pm_project_repos (pm_project_id, project_id) " "VALUES (%s, %s) ON CONFLICT DO NOTHING",
         (pm_project_id, project_id),
     )
     conn.commit()
@@ -142,8 +157,7 @@ def link_project_repo(conn, pm_project_id: int, project_id: int) -> None:
 def link_project_team(conn, pm_project_id: int, team_id: int) -> None:
     execute(
         conn,
-        "INSERT INTO pm_project_teams (pm_project_id, team_id) "
-        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        "INSERT INTO pm_project_teams (pm_project_id, team_id) " "VALUES (%s, %s) ON CONFLICT DO NOTHING",
         (pm_project_id, team_id),
     )
     conn.commit()
@@ -152,8 +166,7 @@ def link_project_team(conn, pm_project_id: int, team_id: int) -> None:
 def link_team_role(conn, team_id: int, role_id: int) -> None:
     execute(
         conn,
-        "INSERT INTO pm_team_roles (team_id, role_id) "
-        "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        "INSERT INTO pm_team_roles (team_id, role_id) " "VALUES (%s, %s) ON CONFLICT DO NOTHING",
         (team_id, role_id),
     )
     conn.commit()
@@ -293,13 +306,10 @@ def adopt_repo_project(conn, project_id: int) -> dict[str, Any]:
     if project is None:
         raise ValueError(f"no repo project with id {project_id}")
 
-    existing = one(
-        conn, "SELECT pm_project_id FROM pm_project_repos WHERE project_id = %s", (project_id,)
-    )
+    existing = one(conn, "SELECT pm_project_id FROM pm_project_repos WHERE project_id = %s", (project_id,))
     if existing is not None:
         raise RepoProjectAlreadyLinked(
-            f"repo project {project_id} is already linked to "
-            f"pm_project {existing['pm_project_id']}"
+            f"repo project {project_id} is already linked to " f"pm_project {existing['pm_project_id']}"
         )
 
     pm_project = create_pm_project(conn, name=project["name"], description=project["description"])
@@ -549,8 +559,7 @@ def add_task_event(
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
-        (task_id, assignment_id, step, iteration, event_type, message,
-         detail_path, tokens_used),
+        (task_id, assignment_id, step, iteration, event_type, message, detail_path, tokens_used),
     )
     conn.commit()
     return row
@@ -582,15 +591,13 @@ def set_task_status(conn, task_id: int, status: str) -> None:
     if status == "running":
         execute(
             conn,
-            "UPDATE pm_tasks SET status = %s, started_at = COALESCE(started_at, now()) "
-            "WHERE id = %s",
+            "UPDATE pm_tasks SET status = %s, started_at = COALESCE(started_at, now()) " "WHERE id = %s",
             (status, task_id),
         )
     elif status in ("pass", "fail", "budget_exceeded", "crashed", "stopped"):
         execute(
             conn,
-            "UPDATE pm_tasks SET status = %s, ended_at = COALESCE(ended_at, now()) "
-            "WHERE id = %s",
+            "UPDATE pm_tasks SET status = %s, ended_at = COALESCE(ended_at, now()) " "WHERE id = %s",
             (status, task_id),
         )
     else:
@@ -643,10 +650,7 @@ def get_skill_names(conn, ids: list[int]) -> list[str]:
     agent's context file."""
     if not ids:
         return []
-    return [
-        r["name"]
-        for r in rows(conn, "SELECT name FROM skills WHERE id = ANY(%s) ORDER BY name", (ids,))
-    ]
+    return [r["name"] for r in rows(conn, "SELECT name FROM skills WHERE id = ANY(%s) ORDER BY name", (ids,))]
 
 
 def overview(conn) -> dict[str, Any]:
@@ -768,6 +772,7 @@ def list_skills(conn) -> list[Row]:
 # source degrades to an empty/static list rather than failing the whole
 # endpoint — one tool being unreachable should not block picking another.
 
+
 def _normalize_ollama_url(raw: str) -> str:
     """Ollama's own convention allows OLLAMA_HOST to be a bare host
     ("127.0.0.1"), host:port, or a full URL — the Windows installer sets the
@@ -840,7 +845,13 @@ def _vibe_agent_profiles() -> list[str]:
 # credentials into the spawned pipeline's environment.
 
 _PROVIDER_TYPES = (
-    "openai", "anthropic", "mistral", "google", "openrouter", "ollama", "openai_compatible",
+    "openai",
+    "anthropic",
+    "mistral",
+    "google",
+    "openrouter",
+    "ollama",
+    "openai_compatible",
 )
 
 #: Base URL used when a provider row leaves base_url empty. ollama/
@@ -907,9 +918,16 @@ def delete_ai_provider(conn, provider_id: int) -> bool:
     return affected > 0
 
 
-_PROVIDER_COLUMNS = frozenset({
-    "name", "provider_type", "base_url", "api_key", "custom_models", "enabled",
-})
+_PROVIDER_COLUMNS = frozenset(
+    {
+        "name",
+        "provider_type",
+        "base_url",
+        "api_key",
+        "custom_models",
+        "enabled",
+    }
+)
 _PROVIDER_JSON_COLUMNS = frozenset({"custom_models"})
 
 
@@ -965,7 +983,8 @@ def _provider_model_ids(provider: dict[str, Any]) -> tuple[list[str], bool, str 
         base = base_url or _PROVIDER_DEFAULT_BASE["google"]
         url = f"{base}/v1beta/models?key={urllib.parse.quote(api_key)}"
         return _fetch_json_models(
-            url, {},
+            url,
+            {},
             lambda d: [str(m.get("name", "")).removeprefix("models/") for m in d.get("models", [])],
         )
 
@@ -1031,13 +1050,15 @@ def ai_catalog(conn) -> dict[str, Any]:
         live_ids, unavailable, _error = _provider_model_ids(provider)
         prefix = _PROVIDER_LITELLM_PREFIX[provider["provider_type"]]
         models = sorted({f"{prefix}{m}" for m in live_ids} | {f"{prefix}{m}" for m in provider["custom_models"]})
-        tools.append({
-            "tool": f"provider:{provider['id']}",
-            "label": f"{provider['name']} ({provider['provider_type']})",
-            "models": models,
-            "unavailable": unavailable,
-            "provider_id": provider["id"],
-        })
+        tools.append(
+            {
+                "tool": f"provider:{provider['id']}",
+                "label": f"{provider['name']} ({provider['provider_type']})",
+                "models": models,
+                "unavailable": unavailable,
+                "provider_id": provider["id"],
+            }
+        )
     return {"tools": tools}
 
 
@@ -1087,10 +1108,18 @@ def _update_row(
     return row
 
 
-_ROLE_COLUMNS = frozenset({
-    "name", "description", "default_ai_tool", "default_ai_model",
-    "skill_refs", "instructions", "document_refs", "token_budget",
-})
+_ROLE_COLUMNS = frozenset(
+    {
+        "name",
+        "description",
+        "default_ai_tool",
+        "default_ai_model",
+        "skill_refs",
+        "instructions",
+        "document_refs",
+        "token_budget",
+    }
+)
 _ROLE_JSON_COLUMNS = frozenset({"document_refs"})
 
 
@@ -1098,10 +1127,17 @@ def update_role(conn, role_id: int, **fields: Any) -> dict[str, Any] | None:
     return _update_row(conn, "pm_roles", role_id, fields, _ROLE_COLUMNS, _ROLE_JSON_COLUMNS)
 
 
-_MEMBER_COLUMNS = frozenset({
-    "name", "member_type", "contact_info", "skill_refs", "instructions",
-    "document_refs", "token_budget",
-})
+_MEMBER_COLUMNS = frozenset(
+    {
+        "name",
+        "member_type",
+        "contact_info",
+        "skill_refs",
+        "instructions",
+        "document_refs",
+        "token_budget",
+    }
+)
 _MEMBER_JSON_COLUMNS = frozenset({"contact_info", "document_refs"})
 
 
@@ -1125,7 +1161,13 @@ def update_team(conn, team_id: int, **fields: Any) -> dict[str, Any] | None:
 
 
 def register_existing_run(
-    conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str, run_id: str,
+    conn,
+    *,
+    pm_project_id: int,
+    team_id: int,
+    title: str,
+    repo_path: str,
+    run_id: str,
 ) -> dict[str, Any]:
     """Adopt a pipeline.sh run Throughline did not launch — e.g. one started
     by hand from the terminal, like razor1911-demo-tribute on 2026-08-25.
@@ -1147,8 +1189,14 @@ def register_existing_run(
         raise FileNotFoundError(f"log directory does not exist: {log_dir}")
 
     task = create_task(
-        conn, pm_project_id=pm_project_id, team_id=team_id, title=title,
-        run_id=run_id, repo_path=repo_path, log_dir=str(log_dir), pid=None,
+        conn,
+        pm_project_id=pm_project_id,
+        team_id=team_id,
+        title=title,
+        run_id=run_id,
+        repo_path=repo_path,
+        log_dir=str(log_dir),
+        pid=None,
     )
     set_task_status(conn, task["id"], "running")
     return get_task(conn, task["id"])

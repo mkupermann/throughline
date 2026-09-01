@@ -29,18 +29,14 @@ def test_latest_iteration_no_files_is_zero(tmp_path: Path):
 
 
 def test_parse_verdict_pass(tmp_path: Path):
-    (tmp_path / "verdict-1.txt").write_text(
-        "Alles erfuellt.\n\nVERDICT: PASS", encoding="utf-8"
-    )
+    (tmp_path / "verdict-1.txt").write_text("Alles erfuellt.\n\nVERDICT: PASS", encoding="utf-8")
     status, message = parse_verdict(tmp_path, 1)
     assert status == "pass"
     assert "VERDICT: PASS" in message
 
 
 def test_parse_verdict_fail(tmp_path: Path):
-    (tmp_path / "verdict-2.txt").write_text(
-        "Test schlaegt fehl.\n\nVERDICT: FAIL: assert fehlt", encoding="utf-8"
-    )
+    (tmp_path / "verdict-2.txt").write_text("Test schlaegt fehl.\n\nVERDICT: FAIL: assert fehlt", encoding="utf-8")
     status, message = parse_verdict(tmp_path, 2)
     assert status == "fail"
     assert "assert fehlt" in message
@@ -57,9 +53,7 @@ def test_parse_verdict_tolerates_cp1252_bytes(tmp_path: Path):
     these, or the watcher's backfill crashes every tick. And now that the
     decoder tries cp1252 before falling back to replacement, the umlaut
     itself must come through correctly rather than as U+FFFD (mojibake)."""
-    (tmp_path / "verdict-3.txt").write_bytes(
-        b"Pr\xfcfung fehlgeschlagen.\n\nVERDICT: FAIL: Umlaut-Test"
-    )
+    (tmp_path / "verdict-3.txt").write_bytes(b"Pr\xfcfung fehlgeschlagen.\n\nVERDICT: FAIL: Umlaut-Test")
     status, message = parse_verdict(tmp_path, 3)
     assert status == "fail"
     assert "Umlaut-Test" in message

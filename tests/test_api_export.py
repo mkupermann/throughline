@@ -30,8 +30,9 @@ def test_the_default_destination_is_offered_but_nothing_is_written(client, tmp_p
     assert not any(tmp_path.iterdir())
 
 
-def test_a_destination_outside_the_root_is_refused_with_a_reason(client):
-    r = client.post("/api/export/markdown", json={"out": "/etc/throughline"})
+def test_a_destination_outside_the_root_is_refused_with_a_reason(client, tmp_path):
+    outside = tmp_path.parent / "outside-throughline"
+    r = client.post("/api/export/markdown", json={"out": str(outside)})
     assert r.status_code == 400
     assert "outside" in r.json()["detail"]
 

@@ -104,7 +104,9 @@ def test_launch_team_not_linked_is_404(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/launch",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
             "repo_path": str(repo),
         },
     )
@@ -118,8 +120,11 @@ def test_register_rejects_path_traversal_run_id(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "../../etc/passwd",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "../../etc/passwd",
         },
     )
     assert resp.status_code == 400
@@ -132,8 +137,11 @@ def test_register_missing_log_dir_is_404(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "never-existed",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "never-existed",
         },
     )
     assert resp.status_code == 404
@@ -151,8 +159,11 @@ def test_register_duplicate_run_is_409(client, tmp_path):
     log_dir.mkdir(parents=True)
 
     body = {
-        "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-        "repo_path": str(tmp_path), "run_id": "dup-run",
+        "pm_project_id": project["id"],
+        "team_id": team["id"],
+        "title": "t",
+        "repo_path": str(tmp_path),
+        "run_id": "dup-run",
     }
     first = client.post("/api/pm/tasks/register", json=body)
     assert first.status_code == 200
@@ -177,8 +188,11 @@ def test_log_excerpt_happy_path_with_tail_truncation(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "log-run",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "log-run",
         },
     )
     assert resp.status_code == 200
@@ -207,8 +221,11 @@ def test_log_excerpt_missing_iteration_file_is_404(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "log-run2",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "log-run2",
         },
     )
     assert resp.status_code == 200
@@ -229,8 +246,11 @@ def test_log_excerpt_no_verdict_yet_is_null(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "log-run3",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "log-run3",
         },
     )
     task_id = resp.json()["id"]
@@ -431,15 +451,16 @@ def test_list_assignments_for_project_includes_names(client):
     project = client.post("/api/pm/projects", json={"name": "AssignApiP"}).json()
     team = client.post("/api/pm/teams", json={"name": "AssignApiT"}).json()
     role = client.post("/api/pm/roles", json={"name": "AssignApiRole"}).json()
-    member = client.post(
-        "/api/pm/members", json={"name": "AssignApiMember", "member_type": "human"}
-    ).json()
+    member = client.post("/api/pm/members", json={"name": "AssignApiMember", "member_type": "human"}).json()
 
     created = client.post(
         "/api/pm/assignments",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"],
-            "role_id": role["id"], "member_id": member["id"], "ai_tool": "aider",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "role_id": role["id"],
+            "member_id": member["id"],
+            "ai_tool": "aider",
         },
     ).json()
 
@@ -468,15 +489,15 @@ def test_delete_assignment_removes_it(client):
     project = client.post("/api/pm/projects", json={"name": "DelAssignApiP"}).json()
     team = client.post("/api/pm/teams", json={"name": "DelAssignApiT"}).json()
     role = client.post("/api/pm/roles", json={"name": "DelAssignApiRole"}).json()
-    member = client.post(
-        "/api/pm/members", json={"name": "DelAssignApiMember", "member_type": "human"}
-    ).json()
+    member = client.post("/api/pm/members", json={"name": "DelAssignApiMember", "member_type": "human"}).json()
 
     created = client.post(
         "/api/pm/assignments",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"],
-            "role_id": role["id"], "member_id": member["id"],
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "role_id": role["id"],
+            "member_id": member["id"],
         },
     ).json()
 
@@ -518,8 +539,11 @@ def test_delete_project_with_task_is_409(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "del-proj-run",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "del-proj-run",
         },
     )
     assert resp.status_code == 200
@@ -555,8 +579,11 @@ def test_delete_team_with_task_is_409(client, tmp_path):
     resp = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "del-team-run",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "del-team-run",
         },
     )
     assert resp.status_code == 200
@@ -582,9 +609,7 @@ def test_delete_role_unknown_id_is_404(client):
 
 
 def test_delete_member_removes_it(client):
-    member = client.post(
-        "/api/pm/members", json={"name": "DelMemberP", "member_type": "human"}
-    ).json()
+    member = client.post("/api/pm/members", json={"name": "DelMemberP", "member_type": "human"}).json()
 
     resp = client.delete(f"/api/pm/members/{member['id']}")
     assert resp.status_code == 200
@@ -607,25 +632,33 @@ def test_delete_member_with_eventful_assignment_is_409(client, db_env, tmp_path)
     project = client.post("/api/pm/projects", json={"name": "DelMemberEvP"}).json()
     team = client.post("/api/pm/teams", json={"name": "DelMemberEvT"}).json()
     role = client.post("/api/pm/roles", json={"name": "DelMemberEvRole"}).json()
-    member = client.post(
-        "/api/pm/members", json={"name": "DelMemberEvMember", "member_type": "human"}
-    ).json()
+    member = client.post("/api/pm/members", json={"name": "DelMemberEvMember", "member_type": "human"}).json()
     assignment = client.post(
         "/api/pm/assignments",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"],
-            "role_id": role["id"], "member_id": member["id"],
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "role_id": role["id"],
+            "member_id": member["id"],
         },
     ).json()
 
     conn = psycopg2.connect(**db_env)
     try:
         task = Q.create_task(
-            conn, pm_project_id=project["id"], team_id=team["id"], title="t",
-            run_id="del-member-ev-run", repo_path=str(tmp_path), log_dir=str(tmp_path),
+            conn,
+            pm_project_id=project["id"],
+            team_id=team["id"],
+            title="t",
+            run_id="del-member-ev-run",
+            repo_path=str(tmp_path),
+            log_dir=str(tmp_path),
         )
         Q.add_task_event(
-            conn, task_id=task["id"], step="executor", event_type="log_update",
+            conn,
+            task_id=task["id"],
+            step="executor",
+            event_type="log_update",
             assignment_id=assignment["id"],
         )
     finally:
@@ -647,8 +680,11 @@ def test_delete_task_removes_it(client, tmp_path):
     task = client.post(
         "/api/pm/tasks/register",
         json={
-            "pm_project_id": project["id"], "team_id": team["id"], "title": "t",
-            "repo_path": str(tmp_path), "run_id": "del-task-run",
+            "pm_project_id": project["id"],
+            "team_id": team["id"],
+            "title": "t",
+            "repo_path": str(tmp_path),
+            "run_id": "del-task-run",
         },
     ).json()
 
@@ -694,8 +730,7 @@ def _seed_repo_project(db_env, *, name: str, project_path: str, sessions: int = 
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO projects (name, description, status) "
-                "VALUES (%s, %s, 'active') RETURNING id",
+                "INSERT INTO projects (name, description, status) " "VALUES (%s, %s, 'active') RETURNING id",
                 (name, f"{name} description"),
             )
             project_id = cur.fetchone()[0]
@@ -864,16 +899,12 @@ def test_create_list_patch_delete_ai_provider_never_leaks_api_key(client):
 
 
 def test_ai_provider_unknown_type_is_422(client):
-    resp = client.post(
-        "/api/pm/ai-providers", json={"name": "Bad", "provider_type": "not-a-real-provider"}
-    )
+    resp = client.post("/api/pm/ai-providers", json={"name": "Bad", "provider_type": "not-a-real-provider"})
     assert resp.status_code == 422
 
 
 def test_ai_provider_patch_unknown_field_is_422(client):
-    provider = client.post(
-        "/api/pm/ai-providers", json={"name": "PatchProv", "provider_type": "openai"}
-    ).json()
+    provider = client.post("/api/pm/ai-providers", json={"name": "PatchProv", "provider_type": "openai"}).json()
     resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"not_a_real_field": "x"})
     assert resp.status_code == 422
 
@@ -900,16 +931,12 @@ def test_ai_provider_ollama_requires_base_url_on_create(client):
 
 
 def test_ai_provider_openai_compatible_requires_base_url_on_create(client):
-    resp = client.post(
-        "/api/pm/ai-providers", json={"name": "Gateway", "provider_type": "openai_compatible"}
-    )
+    resp = client.post("/api/pm/ai-providers", json={"name": "Gateway", "provider_type": "openai_compatible"})
     assert resp.status_code == 400
 
 
 def test_ai_provider_patch_changing_type_to_ollama_requires_base_url(client):
-    provider = client.post(
-        "/api/pm/ai-providers", json={"name": "WasOpenAI", "provider_type": "openai"}
-    ).json()
+    provider = client.post("/api/pm/ai-providers", json={"name": "WasOpenAI", "provider_type": "openai"}).json()
     resp = client.patch(f"/api/pm/ai-providers/{provider['id']}", json={"provider_type": "ollama"})
     assert resp.status_code == 400
 
@@ -1015,7 +1042,9 @@ def test_ai_catalog_includes_enabled_provider_with_live_and_custom_models(client
     provider = client.post(
         "/api/pm/ai-providers",
         json={
-            "name": "CatalogProv", "provider_type": "openai", "api_key": "sk-x",
+            "name": "CatalogProv",
+            "provider_type": "openai",
+            "api_key": "sk-x",
             "custom_models": ["my-finetune"],
         },
     ).json()

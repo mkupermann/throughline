@@ -38,9 +38,7 @@ from throughline.queries import pm as Q
 # a `"..."` TOML string below with no other quoting.
 _AI_MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 
-PIPELINE_SCRIPT = Path(
-    os.environ.get("AI_PIPELINE_SCRIPT_PATH", str(Path.home() / "ai-pipeline" / "pipeline.sh"))
-)
+PIPELINE_SCRIPT = Path(os.environ.get("AI_PIPELINE_SCRIPT_PATH", str(Path.home() / "ai-pipeline" / "pipeline.sh")))
 
 # Resolved once at import time via PATH search rather than passed to Popen
 # as the bare literal "bash". On Windows, CreateProcess (which Popen calls
@@ -177,9 +175,7 @@ def ensure_vibe_agent_profile(resolved: dict[str, Any], profile_name: str) -> Pa
     return path
 
 
-def _write_context_file(
-    conn, tmp_dir: Path, step: str, resolved: dict[str, Any]
-) -> Path | None:
+def _write_context_file(conn, tmp_dir: Path, step: str, resolved: dict[str, Any]) -> Path | None:
     lines = []
     if resolved["instructions"]:
         lines.append(resolved["instructions"])
@@ -199,9 +195,7 @@ def _write_context_file(
     return path
 
 
-def launch_task(
-    conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str
-) -> dict[str, Any]:
+def launch_task(conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str) -> dict[str, Any]:
     teams = Q.get_project_teams(conn, pm_project_id)
     team = next((t for t in teams if t["id"] == team_id), None)
     if team is None:
@@ -282,8 +276,14 @@ def launch_task(
     )
 
     task = Q.create_task(
-        conn, pm_project_id=pm_project_id, team_id=team_id, title=title,
-        run_id=run_id, repo_path=repo_path, log_dir=str(log_dir), pid=process.pid,
+        conn,
+        pm_project_id=pm_project_id,
+        team_id=team_id,
+        title=title,
+        run_id=run_id,
+        repo_path=repo_path,
+        log_dir=str(log_dir),
+        pid=process.pid,
     )
     Q.set_task_status(conn, task["id"], "running")
     return Q.get_task(conn, task["id"])

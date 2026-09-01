@@ -23,8 +23,13 @@ def test_poll_task_records_verdict_and_marks_pass(db_connection, tmp_path: Path)
     (log_dir / "verdict-1.txt").write_text("Sieht gut aus.\n\nVERDICT: PASS", encoding="utf-8")
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run1", repo_path=str(tmp_path), log_dir=str(log_dir),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run1",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
         pid=os.getpid(),  # a real, currently-alive PID so liveness check passes
     )
     Q.set_task_status(db_connection, task["id"], "running")
@@ -47,8 +52,14 @@ def test_poll_task_marks_crashed_when_pid_dead_and_no_verdict(db_connection, tmp
     # A PID essentially guaranteed not to be a live process.
     dead_pid = 999_999
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run2", repo_path=str(tmp_path), log_dir=str(log_dir), pid=dead_pid,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run2",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=dead_pid,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -76,8 +87,14 @@ def test_poll_task_stops_on_budget_exceeded(db_connection, tmp_path: Path):
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run3", repo_path=str(tmp_path), log_dir=str(log_dir), pid=proc.pid,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run3",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=proc.pid,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -114,8 +131,14 @@ def test_poll_task_adopted_task_with_no_pid_stays_running(db_connection, tmp_pat
     # No executor log, no verdict yet — an adopted run still in flight.
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run4", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run4",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=None,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -143,8 +166,14 @@ def test_poll_task_marks_stale_adopted_task_as_stopped(db_connection, tmp_path: 
         os.utime(f, (two_hours_ago, two_hours_ago))
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="stale-run", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="stale-run",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=None,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -174,8 +203,14 @@ def test_poll_task_adopted_task_with_fresh_mtimes_stays_running(db_connection, t
     (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="fresh-run", repo_path=str(tmp_path), log_dir=str(log_dir), pid=None,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="fresh-run",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=None,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -200,8 +235,14 @@ def test_poll_task_refreshes_executor_tokens_across_ticks(db_connection, tmp_pat
     # No verdict yet — run is still "in progress".
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run5", repo_path=str(tmp_path), log_dir=str(log_dir), pid=os.getpid(),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run5",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=os.getpid(),
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -236,14 +277,18 @@ def test_poll_task_marks_fail_when_pid_dead_and_latest_verdict_is_fail(db_connec
     log_dir.mkdir(parents=True)
     (log_dir / "SPEC.md").write_text("x", encoding="utf-8")
     (log_dir / "executor-1.log").write_text("Tokens: 100 sent, 20 received.", encoding="utf-8")
-    (log_dir / "verdict-1.txt").write_text(
-        "Nicht bestanden.\n\nVERDICT: FAIL: assertion kaputt", encoding="utf-8"
-    )
+    (log_dir / "verdict-1.txt").write_text("Nicht bestanden.\n\nVERDICT: FAIL: assertion kaputt", encoding="utf-8")
 
     dead_pid = 999_999  # essentially guaranteed not to be a live process
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="run6", repo_path=str(tmp_path), log_dir=str(log_dir), pid=dead_pid,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="run6",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
+        pid=dead_pid,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
@@ -273,8 +318,13 @@ def test_poll_task_backfills_every_iteration_on_first_poll(db_connection, tmp_pa
     # No verdict-3.txt — iteration 3 is still in progress, run stays "running".
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="backfill-run", repo_path=str(tmp_path), log_dir=str(log_dir),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="backfill-run",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
         pid=os.getpid(),
     )
     Q.set_task_status(db_connection, task["id"], "running")
@@ -308,9 +358,7 @@ def test_poll_task_backfills_every_iteration_on_first_poll(db_connection, tmp_pa
 
 
 @pytest.mark.integration
-def test_poll_task_backfill_does_not_duplicate_already_recorded_iterations(
-    db_connection, tmp_path: Path
-):
+def test_poll_task_backfill_does_not_duplicate_already_recorded_iterations(db_connection, tmp_path: Path):
     """A second poll after the first backfilling poll must not insert
     duplicate executor/tester events for the iterations already recorded —
     only the latest iteration's executor tokens get refreshed."""
@@ -324,8 +372,13 @@ def test_poll_task_backfill_does_not_duplicate_already_recorded_iterations(
     (log_dir / "verdict-1.txt").write_text("x\n\nVERDICT: FAIL: x", encoding="utf-8")
 
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="backfill-run2", repo_path=str(tmp_path), log_dir=str(log_dir),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="backfill-run2",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir),
         pid=os.getpid(),
     )
     Q.set_task_status(db_connection, task["id"], "running")
@@ -335,8 +388,7 @@ def test_poll_task_backfill_does_not_duplicate_already_recorded_iterations(
 
     with db_connection.cursor() as cur:
         cur.execute(
-            "SELECT step, iteration FROM pm_task_events WHERE task_id = %s "
-            "AND step IN ('executor', 'tester')",
+            "SELECT step, iteration FROM pm_task_events WHERE task_id = %s " "AND step IN ('executor', 'tester')",
             (task["id"],),
         )
         pairs = cur.fetchall()
@@ -356,8 +408,13 @@ def test_poll_all_running_isolates_task_failures(db_connection, tmp_path: Path, 
     # (its own log_dir need not even exist — the mock never touches disk).
     log_dir_a = tmp_path / ".ai-pipeline" / "run-a"
     task_a = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="a",
-        run_id="run-a", repo_path=str(tmp_path), log_dir=str(log_dir_a),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="a",
+        run_id="run-a",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir_a),
     )
     Q.set_task_status(db_connection, task_a["id"], "running")
 
@@ -376,8 +433,13 @@ def test_poll_all_running_isolates_task_failures(db_connection, tmp_path: Path, 
     log_dir_b.mkdir(parents=True)
     (log_dir_b / "SPEC.md").write_text("## Ziel\nx", encoding="utf-8")
     task_b = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="b",
-        run_id="run-b", repo_path=str(tmp_path), log_dir=str(log_dir_b),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="b",
+        run_id="run-b",
+        repo_path=str(tmp_path),
+        log_dir=str(log_dir_b),
     )
     Q.set_task_status(db_connection, task_b["id"], "running")
 

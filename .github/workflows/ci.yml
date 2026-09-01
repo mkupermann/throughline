@@ -170,12 +170,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: bash -n on every shell script
         run: |
-          set -e
-          for f in scripts/*.sh; do
-            [ -f "$f" ] || continue
+          set -euo pipefail
+          while IFS= read -r f; do
             echo "→ $f"
             bash -n "$f"
-          done
+          done < <(git ls-files '*.sh')
 
   schema-validation:
     name: Fresh schema validation

@@ -1,17 +1,15 @@
-import os
 import stat
 import subprocess
 import sys
 import time
-import tomllib
 from pathlib import Path
 
 import pytest
+import tomllib
 
 from throughline.jobs import pm_launch
 from throughline.jobs.pm_launch import launch_task
 from throughline.queries import pm as Q
-
 
 FAKE_PIPELINE = """#!/usr/bin/env bash
 set -u
@@ -49,13 +47,19 @@ def test_launch_task_spawns_process_and_creates_task_row(db_connection, tmp_path
     Q.link_project_team(db_connection, project["id"], team["id"])
     Q.link_team_role(db_connection, team["id"], role["id"])
     Q.create_assignment(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        role_id=role["id"], member_id=member["id"],
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        role_id=role["id"],
+        member_id=member["id"],
     )
 
     task = launch_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        title="fake run", repo_path=str(repo),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="fake run",
+        repo_path=str(repo),
     )
 
     assert task["status"] == "running"
@@ -74,8 +78,10 @@ def test_ensure_vibe_agent_profile_writes_readonly_toml(tmp_path, monkeypatch):
     from throughline.jobs.pm_launch import ensure_vibe_agent_profile
 
     resolved = {
-        "ai_model": "devstral", "instructions": "Sei streng.",
-        "skill_refs": [], "document_refs": [],
+        "ai_model": "devstral",
+        "instructions": "Sei streng.",
+        "skill_refs": [],
+        "document_refs": [],
     }
     path = ensure_vibe_agent_profile(resolved, "pm-7-3")
 
@@ -99,8 +105,10 @@ def test_ensure_vibe_agent_profile_comment_escapes_multiline_instructions(tmp_pa
 
     instructions = "Sei streng.\n\nPruefe alles doppelt."
     resolved = {
-        "ai_model": "devstral", "instructions": instructions,
-        "skill_refs": [], "document_refs": [],
+        "ai_model": "devstral",
+        "instructions": instructions,
+        "skill_refs": [],
+        "document_refs": [],
     }
     path = ensure_vibe_agent_profile(resolved, "pm-multiline")
     content = path.read_text(encoding="utf-8")
@@ -120,9 +128,9 @@ def test_ensure_vibe_agent_profile_comment_escapes_multiline_instructions(tmp_pa
             continue
         for content_line in content.splitlines():
             if raw_line in content_line:
-                assert content_line.lstrip().startswith("#"), (
-                    f"instructions text leaked outside a comment: {content_line!r}"
-                )
+                assert content_line.lstrip().startswith(
+                    "#"
+                ), f"instructions text leaked outside a comment: {content_line!r}"
 
 
 def test_ensure_vibe_agent_profile_rejects_unsafe_ai_model(tmp_path, monkeypatch):
@@ -137,7 +145,9 @@ def test_ensure_vibe_agent_profile_rejects_unsafe_ai_model(tmp_path, monkeypatch
 
     resolved = {
         "ai_model": 'devstral"\n[tools.write_file]\npermission = "always',
-        "instructions": None, "skill_refs": [], "document_refs": [],
+        "instructions": None,
+        "skill_refs": [],
+        "document_refs": [],
     }
 
     with pytest.raises(ValueError):
@@ -159,9 +169,7 @@ sleep 0.2
 
 
 @pytest.mark.integration
-def test_launch_task_injects_provider_credentials_for_provider_bound_role(
-    db_connection, tmp_path, monkeypatch
-):
+def test_launch_task_injects_provider_credentials_for_provider_bound_role(db_connection, tmp_path, monkeypatch):
     """A role/member bound to a pm_ai_providers row (ai_tool == "provider:
     <id>") must reach the spawned pipeline with both the litellm-format
     model string AND that provider's credentials in its environment — not
@@ -177,27 +185,38 @@ def test_launch_task_injects_provider_credentials_for_provider_bound_role(
     subprocess.run(["git", "init", "-q", str(repo)])
 
     provider = Q.create_ai_provider(
-        db_connection, name="MyOpenAI", provider_type="openai", api_key="sk-test-123",
+        db_connection,
+        name="MyOpenAI",
+        provider_type="openai",
+        api_key="sk-test-123",
         base_url="https://api.openai.com/v1",
     )
 
     project = Q.create_pm_project(db_connection, name="ProvLaunchP")
     team = Q.create_team(db_connection, name="ProvLaunchT")
     role = Q.create_role(
-        db_connection, name="Executor", default_ai_tool=f"provider:{provider['id']}",
+        db_connection,
+        name="Executor",
+        default_ai_tool=f"provider:{provider['id']}",
         default_ai_model="openai/gpt-4o-mini",
     )
     member = Q.create_member(db_connection, name="Agent B", member_type="agent")
     Q.link_project_team(db_connection, project["id"], team["id"])
     Q.link_team_role(db_connection, team["id"], role["id"])
     Q.create_assignment(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        role_id=role["id"], member_id=member["id"],
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        role_id=role["id"],
+        member_id=member["id"],
     )
 
     launch_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        title="provider run", repo_path=str(repo),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="provider run",
+        repo_path=str(repo),
     )
     time.sleep(0.5)  # let the fake script finish writing env-dump.txt
 
@@ -218,13 +237,19 @@ def test_stop_task_kills_process_and_updates_status(db_connection, tmp_path, mon
     project = Q.create_pm_project(db_connection, name="StopP")
     team = Q.create_team(db_connection, name="StopT")
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="t",
-        run_id="stop-run", repo_path=str(tmp_path), log_dir=str(tmp_path),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="t",
+        run_id="stop-run",
+        repo_path=str(tmp_path),
+        log_dir=str(tmp_path),
         pid=proc.pid,
     )
     Q.set_task_status(db_connection, task["id"], "running")
 
     from throughline.jobs.pm_launch import stop_task
+
     stopped = stop_task(db_connection, task["id"])
 
     assert stopped["status"] == "stopped"

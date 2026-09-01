@@ -26,13 +26,20 @@ NO_DB_ENV = {
 }
 
 
-def _run_eval(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+def _run_eval(
+    *args: str,
+    timeout: int = 30,
+    console_encoding: str | None = None,
+) -> subprocess.CompletedProcess:
+    env = {**NO_DB_ENV, "PYTHONPATH": str(REPO)}
+    if console_encoding:
+        env["PYTHONIOENCODING"] = console_encoding
     return subprocess.run(
         [sys.executable, str(EVAL_PY), *args],
         cwd=REPO,
         capture_output=True,
         text=True,
-        env={**NO_DB_ENV, "PYTHONPATH": str(REPO)},
+        env=env,
         timeout=timeout,
     )
 
@@ -89,3 +96,20 @@ def test_offline_stub_handles_missing_expected_substrings(tmp_path, monkeypatch)
     assert proc.returncode == 0, proc.stderr
     body = report.read_text(encoding="utf-8")
     assert "0/1" in body  # neither condition can hit on empty substrings
+
+
+def test_offline_stub_survives_a_cp1252_console(tmp_path):
+    """Windows' default console codec cannot encode checkmark glyphs."""
+    report = tmp_path / "report.md"
+    proc = _run_eval(
+        "--offline-stub",
+        "--report",
+        str(report),
+        "--questions",
+        str(QUESTIONS),
+        timeout=60,
+        console_encoding="cp1252",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert report.is_file()

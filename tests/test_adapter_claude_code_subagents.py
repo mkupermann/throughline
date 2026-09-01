@@ -8,6 +8,7 @@ subagent inherits its parent's `sessionId`, and the writer keys on it.
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -125,6 +126,10 @@ def test_is_present_is_true_when_a_file_exists(projects):
 # either way and isn't version-sensitive.
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="requires Windows symlink privileges; the symlink boundary is covered by Linux CI",
+)
 def test_symlinked_file_pointing_into_subagents_is_excluded(tmp_path, monkeypatch):
     """(a) A symlink FILE at project top level -> real subagents/agent-0.jsonl.
 
@@ -145,6 +150,10 @@ def test_symlinked_file_pointing_into_subagents_is_excluded(tmp_path, monkeypatc
     assert adapter.excluded_reason(link) == "subagent transcript"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="requires Windows symlink privileges; the symlink boundary is covered by Linux CI",
+)
 def test_symlinked_dir_pointing_into_subagents_is_excluded(tmp_path, monkeypatch):
     """(b) A symlinked DIR named "alias" (not "subagents") -> the real subagents/ dir.
 
@@ -180,6 +189,10 @@ def test_real_file_literally_named_subagents_dot_jsonl_is_still_ingested(tmp_pat
     assert adapter.excluded_reason(f) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="requires Windows symlink privileges; broken-link handling is covered by Linux CI",
+)
 def test_broken_symlink_is_excluded_without_raising(tmp_path, monkeypatch):
     """(d) A symlink whose target does not exist must be excluded, not raise."""
     home = tmp_path / "projects"

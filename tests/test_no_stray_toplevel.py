@@ -22,6 +22,10 @@ def test_a_known_top_level_file_is_fine():
     assert stray_entries(["README.md", "Makefile", "pyproject.toml"]) == []
 
 
+def test_the_intentional_windows_support_directory_is_fine():
+    assert stray_entries(["windows/register-tasks.ps1", "windows/README.md"]) == []
+
+
 def test_a_foreign_project_folder_is_refused():
     strays = stray_entries(["canoscan-projekt/scan8600.py", "canoscan-projekt/README.md"])
     assert strays == ["canoscan-projekt"]

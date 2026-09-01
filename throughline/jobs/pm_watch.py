@@ -163,8 +163,7 @@ def poll_task(conn, task: dict) -> None:
         # consult this same set.
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT step, iteration FROM pm_task_events "
-                "WHERE task_id = %s AND iteration IS NOT NULL",
+                "SELECT step, iteration FROM pm_task_events " "WHERE task_id = %s AND iteration IS NOT NULL",
                 (task_id,),
             )
             existing_pairs = {(row[0], row[1]) for row in cur.fetchall()}
@@ -179,15 +178,23 @@ def poll_task(conn, task: dict) -> None:
             if ("executor", n) not in existing_pairs and executor_log.is_file():
                 n_tokens = extract_aider_tokens(read_run_text(executor_log))
                 Q.add_task_event(
-                    conn, task_id=task_id, step="executor", event_type="log_update",
-                    iteration=n, tokens_used=n_tokens,
+                    conn,
+                    task_id=task_id,
+                    step="executor",
+                    event_type="log_update",
+                    iteration=n,
+                    tokens_used=n_tokens,
                 )
             n_verdict = parse_verdict(log_dir, n)
             if n_verdict is not None and ("tester", n) not in existing_pairs:
                 _, n_message = n_verdict
                 Q.add_task_event(
-                    conn, task_id=task_id, step="tester", event_type="verdict",
-                    iteration=n, message=n_message,
+                    conn,
+                    task_id=task_id,
+                    step="tester",
+                    event_type="verdict",
+                    iteration=n,
+                    message=n_message,
                 )
 
         already_recorded = ("executor", iteration) in existing_pairs
@@ -195,8 +202,12 @@ def poll_task(conn, task: dict) -> None:
         tokens = extract_aider_tokens(log_text)
         if not already_recorded:
             Q.add_task_event(
-                conn, task_id=task_id, step="executor", event_type="log_update",
-                iteration=iteration, tokens_used=tokens,
+                conn,
+                task_id=task_id,
+                step="executor",
+                event_type="log_update",
+                iteration=iteration,
+                tokens_used=tokens,
             )
         else:
             # Aider keeps appending "Tokens: ..." lines to the same log as
@@ -218,8 +229,12 @@ def poll_task(conn, task: dict) -> None:
             already_recorded = ("tester", iteration) in existing_pairs
             if not already_recorded:
                 Q.add_task_event(
-                    conn, task_id=task_id, step="tester", event_type="verdict",
-                    iteration=iteration, message=message,
+                    conn,
+                    task_id=task_id,
+                    step="tester",
+                    event_type="verdict",
+                    iteration=iteration,
+                    message=message,
                 )
 
     Q.recompute_task_tokens(conn, task_id)
@@ -240,7 +255,10 @@ def poll_task(conn, task: dict) -> None:
             if task["pid"] is not None:
                 kill_process_tree(task["pid"])
             Q.add_task_event(
-                conn, task_id=task_id, step="executor", event_type="error",
+                conn,
+                task_id=task_id,
+                step="executor",
+                event_type="error",
                 message=f"{name.replace('_', ' ')} {limit} exceeded (used {used})",
             )
             Q.set_task_status(conn, task_id, "budget_exceeded")
@@ -279,7 +297,10 @@ def poll_task(conn, task: dict) -> None:
         if stale_seconds > _STALE_THRESHOLD_S:
             minutes = int(stale_seconds // 60)
             Q.add_task_event(
-                conn, task_id=task_id, step="executor", event_type="error",
+                conn,
+                task_id=task_id,
+                step="executor",
+                event_type="error",
                 message=f"Lauf extern beendet — keine Aktivität seit {minutes} Minuten",
             )
             Q.set_task_status(conn, task_id, "stopped")

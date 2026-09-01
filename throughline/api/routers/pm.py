@@ -88,7 +88,13 @@ class RegisterIn(BaseModel):
 # ── AI providers (Welle D) ──────────────────────────────────────────────────
 
 PmProviderType = Literal[
-    "openai", "anthropic", "mistral", "google", "openrouter", "ollama", "openai_compatible",
+    "openai",
+    "anthropic",
+    "mistral",
+    "google",
+    "openrouter",
+    "ollama",
+    "openai_compatible",
 ]
 
 #: base_url has no sensible default for these two — ollama needs a host to
@@ -199,9 +205,7 @@ def list_roles(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
 
 
 @router.patch("/pm/roles/{role_id}")
-def patch_role(
-    role_id: int, body: RolePatch, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def patch_role(role_id: int, body: RolePatch, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
     with connection(settings) as conn:
         row = Q.update_role(conn, role_id, **fields)
@@ -223,9 +227,7 @@ def list_members(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
 
 
 @router.patch("/pm/members/{member_id}")
-def patch_member(
-    member_id: int, body: MemberPatch, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def patch_member(member_id: int, body: MemberPatch, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
     with connection(settings) as conn:
         row = Q.update_member(conn, member_id, **fields)
@@ -247,9 +249,7 @@ def list_teams(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
 
 
 @router.patch("/pm/teams/{team_id}")
-def patch_team(
-    team_id: int, body: TeamPatch, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def patch_team(team_id: int, body: TeamPatch, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
     with connection(settings) as conn:
         row = Q.update_team(conn, team_id, **fields)
@@ -271,9 +271,7 @@ def list_projects(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
 
 
 @router.patch("/pm/projects/{project_id}")
-def patch_project(
-    project_id: int, body: ProjectPatch, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def patch_project(project_id: int, body: ProjectPatch, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
     with connection(settings) as conn:
         row = Q.update_pm_project(conn, project_id, **fields)
@@ -451,9 +449,7 @@ def delete_ai_provider(provider_id: int, settings: Settings = Depends(get_settin
 
 
 @router.post("/pm/ai-providers/{provider_id}/models/refresh")
-def refresh_ai_provider_models(
-    provider_id: int, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def refresh_ai_provider_models(provider_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """Live-fetch this provider's model list. Never a 500 for a network/auth
     failure — those come back as {"unavailable": true, "error": "..."};
     only an unknown provider_id is a 404."""
@@ -471,9 +467,7 @@ def project_teams(project_id: int, settings: Settings = Depends(get_settings)) -
 
 
 @router.post("/pm/projects/{project_id}/teams/{team_id}")
-def link_project_team(
-    project_id: int, team_id: int, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def link_project_team(project_id: int, team_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
         Q.link_project_team(conn, project_id, team_id)
     return {"linked": True}
@@ -526,9 +520,7 @@ def unlink_project_repo(
 
 
 @router.post("/pm/teams/{team_id}/roles/{role_id}")
-def link_team_role(
-    team_id: int, role_id: int, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def link_team_role(team_id: int, role_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
         Q.link_team_role(conn, team_id, role_id)
     return {"linked": True}
@@ -541,17 +533,13 @@ def create_assignment(body: AssignmentIn, settings: Settings = Depends(get_setti
 
 
 @router.get("/pm/projects/{project_id}/assignments")
-def project_assignments(
-    project_id: int, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def project_assignments(project_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
         return {"assignments": Q.list_assignments_for_project(conn, project_id)}
 
 
 @router.delete("/pm/assignments/{assignment_id}")
-def delete_assignment(
-    assignment_id: int, settings: Settings = Depends(get_settings)
-) -> dict[str, Any]:
+def delete_assignment(assignment_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
         deleted = Q.delete_assignment(conn, assignment_id)
     if not deleted:
@@ -606,9 +594,7 @@ def task_iteration_log(
     log_dir = Path(task["log_dir"])
     log_path = log_dir / f"executor-{iteration}.log"
     if not log_path.is_file():
-        raise HTTPException(
-            status_code=404, detail=f"no log for task {task_id} iteration {iteration}"
-        )
+        raise HTTPException(status_code=404, detail=f"no log for task {task_id} iteration {iteration}")
 
     lines = read_run_text(log_path).splitlines()
     log_tail = "\n".join(lines[-tail:])

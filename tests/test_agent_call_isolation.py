@@ -14,12 +14,18 @@ exclusion that depends on it.
 
 from __future__ import annotations
 
-from pathlib import Path
+import sys
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from throughline.adapters.claude_code import ClaudeCodeAdapter
 from throughline.self_referential import agent_call_cwd, is_agent_call_transcript
+
+POSIX_CLAUDE_SLUG_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Claude Code's POSIX project-slug convention is covered by Linux CI",
+)
 
 
 @pytest.fixture
@@ -35,23 +41,26 @@ def test_cwd_is_created_on_demand(agent_dir):
     assert agent_dir.is_dir()
 
 
-def test_slug_matches_claude_codes_rule(agent_dir, tmp_path):
+@POSIX_CLAUDE_SLUG_ONLY
+def test_slug_matches_claude_codes_rule(monkeypatch):
     """Every '/' and '.' becomes '-'.
 
     Verified against real directories on disk: ``/Users/x/.claude/sessions``
     is filed as ``-Users-x--claude-sessions`` — the doubled dash comes from the
     dot, and getting that wrong would silently exclude nothing.
     """
-    slug = str(agent_dir).replace("/", "-").replace(".", "-")
-    assert is_agent_call_transcript(Path(slug) / "session.jsonl")
-    assert not is_agent_call_transcript(Path("-Users-someone-Documents-GitHub-throughline") / "session.jsonl")
+    monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", "/Users/x/.claude/sessions")
+    slug = "-Users-x--claude-sessions"
+    assert is_agent_call_transcript(PurePosixPath(slug) / "session.jsonl")
+    assert not is_agent_call_transcript(PurePosixPath("-Users-someone-Documents-GitHub-throughline") / "session.jsonl")
 
 
+@POSIX_CLAUDE_SLUG_ONLY
 def test_dotted_directory_produces_a_doubled_dash(tmp_path, monkeypatch):
     """The ``~/.throughline`` default is a dotted path — the case that bites."""
     monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", "/home/u/.throughline/agent-calls")
     assert is_agent_call_transcript(
-        Path("-home-u--throughline-agent-calls") / "s.jsonl"
+        PurePosixPath("-home-u--throughline-agent-calls") / "s.jsonl"
     ), "the dot must slug to a dash, yielding a doubled dash after the '/'"
 
 
@@ -70,10 +79,12 @@ def test_the_predicate_creates_nothing(tmp_path, monkeypatch):
     assert not target.exists(), "the predicate created its own directory"
 
 
-def test_adapter_excludes_agent_call_transcripts(agent_dir, tmp_path, monkeypatch):
+@POSIX_CLAUDE_SLUG_ONLY
+def test_adapter_excludes_agent_call_transcripts(tmp_path, monkeypatch):
     """A transcript in our own project folder is counted, never ingested."""
+    monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", "/Users/test/.throughline/agent-calls")
     home = tmp_path / "projects"
-    slug = str(agent_dir).replace("/", "-").replace(".", "-")
+    slug = "-Users-test--throughline-agent-calls"
     ours = home / slug
     theirs = home / "-Users-someone-Documents-GitHub-realwork"
     ours.mkdir(parents=True)
@@ -134,11 +145,10 @@ def test_a_real_project_is_not_mistaken_for_one_of_our_calls(monkeypatch):
         assert not is_agent_call_transcript(Path(f"/p/{name}/abc.jsonl")), name
 
 
-def test_an_explicit_override_is_still_matched_exactly(monkeypatch, tmp_path):
-    from pathlib import Path
+@POSIX_CLAUDE_SLUG_ONLY
+def test_an_explicit_override_is_still_matched_exactly(monkeypatch):
+    from throughline.self_referential import is_agent_call_transcript
 
-    from throughline.self_referential import agent_call_cwd, is_agent_call_transcript
-
-    monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", str(tmp_path / "woanders"))
-    slug = str(agent_call_cwd()).replace("/", "-").replace(".", "-")
-    assert is_agent_call_transcript(Path(f"/p/{slug}/abc.jsonl"))
+    monkeypatch.setenv("THROUGHLINE_AGENT_CALL_DIR", "/srv/throughline/woanders")
+    slug = "-srv-throughline-woanders"
+    assert is_agent_call_transcript(PurePosixPath("/p") / slug / "abc.jsonl")

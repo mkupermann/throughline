@@ -32,6 +32,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN find . -type f -name '*.sh' -exec sed -i 's/\r$//' {} +
 RUN pip install -e .
 
 # No Node stage: the built frontend is committed at throughline/web/ and ships

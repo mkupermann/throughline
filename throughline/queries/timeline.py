@@ -240,10 +240,7 @@ def day_detail(
     #
     # Wrapped in a subquery because Postgres allows only result column names in
     # an ORDER BY that follows UNION ALL, never an expression.
-    sql = (
-        "SELECT * FROM (\n"
-        + " UNION ALL ".join(parts)
-        + """
+    sql = "SELECT * FROM (\n" + " UNION ALL ".join(parts) + """
         ) u
         ORDER BY CASE u.kind
                    WHEN 'conversation' THEN 0
@@ -256,7 +253,6 @@ def day_detail(
                  u.ts DESC, u.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """
-    )
     return rows(conn, sql, params)
 
 

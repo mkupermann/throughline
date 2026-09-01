@@ -1,3 +1,4 @@
+import psycopg2
 import pytest
 
 from throughline.queries import pm as Q
@@ -6,8 +7,11 @@ from throughline.queries import pm as Q
 @pytest.mark.integration
 def test_create_and_list_role(db_connection):
     role = Q.create_role(
-        db_connection, name="Executor", default_ai_tool="aider",
-        default_ai_model="ollama_chat/qwen3-coder:30b", token_budget=200_000,
+        db_connection,
+        name="Executor",
+        default_ai_tool="aider",
+        default_ai_model="ollama_chat/qwen3-coder:30b",
+        token_budget=200_000,
     )
     assert role["name"] == "Executor"
     assert role["default_ai_tool"] == "aider"
@@ -19,7 +23,7 @@ def test_create_and_list_role(db_connection):
 
 @pytest.mark.integration
 def test_create_member_rejects_bad_type(db_connection):
-    with pytest.raises(Exception):
+    with pytest.raises(psycopg2.errors.CheckViolation):
         Q.create_member(db_connection, name="X", member_type="robot")
     db_connection.rollback()
 
@@ -51,19 +55,28 @@ def test_resolve_assignment_merges_role_and_member(db_connection):
     project = Q.create_pm_project(db_connection, name="P", token_budget=500_000)
     team = Q.create_team(db_connection, name="T", token_budget=300_000)
     role = Q.create_role(
-        db_connection, name="Executor", default_ai_tool="aider",
+        db_connection,
+        name="Executor",
+        default_ai_tool="aider",
         default_ai_model="qwen3-coder:30b",
-        instructions="Follow the spec exactly.", token_budget=200_000,
+        instructions="Follow the spec exactly.",
+        token_budget=200_000,
         document_refs=["spec.md", "shared.md"],
     )
     member = Q.create_member(
-        db_connection, name="Michael", member_type="human",
-        instructions="Prefer concise diffs.", token_budget=100_000,
+        db_connection,
+        name="Michael",
+        member_type="human",
+        instructions="Prefer concise diffs.",
+        token_budget=100_000,
         document_refs=["shared.md", "shared.md", "notes.md"],
     )
     a = Q.create_assignment(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        role_id=role["id"], member_id=member["id"],
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        role_id=role["id"],
+        member_id=member["id"],
     )
 
     resolved = Q.resolve_assignment(db_connection, a["id"])
@@ -85,12 +98,16 @@ def test_resolve_assignment_ai_override_wins(db_connection):
     role = Q.create_role(db_connection, name="Executor", default_ai_tool="aider", default_ai_model="qwen3-coder:30b")
     member = Q.create_member(db_connection, name="Devstral Agent", member_type="agent")
     a = Q.create_assignment(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        role_id=role["id"], member_id=member["id"], ai_model="devstral",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        role_id=role["id"],
+        member_id=member["id"],
+        ai_model="devstral",
     )
     resolved = Q.resolve_assignment(db_connection, a["id"])
-    assert resolved["ai_tool"] == "aider"       # inherited, no override given
-    assert resolved["ai_model"] == "devstral"   # override wins
+    assert resolved["ai_tool"] == "aider"  # inherited, no override given
+    assert resolved["ai_model"] == "devstral"  # override wins
 
 
 @pytest.mark.integration
@@ -98,9 +115,14 @@ def test_task_lifecycle_and_token_rollup(db_connection):
     project = Q.create_pm_project(db_connection, name="P3")
     team = Q.create_team(db_connection, name="T3")
     task = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        title="Add subtract()", run_id="run-abc", repo_path="/tmp/x",
-        log_dir="/tmp/x/.ai-pipeline/run-abc", pid=1234,
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="Add subtract()",
+        run_id="run-abc",
+        repo_path="/tmp/x",
+        log_dir="/tmp/x/.ai-pipeline/run-abc",
+        pid=1234,
     )
     assert task["status"] == "pending"
 
@@ -110,12 +132,21 @@ def test_task_lifecycle_and_token_rollup(db_connection):
 
     Q.add_task_event(db_connection, task_id=task["id"], step="analyst", event_type="started")
     Q.add_task_event(
-        db_connection, task_id=task["id"], step="executor", event_type="log_update",
-        iteration=1, tokens_used=340,
+        db_connection,
+        task_id=task["id"],
+        step="executor",
+        event_type="log_update",
+        iteration=1,
+        tokens_used=340,
     )
     Q.add_task_event(
-        db_connection, task_id=task["id"], step="tester", event_type="verdict",
-        iteration=1, message="VERDICT: PASS", tokens_used=210,
+        db_connection,
+        task_id=task["id"],
+        step="tester",
+        event_type="verdict",
+        iteration=1,
+        message="VERDICT: PASS",
+        tokens_used=210,
     )
 
     total = Q.recompute_task_tokens(db_connection, task["id"])
@@ -132,13 +163,23 @@ def test_list_tasks_for_project_running_first(db_connection):
     project = Q.create_pm_project(db_connection, name="P4")
     team = Q.create_team(db_connection, name="T4")
     old_done = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="old",
-        run_id="r-old", repo_path="/tmp/x", log_dir="/tmp/x/.ai-pipeline/r-old",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="old",
+        run_id="r-old",
+        repo_path="/tmp/x",
+        log_dir="/tmp/x/.ai-pipeline/r-old",
     )
     Q.set_task_status(db_connection, old_done["id"], "pass")
     running = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team["id"], title="new",
-        run_id="r-new", repo_path="/tmp/x", log_dir="/tmp/x/.ai-pipeline/r-new",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="new",
+        run_id="r-new",
+        repo_path="/tmp/x",
+        log_dir="/tmp/x/.ai-pipeline/r-new",
     )
     Q.set_task_status(db_connection, running["id"], "running")
 
@@ -180,8 +221,12 @@ def test_register_existing_run_rejects_path_traversal_run_id(db_connection, tmp_
 
     with pytest.raises(ValueError):
         Q.register_existing_run(
-            db_connection, pm_project_id=project["id"], team_id=team["id"],
-            title="t", repo_path=str(tmp_path), run_id="../../etc/passwd",
+            db_connection,
+            pm_project_id=project["id"],
+            team_id=team["id"],
+            title="t",
+            repo_path=str(tmp_path),
+            run_id="../../etc/passwd",
         )
 
 
@@ -192,8 +237,12 @@ def test_register_existing_run_rejects_missing_log_dir(db_connection, tmp_path):
 
     with pytest.raises(FileNotFoundError):
         Q.register_existing_run(
-            db_connection, pm_project_id=project["id"], team_id=team["id"],
-            title="t", repo_path=str(tmp_path), run_id="never-existed",
+            db_connection,
+            pm_project_id=project["id"],
+            team_id=team["id"],
+            title="t",
+            repo_path=str(tmp_path),
+            run_id="never-existed",
         )
 
 
@@ -207,31 +256,54 @@ def test_overview_aggregates_projects_teams_and_task_status_counts(db_connection
     Q.link_project_team(db_connection, project["id"], team_b["id"])
 
     running = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team_a["id"], title="r",
-        run_id="ov-run", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-run",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team_a["id"],
+        title="r",
+        run_id="ov-run",
+        repo_path="/tmp/ov",
+        log_dir="/tmp/ov/.ai-pipeline/ov-run",
     )
     Q.set_task_status(db_connection, running["id"], "running")
     Q.add_task_event(
-        db_connection, task_id=running["id"], step="executor", event_type="log_update",
-        iteration=1, tokens_used=1000,
+        db_connection,
+        task_id=running["id"],
+        step="executor",
+        event_type="log_update",
+        iteration=1,
+        tokens_used=1000,
     )
     Q.recompute_task_tokens(db_connection, running["id"])
 
     passed = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team_a["id"], title="p",
-        run_id="ov-pass", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-pass",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team_a["id"],
+        title="p",
+        run_id="ov-pass",
+        repo_path="/tmp/ov",
+        log_dir="/tmp/ov/.ai-pipeline/ov-pass",
     )
     Q.set_task_status(db_connection, passed["id"], "running")
     Q.add_task_event(
-        db_connection, task_id=passed["id"], step="executor", event_type="log_update",
-        iteration=1, tokens_used=2000,
+        db_connection,
+        task_id=passed["id"],
+        step="executor",
+        event_type="log_update",
+        iteration=1,
+        tokens_used=2000,
     )
     Q.recompute_task_tokens(db_connection, passed["id"])
     Q.set_task_status(db_connection, passed["id"], "pass")
 
     failed = Q.create_task(
-        db_connection, pm_project_id=project["id"], team_id=team_b["id"], title="f",
-        run_id="ov-fail", repo_path="/tmp/ov", log_dir="/tmp/ov/.ai-pipeline/ov-fail",
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team_b["id"],
+        title="f",
+        run_id="ov-fail",
+        repo_path="/tmp/ov",
+        log_dir="/tmp/ov/.ai-pipeline/ov-fail",
     )
     Q.set_task_status(db_connection, failed["id"], "fail")
 
@@ -289,8 +361,11 @@ def test_update_role_partial_fields_and_unknown_id(db_connection):
     role = Q.create_role(db_connection, name="Orig", token_budget=1000)
 
     updated = Q.update_role(
-        db_connection, role["id"],
-        instructions="Sei gruendlich.", token_budget=5000, skill_refs=[1, 2],
+        db_connection,
+        role["id"],
+        instructions="Sei gruendlich.",
+        token_budget=5000,
+        skill_refs=[1, 2],
     )
     assert updated["name"] == "Orig"  # untouched field survives
     assert updated["instructions"] == "Sei gruendlich."
@@ -341,8 +416,11 @@ def test_register_existing_run_has_no_pid_and_is_running(db_connection, tmp_path
     log_dir.mkdir(parents=True)
 
     task = Q.register_existing_run(
-        db_connection, pm_project_id=project["id"], team_id=team["id"],
-        title="razor1911-demo-tribute", repo_path=str(tmp_path),
+        db_connection,
+        pm_project_id=project["id"],
+        team_id=team["id"],
+        title="razor1911-demo-tribute",
+        repo_path=str(tmp_path),
         run_id="20260825-184848",
     )
     assert task["pid"] is None

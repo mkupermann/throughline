@@ -353,7 +353,7 @@ def main() -> int:
         pairs.append(pair)
         w, c = pair
         if not args.dry_run:
-            print(f"  {q.id}: with={'✓' if w.hit else '✗'}  cold={'✓' if c.hit else '✗'}")
+            print(f"  {q.id}: with={'hit' if w.hit else 'miss'}  cold={'hit' if c.hit else 'miss'}")
 
     if args.dry_run:
         return 0

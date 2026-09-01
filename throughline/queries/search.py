@@ -172,8 +172,7 @@ def search_all(
 #: Words that carry no retrieval signal. German and English, because questions
 #: arrive in both. Kept deliberately short — an aggressive list would strip
 #: terms that are ordinary words in one language and identifiers in the other.
-_STOPWORDS = frozenset(
-    """
+_STOPWORDS = frozenset("""
 about after again against also because been before being between both could
 does doing during each from have here into just more most only other over
 same should some such than that their them then there these they this those
@@ -184,8 +183,7 @@ etwas fuer für gegen habe haben hatte hier ihre immer jede jeder jetzt kann
 kein keine machen mehr muss nach nicht noch oder ohne schon sein seine sich
 sind soll sowie ueber über und unter viel vom von vor waren warum wenn werden
 wieder wird wurde zum zur zwischen
-""".split()
-)
+""".split())
 
 
 def salient_terms(text: str, limit: int = 6) -> list[str]:

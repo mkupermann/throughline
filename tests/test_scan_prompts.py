@@ -93,18 +93,14 @@ class TestProjectNameDerivation:
         name = sp.project_name_from_path(path)
         assert name == "claude-config"
 
-    def test_github_repo_path(self, tmp_path):
+    def test_github_repo_path(self):
         # Build a path that has "GitHub" somewhere
-        repo_path = tmp_path / "GitHub" / "my-awesome-repo" / "CLAUDE.md"
-        repo_path.parent.mkdir(parents=True)
-        repo_path.touch()
+        repo_path = Path("workspace") / "GitHub" / "my-awesome-repo" / "CLAUDE.md"
         name = sp.project_name_from_path(repo_path)
         assert name == "my-awesome-repo"
 
-    def test_fallback_uses_parent_dir(self, tmp_path):
-        path = tmp_path / "some-project" / "CLAUDE.md"
-        path.parent.mkdir()
-        path.touch()
+    def test_fallback_uses_parent_dir(self):
+        path = Path("workspace") / "some-project" / "CLAUDE.md"
         name = sp.project_name_from_path(path)
         assert name == "some-project"
 

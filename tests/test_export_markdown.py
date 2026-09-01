@@ -8,7 +8,10 @@ typed, or a project file that grows past what an editor will open.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -55,20 +58,25 @@ def test_safe_name_strips_characters_the_filesystem_rejects():
     assert em.safe_name(None) == "unknown"
 
 
-def test_relative_tool_paths_resolve_against_the_session_cwd():
-    assert em.resolve_path("src/app.py", "/Users/dev/demo") == "/Users/dev/demo/src/app.py"
-    assert em.resolve_path("/tmp/x.py", "/Users/dev/demo") == "/tmp/x.py"
+def test_relative_tool_paths_resolve_against_the_session_cwd(tmp_path):
+    project = tmp_path / "demo"
+    absolute = tmp_path / "outside" / "x.py"
+    assert em.resolve_path(str(Path("src") / "app.py"), str(project)) == str(project / "src" / "app.py")
+    assert em.resolve_path(str(absolute), str(project)) == str(absolute)
 
 
-def test_link_label_keeps_the_path_below_the_project_root():
+def test_link_label_keeps_the_path_below_the_project_root(tmp_path):
     # A bare basename would render two different index.html files identically.
-    rendered = em.link("web/index.html", "/Users/dev/demo")
-    assert "[web/index.html]" in rendered
-    assert "file:///Users/dev/demo/web/index.html" in rendered
+    project = tmp_path / "demo"
+    relative = Path("web") / "index.html"
+    rendered = em.link(str(relative), str(project))
+    expected_url = "file://" + quote(str(project / relative), safe="/:")
+    assert f"[{relative}]" in rendered
+    assert expected_url in rendered
 
 
-def test_link_to_a_file_outside_the_project_falls_back_to_the_basename():
-    rendered = em.link("/tmp/scratch.py", "/Users/dev/demo")
+def test_link_to_a_file_outside_the_project_falls_back_to_the_basename(tmp_path):
+    rendered = em.link(str(tmp_path / "outside" / "scratch.py"), str(tmp_path / "demo"))
     assert rendered.startswith("[scratch.py](")
 
 
@@ -128,10 +136,11 @@ def test_a_shell_command_renders_as_a_fenced_block_and_changes_no_file():
     assert changed is None
 
 
-def test_a_write_reports_the_file_it_changed():
+def test_a_write_reports_the_file_it_changed(tmp_path):
     call = {"tool_name": "Edit", "input": {"file_path": "src/app.py"}}
-    rendered, changed = em.render_tool_call(call, "/Users/dev/demo")
-    assert changed == "/Users/dev/demo/src/app.py"
+    project = tmp_path / "demo"
+    rendered, changed = em.render_tool_call(call, str(project))
+    assert changed == str(project / "src" / "app.py")
     assert "writes" in rendered
 
 
@@ -159,7 +168,7 @@ def test_a_scalar_input_does_not_crash_the_renderer():
 # --------------------------------------------------------------------------- #
 
 
-def test_a_session_renders_prompt_answer_command_and_changed_files():
+def test_a_session_renders_prompt_answer_command_and_changed_files(tmp_path):
     messages = [
         _msg("user", content="Mach das Deployment.", minute=0),
         _msg(
@@ -172,14 +181,16 @@ def test_a_session_renders_prompt_answer_command_and_changed_files():
             minute=1,
         ),
     ]
-    out = em.render_session(_conv(), messages, tool_output=0)
+    project = tmp_path / "demo"
+    out = em.render_session(_conv(project_path=str(project)), messages, tool_output=0)
 
     assert out.startswith("## 2026-08-13 09:00 — Ein Titel")
     assert "`claude_code`" in out and "Model `claude-opus-5`" in out
     assert "### 09:00 · Prompt · You\n\nMach das Deployment." in out
     assert "### 09:01 · Answer · claude_code · claude-opus-5\n\nKlar." in out
     assert "make deploy" in out
-    assert "**Files changed:** [deploy.sh](file:///Users/dev/demo/deploy.sh)" in out
+    expected_url = "file://" + quote(str(project / "deploy.sh"), safe="/:")
+    assert f"**Files changed:** [deploy.sh]({expected_url})" in out
 
 
 def test_tool_results_stay_out_unless_asked_for():
@@ -273,8 +284,9 @@ def test_an_unresolvable_relative_path_is_not_dressed_up_as_a_link():
     # Some adapters record a bare project name as project_path, which leaves
     # a relative tool argument unresolvable. A file:// URL built from one of
     # those points nowhere.
-    assert em.link("src/app.swift", "mackeyboardcleaner") == "`mackeyboardcleaner/src/app.swift`"
-    assert em.link("src/app.swift", None) == "`src/app.swift`"
+    relative = Path("src") / "app.swift"
+    assert em.link(str(relative), "mackeyboardcleaner") == f"`{Path('mackeyboardcleaner') / relative}`"
+    assert em.link(str(relative), None) == f"`{relative}`"
 
 
 def test_two_parts_opening_on_the_same_day_do_not_overwrite_each_other(tmp_path):
@@ -316,6 +328,10 @@ def test_redaction_scrubs_secrets_out_of_prompts_and_commands():
     assert "hunter2" not in safe
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the source-path redactor recognises POSIX home paths; this integration is covered by Linux CI",
+)
 def test_redaction_hides_the_home_directory_and_drops_the_dead_link():
     call = {"tool_name": "Write", "input": {"file_path": "src/app.py"}}
     rendered, changed = em.render_tool_call(call, "/Users/alice/demo", redact=True)
@@ -575,7 +591,7 @@ def test_a_destination_inside_the_allowed_root_is_accepted(tmp_path):
 
 def test_a_destination_outside_the_allowed_root_is_refused(tmp_path):
     with pytest.raises(ValueError, match="outside"):
-        em.resolve_destination("/etc/throughline-export", root=tmp_path)
+        em.resolve_destination(str(tmp_path.parent / "outside-throughline-export"), root=tmp_path)
 
 
 def test_a_traversal_back_out_of_the_root_is_refused(tmp_path):
@@ -592,6 +608,7 @@ def test_a_destination_that_is_an_existing_file_is_refused(tmp_path):
 
 def test_a_tilde_is_expanded_against_the_root(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert em.resolve_destination("~/Vault", root=tmp_path) == tmp_path / "Vault"
 
 
