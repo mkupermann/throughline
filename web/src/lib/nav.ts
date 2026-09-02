@@ -20,17 +20,20 @@ export interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  group: "Work" | "Trust" | "System" | "Project Management";
   /** Single-key chord after `g`, e.g. `g f` jumps to Find. */
   chord: string;
-  hint: string;
+  description?: string;
 }
 
 export const NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: Compass, chord: "o", hint: "What needs attention" },
-  { to: "/find", label: "Find", icon: Search, chord: "f", hint: "Search everything" },
-  { to: "/timeline", label: "Timeline", icon: CalendarRange, chord: "t", hint: "Activity over time" },
-  { to: "/curate", label: "Curate", icon: ClipboardCheck, chord: "c", hint: "Keep memory trustworthy" },
-  { to: "/operate", label: "Operate", icon: Cog, chord: "p", hint: "Pipeline and jobs" },
-  { to: "/console", label: "Console", icon: Terminal, chord: "s", hint: "SQL console" },
-  { to: "/pm", label: "Project Management", icon: Users, chord: "m", hint: "Virtual team ops" },
+  { to: "/", label: "Overview", icon: Compass, group: "Work", chord: "o", description: "What needs attention" },
+  { to: "/find", label: "Find", icon: Search, group: "Work", chord: "f", description: "Search everything" },
+  { to: "/timeline", label: "Timeline", icon: CalendarRange, group: "Work", chord: "t", description: "Activity over time" },
+  { to: "/curate", label: "Review", icon: ClipboardCheck, group: "Trust", chord: "c", description: "Keep memory trustworthy" },
+  { to: "/operate", label: "Operate", icon: Cog, group: "System", chord: "p", description: "Pipeline and jobs" },
+  { to: "/console", label: "Console", icon: Terminal, group: "System", chord: "s", description: "SQL console" },
+  { to: "/pm", label: "Project Management", icon: Users, group: "Project Management", chord: "m", description: "Virtual team ops" },
 ];
+
+export const NAV_GROUPS = ["Work", "Trust", "System", "Project Management"] as const;

@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Download, Moon, Sun, Monitor, FileSearch, Play } from "lucide-react";
 
-import { NAV } from "@/lib/nav";
+import { NAV, NAV_GROUPS } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
 import { findApi, operateApi, type FindItem } from "@/lib/api";
@@ -140,21 +140,23 @@ export function CommandPalette() {
       <Command.List className="palette-list">
         <Command.Empty className="palette-empty">No matches.</Command.Empty>
 
-        <Command.Group heading="Go to" className="palette-group">
-          {NAV.map((item) => (
-            <Command.Item
-              key={item.to}
-              value={`${item.label} ${item.hint}`}
-              onSelect={() => run(() => navigate(carryProviders(item.to, sp)))}
-              className="palette-item"
-            >
-              <item.icon size={15} aria-hidden />
-              <span>{item.label}</span>
-              <span className="palette-hint">{item.hint}</span>
-              <kbd className="palette-kbd">g {item.chord}</kbd>
-            </Command.Item>
-          ))}
-        </Command.Group>
+        {NAV_GROUPS.map((group) => (
+          <Command.Group key={group} heading={group} className="palette-group">
+            {NAV.filter((item) => item.group === group).map((item) => (
+              <Command.Item
+                key={item.to}
+                value={`${item.label} ${item.description ?? ""}`}
+                onSelect={() => run(() => navigate(carryProviders(item.to, sp)))}
+                className="palette-item"
+              >
+                <item.icon size={15} aria-hidden />
+                <span>{item.label}</span>
+                <span className="palette-hint">{item.description}</span>
+                <kbd className="palette-kbd">g {item.chord}</kbd>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        ))}
 
         {debouncedQuery.length >= 2 && jumpResults && jumpResults.items.length > 0 && (
           <Command.Group heading="Jump to" className="palette-group">

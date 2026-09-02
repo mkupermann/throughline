@@ -136,8 +136,8 @@
 
   --text-xs: 11px;
   --text-sm: 12px;
-  --text-base: 13px;
-  --text-md: 14px;
+  --text-base: 14px;
+  --text-md: 15px;
   --text-lg: 16px;
   --text-xl: 20px;
   --text-2xl: 28px;
@@ -161,6 +161,13 @@
   --z-toast: 1000;
 
   color-scheme: light;
+}
+
+:root[data-density="compact"] {
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
 }
 
 /* Dark values, applied when the viewer has chosen "system" and their OS is

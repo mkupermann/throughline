@@ -83,6 +83,19 @@ describe("CommandPalette", () => {
     expect(await screen.findByText(/export as markdown/i)).toBeTruthy();
   });
 
+  it("organises navigation under the same task groups as the sidebar", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.keyboard("{Meta>}k{/Meta}");
+
+    expect(await screen.findByText("Work")).toBeTruthy();
+    expect(screen.getByText("Trust")).toBeTruthy();
+    expect(screen.getByText("System")).toBeTruthy();
+    expect(screen.getAllByText("Project Management").length).toBeGreaterThan(0);
+    expect(screen.getByText("Review")).toBeTruthy();
+    expect(screen.queryByText("Curate")).toBeNull();
+  });
+
   it("finds the export when searching for Obsidian", async () => {
     const user = userEvent.setup();
     open();

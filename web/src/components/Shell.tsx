@@ -1,16 +1,17 @@
 import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { Moon, Sun, Monitor, Command as CommandIcon } from "lucide-react";
+import { Moon, Sun, Monitor, Command as CommandIcon, Keyboard } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
-import { NAV } from "@/lib/nav";
+import { NAV, NAV_GROUPS } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
+import { readDensity, saveDensity, type Density } from "@/lib/density";
 import { CommandPalette } from "./CommandPalette";
 import { ProviderBar } from "./ProviderBar";
 
 /** `g` followed by a nav chord jumps between surfaces, carrying provider scope. */
-function useGoChords(sp: URLSearchParams) {
+function useGoChords(sp: URLSearchParams, enabled: boolean) {
   const navigate = useNavigate();
   const armed = useRef(false);
   const timer = useRef<number | null>(null);
@@ -51,12 +52,13 @@ function useGoChords(sp: URLSearchParams) {
       }
     };
 
+    if (!enabled) return disarm;
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       disarm();
     };
-  }, [navigate, sp]);
+  }, [enabled, navigate, sp]);
 }
 
 function ThemeToggle() {
@@ -79,15 +81,86 @@ function ThemeToggle() {
   );
 }
 
+function KeyboardHelp({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable || focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  };
+
+  return (
+    <div className="keyboard-help-backdrop" data-testid="keyboard-help-backdrop" onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        className="keyboard-help"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onKeyDown={onKeyDown}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="keyboard-help-header">
+          <h2>Keyboard shortcuts</h2>
+          <button ref={closeRef} type="button" className="icon-button" aria-label="Close keyboard shortcuts" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <dl>
+          <div><dt><kbd>Cmd/Ctrl+K</kbd></dt><dd>Open the command palette</dd></div>
+          {NAV.map((item) => (
+            <div key={item.to}><dt><kbd>g {item.chord}</kbd></dt><dd>{item.label}</dd></div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
 export function Shell() {
   const [sp] = useSearchParams();
-  useGoChords(sp);
   const [paletteHintSeen, setPaletteHintSeen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [density, setDensity] = useState<Density>(readDensity);
+  const helpTriggerRef = useRef<HTMLButtonElement>(null);
+
+  useGoChords(sp, !helpOpen);
+
+  const closeHelp = () => {
+    setHelpOpen(false);
+    window.requestAnimationFrame(() => helpTriggerRef.current?.focus());
+  };
 
   useEffect(() => {
     const t = window.setTimeout(() => setPaletteHintSeen(true), 6000);
     return () => window.clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.density = density;
+    saveDensity(density);
+  }, [density]);
 
   return (
     <div className="shell">
@@ -106,23 +179,28 @@ export function Shell() {
           </div>
         </div>
 
-        <nav aria-label="Main">
-          <ul className="nav-list">
-            {NAV.map((item) => (
-              <li key={item.to}>
-                <NavLink
-                  to={carryProviders(item.to, sp)}
-                  end={item.to === "/"}
-                  className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
-                >
-                  <item.icon size={16} aria-hidden />
-                  <span>{item.label}</span>
-                  <kbd className="nav-kbd">g {item.chord}</kbd>
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className="nav-groups">
+          {NAV_GROUPS.map((group) => (
+            <nav key={group} aria-label={group}>
+              <h2 className="nav-group-title">{group}</h2>
+              <ul className="nav-list">
+                {NAV.filter((item) => item.group === group).map((item) => (
+                  <li key={item.to}>
+                    <NavLink
+                      to={carryProviders(item.to, sp)}
+                      end={item.to === "/"}
+                      className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
+                    >
+                      <item.icon size={16} aria-hidden />
+                      <span>{item.label}</span>
+                      <kbd className="nav-kbd">g {item.chord}</kbd>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ))}
+        </div>
 
         <div className="sidebar-foot">
           {!paletteHintSeen && (
@@ -134,6 +212,22 @@ export function Shell() {
             </div>
           )}
           <ThemeToggle />
+          <button ref={helpTriggerRef} type="button" className="icon-button" aria-label="Keyboard shortcuts" onClick={() => setHelpOpen(true)}>
+            <Keyboard size={16} aria-hidden />
+          </button>
+          <div className="density-toggle" role="group" aria-label="Display density">
+            {(["comfortable", "compact"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-label={`${option[0].toUpperCase()}${option.slice(1)} density`}
+                aria-pressed={density === option}
+                onClick={() => setDensity(option)}
+              >
+                {option === "comfortable" ? "Comfortable" : "Compact"}
+              </button>
+            ))}
+          </div>
         </div>
       </aside>
 
@@ -149,6 +243,7 @@ export function Shell() {
           at 0. */}
       <ScrollRestoration />
       <CommandPalette />
+      {helpOpen && <KeyboardHelp onClose={closeHelp} />}
     </div>
   );
 }
