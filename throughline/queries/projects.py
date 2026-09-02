@@ -72,6 +72,38 @@ def is_placed(project_path: str | None) -> bool:
 SessionOrder = Literal["newest", "oldest"]
 
 
+def project_name_sql(alias: str = "c") -> str:
+    """Return the canonical SQL expression that names a conversation's project.
+
+    Every project surface must use this expression. Otherwise a session from
+    ``/tmp`` appears under ``(no project)`` in one view and disappears from
+    another view that compares the generated ``project_name`` column directly.
+    ``alias`` is supplied only by this module's query authors, never by a user.
+    """
+    return f"""
+        CASE
+          WHEN {alias}.project_path IS NULL
+            OR COALESCE(NULLIF(rtrim({alias}.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
+          THEN %(unplaced_label)s
+          ELSE COALESCE({alias}.project_name, %(unplaced_label)s)
+        END
+    """
+
+
+def project_filter_sql(alias: str = "c") -> str:
+    """Return the canonical predicate for selecting one project."""
+    return f"{project_name_sql(alias)} = %(project)s"
+
+
+def project_filter_params(project: str) -> dict[str, object]:
+    """Parameters shared by every query that uses :func:`project_filter_sql`."""
+    return {
+        "project": project,
+        "unplaced": sorted(_NOT_A_PROJECT_PATHS),
+        "unplaced_label": UNPLACED,
+    }
+
+
 def recent(conn, days: int = 7, include_generated: bool = False) -> list[Row]:
     """Projects with activity in the last *days*, busiest first.
 
@@ -131,11 +163,9 @@ def sessions(
     gen = "" if include_generated else "AND c.generated_by IS NULL"
     search = ""
     params: dict[str, object] = {
-        "project": project,
+        **project_filter_params(project),
         "limit": limit,
         "offset": offset,
-        "unplaced": sorted(_NOT_A_PROJECT_PATHS),
-        "unplaced_label": UNPLACED,
     }
     if q:
         params["like"] = f"%{q}%"
@@ -160,12 +190,7 @@ def sessions(
                c.git_branch,
                c.generated_by
         FROM conversations c
-        WHERE CASE
-                WHEN c.project_path IS NULL
-                  OR COALESCE(NULLIF(rtrim(c.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
-                THEN %(unplaced_label)s
-                ELSE COALESCE(c.project_name, %(unplaced_label)s)
-              END = %(project)s
+        WHERE {project_filter_sql("c")}
           {gen}
           {search}
         ORDER BY c.started_at {direction}, c.id {direction}
@@ -189,11 +214,7 @@ def session_count(
     """
     gen = "" if include_generated else "AND c.generated_by IS NULL"
     search = ""
-    params: dict[str, object] = {
-        "project": project,
-        "unplaced": sorted(_NOT_A_PROJECT_PATHS),
-        "unplaced_label": UNPLACED,
-    }
+    params: dict[str, object] = project_filter_params(project)
     if q:
         params["like"] = f"%{q}%"
         search = """
@@ -206,12 +227,7 @@ def session_count(
         f"""
         SELECT count(*) AS n
         FROM conversations c
-        WHERE CASE
-                WHEN c.project_path IS NULL
-                  OR COALESCE(NULLIF(rtrim(c.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
-                THEN %(unplaced_label)s
-                ELSE COALESCE(c.project_name, %(unplaced_label)s)
-              END = %(project)s
+        WHERE {project_filter_sql("c")}
           {gen}
           {search}
         """,
@@ -230,21 +246,12 @@ def hidden_count(conn, project: str) -> int:
     """
     result = rows(
         conn,
-        """
+        f"""
         SELECT count(*) AS n
         FROM conversations c
-        WHERE CASE
-                WHEN c.project_path IS NULL
-                  OR COALESCE(NULLIF(rtrim(c.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
-                THEN %(unplaced_label)s
-                ELSE COALESCE(c.project_name, %(unplaced_label)s)
-              END = %(project)s
+        WHERE {project_filter_sql("c")}
           AND c.generated_by IS NOT NULL
         """,
-        {
-            "project": project,
-            "unplaced": sorted(_NOT_A_PROJECT_PATHS),
-            "unplaced_label": UNPLACED,
-        },
+        project_filter_params(project),
     )
     return int(result[0]["n"]) if result else 0

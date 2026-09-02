@@ -41,12 +41,62 @@ interface Block {
   content?: unknown;
 }
 
+interface StoredToolCall {
+  tool_name?: unknown;
+  name?: unknown;
+  input?: unknown;
+  arguments?: unknown;
+  function?: unknown;
+}
+
 function blocksOf(m: TranscriptMessage): Block[] {
   const raw = m.content_blocks;
   if (Array.isArray(raw)) return raw as Block[];
   // A few adapters store a single block rather than a list.
   if (raw && typeof raw === "object") return [raw as Block];
   return [];
+}
+
+function inputOf(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // A plain command is still a useful argument even when it is not JSON.
+    }
+    return { value };
+  }
+  return value == null ? {} : { value };
+}
+
+/** Older adapters persist normalised tool calls beside, rather than inside,
+ * ``content_blocks``. Turn that shape into the same blocks the UI already
+ * renders, without duplicating calls when richer blocks are present. */
+function storedToolCallsOf(value: unknown): Block[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): Block[] => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const call = raw as StoredToolCall;
+    const nested =
+      call.function && typeof call.function === "object" && !Array.isArray(call.function)
+        ? (call.function as Record<string, unknown>)
+        : undefined;
+    const name = call.tool_name ?? call.name ?? nested?.name;
+    const input = call.input ?? call.arguments ?? nested?.arguments;
+    return [
+      {
+        type: "tool_use",
+        name: typeof name === "string" && name ? name : "tool",
+        input: inputOf(input),
+      },
+    ];
+  });
 }
 
 /** The one field of a tool's input worth showing first. */
@@ -162,13 +212,14 @@ export function Transcript({
     <ol className="tx">
       {messages.map((m) => {
         const blocks = blocksOf(m);
-        const tools = blocks.filter((b) => b.type === "tool_use");
+        const blockTools = blocks.filter((b) => b.type === "tool_use");
+        const tools = blockTools.length ? blockTools : storedToolCallsOf(m.tool_calls);
         const results = blocks.filter((b) => b.type === "tool_result");
         const prose =
           blocks
             .filter((b) => b.type === "text")
             .map((b) => b.text ?? "")
-            .join("\n\n") || (tools.length || results.length ? "" : (m.content ?? ""));
+            .join("\n\n") || (blockTools.length || results.length ? "" : (m.content ?? ""));
 
         const Icon = m.role === "user" ? User : m.role === "tool_result" ? CornerUpRight : Bot;
 

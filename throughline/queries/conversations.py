@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._exec import Row, one, rows, scalar
+from .projects import project_filter_params, project_filter_sql
 
 
 def distinct_projects(conn) -> list[str]:
@@ -141,6 +142,59 @@ def messages_for(
         LIMIT %s OFFSET %s
         """,
         (conversation_id, limit, offset),
+    )
+
+
+def project_context_messages(
+    conn,
+    project: str,
+    *,
+    ascending: bool = True,
+    limit: int = 500,
+    offset: int = 0,
+    include_generated: bool = False,
+) -> list[Row]:
+    """One stable, source-linked page of a project's transcript."""
+    direction = "ASC" if ascending else "DESC"
+    generated = "" if include_generated else "AND c.generated_by IS NULL"
+    return rows(
+        conn,
+        f"""
+        SELECT m.id, m.role::text AS role, m.content, m.content_blocks,
+               m.tool_calls, m.tool_name, m.model, m.created_at,
+               c.id AS conversation_id, c.summary AS conversation_title,
+               c.started_at AS conversation_started_at, c.generated_by
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE {project_filter_sql("c")}
+          {generated}
+        ORDER BY m.created_at {direction}, m.id {direction}
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        {
+            **project_filter_params(project),
+            "limit": limit,
+            "offset": offset,
+        },
+    )
+
+
+def project_context_totals(conn, project: str, *, include_generated: bool = False) -> Row:
+    """Counts use the exact same filter as the transcript page."""
+    generated = "" if include_generated else "AND c.generated_by IS NULL"
+    return (
+        one(
+            conn,
+            f"""
+        SELECT count(DISTINCT m.conversation_id) AS sessions, count(m.id) AS messages
+        FROM conversations c
+        LEFT JOIN messages m ON m.conversation_id = c.id
+        WHERE {project_filter_sql("c")}
+          {generated}
+        """,
+            project_filter_params(project),
+        )
+        or {"sessions": 0, "messages": 0}
     )
 
 

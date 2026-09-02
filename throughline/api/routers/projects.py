@@ -17,6 +17,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 
+from throughline.queries import conversations as Conversations
+from throughline.queries import memory as Memory
 from throughline.queries import projects as Q
 
 from ..deps import connection
@@ -29,6 +31,7 @@ router = APIRouter(tags=["projects"])
 #: the busiest on this corpus has 36 in a week — small enough that a project
 #: with years of history does not arrive in one payload.
 PAGE = 50
+CONTEXT_PAGE = 500
 
 
 @router.get("/projects/recent")
@@ -39,6 +42,55 @@ def recent(
     """Projects touched in the last *days*, busiest first."""
     with connection(settings) as conn:
         return {"days": days, "projects": Q.recent(conn, days=days)}
+
+
+@router.get("/projects/{name:path}/context")
+def context(
+    name: str,
+    order: Literal["oldest", "newest"] = "oldest",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(CONTEXT_PAGE, ge=1, le=CONTEXT_PAGE),
+    include_generated: bool = Query(False, alias="includeGenerated"),
+    legacy_include_generated: bool = Query(False, alias="include_generated", include_in_schema=False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """The source-linked knowledge and transcript for one project."""
+    show_generated = include_generated or legacy_include_generated
+    with connection(settings) as conn:
+        totals = Conversations.project_context_totals(conn, name, include_generated=show_generated)
+        messages = Conversations.project_context_messages(
+            conn,
+            name,
+            ascending=order == "oldest",
+            limit=limit,
+            offset=offset,
+            include_generated=show_generated,
+        )
+        message_total = int(totals["messages"])
+        session_total = int(totals["sessions"])
+        knowledge = [
+            {
+                **item,
+                # PostgreSQL numeric is Decimal. The API contract is a JSON
+                # number so clients can sort or format confidence directly.
+                "confidence": float(item["confidence"]),
+            }
+            for item in Memory.project_context_knowledge(conn, name, include_generated=show_generated)
+        ]
+        return {
+            "project": name,
+            "summary": f"{session_total} session{'s' if session_total != 1 else ''}, {message_total} message{'s' if message_total != 1 else ''}",
+            "knowledge": knowledge,
+            "messages": messages,
+            "sessionCount": session_total,
+            "messageCount": message_total,
+            "total": message_total,
+            "offset": offset,
+            "limit": limit,
+            "complete": offset + len(messages) >= message_total,
+            "order": order,
+            "includeGenerated": show_generated,
+        }
 
 
 @router.get("/projects/{name:path}/sessions")

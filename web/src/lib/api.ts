@@ -231,6 +231,19 @@ export interface ProjectSessions {
   hidden_generated: number;
 }
 
+export interface ProjectContextMessage {
+  id: number; role: string; content: string | null;
+  content_blocks?: unknown; tool_calls?: unknown; tool_name?: string | null; model?: string | null;
+  created_at: string;
+  conversation_id: number; conversation_title: string | null;
+  conversation_started_at: string | null; generated_by: string | null;
+}
+export interface ProjectContext {
+  project: string; summary: string; knowledge: { id: number; type: "memory"; category: string; content: string; confidence: number; source_type: string; source_id: number | null }[];
+  messages: ProjectContextMessage[]; sessionCount: number; messageCount: number;
+  total: number; offset: number; limit: number; complete: boolean; order: "oldest" | "newest"; includeGenerated: boolean;
+}
+
 export const projectsApi = {
   recent: (days = 7) =>
     request<{ days: number; projects: ProjectSummary[] }>(`/projects/recent?days=${days}`),
@@ -255,6 +268,14 @@ export const projectsApi = {
     return request<ProjectSessions>(
       `/projects/${encodeURIComponent(project)}/sessions?${p.toString()}`,
     );
+  },
+  context: (project: string, opts: { order?: "oldest" | "newest"; offset?: number; limit?: number; includeGenerated?: boolean } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.order) p.set("order", opts.order);
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.includeGenerated) p.set("includeGenerated", "true");
+    return request<ProjectContext>(`/projects/${encodeURIComponent(project)}/context?${p.toString()}`);
   },
 };
 

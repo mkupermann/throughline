@@ -149,7 +149,10 @@ export function Shell() {
 
   const closeHelp = () => {
     setHelpOpen(false);
-    window.requestAnimationFrame(() => helpTriggerRef.current?.focus());
+    // The trigger never unmounts, so focus can return synchronously. Waiting
+    // for an animation frame left keyboard users briefly at the document body
+    // and made the result depend on frame timing under load.
+    helpTriggerRef.current?.focus();
   };
 
   useEffect(() => {

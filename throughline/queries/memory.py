@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._exec import Row, one, rows, scalar
+from .projects import project_filter_params, project_filter_sql
 
 CATEGORIES = (
     "decision",
@@ -88,6 +89,46 @@ def count_chunks(
 ) -> int:
     where, params = _build_filters(category, project, search, status)
     return int(scalar(conn, f"SELECT count(*) FROM memory_chunks {where}", params, 0) or 0)
+
+
+def project_context_knowledge(conn, project: str, *, include_generated: bool = False) -> list[Row]:
+    """Active knowledge with provenance and the transcript's automation filter.
+
+    Only ``conversation`` sources point at a conversation. Manual writes,
+    consolidation results, and reflections keep their own polymorphic source
+    meaning and therefore remain visible.
+    """
+    return rows(
+        conn,
+        f"""
+        SELECT mc.id, 'memory' AS type, mc.category::text AS category, mc.content,
+               mc.confidence, mc.source_type,
+               CASE WHEN mc.source_type = 'conversation'
+                    THEN source_conversation.id
+                    ELSE mc.source_id
+               END AS source_id
+        FROM memory_chunks mc
+        LEFT JOIN conversations source_conversation
+          ON mc.source_type = 'conversation'
+         AND source_conversation.id = mc.source_id
+        WHERE (
+            (mc.source_type = 'conversation'
+             AND source_conversation.id IS NOT NULL
+             AND {project_filter_sql("source_conversation")})
+            OR
+            ((mc.source_type <> 'conversation' OR source_conversation.id IS NULL)
+             AND mc.project_name = %(project)s)
+          )
+          AND COALESCE(mc.status, 'active') = 'active'
+          AND (
+            %(include_generated)s
+            OR mc.source_type <> 'conversation'
+            OR source_conversation.generated_by IS NULL
+          )
+        ORDER BY mc.category ASC, mc.created_at ASC, mc.id ASC
+        """,
+        {**project_filter_params(project), "include_generated": include_generated},
+    )
 
 
 def get_chunk(conn, chunk_id: int) -> Row | None:

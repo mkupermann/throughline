@@ -1,154 +1,307 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, Search, X } from "lucide-react";
 
-import { ApiError, projectsApi, type ProjectSession } from "@/lib/api";
+import {
+  projectsApi,
+  type ApiError,
+  type ProjectContextMessage,
+  type ProjectSession,
+} from "@/lib/api";
 import { formatCount } from "@/lib/format";
+import { ProjectDocument } from "./ProjectDocument";
 
-/**
- * One project's history: its sessions, oldest or newest first, searchable.
- *
- * Sessions, not messages. This project holds 7,461 messages across 28
- * sessions, and one session alone holds 5,560 — rendering "the whole history"
- * as a flat message list is a page that never finishes and a reader who cannot
- * find anything. A session row is the unit a person remembers: a date, a
- * length, and what it was about.
- *
- * Search runs on the server against both the session title and its messages.
- * Filtering 7,461 messages in the browser would mean shipping them first,
- * which is the same mistake in a different place.
- */
+const CONTEXT_PAGE = 500;
+const SESSION_PAGE = 50;
 
-const PAGE = 50;
+type Mode = "document" | "sessions";
+type Order = "oldest" | "newest";
 
 function when(iso: string | null | undefined, withTime = true): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
     ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
-  }).format(d);
+  }).format(date);
 }
 
-/** How long a session ran, when both ends are known. */
 function duration(start: string | null, end: string | null): string {
   if (!start || !end) return "";
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (!Number.isFinite(ms) || ms < 60_000) return "";
-  const mins = Math.round(ms / 60_000);
-  if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  return `${h}h ${mins % 60}m`;
+  const milliseconds = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(milliseconds) || milliseconds < 60_000) return "";
+  const minutes = Math.round(milliseconds / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 export function ProjectPage() {
   const { name } = useParams();
-  const [sp, setSp] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const project = decodeURIComponent(name ?? "");
+  const mode: Mode = searchParams.get("mode") === "sessions" ? "sessions" : "document";
+  const explicitOrder = searchParams.get("order");
+  const documentOrder: Order = explicitOrder === "newest" ? "newest" : "oldest";
+  const sessionOrder: Order = explicitOrder === "oldest" ? "oldest" : "newest";
+  const query = searchParams.get("q") ?? "";
+  const includeGenerated = searchParams.get("generated") === "1";
 
-  // Sort and search live in the URL, so a view of a project is a link someone
-  // can keep or share rather than a state only this tab knows about.
-  const order = (sp.get("order") === "oldest" ? "oldest" : "newest") as "newest" | "oldest";
-  const q = sp.get("q") ?? "";
-  // Whether machine-generated sessions are listed. In the URL like the rest,
-  // and off by default — but the reader's call, not the interface's. Some of
-  // what gets labelled "agent-consultation" is a person's own multi-agent
-  // work, and hiding that permanently would be deciding what counts as their
-  // history on their behalf.
-  const includeGenerated = sp.get("generated") === "1";
-  const [draft, setDraft] = useState(q);
+  const [draft, setDraft] = useState(query);
+  const [moreMessages, setMoreMessages] = useState<ProjectContextMessage[]>([]);
+  const [loadingAllMessages, setLoadingAllMessages] = useState(false);
+  const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
+  const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
+  const [moreSessions, setMoreSessions] = useState<ProjectSession[]>([]);
+  const [loadingAllSessions, setLoadingAllSessions] = useState(false);
+  const [allSessionsLoaded, setAllSessionsLoaded] = useState(false);
+  const [sessionTotalOverride, setSessionTotalOverride] = useState<number | null>(null);
+  const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
+  const documentTab = useRef<HTMLButtonElement>(null);
+  const sessionsTab = useRef<HTMLButtonElement>(null);
+  const messageLoading = useRef(false);
+  const sessionLoading = useRef(false);
+  const automaticDocumentLoad = useRef<string | null>(null);
+  const messageScope = `${project}\u0000${includeGenerated ? "generated" : "human"}`;
+  const sessionScope = `${project}\u0000${sessionOrder}\u0000${query}\u0000${includeGenerated ? "generated" : "human"}`;
+  const activeMessageScope = useRef(messageScope);
+  const activeSessionScope = useRef(sessionScope);
+  activeMessageScope.current = messageScope;
+  activeSessionScope.current = sessionScope;
 
-  // Sessions beyond the first page, appended as they arrive. Held here rather
-  // than fetched by bumping an `offset` query param on the main query: that
-  // approach fetched page N but never combined it with pages 1..N-1, so
-  // clicking "Show more" replaced the list with the next 50 rather than
-  // growing it — the button's own "X of Y" label promised accumulation that
-  // never happened.
-  const [more, setMore] = useState<ProjectSession[]>([]);
-  const [loadingAll, setLoadingAll] = useState(false);
+  const context = useQuery({
+    queryKey: ["project-context", project, includeGenerated],
+    queryFn: () =>
+      projectsApi.context(project, {
+        order: "oldest",
+        limit: CONTEXT_PAGE,
+        includeGenerated,
+      }),
+    enabled: Boolean(project) && mode === "document",
+  });
 
-  const { data, isPending, error, refetch } = useQuery({
-    queryKey: ["project-sessions", project, order, q, includeGenerated],
+  const sessionIndex = useQuery({
+    queryKey: ["project-sessions", project, sessionOrder, query, includeGenerated],
     queryFn: () =>
       projectsApi.sessions(project, {
-        order,
-        q,
-        limit: PAGE,
+        order: sessionOrder,
+        q: query || undefined,
+        limit: SESSION_PAGE,
         offset: 0,
         includeGenerated,
       }),
-    enabled: Boolean(project),
+    enabled: Boolean(project) && mode === "sessions",
   });
 
-  // A new filter, sort, or project means the accumulated tail belongs to the
-  // previous view.
   useEffect(() => {
-    setMore([]);
-  }, [project, order, q, includeGenerated]);
+    setMoreMessages([]);
+    setAllMessagesLoaded(false);
+    setMessageLoadError(null);
+    setLoadingAllMessages(false);
+    messageLoading.current = false;
+  }, [messageScope]);
+
+  useEffect(() => {
+    setMoreSessions([]);
+    setAllSessionsLoaded(false);
+    setSessionTotalOverride(null);
+    setSessionLoadError(null);
+    setLoadingAllSessions(false);
+    sessionLoading.current = false;
+  }, [sessionScope]);
+
+  useEffect(() => {
+    setDraft(query);
+  }, [project, query]);
 
   function update(next: Record<string, string | null>) {
-    const p = new URLSearchParams(sp);
-    for (const [k, v] of Object.entries(next)) {
-      if (v) p.set(k, v);
-      else p.delete(k);
+    const updated = new URLSearchParams(searchParams);
+    for (const [key, value] of Object.entries(next)) {
+      if (value) updated.set(key, value);
+      else updated.delete(key);
     }
-    setSp(p, { replace: true });
+    setSearchParams(updated, { replace: true });
   }
 
-  const firstPage = data?.sessions ?? [];
-  const sessions = firstPage.concat(more);
-  const total = data?.total ?? 0;
-  const complete = sessions.length >= total;
+  function selectMode(nextMode: Mode, focus = false) {
+    update({ mode: nextMode === "sessions" ? "sessions" : null });
+    if (focus) {
+      (nextMode === "document" ? documentTab : sessionsTab).current?.focus();
+    }
+  }
 
-  // Fetches every remaining page in one loop rather than one click per 50
-  // sessions, mirroring the conversation transcript's "Load full transcript".
-  async function loadAll() {
-    if (loadingAll || complete) return;
-    setLoadingAll(true);
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    let nextMode: Mode | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      nextMode = mode === "document" ? "sessions" : "document";
+    } else if (event.key === "Home") {
+      nextMode = "document";
+    } else if (event.key === "End") {
+      nextMode = "sessions";
+    }
+    if (!nextMode) return;
+    event.preventDefault();
+    selectMode(nextMode, true);
+  }
+
+  const contextData = context.data;
+  const messages = (contextData?.messages ?? []).concat(moreMessages);
+  const documentComplete = Boolean(contextData && (contextData.complete || allMessagesLoaded));
+
+  const loadCompleteDocument = useCallback(async (): Promise<boolean> => {
+    if (!contextData) return false;
+    if (contextData.complete || allMessagesLoaded) return true;
+    if (messageLoading.current) return false;
+    const scope = messageScope;
+    messageLoading.current = true;
+    setLoadingAllMessages(true);
+    setMessageLoadError(null);
     try {
-      let loaded = sessions.length;
-      while (loaded < total) {
-        const next = await projectsApi.sessions(project, {
-          order,
-          q,
-          limit: PAGE,
-          offset: loaded,
+      let offset = contextData.offset + contextData.messages.length;
+      let expectedTotal = contextData.total;
+      const seen = new Set(contextData.messages.map((message) => message.id));
+      const collected: ProjectContextMessage[] = [];
+      let complete: boolean = contextData.complete;
+      while (!complete && offset < expectedTotal) {
+        const page = await projectsApi.context(project, {
+          order: "oldest",
+          offset,
+          limit: CONTEXT_PAGE,
           includeGenerated,
         });
-        if (!next.sessions.length) break;
-        setMore((prev) => prev.concat(next.sessions));
-        loaded += next.sessions.length;
+        if (activeMessageScope.current !== scope) return false;
+        expectedTotal = page.total;
+        if (!page.messages.length && !page.complete) {
+          throw new Error("The server returned no next page.");
+        }
+        for (const message of page.messages) {
+          if (seen.has(message.id)) continue;
+          seen.add(message.id);
+          collected.push(message);
+        }
+        offset = page.offset + page.messages.length;
+        complete = page.complete || offset >= expectedTotal;
       }
+      if (activeMessageScope.current !== scope) return false;
+      if (!complete && offset < expectedTotal) {
+        throw new Error("The complete project could not be loaded.");
+      }
+      setMoreMessages(collected);
+      setAllMessagesLoaded(true);
+      return true;
+    } catch {
+      if (activeMessageScope.current === scope) {
+        setMessageLoadError("Could not load the complete project. Try again.");
+      }
+      return false;
     } finally {
-      setLoadingAll(false);
+      if (activeMessageScope.current === scope) {
+        messageLoading.current = false;
+        setLoadingAllMessages(false);
+      }
+    }
+  }, [allMessagesLoaded, contextData, includeGenerated, messageScope, project]);
+
+  useEffect(() => {
+    const attempt = `${messageScope}\u0000newest`;
+    if (
+      mode === "document" &&
+      documentOrder === "newest" &&
+      contextData &&
+      !documentComplete &&
+      automaticDocumentLoad.current !== attempt
+    ) {
+      automaticDocumentLoad.current = attempt;
+      void loadCompleteDocument();
+    }
+  }, [contextData, documentComplete, documentOrder, loadCompleteDocument, messageScope, mode]);
+
+  async function setDocumentOrder(nextOrder: Order) {
+    if (nextOrder === "newest" && !documentComplete) {
+      const loaded = await loadCompleteDocument();
+      if (!loaded) return;
+    }
+    update({ order: nextOrder === "newest" ? "newest" : null });
+  }
+
+  const visibleMessages =
+    documentOrder === "newest" && documentComplete ? [...messages].reverse() : messages;
+
+  const firstSessionPage = sessionIndex.data?.sessions ?? [];
+  const visibleSessions = firstSessionPage.concat(moreSessions);
+  const sessionTotal = sessionTotalOverride ?? sessionIndex.data?.total ?? 0;
+  const sessionsComplete = Boolean(
+    sessionIndex.data && (allSessionsLoaded || !sessionIndex.data.has_more),
+  );
+
+  async function loadAllSessions(): Promise<boolean> {
+    if (!sessionIndex.data) return false;
+    if (sessionsComplete) return true;
+    if (sessionLoading.current) return false;
+    const scope = sessionScope;
+    sessionLoading.current = true;
+    setLoadingAllSessions(true);
+    setSessionLoadError(null);
+    try {
+      let offset = sessionIndex.data.offset + sessionIndex.data.sessions.length;
+      let expectedTotal = sessionIndex.data.total;
+      let hasMore = sessionIndex.data.has_more;
+      const seen = new Set(sessionIndex.data.sessions.map((session) => session.id));
+      const collected: ProjectSession[] = [];
+      while (hasMore || offset < expectedTotal) {
+        const page = await projectsApi.sessions(project, {
+          order: sessionOrder,
+          q: query || undefined,
+          limit: SESSION_PAGE,
+          offset,
+          includeGenerated,
+        });
+        if (activeSessionScope.current !== scope) return false;
+        expectedTotal = page.total;
+        hasMore = page.has_more;
+        if (!page.sessions.length && hasMore) {
+          throw new Error("The server returned no next page.");
+        }
+        for (const session of page.sessions) {
+          if (seen.has(session.id)) continue;
+          seen.add(session.id);
+          collected.push(session);
+        }
+        offset = page.offset + page.sessions.length;
+        if (!page.sessions.length) break;
+      }
+      if (activeSessionScope.current !== scope) return false;
+      if (hasMore || offset < expectedTotal) {
+        throw new Error("The complete session list could not be loaded.");
+      }
+      setMoreSessions(collected);
+      setSessionTotalOverride(expectedTotal);
+      setAllSessionsLoaded(true);
+      return true;
+    } catch {
+      if (activeSessionScope.current === scope) {
+        setSessionLoadError("Could not load every session. Try again.");
+      }
+      return false;
+    } finally {
+      if (activeSessionScope.current === scope) {
+        sessionLoading.current = false;
+        setLoadingAllSessions(false);
+      }
     }
   }
 
-  if (error) {
-    const e = error as ApiError;
-    return (
-      <>
-        <header className="page-header">
-          <Link to="/" className="backlink">
-            ← Overview
-          </Link>
-          <h1 className="page-title">{project}</h1>
-        </header>
-        <div className="empty-state">
-          <h2>Could not load project history</h2>
-          <p>{e.message}</p>
-          {e.hint && <p className="empty-hint">{e.hint}</p>}
-          <button type="button" className="button" onClick={() => refetch()}>
-            Try again
-          </button>
-        </div>
-      </>
-    );
-  }
+  const pageSubtitle =
+    mode === "document"
+      ? (contextData?.summary ?? "…")
+      : sessionIndex.data
+        ? `${formatCount(sessionIndex.data.total)} session${sessionIndex.data.total === 1 ? "" : "s"}${
+            query ? ` matching “${query}”` : ""
+          }`
+        : "…";
 
   return (
     <>
@@ -157,134 +310,228 @@ export function ProjectPage() {
           ← Overview
         </Link>
         <h1 className="page-title">{project}</h1>
-        <p className="page-subtitle">
-          {data
-            ? `${formatCount(data.total)} session${data.total === 1 ? "" : "s"}${
-                q ? ` matching “${q}”` : ""
-              }`
-            : "…"}
-        </p>
+        <p className="page-subtitle">{pageSubtitle}</p>
       </header>
 
-      <div className="proj-controls">
-        <form
-          className="searchbar proj-search"
-          onSubmit={(e) => {
-            e.preventDefault();
-            update({ q: draft.trim() || null });
-          }}
+      <div className="project-view-tabs mode-switch" role="tablist" aria-label="Project view">
+        <button
+          ref={documentTab}
+          id="project-document-tab"
+          type="button"
+          role="tab"
+          aria-selected={mode === "document"}
+          aria-controls="project-document-panel"
+          tabIndex={mode === "document" ? 0 : -1}
+          className={mode === "document" ? "is-on" : ""}
+          onClick={() => selectMode("document")}
+          onKeyDown={handleTabKeyDown}
         >
-          <Search size={15} aria-hidden className="searchbar-icon" />
-          <input
-            className="searchbar-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Search inside ${project}…`}
-            aria-label={`Search inside ${project}`}
-          />
-          {draft && (
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => {
-                setDraft("");
-                update({ q: null });
-              }}
-              aria-label="Clear search"
-            >
-              <X size={15} aria-hidden />
-            </button>
-          )}
-        </form>
-
-        {/* Both directions, because both questions are asked: "what was I just
-            doing" and "how did this start". */}
-        <div className="mode-switch" role="group" aria-label="Sort order">
-          <button
-            type="button"
-            className={order === "newest" ? "is-on" : ""}
-            aria-pressed={order === "newest"}
-            onClick={() => update({ order: null })}
-          >
-            <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
-          </button>
-          <button
-            type="button"
-            className={order === "oldest" ? "is-on" : ""}
-            aria-pressed={order === "oldest"}
-            onClick={() => update({ order: "oldest" })}
-          >
-            <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
-          </button>
-        </div>
+          Document
+        </button>
+        <button
+          ref={sessionsTab}
+          id="project-sessions-tab"
+          type="button"
+          role="tab"
+          aria-selected={mode === "sessions"}
+          aria-controls="project-sessions-panel"
+          tabIndex={mode === "sessions" ? 0 : -1}
+          className={mode === "sessions" ? "is-on" : ""}
+          onClick={() => selectMode("sessions")}
+          onKeyDown={handleTabKeyDown}
+        >
+          Sessions
+        </button>
       </div>
 
-      {isPending && <p className="ask-status">Loading…</p>}
-
-      {!isPending && sessions.length === 0 && (
-        <div className="empty-state">
-          <h2>{q ? `Nothing in ${project} matches “${q}”` : "No sessions yet"}</h2>
-          {q && <p>Search covers session titles and every message inside them.</p>}
-        </div>
-      )}
-
-      <ol className="proj-sessions">
-        {sessions.map((s) => (
-          <li key={s.id}>
-            <Link to={`/c/${s.id}`} className="proj-session">
-              <div className="proj-session-main">
-                <span className="proj-session-title">
-                  {s.title || <span className="proj-untitled">(untitled session)</span>}
-                </span>
-                <span className="proj-session-meta">
-                  <time dateTime={s.started_at ?? undefined}>{when(s.started_at)}</time>
-                  {duration(s.started_at, s.ended_at) && <span>{duration(s.started_at, s.ended_at)}</span>}
-                  <span>{s.source_tool}</span>
-                  {s.git_branch && <span className="proj-branch">{s.git_branch}</span>}
-                </span>
-              </div>
-              <span className="proj-session-count tabular">
-                {formatCount(s.message_count)}
-                <span className="proj-session-unit">msg</span>
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ol>
-
-      {!complete && (
-        <button type="button" className="button stack-top" onClick={loadAll} disabled={loadingAll}>
-          {loadingAll
-            ? `Loading… (${formatCount(sessions.length)} of ${formatCount(total)})`
-            : `Load all sessions — ${formatCount(sessions.length)} of ${formatCount(total)} shown`}
-        </button>
-      )}
-
-      {/* What is not shown, and why. A project listing 29 sessions out of 689
-          stored rows has to account for the difference, or the interface is
-          quietly deciding what counts as the user's history. */}
-      {data && data.hidden_generated > 0 && (
-        <p className="proj-hidden">
-          {includeGenerated ? (
-            <>
-              Showing machine-generated sessions too — tool calls Throughline and other automation
-              made on your behalf.{" "}
-              <button type="button" className="linkbutton" onClick={() => update({ generated: null })}>
-                Hide them
+      <section
+        id="project-document-panel"
+        role="tabpanel"
+        aria-labelledby="project-document-tab"
+        hidden={mode !== "document"}
+      >
+          <div className="proj-controls project-document-controls">
+            <div className="mode-switch" role="group" aria-label="Document chronology">
+              <button
+                type="button"
+                className={documentOrder === "oldest" ? "is-on" : ""}
+                aria-pressed={documentOrder === "oldest"}
+                onClick={() => void setDocumentOrder("oldest")}
+              >
+                <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
               </button>
-            </>
-          ) : (
-            <>
-              {formatCount(data.hidden_generated)} machine-generated sessions in this project are
-              not listed — tool calls Throughline and other automation made on your behalf. They are
-              stored, not deleted.{" "}
-              <button type="button" className="linkbutton" onClick={() => update({ generated: "1" })}>
-                Show them
+              <button
+                type="button"
+                className={documentOrder === "newest" ? "is-on" : ""}
+                aria-pressed={documentOrder === "newest"}
+                onClick={() => void setDocumentOrder("newest")}
+              >
+                <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
               </button>
-            </>
+            </div>
+          </div>
+
+          {context.isPending && <p className="ask-status">Loading…</p>}
+          {context.error && (
+            <ProjectError error={context.error as ApiError} onRetry={() => context.refetch()} />
           )}
-        </p>
-      )}
+          {messageLoadError && <p className="ask-status" role="alert">{messageLoadError}</p>}
+          {contextData && (
+            <ProjectDocument
+              summary={contextData.summary}
+              knowledge={contextData.knowledge}
+              messages={visibleMessages}
+              complete={documentComplete}
+              onLoadComplete={loadCompleteDocument}
+              loading={loadingAllMessages}
+            />
+          )}
+      </section>
+
+      <section
+        id="project-sessions-panel"
+        role="tabpanel"
+        aria-labelledby="project-sessions-tab"
+        hidden={mode !== "sessions"}
+      >
+          <div className="proj-controls">
+            <form
+              className="searchbar proj-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                update({ q: draft.trim() || null });
+              }}
+            >
+              <Search size={15} aria-hidden className="searchbar-icon" />
+              <input
+                className="searchbar-input"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder={`Search inside ${project}…`}
+                aria-label={`Search inside ${project}`}
+              />
+              {draft && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => {
+                    setDraft("");
+                    update({ q: null });
+                  }}
+                  aria-label="Clear search"
+                >
+                  <X size={15} aria-hidden />
+                </button>
+              )}
+            </form>
+
+            <div className="mode-switch" role="group" aria-label="Session sort order">
+              <button
+                type="button"
+                className={sessionOrder === "newest" ? "is-on" : ""}
+                aria-pressed={sessionOrder === "newest"}
+                onClick={() => update({ order: null })}
+              >
+                <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
+              </button>
+              <button
+                type="button"
+                className={sessionOrder === "oldest" ? "is-on" : ""}
+                aria-pressed={sessionOrder === "oldest"}
+                onClick={() => update({ order: "oldest" })}
+              >
+                <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
+              </button>
+            </div>
+          </div>
+
+          {sessionIndex.isPending && <p className="ask-status">Loading…</p>}
+          {sessionIndex.error && (
+            <ProjectError error={sessionIndex.error as ApiError} onRetry={() => sessionIndex.refetch()} />
+          )}
+
+          {!sessionIndex.isPending && !sessionIndex.error && visibleSessions.length === 0 && (
+            <div className="empty-state">
+              <h2>{query ? `Nothing in ${project} matches “${query}”` : "No sessions yet"}</h2>
+              {query && <p>Search covers session titles and every message inside them.</p>}
+            </div>
+          )}
+          {sessionLoadError && <p className="ask-status" role="alert">{sessionLoadError}</p>}
+
+          <ol className="proj-sessions">
+            {visibleSessions.map((session) => (
+              <li key={session.id}>
+                <Link to={`/c/${session.id}`} className="proj-session">
+                  <div className="proj-session-main">
+                    <span className="proj-session-title">
+                      {session.title || <span className="proj-untitled">(untitled session)</span>}
+                    </span>
+                    <span className="proj-session-meta">
+                      <time dateTime={session.started_at ?? undefined}>{when(session.started_at)}</time>
+                      {duration(session.started_at, session.ended_at) && (
+                        <span>{duration(session.started_at, session.ended_at)}</span>
+                      )}
+                      <span>{session.source_tool}</span>
+                      {session.git_branch && <span className="proj-branch">{session.git_branch}</span>}
+                    </span>
+                  </div>
+                  <span className="proj-session-count tabular">
+                    {formatCount(session.message_count)}
+                    <span className="proj-session-unit">msg</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+
+          {!sessionsComplete && (
+            <button
+              type="button"
+              className="button stack-top"
+              onClick={() => void loadAllSessions()}
+              disabled={loadingAllSessions}
+            >
+              {loadingAllSessions
+                ? `Loading… (${formatCount(visibleSessions.length)} of ${formatCount(sessionTotal)})`
+                : `Load all sessions — ${formatCount(visibleSessions.length)} of ${formatCount(sessionTotal)} shown`}
+            </button>
+          )}
+
+          {sessionIndex.data && sessionIndex.data.hidden_generated > 0 && (
+            <p className="proj-hidden">
+              {includeGenerated ? (
+                <>
+                  Showing machine-generated sessions too. These are tool calls Throughline and other
+                  automation made on your behalf.{" "}
+                  <button type="button" className="linkbutton" onClick={() => update({ generated: null })}>
+                    Hide them
+                  </button>
+                </>
+              ) : (
+                <>
+                  {formatCount(sessionIndex.data.hidden_generated)} machine-generated sessions in this
+                  project are not listed. They are stored, not deleted.{" "}
+                  <button type="button" className="linkbutton" onClick={() => update({ generated: "1" })}>
+                    Show them
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+      </section>
     </>
+  );
+}
+
+function ProjectError({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
+  return (
+    <div className="empty-state">
+      <h2>Could not load project history</h2>
+      <p>{error.message}</p>
+      {error.hint && <p className="empty-hint">{error.hint}</p>}
+      <button type="button" className="button" onClick={onRetry}>
+        Try again
+      </button>
+    </div>
   );
 }
