@@ -1,11 +1,20 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, OctagonAlert, Play } from "lucide-react";
 
-import { ApiError, curateApi, type ActResult, type CurateItem, type QueueSummary } from "@/lib/api";
+import {
+  ApiError,
+  curateApi,
+  operateApi,
+  type ActResult,
+  type AuditStatus,
+  type CurateItem,
+  type QueueSummary,
+} from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
+import { JobConsole, type JobCompletion } from "@/features/operate/JobConsole";
 import { NewChunkForm } from "./NewChunkForm";
 
 const SEVERITY_ICON = { warning: AlertTriangle, info: Info } as const;
@@ -49,6 +58,35 @@ export function CuratePage() {
   const [pending, setPending] = useState<{ action: string; ids: number[] } | null>(null);
   const toast = useToast();
   const qc = useQueryClient();
+  const [auditJobId, setAuditJobId] = useState<string | null>(null);
+
+  const { data: audit, error: auditError } = useQuery({
+    queryKey: ["curate", "audit"],
+    queryFn: curateApi.audit,
+    refetchInterval: (query) =>
+      auditJobId || (query.state.data as AuditStatus | undefined)?.job?.running ? 4000 : false,
+  });
+
+  const runAudit = useMutation({
+    mutationFn: () => operateApi.run("audit-extraction"),
+    onSuccess: (result) => setAuditJobId(result.job_id),
+    onError: (error) =>
+      toast.push({ message: (error as Error).message, tone: "error", duration: 8000 }),
+  });
+
+  const auditFinished = useCallback((completion: JobCompletion) => {
+    setAuditJobId(null);
+    void qc.invalidateQueries({ queryKey: ["curate"] });
+    toast.push(
+      completion.ok
+        ? { message: "Drift audit finished. Review is up to date." }
+        : {
+            message: "Drift audit failed. Review was not updated.",
+            tone: "error",
+            duration: 8000,
+          },
+    );
+  }, [qc, toast]);
 
   const { data: queues, error: queuesError, refetch: refetchQueues } = useQuery({
     queryKey: ["curate", "queues"],
@@ -258,7 +296,7 @@ export function CuratePage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Curate</h1>
+          <h1 className="page-title">Review</h1>
         </header>
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
@@ -273,16 +311,57 @@ export function CuratePage() {
     );
   }
 
+  const activeAuditJobId =
+    auditJobId ?? (audit?.job?.running ? audit.job.job_id : null);
+
   return (
     <>
       <header className="page-header">
-        <h1 className="page-title">Curate</h1>
+        <h1 className="page-title">Review</h1>
         <p className="page-subtitle">
           {totalOutstanding === 0
             ? "Every queue is clear."
             : `${formatCount(totalOutstanding)} item${totalOutstanding === 1 ? "" : "s"} across all queues.`}
         </p>
       </header>
+
+      <section className="audit-panel" aria-labelledby="drift-audit-heading">
+        <div className="audit-panel-copy">
+          <h2 id="drift-audit-heading">Memory drift audit</h2>
+          <p>{auditSummary(audit?.last_run ?? null)}</p>
+          {audit?.last_run?.created_at && (
+            <p className="audit-last-run">
+              Last run {new Date(audit.last_run.created_at).toLocaleString("en-US")}
+            </p>
+          )}
+          {auditError && <p className="job-unavailable">Audit status is unavailable.</p>}
+          {audit?.job?.unavailable && (
+            <p className="job-unavailable">{audit.job.unavailable}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="button audit-run"
+          onClick={() => runAudit.mutate()}
+          disabled={
+            !audit?.job ||
+            Boolean(audit.job.unavailable) ||
+            audit.job.running ||
+            runAudit.isPending ||
+            Boolean(auditJobId)
+          }
+        >
+          <Play size={14} aria-hidden />
+          {audit?.job?.running || runAudit.isPending || auditJobId
+            ? "Audit running…"
+            : "Run drift audit"}
+        </button>
+        {activeAuditJobId && (
+          <div className="audit-console">
+            <JobConsole jobId={activeAuditJobId} onFinished={auditFinished} />
+          </div>
+        )}
+      </section>
 
       <div className="curate-toolbar">
         <NewChunkForm />
@@ -300,6 +379,9 @@ export function CuratePage() {
             <h2 className="queue-title">{queue.title}</h2>
             <p className="queue-desc">{queue.description}</p>
           </div>
+          <span className={`queue-urgency sev-${queue.severity}`}>
+            {queue.severity === "warning" ? "Needs review" : "Maintenance"}
+          </span>
         </div>
       )}
 
@@ -346,6 +428,20 @@ export function CuratePage() {
       {confirmDialog}
     </>
   );
+}
+
+function auditSummary(lastRun: AuditStatus["last_run"]): string {
+  if (!lastRun) return "No drift audit has run yet.";
+  if (lastRun.state === "no-samples") {
+    return "No eligible source-linked memory was available.";
+  }
+  if (lastRun.drifted === 0) {
+    return `No drift found in ${formatCount(lastRun.sampled)} sampled chunks.`;
+  }
+  if (lastRun.findings_available === false) {
+    return `The last legacy audit found ${formatCount(lastRun.drifted)} possible issues. Run again to identify them safely.`;
+  }
+  return `${formatCount(lastRun.drifted)} of ${formatCount(lastRun.sampled)} sampled chunks need review.`;
 }
 
 function CurateRow({

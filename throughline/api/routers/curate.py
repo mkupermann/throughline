@@ -11,6 +11,7 @@ from throughline import queries as Q
 from throughline.queries.curate import INVERSE_OPS, QUEUE_FUNCS, QUEUE_META
 
 from ..deps import connection
+from ..jobs import JOBS, check_requirement, runner
 from ..settings import Settings
 from ..undo import registry
 from .common import get_settings
@@ -50,6 +51,29 @@ def queues(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
             for name in QUEUE_FUNCS
         ],
         "total": sum(counts.values()),
+    }
+
+
+@router.get("/curate/audit")
+def audit_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Latest drift verdict and the one safe job that refreshes it."""
+    with connection(settings) as conn:
+        latest = Q.curate.latest_audit(conn)
+    spec = JOBS.get("audit-extraction")
+    if spec is None:
+        return {"last_run": _row(latest) if latest else None, "job": None}
+    current = runner.current(spec.name)
+    return {
+        "last_run": _row(latest) if latest else None,
+        "job": {
+            "name": spec.name,
+            "title": spec.title,
+            "description": spec.description,
+            "danger": spec.danger,
+            "running": bool(current),
+            "job_id": current.id if current else None,
+            "unavailable": check_requirement(spec.requires),
+        },
     }
 
 

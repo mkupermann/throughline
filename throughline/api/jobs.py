@@ -98,6 +98,11 @@ def _cli(*args: str) -> list[str]:
     return [sys.executable, "-m", "throughline", *args]
 
 
+def _job_module(module: str, *args: str) -> list[str]:
+    """Run one packaged job module with this interpreter."""
+    return [sys.executable, "-m", module, *args]
+
+
 JOBS: dict[str, JobSpec] = {
     "ingest": JobSpec(
         "ingest",
@@ -144,6 +149,12 @@ JOBS: dict[str, JobSpec] = {
         "Deduplicate, find contradictions, mark stale memory.",
         _cli("reflect"),
         requires="model",
+    ),
+    "audit-extraction": JobSpec(
+        "audit-extraction",
+        "Run drift audit",
+        "Check a sample of extracted memory against its source conversations.",
+        _job_module("throughline.jobs.audit_extraction", "--json"),
     ),
     "export-markdown": JobSpec(
         "export-markdown",

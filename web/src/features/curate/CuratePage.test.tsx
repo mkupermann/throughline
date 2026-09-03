@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/Toaster";
-import type { CurateItem, QueueSummary } from "@/lib/api";
+import type { AuditStatus, CurateItem, QueueSummary } from "@/lib/api";
 import { CuratePage } from "./CuratePage";
 
 // Which queue Curate opens on. The default was the literal "low-confidence",
@@ -32,6 +32,23 @@ const queue = vi.fn(async (name: string) => ({
   // supplies real items later fails to compile against its own fixture.
   items: [] as CurateItem[],
 }));
+const auditStatus = vi.fn(async (): Promise<AuditStatus> => ({
+  last_run: null,
+  job: {
+    name: "audit-extraction",
+    title: "Run drift audit",
+    description: "Check sampled memory against its source conversations.",
+    danger: null,
+    running: false,
+    job_id: null,
+    unavailable: null,
+  },
+}));
+const runAudit = vi.fn(async (_name: string) => ({
+  job_id: "audit-job-1",
+  name: "audit-extraction",
+  running: true,
+}));
 
 vi.mock("@/lib/api", () => ({
   curateApi: {
@@ -39,8 +56,22 @@ vi.mock("@/lib/api", () => ({
     queue: (name: string) => queue(name),
     act: (b: { action: string; ids: number[]; value?: number }) => act(b),
     create: vi.fn(),
+    audit: () => auditStatus(),
+    categories: async () => ({ categories: [] }),
+  },
+  operateApi: {
+    run: (name: string) => runAudit(name),
   },
   providersApi: { list: async () => ({ providers: [] }) },
+}));
+
+vi.mock("@/features/operate/JobConsole", () => ({
+  JobConsole: ({ onFinished }: { onFinished: (result: { ok: boolean }) => void }) => (
+    <>
+      <button type="button" onClick={() => onFinished({ ok: true })}>Finish audit job</button>
+      <button type="button" onClick={() => onFinished({ ok: false })}>Fail audit job</button>
+    </>
+  ),
 }));
 
 function renderAt(path = "/curate") {
@@ -178,5 +209,169 @@ describe("CuratePage destructive actions", () => {
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(act).toHaveBeenCalled();
+  });
+});
+
+describe("CuratePage drift audit", () => {
+  beforeEach(() => {
+    auditStatus.mockReset();
+    runAudit.mockReset();
+    auditStatus.mockResolvedValue({
+      last_run: null,
+      job: {
+        name: "audit-extraction",
+        title: "Run drift audit",
+        description: "Check sampled memory against its source conversations.",
+        danger: null,
+        running: false,
+        job_id: null,
+        unavailable: null,
+      },
+    });
+    runAudit.mockResolvedValue({
+      job_id: "audit-job-1",
+      name: "audit-extraction",
+      running: true,
+    });
+    queues.mockResolvedValue({
+      queues: [summary("drift", "Drift audit hits", 0)],
+      total: 0,
+    });
+    queue.mockResolvedValue({
+      ...summary("drift", "Drift audit hits", 0),
+      items: [],
+    });
+  });
+
+  it("starts a visible drift audit and refreshes Review when it finishes", async () => {
+    const user = userEvent.setup();
+    renderAt();
+
+    expect(await screen.findByText("No drift audit has run yet.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Run drift audit" }));
+    expect(runAudit).toHaveBeenCalledWith("audit-extraction");
+    await user.click(await screen.findByRole("button", { name: "Finish audit job" }));
+    await waitFor(() => expect(auditStatus.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("shows the last sample and its actionable findings", async () => {
+    auditStatus.mockResolvedValue({
+      last_run: {
+        id: 9,
+        created_at: "2026-09-01T10:00:00Z",
+        sampled: 20,
+        drifted: 2,
+        state: "findings",
+      },
+      job: {
+        name: "audit-extraction",
+        title: "Run drift audit",
+        description: "Check sampled memory against its source conversations.",
+        danger: null,
+        running: false,
+        job_id: null,
+        unavailable: null,
+      },
+    });
+    renderAt();
+
+    expect(await screen.findByText("2 of 20 sampled chunks need review.")).toBeTruthy();
+  });
+
+  it("asks for a safe rerun when a legacy audit cannot identify its findings", async () => {
+    auditStatus.mockResolvedValue({
+      last_run: {
+        id: 8,
+        created_at: "2026-08-31T10:00:00Z",
+        sampled: 20,
+        drifted: 2,
+        state: "findings",
+        findings_available: false,
+      },
+      job: {
+        name: "audit-extraction",
+        title: "Run drift audit",
+        description: "Check sampled memory against its source conversations.",
+        danger: null,
+        running: false,
+        job_id: null,
+        unavailable: null,
+      },
+    });
+    renderAt();
+
+    expect(
+      await screen.findByText(
+        "The last legacy audit found 2 possible issues. Run again to identify them safely.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("explains a completed audit with no eligible samples", async () => {
+    auditStatus.mockResolvedValue({
+      last_run: {
+        id: 10,
+        created_at: "2026-09-01T10:00:00Z",
+        sampled: 0,
+        drifted: 0,
+        state: "no-samples",
+      },
+      job: {
+        name: "audit-extraction",
+        title: "Run drift audit",
+        description: "Check sampled memory against its source conversations.",
+        danger: null,
+        running: false,
+        job_id: null,
+        unavailable: null,
+      },
+    });
+    renderAt();
+
+    expect(await screen.findByText("No eligible source-linked memory was available.")).toBeTruthy();
+  });
+
+  it("disables the audit when the server reports a blocker", async () => {
+    auditStatus.mockResolvedValue({
+      last_run: null,
+      job: {
+        name: "audit-extraction",
+        title: "Run drift audit",
+        description: "Check sampled memory against its source conversations.",
+        danger: null,
+        running: false,
+        job_id: null,
+        unavailable: "PostgreSQL is unavailable.",
+      },
+    });
+    renderAt();
+
+    const button = await screen.findByRole("button", { name: "Run drift audit" });
+    expect(await screen.findByText("PostgreSQL is unavailable.")).toBeTruthy();
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("reports a failed start without hiding the audit controls", async () => {
+    runAudit.mockRejectedValue(new Error("Audit could not start."));
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByText("No drift audit has run yet.");
+
+    await user.click(screen.getByRole("button", { name: "Run drift audit" }));
+
+    expect(await screen.findByText("Audit could not start.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run drift audit" })).toBeTruthy();
+  });
+
+  it("does not claim Review is current when the audit process fails", async () => {
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByText("No drift audit has run yet.");
+    await user.click(screen.getByRole("button", { name: "Run drift audit" }));
+
+    await user.click(await screen.findByRole("button", { name: "Fail audit job" }));
+
+    expect(await screen.findByText("Drift audit failed. Review was not updated.")).toBeTruthy();
+    expect(screen.queryByText("Drift audit finished. Review is up to date.")).toBeNull();
   });
 });

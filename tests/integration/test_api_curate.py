@@ -88,6 +88,63 @@ def test_queues_listed_with_counts(client, chunks):
         assert q["title"] and q["description"]
 
 
+def test_audit_status_exposes_last_run_and_only_real_findings(client, chunks, db_connection):
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO memory_reflections
+                (reflection_type, affected_chunks, action_taken, reasoning, confidence)
+            VALUES ('audit', %s, 'flagged_drift_v2',
+                    'Sampled 2 chunks, mean recall 0.50, threshold 0.30, 1 drifted.', 1.0)
+            """,
+            ([chunks[0]],),
+        )
+    db_connection.commit()
+
+    status = client.get("/api/curate/audit").json()
+    assert status["last_run"]["sampled"] == 2
+    assert status["last_run"]["drifted"] == 1
+    assert status["last_run"]["state"] == "findings"
+    assert status["job"]["name"] == "audit-extraction"
+    assert status["job"]["running"] is False
+    items = client.get("/api/curate/queue/drift").json()["items"]
+    assert [item["id"] for item in items] == [chunks[0]]
+
+
+def test_audit_status_distinguishes_a_zero_sample_run(client, db_connection):
+    with db_connection.cursor() as cur:
+        cur.execute("""
+            INSERT INTO memory_reflections
+                (reflection_type, affected_chunks, action_taken, reasoning, confidence)
+            VALUES ('audit', ARRAY[]::bigint[], 'no_samples_v2',
+                    'Sampled 0 chunks, mean recall 1.00, threshold 0.30, 0 drifted.', 1.0)
+            """)
+    db_connection.commit()
+
+    status = client.get("/api/curate/audit").json()
+    assert status["last_run"]["sampled"] == 0
+    assert status["last_run"]["state"] == "no-samples"
+
+
+def test_legacy_audit_does_not_turn_its_whole_sample_into_drift_findings(client, chunks, db_connection):
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO memory_reflections
+                (reflection_type, affected_chunks, action_taken, reasoning, confidence)
+            VALUES ('audit', %s, 'flagged_drift',
+                    'Sampled 2 chunks, mean recall 0.50, threshold 0.30, 1 drifted.', 1.0)
+            """,
+            (chunks,),
+        )
+    db_connection.commit()
+
+    status = client.get("/api/curate/audit").json()
+    assert status["last_run"]["drifted"] == 1
+    assert status["last_run"]["findings_available"] is False
+    assert client.get("/api/curate/queue/drift").json()["items"] == []
+
+
 def test_unknown_queue_404s(client):
     assert client.get("/api/curate/queue/nope").status_code == 404
 

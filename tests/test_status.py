@@ -68,6 +68,19 @@ class TestParseDriftCount:
         assert _parse_drift_count(None, "flagged_drift") == 0
         assert _parse_drift_count("", "flagged_drift") == 0
 
+
+class TestParseAuditSampleCount:
+    def test_pulls_sample_count_from_new_and_legacy_reasoning(self):
+        from throughline.status import _parse_audit_sample_count
+
+        reasoning = "Sampled 20 chunks, mean recall 0.62, threshold 0.3, 4 drifted."
+        assert _parse_audit_sample_count(reasoning, 4) == 20
+
+    def test_falls_back_to_affected_count_for_legacy_rows(self):
+        from throughline.status import _parse_audit_sample_count
+
+        assert _parse_audit_sample_count(None, 20) == 20
+
     def test_zero_when_format_drifts(self):
         # Future writers might drop the integer — that's fine, just don't crash.
         from throughline.status import _parse_drift_count

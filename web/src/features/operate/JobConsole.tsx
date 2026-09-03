@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
+export interface JobCompletion {
+  ok: boolean;
+  returncode: number | null;
+  summary: string;
+}
+
+/** Decode the stable final line emitted by the server's SSE job stream. */
+export function parseJobCompletion(summary: string): JobCompletion {
+  const match = summary.match(/(?:^|\s)exit=(-?\d+|none|null)(?:\s|$)/i);
+  const returncode = match && /^-?\d+$/.test(match[1]) ? Number(match[1]) : null;
+  return { ok: returncode === 0, returncode, summary };
+}
+
 /**
  * Live job output.
  *
@@ -8,7 +21,13 @@ import { useEffect, useRef, useState } from "react";
  * through the quiet. The stream replays the retained buffer on connect, so
  * opening this panel mid-run shows the whole run so far.
  */
-export function JobConsole({ jobId, onFinished }: { jobId: string; onFinished: () => void }) {
+export function JobConsole({
+  jobId,
+  onFinished,
+}: {
+  jobId: string;
+  onFinished: (completion: JobCompletion) => void;
+}) {
   const [lines, setLines] = useState<string[]>([]);
   const [done, setDone] = useState<string | null>(null);
   const boxRef = useRef<HTMLPreElement>(null);
@@ -20,9 +39,10 @@ export function JobConsole({ jobId, onFinished }: { jobId: string; onFinished: (
     const es = new EventSource(`/api/operate/job/${jobId}/stream`);
     es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data]));
     es.addEventListener("done", (e) => {
-      setDone((e as MessageEvent).data);
+      const summary = String((e as MessageEvent).data);
+      setDone(summary);
       es.close();
-      onFinished();
+      onFinished(parseJobCompletion(summary));
     });
     es.onerror = () => es.close();
     return () => es.close();

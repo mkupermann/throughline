@@ -344,10 +344,23 @@ export interface ActResult {
   affected_ids: number[];
 }
 
+export interface AuditStatus {
+  last_run: {
+    id: number;
+    created_at: string;
+    sampled: number;
+    drifted: number;
+    state: "findings" | "clear" | "no-samples";
+    findings_available?: boolean;
+  } | null;
+  job: JobSummary | null;
+}
+
 export const curateApi = {
   queues: () => request<{ queues: QueueSummary[]; total: number }>("/curate/queues"),
   queue: (name: string) =>
     request<QueueSummary & { items: CurateItem[] }>(`/curate/queue/${name}`),
+  audit: () => request<AuditStatus>("/curate/audit"),
   act: (body: { action: string; ids: number[]; reason?: string; value?: number }) =>
     request<ActResult>("/curate/act", {
       method: "POST",

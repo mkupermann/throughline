@@ -73,7 +73,7 @@ class UndoRegistry:
             entry = self._entries.get(token)
             if entry is None or entry.used:
                 return None
-            if time.monotonic() - entry.created_at > self._ttl:
+            if time.monotonic() - entry.created_at >= self._ttl:
                 self._entries.pop(token, None)
                 return None
             entry.used = True
@@ -99,7 +99,7 @@ class UndoRegistry:
 
     def _prune_locked(self) -> None:
         now = time.monotonic()
-        expired = [t for t, e in self._entries.items() if now - e.created_at > self._ttl or e.used]
+        expired = [t for t, e in self._entries.items() if now - e.created_at >= self._ttl or e.used]
         for t in expired:
             self._entries.pop(t, None)
         if len(self._entries) > self._max:

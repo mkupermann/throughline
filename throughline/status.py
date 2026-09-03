@@ -192,12 +192,29 @@ def _parse_drift_count(reasoning: str | None, action: str | None) -> int:
     """
     import re
 
-    if action == "no_drift_detected":
+    if action in {"no_drift_detected", "no_drift_detected_v2", "no_samples_v2"}:
         return 0
     if not reasoning:
         return 0
     m = re.search(r"(\d+)\s+drift(?:ed)?\b", reasoning)
     return int(m.group(1)) if m else 0
+
+
+def _parse_audit_sample_count(reasoning: str | None, affected_count: int) -> int:
+    """Read the sample size while retaining compatibility with legacy rows.
+
+    Audit v2 stores only drift findings in ``affected_chunks``. Older rows
+    stored every sampled ID there. The reasoning sentence exists in both
+    formats, so it is authoritative when present and the array length remains
+    a safe fallback for historical rows with incomplete text.
+    """
+    import re
+
+    if reasoning:
+        match = re.search(r"Sampled\s+(\d+)\s+chunks?\b", reasoning, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return affected_count
 
 
 def _schema_version(cur) -> str | None:
@@ -365,13 +382,13 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                 pass
 
             # Drift audit — most recent row with reflection_type='audit'.
-            # ``affected_chunks`` is the sampled-id list, length = sampled.
-            # ``action_taken`` distinguishes drift-flagged runs from clean ones.
-            # ``reasoning`` carries the parseable counts ("… N drifted.").
+            # V2 stores only findings in ``affected_chunks``. Sampled and
+            # drifted counts remain parseable from ``reasoning``. The array
+            # length is retained as a legacy fallback.
             try:
                 cur.execute("""
                     SELECT created_at, action_taken,
-                           COALESCE(array_length(affected_chunks, 1), 0) AS sampled,
+                           COALESCE(array_length(affected_chunks, 1), 0) AS affected,
                            reasoning
                     FROM public.memory_reflections
                     WHERE reflection_type = 'audit'
@@ -380,9 +397,9 @@ def collect_status(*, conn=None) -> dict[str, Any]:
                     """)
                 row = cur.fetchone()
                 if row:
-                    when, action, sampled, reasoning = row
+                    when, action, affected, reasoning = row
                     payload.last_audit_at = when.isoformat() if when else None
-                    payload.last_audit_sampled = int(sampled or 0)
+                    payload.last_audit_sampled = _parse_audit_sample_count(reasoning, int(affected or 0))
                     # Parse the drift count out of the reasoning string the
                     # auditor writes; falls back to 0 if the format ever drifts.
                     payload.last_audit_drifted = _parse_drift_count(reasoning, action)

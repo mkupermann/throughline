@@ -192,7 +192,29 @@ class TestRunAudit:
         # The INSERT was logged.
         sqls = [entry[0] for entry in cur.log]
         assert any("INSERT INTO memory_reflections" in s for s in sqls)
+        insert = next(entry for entry in cur.log if "INSERT INTO memory_reflections" in entry[0])
+        assert insert[1][0] == [], "affected_chunks must contain findings, not every sampled chunk"
+        assert insert[1][1] == "no_drift_detected_v2"
         assert conn.committed is True
+
+    def test_written_audit_stores_only_drifted_chunk_ids(self):
+        cur = _FakeCursor(
+            sample_rows=[
+                _chunk(1, "matching pgvector decision", source_id=10),
+                _chunk(2, "unrelated weather forecast", source_id=11),
+            ],
+            message_rows_by_conv={
+                10: ["matching pgvector decision"],
+                11: ["database indexing only"],
+            },
+        )
+        conn = _FakeConn(cur)
+
+        ae.run_audit(conn, limit=2, threshold=0.5, write_audit_row=True)
+
+        insert = next(entry for entry in cur.log if "INSERT INTO memory_reflections" in entry[0])
+        assert insert[1][0] == [2]
+        assert insert[1][1] == "flagged_drift_v2"
 
     def test_dry_run_does_not_write(self):
         cur = _FakeCursor(
@@ -231,13 +253,23 @@ class TestRunAudit:
         }
         assert summary["drifted_ids"] == [2]
 
-    def test_empty_sample_short_circuits(self):
+    def test_empty_sample_records_that_the_audit_ran(self):
         cur = _FakeCursor(sample_rows=[])
         conn = _FakeConn(cur)
         summary = ae.run_audit(conn, limit=10, write_audit_row=True)
         assert summary["sampled"] == 0
         assert summary["drifted"] == 0
         assert summary["mean_recall"] == 1.0
-        # Don't write an audit row for a zero-sample run; nothing to record.
-        sqls = [entry[0] for entry in cur.log]
-        assert not any("INSERT INTO memory_reflections" in s for s in sqls)
+        insert = next(entry for entry in cur.log if "INSERT INTO memory_reflections" in entry[0])
+        assert insert[1][0] == []
+        assert insert[1][1] == "no_samples_v2"
+        assert summary["reflection_id"] == 999
+        assert conn.committed is True
+
+
+def test_audit_is_a_registered_single_run_job():
+    from throughline.api.jobs import JOBS
+
+    spec = JOBS["audit-extraction"]
+    assert spec.args[-2:] == ["throughline.jobs.audit_extraction", "--json"]
+    assert spec.requires is None

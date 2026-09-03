@@ -18,8 +18,10 @@ Why a heuristic and not an LLM judge?
     in memory_reflections already accommodates both.
 
 Each run writes exactly one row to ``memory_reflections`` with
-``reflection_type='audit'``, listing the chunk IDs that were sampled
-and flagging the ones that fell below the drift threshold.
+``reflection_type='audit'``. Its affected chunk IDs contain only findings
+that fell below the drift threshold. The reasoning text records the sample
+size so the GUI can report both values without turning clean samples into
+false findings.
 
 Usage:
   audit_extraction.py                   # sample 20, write audit row
@@ -304,14 +306,15 @@ def run_audit(
             "examples": [r.to_dict() for r in results if r.drifted][:5],
         }
 
-        if write_audit_row and results:
-            sampled_ids = [r.chunk_id for r in results]
+        if write_audit_row:
             reasoning = (
                 f"Sampled {len(results)} chunks, "
                 f"mean recall {summary['mean_recall']:.2f}, "
                 f"threshold {threshold:.2f}, "
-                f"{len(drifted_ids)} drifted."
+                f"{len(drifted_ids)} drifted. "
+                "Affected IDs contain drift findings only."
             )
+            action = "no_samples_v2" if not results else "flagged_drift_v2" if drifted_ids else "no_drift_detected_v2"
             cur.execute(
                 """
                 INSERT INTO memory_reflections
@@ -320,8 +323,8 @@ def run_audit(
                 RETURNING id
                 """,
                 (
-                    sampled_ids,
-                    "flagged_drift" if drifted_ids else "no_drift_detected",
+                    drifted_ids,
+                    action,
                     reasoning[:4000],
                 ),
             )

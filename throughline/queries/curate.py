@@ -32,6 +32,7 @@ permanently either way.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -182,6 +183,35 @@ def queue_forgotten(conn, limit: int = 200) -> list[Row]:
     )
 
 
+def latest_audit(conn) -> Row | None:
+    """Return a UI-safe summary of the latest extraction audit."""
+    latest = one(
+        conn,
+        "SELECT id, affected_chunks, action_taken, reasoning, created_at "
+        "FROM memory_reflections "
+        "WHERE reflection_type = 'audit' ORDER BY created_at DESC NULLS LAST LIMIT 1",
+    )
+    if not latest:
+        return None
+    reasoning = str(latest.get("reasoning") or "")
+    sampled_match = re.search(r"Sampled\s+(\d+)\s+chunks?\b", reasoning, re.IGNORECASE)
+    drifted_match = re.search(r"(\d+)\s+drift(?:ed)?\b", reasoning, re.IGNORECASE)
+    affected = list(latest.get("affected_chunks") or [])
+    sampled = int(sampled_match.group(1)) if sampled_match else len(affected)
+    drifted = int(drifted_match.group(1)) if drifted_match else len(affected)
+    action = str(latest.get("action_taken") or "")
+    state = "no-samples" if action == "no_samples_v2" or sampled == 0 else "findings" if drifted else "clear"
+    return {
+        "id": int(latest["id"]),
+        "created_at": latest.get("created_at"),
+        "sampled": sampled,
+        "drifted": drifted,
+        "state": state,
+        "finding_ids": affected if action.endswith("_v2") else [],
+        "findings_available": action.endswith("_v2"),
+    }
+
+
 def queue_drift(conn, limit: int = 200) -> list[Row]:
     """Chunks flagged by the most recent extraction drift audit.
 
@@ -189,12 +219,8 @@ def queue_drift(conn, limit: int = 200) -> list[Row]:
     queue is those ids resolved back to their chunks. Nothing to show before
     the first audit has run — which is correct, not an empty-state bug.
     """
-    latest = one(
-        conn,
-        "SELECT id, affected_chunks, created_at FROM memory_reflections "
-        "WHERE reflection_type = 'audit' ORDER BY created_at DESC LIMIT 1",
-    )
-    if not latest or not latest.get("affected_chunks"):
+    latest = latest_audit(conn)
+    if not latest or not latest.get("findings_available") or not latest.get("finding_ids"):
         return []
     return rows(
         conn,
@@ -205,7 +231,7 @@ def queue_drift(conn, limit: int = 200) -> list[Row]:
         ORDER BY mc.created_at DESC
         LIMIT %s
         """,
-        (list(latest["affected_chunks"]), limit),
+        (list(latest["finding_ids"]), limit),
     )
 
 
