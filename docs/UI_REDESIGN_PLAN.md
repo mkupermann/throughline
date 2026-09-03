@@ -52,6 +52,7 @@ build the three verbs and let the nouns be *facets*, not pages.
 **Five surfaces, replacing fourteen pages.**
 
 ### `/` — Overview
+
 Not a KPI wall. A **worklist**: one headline number (memory chunks under
 management), one health verdict (OK / degraded / broken, from
 `throughline.status.collect_status`), and then *only the things that need
@@ -62,6 +63,7 @@ pre-applied. 14-day activity sparkline below the fold, not above it.
 If nothing needs attention, the page says so in one line. That is a feature.
 
 ### `/find` — the unified retrieval surface
+
 One query box. **Hybrid retrieval**: pg_trgm lexical (`idx_memory_content_trgm`,
 `idx_messages_content_trgm`) fused with pgvector HNSW semantic (`embeddings`),
 combined by reciprocal-rank fusion, over *all* record types at once.
@@ -87,6 +89,7 @@ Absorbs: Search, Semantic, Conversations, Memory (browse), Skills, Prompts,
 Knowledge Graph, Calendar, Projects (browse). **Nine pages → one.**
 
 ### `/curate` — memory quality workbench
+
 The surface that does not exist today, and is the actual reason this tool has
 long-term value. Queues, each with a count badge and a bulk action:
 
@@ -102,16 +105,19 @@ Every mutation goes through `scripts/forget.py` semantics and gets an **undo
 toast**. Absorbs: Memory Health + the mutating half of Memory.
 
 ### `/operate` — pipeline control
+
 Ingestion runs and `ingestion_log`, scheduler state, embedding backfill,
 `throughline doctor` output, DB connection facts. Absorbs: Ingestion, Scheduler,
 plus the DB-health strip currently in the sidebar.
 
 ### `/console` — SQL
+
 Kept as-is in capability, rebuilt as a proper editor (CodeMirror, schema-aware
 completion from `sql/schema.sql`, query history, result export). Power tool,
 single user, local — it stays.
 
 ### Detail routes
+
 `/c/:id` conversation · `/m/:id` memory chunk · `/e/:id` entity ·
 `/p/:name` project · `/s/:id` skill · `/pr/:id` prompt.
 
@@ -395,6 +401,7 @@ Acceptance criteria are written **before** the work, and are binary. A phase tha
 misses its bar is not re-scoped after the fact.
 
 ### Phase 0 — Query layer extraction *(no UI)* — ✅ **DONE 2026-08-09**
+
 Move all SQL from `gui/page_views/*` into `throughline/queries/`. Measure the
 three recorded query defects and fix the ones that reproduce.
 
@@ -444,6 +451,7 @@ semantics (one `b` per stale chunk instead of every newer `b`), which is a
 product decision, not an extraction. Tracked, not silently absorbed.
 
 ### Phase 1 — API + app shell + Overview — ✅ **DONE 2026-08-10**
+
 FastAPI app, pooling, OpenAPI-generated client. Vite/React shell: routing, theme
 tokens, sidebar, command palette skeleton. Overview surface.
 
@@ -499,6 +507,7 @@ are ignored; `throughline/web/` is committed. FastAPI is an optional extra
 core package does not depend on it.
 
 ### Phase 2 — Find — ✅ **DONE 2026-08-10**
+
 Hybrid retrieval endpoint, facets, List + Table modes, detail routes.
 
 **Bar:** a query returns fused lexical+vector results in <300ms p95 on the live
@@ -573,6 +582,7 @@ sizes were coerced with `Number(x) || default`, so `per_page=0` fell back to
 outcomes. Anything invalid now lands on the same fallback.
 
 ### Phase 3 — Curate + Operate — ✅ **DONE 2026-08-10**
+
 All seven curation queues with bulk actions and undo. Ingestion/scheduler/embed
 control with SSE progress.
 
@@ -603,11 +613,11 @@ left to restore. An undo button over a hard delete is a lie.
 
 Forgetting is now two-tier:
 
-* **Forget** sets `status = 'forgotten'`. The row survives, drops out of every
+- **Forget** sets `status = 'forgotten'`. The row survives, drops out of every
   retrieval path, and is restorable — from the toast, or later from the
   Forgotten queue. `memory_chunks.status` is plain `text`, so this needed no
   migration.
-* **Purge** (the original hard delete) remains, because soft-deleting a chunk
+- **Purge** (the original hard delete) remains, because soft-deleting a chunk
   containing a leaked credential does not remove the credential from the
   database. It is explicit, bulk, and labelled unrecoverable.
 
@@ -639,6 +649,7 @@ costs a trip to the Forgotten queue rather than data. Any future *irreversible*
 action must not be given an undo token; it needs a confirmation dialog instead.
 
 ### Phase 4 — Console, Timeline, Graph — ✅ **DONE 2026-08-10**
+
 CodeMirror SQL console on a read-only role. FullCalendar timeline mode.
 Cytoscape subgraph mode.
 
@@ -730,6 +741,7 @@ right answer if the console gets heavy use; it was not worth ~150 kB and a new
 editor abstraction to reach this phase's bar.
 
 ### Phase 5 — Cutover — ✅ **DONE 2026-08-10**
+
 `gui/` moves to `legacy/streamlit-gui/`. Docs, Docker, Makefile, README updated.
 Zero `dangerouslySetInnerHTML`, zero emoji-as-icon, zero runtime font fetch.
 
@@ -821,11 +833,11 @@ surfaces plus an API layer — not 4 weeks of calendar time.
    required for the UI to be correct; `throughline backfill-projects` remains
    available for adding descriptions and status.
 
-5. **pgvector is broken on the native `claude_memory` database** (found
+4. **pgvector is broken on the native `claude_memory` database** (found
    2026-08-09, pre-existing, unrelated to this work). `pg_extension` lists
    `vector 0.8.0`, but the library is gone:
 
-   ```
+   ```text
    ERROR:  could not access file "$libdir/vector": No such file or directory
    ```
 
@@ -839,7 +851,7 @@ surfaces plus an API layer — not 4 weeks of calendar time.
    and test runs in this document used it. Options: `pg_upgrade` to @17, build
    pgvector from source against @16, or move the memory DB into Docker.
    Needs a `brew`/`sudo` action, so it is the user's call.
-4. ~~**Chart library.**~~ **Decided across Phases 1–4.** Everything is
+5. ~~**Chart library.**~~ **Decided across Phases 1–4.** Everything is
    hand-rolled SVG plus `d3-force` (~40 kB) for graph layout. Recharts,
    Cytoscape and FullCalendar were all evaluated and none earned their weight:
    the charts are a single-series line and a bounded force graph, both of

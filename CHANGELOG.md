@@ -167,7 +167,7 @@ flag to label them. Nothing is deleted — every listing gains a
   nothing linked to. It takes a destination, so it was never a job card in the
   first place. Searching the palette for "obsidian" now finds it.
 
-### Added
+### Added for portability
 
 - **The Compose stack no longer assumes macOS.** Three assumptions stood
   between it and a second machine: `scripts/init_compose_env.py` called
@@ -315,7 +315,7 @@ flag to label them. Nothing is deleted — every listing gains a
   printed German. `docs/USAGE.md` documented a 14-page Streamlit UI that no
   longer exists.
 
-### Changed
+### Changed in retrieval
 
 - **Cross-tool conflict detection now groups by `source_tool` rather than
   `entrypoint`, and reaches `conversations` through the correct join.** Two
@@ -374,9 +374,9 @@ flag to label them. Nothing is deleted — every listing gains a
   populated by ingest.** The original ingest never set these columns;
   every conversation showed 0 / 0 even on long-lived sessions that had
   burned millions of tokens. The new ingest reads each assistant
-  message's `usage` block (`input_tokens` + `cache_creation_input_tokens`
-  + `cache_read_input_tokens` for input total, `output_tokens` for
-  output total) and aggregates per session.
+  message's `usage` block. Input total is `input_tokens` plus
+  `cache_creation_input_tokens` plus `cache_read_input_tokens`. Output total is
+  `output_tokens`. The ingest aggregates both per session.
 - **Per-message `messages.token_count` is now populated** with the same
   per-turn total, so message-level filtering and GUI tooltips can use
   it.
@@ -534,8 +534,8 @@ flag to label them. Nothing is deleted — every listing gains a
   reflections + supersede/merge), Skills, Knowledge Graph entities,
   Projects, Prompts, every Global Search scope, and every Semantic Search
   scope. CSV is UTF-8 with BOM; Excel via `openpyxl`; PDF via `reportlab`
-  (landscape A4, repeated header row, alternating row backgrounds, title
-  + timestamp). Missing optional deps degrade gracefully — those buttons
+  (landscape A4, repeated header row, alternating row backgrounds, title and
+  timestamp). Missing optional deps degrade gracefully — those buttons
   disappear and the page surfaces a `pip install` hint. CSV is always
   available.
 - **PII / secret redaction** in `throughline/pii.py` that runs automatically

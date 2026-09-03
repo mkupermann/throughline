@@ -33,6 +33,7 @@ python evals/run_eval.py --questions evals/questions.jsonl --report evals/last_r
 ```
 
 Required for a real run:
+
 - A populated `claude_memory` DB.
 - An OpenAI or Ollama embedding backend (for `memory.search`).
 - Either `ANTHROPIC_API_KEY` (uses the SDK) or the `claude` CLI on `$PATH`

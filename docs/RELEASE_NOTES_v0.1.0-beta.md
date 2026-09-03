@@ -21,6 +21,7 @@ and gives Claude a skill to query its own past.
 ## Features
 
 ### Core pipeline
+
 - Automatic ingestion of Claude Code JSONL sessions with SHA256
   deduplication
 - Memory extraction via the Claude Code CLI in headless mode
@@ -28,6 +29,7 @@ and gives Claude a skill to query its own past.
 - Prompt scanner for `CLAUDE.md` files in your git repos
 
 ### Data layer
+
 - 11 tables under `claude_memory`: conversations, messages, memory
   chunks, skills, prompts, projects, entities, relationships, entity
   mentions, embeddings, memory reflections, ingestion log
@@ -35,6 +37,7 @@ and gives Claude a skill to query its own past.
 - Supports both OpenAI (1536d) and local Ollama (768d) embeddings
 
 ### Intelligence
+
 - Temporal knowledge graph: entities and typed relationships with
   `valid_from` / `valid_until` tracking
 - Self-reflecting memory: dedup, contradiction detection, stale
@@ -44,6 +47,7 @@ and gives Claude a skill to query its own past.
   `.claude/MEMORY_CONTEXT.md` on every new Claude session
 
 ### GUI
+
 - 14-page Streamlit app (Dashboard, Calendar, Search, Semantic,
   Conversations, Memory, Memory Health, Skills, Knowledge Graph,
   Projects, Prompts, Scheduler, Ingestion, SQL console)
@@ -54,6 +58,7 @@ and gives Claude a skill to query its own past.
   forceAtlas2 layout, user-adjustable spacing)
 
 ### Automation
+
 - launchd jobs for hourly ingestion, daily memory extraction, daily
   `pg_dump` backup with 30-day retention
 - Claude Code skill (`bks-claude-memory/`) for natural-language DB
@@ -115,6 +120,7 @@ Built by [Michael Kupermann](https://github.com/mkupermann) with
 Claude Opus 4.7 as a pair-programming partner.
 
 Inspired by:
+
 - The Anthropic Claude Code team
 - The Mem0 and Letta projects
 - The `pgvector` maintainers

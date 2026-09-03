@@ -191,7 +191,14 @@ def test_docker_image_runs_a_crlf_normalised_packaged_shell_script(tmp_path: Pat
         ROOT,
         context,
         ignore=shutil.ignore_patterns(
-            ".git", ".pytest_cache", ".venv", ".superpowers", "__pycache__", "node_modules", "*.pyc"
+            ".git",
+            ".pytest_cache",
+            ".pytest-tmp*",
+            ".venv",
+            ".superpowers",
+            "__pycache__",
+            "node_modules",
+            "*.pyc",
         ),
     )
     script = context / "throughline" / "shell" / "backup.sh"
@@ -415,6 +422,7 @@ def test_compose_source_mounts_follow_the_unprivileged_home(compose: dict) -> No
     assert all(mount.endswith(":ro") for mount in source_mounts)
 
 
+@POSIX_SHELL_ONLY
 @pytest.mark.integration
 def test_configured_container_uid_reads_a_private_source_mount(tmp_path: Path) -> None:
     """A 0600 transcript must remain readable after the image drops root."""

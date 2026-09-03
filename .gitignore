@@ -96,5 +96,10 @@ build/
 # pytest-cov output.
 .coverage
 
+# Local pytest runs use repository-scoped temp trees on Windows, where the
+# shared user temp directory may have stricter ACLs than the checkout.
+.pytest-tmp*/
+.pytest-tmp*.xml
+
 # Placeholder for the Cline mount on machines without Cline installed.
 .cline-tasks/

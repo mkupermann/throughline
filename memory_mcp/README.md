@@ -73,6 +73,7 @@ python -c "from memory_mcp.server import mcp; print(sorted(t.name for t in mcp._
 ```
 
 Expected output:
+
 ```text
 ['forget', 'list_projects', 'preload_summary', 'recall_entity', 'recent_reflections', 'search', 'stats', 'supersede', 'write']
 ```

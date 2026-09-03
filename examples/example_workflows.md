@@ -15,14 +15,14 @@ before you type a single line of code.
 
 1. Open a Claude Code session in the project directory.
 
-   ```
+   ```bash
    cd ~/projects/acme-web
    claude
    ```
 
 2. Invoke the context-loader skill.
 
-   ```
+   ```text
    load context
    ```
 
@@ -32,7 +32,7 @@ before you type a single line of code.
 
 3. Read the summary, ask follow-up questions if needed.
 
-   ```
+   ```text
    What was the rationale for using httpOnly cookies instead of localStorage?
    ```
 
@@ -55,7 +55,7 @@ decided.
 
 1. Search memory from Claude Code.
 
-   ```
+   ```text
    What decisions have we made about caching in fintech-api?
    ```
 
@@ -83,7 +83,7 @@ decided.
    automatically by the nightly ingest + extract pipeline, or you can log it
    manually:
 
-   ```
+   ```text
    Log decision: We chose Redis for rate-limiting state in fintech-api
    because it is already in the infrastructure and supports atomic INCR.
    Rejected Postgres because it would add write pressure to the primary.
@@ -101,7 +101,7 @@ extraction runs. You are new to the project.
 1. Check the launchd configuration files in the `launchd/` directory of the
    repository. Each plist file corresponds to one scheduled job.
 
-   ```
+   ```bash
    ls launchd/
    ```
 
@@ -142,7 +142,7 @@ a Claude Code session) and want to save what you learned to the memory database.
 
 ### Steps
 
-**Option A — From Claude Code (natural language)**
+#### Option A — From Claude Code (natural language)
 
 ```text
 Add a contact memory chunk:
@@ -156,7 +156,7 @@ Add a contact memory chunk:
 The memory skill translates this into an `INSERT` on `memory_chunks` with
 `category = 'contact'` and `source_type = 'manual'`.
 
-**Option B — Direct SQL**
+#### Option B — Direct SQL
 
 ```sql
 INSERT INTO public.memory_chunks
@@ -173,7 +173,7 @@ VALUES
    'active');
 ```
 
-**Option C — web UI**
+#### Option C — web UI
 
 Open the web UI (`throughline serve`), go to Curate, select the chunk and
 "Add chunk", fill in the form and save. The GUI writes the same SQL as Option B.

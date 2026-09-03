@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -40,19 +41,53 @@ _AI_MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 
 PIPELINE_SCRIPT = Path(os.environ.get("AI_PIPELINE_SCRIPT_PATH", str(Path.home() / "ai-pipeline" / "pipeline.sh")))
 
-# Resolved once at import time via PATH search rather than passed to Popen
-# as the bare literal "bash". On Windows, CreateProcess (which Popen calls
-# for an extension-less executable name) searches System32 *before*
-# consulting PATH — and Windows 11 ships a WSL-relay shim at
-# C:\Windows\System32\bash.exe that intercepts a bare "bash" and fails with
-# "execvpe(/bin/bash) failed: No such file or directory" instead of running
-# Git Bash, even when Git's own bash.exe appears earlier in PATH. Resolving
-# the absolute path via shutil.which (a plain PATH scan, no System32
-# priority) sidesteps that and always lands on the intended bash — Git Bash
-# on Windows, the system bash elsewhere. Falls back to the literal "bash"
-# if none is found on PATH so the failure mode is a normal
-# FileNotFoundError from Popen rather than a silent None.
-BASH_EXECUTABLE = shutil.which("bash") or "bash"
+
+def _resolve_bash_executable() -> str:
+    """Find a real bash, not Windows' legacy WSL relay.
+
+    ``shutil.which("bash")`` can return ``System32\\bash.exe`` on Windows.
+    That executable delegates to WSL and cannot execute the Windows paths the
+    PM launcher passes to it. Git for Windows ships the compatible bash next
+    to ``cmd\\git.exe``, so prefer that installation when the PATH result is
+    the relay. A non-Windows PATH result remains the normal fast path.
+    """
+    found = shutil.which("bash")
+    if sys.platform != "win32":
+        return found or "bash"
+
+    normalised = (found or "").replace("\\", "/").casefold()
+    is_wsl_relay = normalised.endswith("/windows/system32/bash.exe")
+    if found and not is_wsl_relay:
+        return found
+
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        git_path = Path(git)
+        candidates.extend(
+            [
+                git_path.parent.parent / "bin" / "bash.exe",
+                git_path.parent.parent / "usr" / "bin" / "bash.exe",
+            ]
+        )
+
+    for env_name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        root = os.environ.get(env_name)
+        if not root:
+            continue
+        root_path = Path(root)
+        candidates.append(root_path / "Git" / "bin" / "bash.exe")
+        if env_name == "LOCALAPPDATA":
+            candidates.append(root_path / "Programs" / "Git" / "bin" / "bash.exe")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    return found or "bash"
+
+
+BASH_EXECUTABLE = _resolve_bash_executable()
 
 _STEP_TO_CONTEXT_VAR = {
     "analyst": "AI_PIPELINE_ANALYST_CONTEXT",

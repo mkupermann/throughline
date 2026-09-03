@@ -71,7 +71,10 @@ def test_historical_duplicate_filename_upgrades_without_replaying_it(empty_test_
             conn.commit()
 
         assert migrate.cmd_migrate(conn, dry_run=False) == 0
-        assert _names(conn) == set(historical_names)
+        expected_names = {path.name for path in migrate.discover_migrations()}
+        expected_names.remove("005_widen_conversation_token_counts.sql")
+        expected_names.add("001_widen_conversation_token_counts.sql")
+        assert _names(conn) == expected_names
     finally:
         conn.close()
 

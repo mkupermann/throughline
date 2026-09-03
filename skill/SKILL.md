@@ -16,6 +16,7 @@ User: $PGUSER (defaults to the current OS user; trust auth, no password)
 ```
 
 Python (via `psycopg2`):
+
 ```python
 import os, getpass, psycopg2
 user = os.environ.get("PGUSER") or getpass.getuser()
@@ -54,6 +55,7 @@ LIMIT 20;
 ```
 
 Use `scripts/query.py` for structured queries:
+
 ```bash
 python3 ~/.claude/skills/claude-memory/scripts/query.py search "pgvector tuning"
 python3 ~/.claude/skills/claude-memory/scripts/query.py project "Project Alpha"
