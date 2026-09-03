@@ -68,6 +68,17 @@ def test_wheel_contains_runtime_jobs_for_cli_and_mcp(tmp_path: Path) -> None:
     assert "throughline/shell/install_hooks.sh" in contents
 
 
+def test_wheel_declares_process_monitor_dependency(tmp_path: Path) -> None:
+    """Installing Throughline also installs the process watcher it imports."""
+    wheel = _build_wheel(tmp_path)
+
+    with zipfile.ZipFile(wheel) as artifact:
+        metadata_name = next(name for name in artifact.namelist() if name.endswith(".dist-info/METADATA"))
+        metadata = artifact.read(metadata_name).decode("utf-8")
+
+    assert "Requires-Dist: psutil>=5.9" in metadata
+
+
 def test_clean_install_runs_throughline_entry_point_outside_checkout(tmp_path: Path) -> None:
     """A non-editable wheel runs its CLI from an unrelated working directory."""
     wheel = _build_wheel(tmp_path)
