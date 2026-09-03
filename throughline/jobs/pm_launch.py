@@ -42,7 +42,7 @@ _AI_MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 PIPELINE_SCRIPT = Path(os.environ.get("AI_PIPELINE_SCRIPT_PATH", str(Path.home() / "ai-pipeline" / "pipeline.sh")))
 
 
-def _resolve_bash_executable() -> str:
+def _resolve_bash_executable() -> str | None:
     """Find a real bash, not Windows' legacy WSL relay.
 
     ``shutil.which("bash")`` can return ``System32\\bash.exe`` on Windows.
@@ -84,7 +84,7 @@ def _resolve_bash_executable() -> str:
         if candidate.is_file():
             return str(candidate)
 
-    return found or "bash"
+    return None
 
 
 BASH_EXECUTABLE = _resolve_bash_executable()
@@ -231,6 +231,12 @@ def _write_context_file(conn, tmp_dir: Path, step: str, resolved: dict[str, Any]
 
 
 def launch_task(conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str) -> dict[str, Any]:
+    if BASH_EXECUTABLE is None:
+        raise RuntimeError(
+            "Git Bash is required to launch Project Management tasks on Windows. "
+            "Install Git for Windows, then restart Throughline."
+        )
+
     teams = Q.get_project_teams(conn, pm_project_id)
     team = next((t for t in teams if t["id"] == team_id), None)
     if team is None:

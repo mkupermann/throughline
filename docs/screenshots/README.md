@@ -41,6 +41,11 @@ cd web && npm run screenshots -- --url http://127.0.0.1:8791 --out ../docs/scree
 If Playwright's bundled Chromium is not installed, use a system browser with
 `--browser chrome` or set `THROUGHLINE_SCREENSHOT_BROWSER=chrome`.
 
+Before it opens a page, the script checks exact totals, the synthetic project
+name and a known memory record from the bundled fixture. It refuses every
+other database. This guard also protects against an accidentally supplied live
+URL or a real database mounted on the expected demo port.
+
 `examples/demo_data.sql` re-bases its own timestamps on load, so the seven-day
 and per-day views are populated whatever date you run it — see the comment at
 the bottom of that file.

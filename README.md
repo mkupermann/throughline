@@ -263,7 +263,7 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
-Integration tests require a disposable PostgreSQL 16 instance with pgvector. The frontend suite currently contains 192 tests. Documentation screenshots are generated from [`examples/demo_data.sql`](examples/demo_data.sql), never from a personal database. The capture procedure is in [`docs/screenshots/`](docs/screenshots/).
+Integration tests require a disposable PostgreSQL 16 instance with pgvector. The frontend suite currently contains 199 tests. Documentation screenshots are generated from [`examples/demo_data.sql`](examples/demo_data.sql), never from a personal database. The capture procedure is in [`docs/screenshots/`](docs/screenshots/).
 
 Contributions are welcome. Read [Contributing](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report bugs in [Issues](https://github.com/mkupermann/throughline/issues). Report security problems through the channel in [Security](SECURITY.md).
 

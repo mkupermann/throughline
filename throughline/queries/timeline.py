@@ -290,7 +290,7 @@ def _detail_columns(kind: str) -> tuple[str, str, str]:
         # The full path is still one click away on the ingestion record.
         "ingestion": (
             "il.id",
-            "regexp_replace(il.file_path, '^.*/', '')",
+            "regexp_replace(il.file_path, '^.*[\\\\/]', '')",
             "NULL::bigint",
         ),
     }[kind]

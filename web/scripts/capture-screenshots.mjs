@@ -18,6 +18,8 @@ import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
+import { assertScreenshotFixture } from "./screenshot-safety.mjs";
+
 const args = process.argv.slice(2);
 const argOf = (flag, fallback) => {
   const i = args.indexOf(flag);
@@ -126,6 +128,15 @@ const run = async () => {
       localStorage.setItem("throughline-theme", "dark");
     } catch {}
   });
+
+  const [overviewResponse, projectResponse] = await Promise.all([
+    context.request.get(`${BASE}/api/overview`),
+    context.request.get(`${BASE}/api/projects/acme-web/context?limit=1`),
+  ]);
+  if (!overviewResponse.ok() || !projectResponse.ok()) {
+    throw new Error("Refusing to capture screenshots: the demo fingerprint endpoints failed.");
+  }
+  assertScreenshotFixture(await overviewResponse.json(), await projectResponse.json());
 
   const page = await context.newPage();
   page.on("pageerror", (e) => failures.push(`page error: ${e.message}`));

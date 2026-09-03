@@ -81,6 +81,14 @@ describe("Shell", () => {
     }
   });
 
+  it("shows the platform shortcut once in the command-palette nudge", () => {
+    renderShell();
+
+    const nudge = screen.getByText(/Press/).closest(".palette-nudge");
+    expect(nudge?.textContent).toContain("Ctrl+K");
+    expect(nudge?.querySelector("svg")).toBeNull();
+  });
+
   it("moves focus into keyboard help and contains tab navigation", async () => {
     const user = userEvent.setup();
     renderShell();

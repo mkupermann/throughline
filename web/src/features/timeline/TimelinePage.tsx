@@ -266,14 +266,12 @@ export function TimelinePage() {
     <section className="timeline-page">
       <header className="page-header">
         <h1 className="page-title">Timeline</h1>
-        {/* Says what the page answers, then what an "event" is. The subtitle
-            used to read "38,376 event(s) between … , bucketed by day", which
-            names a unit nothing on the page defines and a word ("bucketed")
-            that belongs to the query, not to the reader. */}
+        {/* Says what the page answers, then defines the total in reader terms
+            rather than pretending every source row is a message. */}
         <p className="page-subtitle">What happened, and when.</p>
         <p className="page-hint">
-          {formatCount(grandTotal)} messages and memory entries from {range.since} to{" "}
-          {range.until}, one column per {data?.bucket ?? "day"}.
+          {formatCount(grandTotal)} events across conversations, messages, memory and system
+          activity from {range.since} to {range.until}. One column per {data?.bucket ?? "day"}.
         </p>
       </header>
 

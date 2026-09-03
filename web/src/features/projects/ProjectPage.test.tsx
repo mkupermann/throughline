@@ -104,9 +104,10 @@ function sessionResponse(offset = 0, rows = sessionRows) {
 }
 
 function renderPage(entry = "/project/atlas") {
-  return render(
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
     <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      client={client}
     >
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
@@ -115,6 +116,7 @@ function renderPage(entry = "/project/atlas") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { client, view };
 }
 
 describe("ProjectPage", () => {
@@ -201,7 +203,9 @@ describe("ProjectPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /newest first/i }));
 
     await waitFor(() => expect(context.mock.calls.some((call) => call[1]?.offset === 1)).toBe(true));
-    const messages = await screen.findAllByText(/First message|Second message/);
+    await screen.findByText("Second message");
+    const transcript = screen.getByRole("heading", { name: "Transcript" }).parentElement!;
+    const messages = within(transcript).getAllByText(/First message|Second message/);
     expect(messages.map((message) => message.textContent)).toEqual(["Second message", "First message"]);
     expect(context.mock.calls.every((call) => call[1]?.order === "oldest")).toBe(true);
   });
@@ -263,6 +267,50 @@ describe("ProjectPage", () => {
 
     expect(await screen.findByText("Third message")).toBeTruthy();
     expect(context.mock.calls.some((call) => call[1]?.offset === 2)).toBe(true);
+  });
+
+  it("drops loaded transcript pages when the first page is refetched", async () => {
+    let refreshed = false;
+    context.mockImplementation(async (_project, options) => {
+      const offset = options?.offset ?? 0;
+      if (offset === 0) {
+        return {
+          ...projectContext,
+          total: 2,
+          complete: false,
+          messages: [
+            {
+              ...firstMessage,
+              content: refreshed ? "Refreshed first message" : "Initial first message",
+            },
+          ],
+        };
+      }
+      return {
+        ...projectContext,
+        offset,
+        total: 2,
+        complete: true,
+        messages: [
+          {
+            ...firstMessage,
+            id: refreshed ? 3 : 2,
+            content: refreshed ? "Refreshed second message" : "Stale second message",
+          },
+        ],
+      };
+    });
+    const { client } = renderPage();
+    await screen.findByText("Initial first message");
+    await userEvent.click(screen.getByRole("button", { name: "Load complete project" }));
+    await screen.findByText("Stale second message");
+
+    refreshed = true;
+    await client.refetchQueries({ queryKey: ["project-context", "atlas", false] });
+
+    expect(await screen.findByText("Refreshed first message")).toBeTruthy();
+    expect(screen.queryByText("Stale second message")).toBeNull();
+    expect(screen.getByRole("button", { name: "Load complete project" })).toBeTruthy();
   });
 
   it("does not loop when automatic newest-first loading makes no progress", async () => {
@@ -391,5 +439,41 @@ describe("ProjectPage", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(screen.queryByRole("link", { name: /Stale newest scope/ })).toBeNull();
+  });
+
+  it("drops loaded session pages when the first page is refetched", async () => {
+    let refreshed = false;
+    sessions.mockImplementation(async (_project, options) => {
+      const offset = options?.offset ?? 0;
+      if (offset === 0) {
+        return sessionResponse(0, [
+          {
+            ...sessionRows[0],
+            title: refreshed ? "Refreshed session" : "Initial session",
+          },
+          sessionRows[1],
+        ]);
+      }
+      return sessionResponse(offset, [
+        {
+          ...sessionRows[1],
+          id: refreshed ? 20 : 10,
+          title: refreshed ? "Refreshed final session" : "Stale final session",
+        },
+      ]);
+    });
+    const { client } = renderPage("/project/atlas?mode=sessions");
+    await screen.findByRole("link", { name: /Initial session/ });
+    await userEvent.click(screen.getByRole("button", { name: /load all sessions/i }));
+    await screen.findByRole("link", { name: /Stale final session/ });
+
+    refreshed = true;
+    await client.refetchQueries({
+      queryKey: ["project-sessions", "atlas", "newest", "", false],
+    });
+
+    expect(await screen.findByRole("link", { name: /Refreshed session/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Stale final session/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /load all sessions/i })).toBeTruthy();
   });
 });

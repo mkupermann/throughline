@@ -1,6 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { act, render, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseJobCompletion } from "./JobConsole";
+import { JobConsole, parseJobCompletion } from "./JobConsole";
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  readonly listeners = new Map<string, (event: MessageEvent) => void>();
+  onerror: ((event: Event) => void) | null = null;
+  close = vi.fn();
+
+  constructor(readonly url: string) {
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: (event: MessageEvent) => void) {
+    this.listeners.set(name, listener);
+  }
+
+  emit(name: string, data: string) {
+    this.listeners.get(name)?.(new MessageEvent(name, { data }));
+  }
+}
+
+vi.stubGlobal("EventSource", FakeEventSource);
+
+beforeEach(() => {
+  FakeEventSource.instances = [];
+});
 
 describe("parseJobCompletion", () => {
   it("recognises a successful job", () => {
@@ -17,5 +44,20 @@ describe("parseJobCompletion", () => {
       ok: false,
       returncode: null,
     });
+  });
+});
+
+describe("JobConsole", () => {
+  it("lets EventSource reconnect after a transient error and still reports completion", async () => {
+    const onFinished = vi.fn();
+    render(createElement(JobConsole, { jobId: "abc123", onFinished }));
+    const source = FakeEventSource.instances[0];
+
+    act(() => source.onerror?.(new Event("error")));
+    expect(source.close).not.toHaveBeenCalled();
+
+    act(() => source.emit("done", "exit=0 duration=1.0s"));
+    await waitFor(() => expect(onFinished).toHaveBeenCalledOnce());
+    expect(source.close).toHaveBeenCalledOnce();
   });
 });

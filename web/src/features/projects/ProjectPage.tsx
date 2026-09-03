@@ -69,8 +69,6 @@ export function ProjectPage() {
   const sessionScope = `${project}\u0000${sessionOrder}\u0000${query}\u0000${includeGenerated ? "generated" : "human"}`;
   const activeMessageScope = useRef(messageScope);
   const activeSessionScope = useRef(sessionScope);
-  activeMessageScope.current = messageScope;
-  activeSessionScope.current = sessionScope;
 
   const context = useQuery({
     queryKey: ["project-context", project, includeGenerated],
@@ -96,13 +94,21 @@ export function ProjectPage() {
     enabled: Boolean(project) && mode === "sessions",
   });
 
+  const activeMessageVersion = useRef(context.dataUpdatedAt);
+  const activeSessionVersion = useRef(sessionIndex.dataUpdatedAt);
+  activeMessageScope.current = messageScope;
+  activeSessionScope.current = sessionScope;
+  activeMessageVersion.current = context.dataUpdatedAt;
+  activeSessionVersion.current = sessionIndex.dataUpdatedAt;
+
   useEffect(() => {
     setMoreMessages([]);
     setAllMessagesLoaded(false);
     setMessageLoadError(null);
     setLoadingAllMessages(false);
     messageLoading.current = false;
-  }, [messageScope]);
+    automaticDocumentLoad.current = null;
+  }, [context.dataUpdatedAt, messageScope]);
 
   useEffect(() => {
     setMoreSessions([]);
@@ -111,7 +117,7 @@ export function ProjectPage() {
     setSessionLoadError(null);
     setLoadingAllSessions(false);
     sessionLoading.current = false;
-  }, [sessionScope]);
+  }, [sessionIndex.dataUpdatedAt, sessionScope]);
 
   useEffect(() => {
     setDraft(query);
@@ -156,6 +162,7 @@ export function ProjectPage() {
     if (contextData.complete || allMessagesLoaded) return true;
     if (messageLoading.current) return false;
     const scope = messageScope;
+    const version = context.dataUpdatedAt;
     messageLoading.current = true;
     setLoadingAllMessages(true);
     setMessageLoadError(null);
@@ -172,7 +179,12 @@ export function ProjectPage() {
           limit: CONTEXT_PAGE,
           includeGenerated,
         });
-        if (activeMessageScope.current !== scope) return false;
+        if (
+          activeMessageScope.current !== scope ||
+          activeMessageVersion.current !== version
+        ) {
+          return false;
+        }
         expectedTotal = page.total;
         if (!page.messages.length && !page.complete) {
           throw new Error("The server returned no next page.");
@@ -185,7 +197,12 @@ export function ProjectPage() {
         offset = page.offset + page.messages.length;
         complete = page.complete || offset >= expectedTotal;
       }
-      if (activeMessageScope.current !== scope) return false;
+      if (
+        activeMessageScope.current !== scope ||
+        activeMessageVersion.current !== version
+      ) {
+        return false;
+      }
       if (!complete && offset < expectedTotal) {
         throw new Error("The complete project could not be loaded.");
       }
@@ -193,17 +210,23 @@ export function ProjectPage() {
       setAllMessagesLoaded(true);
       return true;
     } catch {
-      if (activeMessageScope.current === scope) {
+      if (
+        activeMessageScope.current === scope &&
+        activeMessageVersion.current === version
+      ) {
         setMessageLoadError("Could not load the complete project. Try again.");
       }
       return false;
     } finally {
-      if (activeMessageScope.current === scope) {
+      if (
+        activeMessageScope.current === scope &&
+        activeMessageVersion.current === version
+      ) {
         messageLoading.current = false;
         setLoadingAllMessages(false);
       }
     }
-  }, [allMessagesLoaded, contextData, includeGenerated, messageScope, project]);
+  }, [allMessagesLoaded, context.dataUpdatedAt, contextData, includeGenerated, messageScope, project]);
 
   useEffect(() => {
     const attempt = `${messageScope}\u0000newest`;
@@ -242,6 +265,7 @@ export function ProjectPage() {
     if (sessionsComplete) return true;
     if (sessionLoading.current) return false;
     const scope = sessionScope;
+    const version = sessionIndex.dataUpdatedAt;
     sessionLoading.current = true;
     setLoadingAllSessions(true);
     setSessionLoadError(null);
@@ -259,7 +283,12 @@ export function ProjectPage() {
           offset,
           includeGenerated,
         });
-        if (activeSessionScope.current !== scope) return false;
+        if (
+          activeSessionScope.current !== scope ||
+          activeSessionVersion.current !== version
+        ) {
+          return false;
+        }
         expectedTotal = page.total;
         hasMore = page.has_more;
         if (!page.sessions.length && hasMore) {
@@ -273,7 +302,12 @@ export function ProjectPage() {
         offset = page.offset + page.sessions.length;
         if (!page.sessions.length) break;
       }
-      if (activeSessionScope.current !== scope) return false;
+      if (
+        activeSessionScope.current !== scope ||
+        activeSessionVersion.current !== version
+      ) {
+        return false;
+      }
       if (hasMore || offset < expectedTotal) {
         throw new Error("The complete session list could not be loaded.");
       }
@@ -282,12 +316,18 @@ export function ProjectPage() {
       setAllSessionsLoaded(true);
       return true;
     } catch {
-      if (activeSessionScope.current === scope) {
+      if (
+        activeSessionScope.current === scope &&
+        activeSessionVersion.current === version
+      ) {
         setSessionLoadError("Could not load every session. Try again.");
       }
       return false;
     } finally {
-      if (activeSessionScope.current === scope) {
+      if (
+        activeSessionScope.current === scope &&
+        activeSessionVersion.current === version
+      ) {
         sessionLoading.current = false;
         setLoadingAllSessions(false);
       }

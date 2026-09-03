@@ -50,7 +50,9 @@ export function JobConsole({
       es.close();
       onFinishedRef.current(parseJobCompletion(summary));
     });
-    es.onerror = () => es.close();
+    // EventSource reconnects by itself after a transient network error. Closing
+    // here loses the eventual `done` event and leaves the parent stuck in its
+    // running state even though the server-side job has already finished.
     return () => es.close();
   }, [jobId]);
 

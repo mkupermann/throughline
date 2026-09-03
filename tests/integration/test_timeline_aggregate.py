@@ -423,12 +423,15 @@ def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
     # on the next calendar day around midnight.
     day = date(2026, 5, 5)
     with db_connection.cursor() as cur:
-        cur.execute(
+        cur.executemany(
             """
             INSERT INTO ingestion_log (file_path, file_hash, record_count, ingested_at)
-            VALUES (%s, 'h', 3, '2026-05-05T09:00:00Z')
+            VALUES (%s, %s, 3, '2026-05-05T09:00:00Z')
             """,
-            ("/Users/somebody/.claude/projects/-Users-somebody-work/abc123.jsonl",),
+            [
+                ("/Users/somebody/.claude/projects/-Users-somebody-work/abc123.jsonl", "h-posix"),
+                (r"C:\Users\somebody\.codex\sessions\def456.jsonl", "h-windows"),
+            ],
         )
     db_connection.commit()
 
@@ -436,4 +439,6 @@ def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
     labels = [r["title"] for r in rows]
     assert labels, "expected the ingestion row back"
     assert "abc123.jsonl" in labels
+    assert "def456.jsonl" in labels
     assert not any("/Users/" in (label or "") for label in labels), labels
+    assert not any("C:\\Users\\" in (label or "") for label in labels), labels

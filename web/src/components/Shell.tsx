@@ -1,6 +1,6 @@
 import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { Moon, Sun, Monitor, Command as CommandIcon, Keyboard } from "lucide-react";
+import { Moon, Sun, Monitor, Keyboard } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
 import { NAV, NAV_GROUPS } from "@/lib/nav";
@@ -139,6 +139,7 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
 }
 
 export function Shell() {
+  const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sp] = useSearchParams();
   const [paletteHintSeen, setPaletteHintSeen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -209,9 +210,8 @@ export function Shell() {
         <div className="sidebar-foot">
           {!paletteHintSeen && (
             <div className="palette-nudge">
-              <CommandIcon size={13} aria-hidden />
               <span>
-                Press <kbd>⌘K</kbd>
+                Press <kbd>{paletteShortcut}</kbd>
               </span>
             </div>
           )}
