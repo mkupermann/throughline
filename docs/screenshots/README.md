@@ -13,9 +13,11 @@ command.
 | `find.png` | one query across conversations, messages, memory, skills and prompts |
 | `ask.png` | a cited answer assembled from your own records |
 | `timeline.png` | one column per day, one lane per tool |
-| `curate.png` | the queues that keep memory trustworthy |
+| `review.png` | the queues that keep memory trustworthy |
 | `operate.png` | pipeline state and the jobs that change it |
 | `console.png` | read-only SQL |
+| `hero.png` | the current Overview in the blue diagonal launch composition at 1280 by 960 |
+| `social-preview.png` | the current Timeline in the blue launch frame at GitHub's 1280 by 640 social-preview size |
 
 ## Regenerating them
 
@@ -35,6 +37,9 @@ HOME=/path/to/a/fake/home PGDATABASE=throughline_demo throughline serve --port 8
 # 3. Capture
 cd web && npm run screenshots -- --url http://127.0.0.1:8791 --out ../docs/screenshots
 ```
+
+If Playwright's bundled Chromium is not installed, use a system browser with
+`--browser chrome` or set `THROUGHLINE_SCREENSHOT_BROWSER=chrome`.
 
 `examples/demo_data.sql` re-bases its own timestamps on load, so the seven-day
 and per-day views are populated whatever date you run it — see the comment at
@@ -70,6 +75,10 @@ a file called `s1.json` is not discovered where `session_1.json` is.
   narrowest desktop the layout targets, so the images show it under pressure.
 - **Full page.** Several surfaces are taller than the viewport and the fold is
   not a natural crop.
+- **Reproducible launch artwork.** `hero.png` is always 1280 by 960 pixels and
+  `social-preview.png` is always 1280 by 640 pixels, both at 1x scale. Their
+  blue frames follow the launch artwork. Each interface is a fresh browser
+  capture in light, compact mode, not a separate dashboard mockup.
 
 ## When they go stale
 

@@ -1,269 +1,276 @@
 # Throughline
 
-![Throughline: one memory layer for every AI CLI on your laptop](docs/assets/hero.svg)
-
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-336791.svg)](sql/schema.sql)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
 
-**Your AI assistant forgets you every time you close it. Throughline does not.**
+**Your AI work should compound. Throughline makes it searchable, structured, and reusable.**
 
-It is a universal, vendor-agnostic memory layer for AI coding assistants. No account, no telemetry, no cloud. Each assistant remembers, at best, its own sessions, and none of them sees what you did in the others. Throughline ingests the session history of every major AI CLI, Claude Code, Cursor, Zed, Codex, Hermes, Continue, Cline, Windsurf, and Vibe, into one local PostgreSQL database and feeds that unified memory back to whichever tool you use next.
+Throughline imports the sessions that AI coding tools already store on your computer. It brings them into one local PostgreSQL database, organises them by project, extracts durable knowledge, and keeps every result linked to its source.
 
-Storage, indexing, search, and every listing happen on your machine. Three operations may call a model, and each is a point where content could leave. They are named here, not in a footnote:
+You can change tools without abandoning what you learned in the last one. Throughline currently reads Claude Code, Cline, Codex CLI, Continue, Cursor, Hermes, Vibe, Windsurf, and Zed.
 
-| Operation | Stays local when | Required? |
-|---|---|---|
-| **Embedding** (`throughline embed`) | Ollama is selected explicitly, or `auto` runs without an OpenAI key | needed for semantic search |
-| **Answering** (`throughline ask`) | the backend is local | optional |
-| **Extraction, titles, reflection** | the backend is local | optional |
+![Throughline Overview with knowledge from several AI tools](docs/screenshots/hero.png)
 
-Embedding `auto` selects hosted OpenAI whenever `OPENAI_API_KEY` is present. Select `--backend ollama` to keep embeddings local. Answering, extraction, titles, and reflection can likewise reach a hosted OpenAI-compatible endpoint when their automatic probe selects one. Set an explicit local backend when content must stay on the machine. `throughline doctor` reports the selected answer backend.
+No account. No telemetry. No proprietary archive.
 
-Switch providers freely, Anthropic today, Mistral or OpenAI tomorrow, and your accumulated context, decisions, and preferences move with you. The memory belongs to you, not to a vendor.
+## The problem it solves
 
-![Vendor integration matrix](docs/assets/vendor_matrix.svg)
+AI tools remember their own sessions, if they remember them at all. They do not know what happened in another tool. Useful decisions disappear into transcripts. Fixes get rediscovered. Context has to be explained again.
 
-| Tool | Vendor | Storage location | Format |
-|------|--------|------------------|--------|
-| Claude Code | Anthropic | `~/.claude/projects/<project>/*.jsonl` | JSONL transcripts |
-| Cline | Cline | VS Code `globalStorage/.../tasks/` | Per-task files |
-| Codex CLI | OpenAI | `~/.codex/sessions/<date>/rollout-*.jsonl` | JSONL rollouts |
-| Continue | Continue.dev | `~/.continue/sessions/*.json` | JSON transcripts |
-| Cursor | Anysphere | `~/.cursor/sessions/*.jsonl` | JSONL transcripts |
-| Hermes | Community | `~/.hermes/sessions/*.json` | JSON transcripts |
-| Vibe | Mistral AI | `~/.vibe/logs/session/session_*/` | Session directories |
-| Windsurf | Codeium/Cognition | `~/.windsurf/plans/*.md` | Markdown plans |
-| Zed | Zed Industries | `~/.zed/data/sessions/*.json` | JSON transcripts |
+Throughline treats those transcripts as one body of work.
 
-Listed alphabetically. No adapter is privileged in the schema, the pipeline, or the UI: a conversation carries a `source_tool` and nothing else marks where it came from.
+- A project becomes a continuous document with its sessions and extracted knowledge.
+- Find searches conversations, messages, memory, skills, projects, and prompts together.
+- Ask turns retrieved records into a cited answer.
+- Timeline shows how work evolved across tools.
+- Review exposes contradictions, drift, stale knowledge, and weak evidence.
+- Markdown export and MCP put the knowledge back into the tools where you need it.
 
-Adapters degrade gracefully. A tool that is not installed is reported as "not present". Third-party adapters plug in through the `throughline.adapters` entry point without touching Throughline itself. See [docs/ADAPTER_DEVELOPMENT.md](docs/ADAPTER_DEVELOPMENT.md).
+The result is not another chat history. It is working memory you control.
 
----
+## What the interface does
 
-## Project Management — run virtual AI teams on your own machine
+The navigation follows the work rather than the storage model.
 
-![Walking through the Project Management area: projects, team pipelines, role configuration, and a run's iterations with verdicts](docs/assets/pm-walkthrough.gif)
+| Area | Purpose |
+|---|---|
+| **Overview** | Shows what needs attention, then the projects active in the last seven days. |
+| **Projects** | Combines structured knowledge with the complete project transcript. Switch between oldest first and newest first. |
+| **Find** | Runs one lexical and semantic query across every stored object. Copy selected context as clean Markdown. |
+| **Ask** | Answers from your records and cites the messages or memory chunks it used. Copy the answer with its sources. |
+| **Timeline** | Browses the same corpus by date and tool. Open any active day and follow it back to the session. |
+| **Review** | Works through contradictions, drift, superseded chains, low confidence, missing embeddings, expiring records, unused records, and forgotten records. |
+| **Operate** | Presents discovery, ingestion, extraction, embeddings, and quality review as one recoverable pipeline. |
+| **Console** | Runs read-only SQL. PostgreSQL itself rejects writes. |
 
-*Subtitled walkthrough ([MP4](docs/assets/pm-walkthrough.mp4), [captions](docs/assets/pm-walkthrough.srt)). Every screen shows fictional demo data generated by [`scripts/seed_demo_data.py`](scripts/seed_demo_data.py).*
+Project Management remains available as a separate area for local team pipelines. It does not compete with the personal knowledge workflow.
 
-Memory is half the story. The **Project Management** area (the "Project Management" entry in the sidebar, `/pm`) turns Throughline from a passive record into a control plane: you define **projects**, staff them with **teams**, give each team a pipeline of **roles** (for example Analyst → Executor → Tester), and fill each seat with a **member** — human or agent. Every role carries its own configuration: which AI tool and model it runs on, which skills it may use, its own instructions, reference documents, and a **token budget**. Budgets are not decorative — a run that exhausts its project, team, role, or member budget is stopped, process tree and all.
+### One project, in full
 
-**How a run works.** A task hands your description to the Analyst (Claude Code), which writes a specification with acceptance criteria. The Executor (Aider driving a local Ollama model, or any provider you configure) implements it iteration by iteration. The Tester (Vibe, locked to read-only tools) checks each iteration against the spec and returns PASS or FAIL with reasons; failures feed the next iteration. Every step lands in the dashboard as it happens: iteration timeline, verdict badges with the tester's reasoning, per-iteration log excerpts, token counters against every applicable budget. Runs started outside the dashboard can be **adopted** and watched the same way — including runs that are already hours old; their full history is backfilled.
+The Project page opens in Document mode. It groups extracted knowledge by category, keeps provenance visible, and follows it with the complete transcript across every matching session. Content loads incrementally. One explicit action loads the complete project. Switching an incomplete document to newest first loads the remainder before reversing it, so a partial list never pretends to be the latest history.
 
-**Bring your own models.** Under *AI models* you register providers the way you would in Cline or Cursor: OpenAI, Anthropic, Mistral, Google Gemini, OpenRouter, Ollama, or any OpenAI-compatible endpoint. Store a key, fetch the provider's live model list, add custom model ids by hand. Registered providers appear in the role editor, and their credentials are injected into the pipeline environment at launch — the Executor genuinely runs on whatever you picked.
+![A complete project document with knowledge and transcript](docs/screenshots/project.png)
 
-**Step by step:**
+Sessions mode keeps the compact searchable index for fast navigation.
 
-1. Open `/pm` and create a project — or adopt one of your existing repository projects (Throughline already knows them from your session history) with one click.
-2. Create roles under *Roles*: pick the AI tool and model (live-listed from Ollama and your registered providers), select skills, write the role's instructions, attach documents, set a budget.
-3. Create members under *Members*, then open the project cockpit and assign a member to each seat of the team pipeline.
-4. Set budgets where you want hard cost ceilings: project, team, role, or member — the strictest one wins.
-5. Start a task from the cockpit (title + repository path, prefilled from a linked repository project), or register an already-running external run.
-6. Click into the task and watch it work: iterations appear live, each with its verdict; expand any iteration's log; stop the run at any time.
+### Find it, answer it, reuse it
 
-The three pipeline CLIs (Claude Code, Aider, Vibe) are optional — without them, Project Management still works as a live dashboard over adopted runs. The interface is bilingual (German/English, toggle on every page), and archived projects fold away out of sight without losing their history.
+Find and Ask share filters and stable URL state. Recent queries stay in the browser. They are not written to PostgreSQL.
 
----
+Find is for retrieval. Ask is for synthesis. Both can produce Markdown that carries its source references into another AI tool.
 
-## Quick start
+![A cited answer assembled from synthetic records](docs/screenshots/ask.png)
 
-**Requirements.** Docker route: Docker with Compose v2, and 2 GB of free disk for the image and database. Native route: Python 3.10+, PostgreSQL 16 with the pgvector extension, and the `psql`/`createdb` client tools. macOS and Linux are tested. Windows with Docker Desktop is tested end to end, ingest, backup, Markdown export, and Ask, including its own background job runner ([`windows/`](windows/), below).
+Every answer states which model produced it and whether the request stayed on the machine. An uncited answer is labelled as unverified. When generation is unavailable, Throughline still returns the records it found.
 
-### Docker (recommended)
+### Trust needs its own workflow
+
+Memory becomes dangerous when old decisions look current. Review makes that failure visible. Its drift audit samples extracted memory against the source conversations and records the result without changing either source conversations or memory chunks.
+
+![Review queues and the visible drift audit action](docs/screenshots/review.png)
+
+Destructive actions require confirmation. Forgetting repairs related references and leaves an audit record. The interface offers an undo window for reversible review actions.
+
+### Operate the pipeline, not a wall of jobs
+
+Operate shows five stages in order: discover sources, ingest sessions, extract knowledge, create embeddings, and review quality. Each stage states whether it is current, due, running, blocked, or failed. The next useful action stays beside the stage that needs it.
+
+![The knowledge pipeline, environment, inventory, and Markdown export](docs/screenshots/operate.png)
+
+Markdown export includes an in-app folder browser. Server-side browsing is confined to `THROUGHLINE_EXPORT_ROOT`. A container cannot open the host operating system's native folder dialog, so the browser presents only the directory tree the service is allowed to use.
+
+### Built for daily use
+
+Press `Cmd+K` on macOS or `Ctrl+K` elsewhere for the command palette. It navigates, finds specific records, and runs safe pipeline jobs. Press `/` to focus search. Press `g` and then `o`, `f`, `t`, `c`, `p`, `s`, or `m` to move between areas.
+
+Comfortable and compact density settings persist locally. The interface supports keyboard navigation, visible focus, reduced motion, narrow screens, and light or dark themes.
+
+## Quick start with Docker
+
+Docker Compose is the shortest supported path. It includes PostgreSQL 16 with pgvector and serves the app on loopback.
 
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
 python3 scripts/init_compose_env.py
 docker compose up -d
-docker compose exec web throughline ingest --all   # first run only
-# Web UI: http://127.0.0.1:8788
+docker compose exec web throughline ingest --all
 ```
 
-The initialization command creates or updates the ignored `.env` with a random database password and your numeric UID/GID, so the application runs unprivileged while still reading your 0600 local source files on Linux and Docker Desktop for macOS. The compose stack starts PostgreSQL 16 with pgvector and the web UI. Ingestion is not automatic on first boot. Run it once, then schedule it (see below). The port publishes on loopback only. The API has no authentication, by design for a single-user local tool. Host tool directories mount read-only into the container.
+On Windows, use `py -3 scripts/init_compose_env.py` if `python3` is not available.
 
-Optional profiles: `--profile mcp` adds the MCP server, so assistants can query memory mid-session, and `--profile embeddings` adds a local Ollama container, so embeddings never need an API key. Pull a generation model too, or `ask` has nothing to answer with:
+Open [http://127.0.0.1:8788](http://127.0.0.1:8788).
+
+The setup script creates an ignored `.env` with a random database password. Source directories are mounted read-only. The web API binds to loopback because it has no authentication. The first ingestion is explicit.
+
+### Keep the database safe
+
+The PostgreSQL named volume contains the corpus. Rebuilding or replacing the web container does not remove it.
+
+Do not run `docker compose down -v` unless you intend to destroy the database. Use the normal update path instead:
+
+```bash
+git pull
+docker compose build web migrate
+docker compose up -d migrate web
+docker compose exec web throughline doctor
+```
+
+Create a verified backup before a major update:
+
+```bash
+docker compose exec web throughline backup
+```
+
+See [Deployment](docs/DEPLOYMENT.md) for upgrades, credential rotation, backups, and recovery.
+
+## Local models
+
+Embeddings enable semantic search. A generation model powers Ask, extraction, titles, and reflection. These are different jobs and need different models.
 
 ```bash
 docker compose --profile embeddings up -d ollama
-docker exec throughline-ollama ollama pull nomic-embed-text     # embeddings
-docker exec throughline-ollama ollama pull qwen2.5:7b-instruct  # answers, extraction, titles, reflection
+docker exec throughline-ollama ollama pull nomic-embed-text
+docker exec throughline-ollama ollama pull qwen3.5:9b
+docker compose exec web throughline embed --backend ollama
 ```
 
-The container publishes **8788**. A native `throughline serve` listens on **8790**. Different ports on purpose, so both can run at once.
+Use a smaller or larger generation model to match the machine. Throughline inspects the models Ollama actually has. `throughline doctor` reports what will run.
 
-### Native installation
+Model use is an explicit privacy boundary:
+
+| Operation | Local when |
+|---|---|
+| Embeddings | `--backend ollama` is selected, or `auto` runs without `OPENAI_API_KEY` |
+| Ask | the resolved generation backend is local |
+| Extraction, titles, and reflection | the resolved generation backend is local |
+
+Embedding `auto` uses hosted OpenAI when `OPENAI_API_KEY` is present. Generation `auto` prefers a reachable local Ollama model, then a configured OpenAI-compatible endpoint, then hosted OpenAI. Set the backend explicitly when content must stay on the machine.
+
+## Supported sources
+
+| Tool | Session location |
+|---|---|
+| Claude Code | `~/.claude/projects/` |
+| Cline | the editor's `globalStorage` task directory |
+| Codex CLI | `~/.codex/sessions/` |
+| Continue | `~/.continue/sessions/` |
+| Cursor | `~/.cursor/sessions/` |
+| Hermes | `~/.hermes/sessions/` |
+| Vibe | `~/.vibe/logs/session/` |
+| Windsurf | `~/.windsurf/plans/` |
+| Zed | `~/.zed/data/sessions/` |
+
+Adapters normalise each source into conversations and messages. Re-ingestion is idempotent. Changed source files refresh their stored conversation without creating duplicates. Third-party adapters can register through the `throughline.adapters` entry point. See [Adapter development](docs/ADAPTER_DEVELOPMENT.md).
+
+## The daily loop
+
+Most days Throughline should update itself in the background.
+
+| Platform | Scheduler | Setup |
+|---|---|---|
+| macOS | per-user launchd agents | [`launchd/`](launchd/) |
+| Linux | systemd user timers | [`systemd/`](systemd/) |
+| Windows | Task Scheduler | [`windows/`](windows/) |
+
+The scheduled jobs ingest hourly, extract daily, and back up daily. The Windows scripts detect a running Docker setup and use it directly. Native installations use the same commands with a local environment file.
+
+When you need something back:
+
+```bash
+throughline ask "why did we change the ingestion queue?"
+throughline search "pgvector index"
+throughline serve
+```
+
+When you need to inspect the system:
+
+```bash
+throughline status
+throughline doctor
+throughline conflicts
+throughline migrate --status
+```
+
+The complete command guide is in [Usage](docs/USAGE.md).
+
+## Take the knowledge with you
+
+Markdown export writes one folder per project. Sessions remain chronological and large projects split into manageable dated parts. Re-running updates files Throughline owns and leaves your own notes alone.
+
+```bash
+throughline export-markdown --out ~/Documents/Throughline
+throughline export-markdown --out ~/Documents/Throughline --project throughline
+throughline export-markdown --out ~/Documents/Throughline --redact
+```
+
+The redaction pass removes common key, token, email, and home-path shapes. It reduces exposure but cannot prove that arbitrary transcript content is safe. Review an export before placing it in a shared or cloud-synced folder.
+
+The MCP server in [`memory_mcp/`](memory_mcp/) lets compatible clients search, recall, write, supersede, and forget shared memory while they work. The optional Claude Code SessionStart hook can preload a short project-scoped context file.
+
+## Architecture
+
+- Python and FastAPI provide the CLI, API, jobs, and server.
+- React, TypeScript, Vite, and TanStack Query provide the web interface.
+- PostgreSQL 16 and pgvector store the corpus and vector index.
+- Ollama or an OpenAI-compatible endpoint can provide local generation.
+- The built frontend ships inside the Python package. Installing Throughline does not require Node.
+
+Schema changes use ordered migrations. Compose applies them before the web service starts. `throughline migrate --status` shows what is applied and what remains.
+
+## Native installation
+
+The native route is intended for a machine that already has PostgreSQL 16 and pgvector.
 
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
-
 createdb throughline
 throughline migrate
-
 throughline ingest --all
 throughline serve
 ```
 
-The connection comes from the standard `PG*` variables, and a `.env` in the repository root is read automatically. `throughline migrate` uses the versioned migrations shipped in the installed package. Run it after upgrading a native install. The Compose stack runs it automatically before web or MCP starts.
+The application reads standard `PG*` variables and an ignored repository-root `.env`. The native server defaults to [http://127.0.0.1:8790](http://127.0.0.1:8790).
 
-Full instructions, including screenshots-driven verification and deployment profiles: [docs/INSTALLATION.md](docs/INSTALLATION.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Full setup details are in [Installation](docs/INSTALLATION.md).
 
-### Keeping memory current: scheduled jobs
+## Project Management
 
-A database that only updates when you remember to click Run is not a memory layer, it is a manual chore. Three background jobs, ingest, extract, backup, keep it current on their own:
+The optional Project Management area defines projects, team pipelines, roles, members, model providers, and hard token budgets. It can launch supported local agent workflows or adopt an external run and display its history.
 
-| Platform | Mechanism | Setup |
-|---|---|---|
-| macOS | `launchd` per-user agents | [`launchd/`](launchd/) |
-| Linux | `systemd --user` timers | [`systemd/`](systemd/) |
-| Windows | Task Scheduler | [`windows/`](windows/) |
+![A walkthrough of the separate Project Management area](docs/assets/pm-walkthrough.gif)
 
-The Windows path auto-detects a running Docker Compose stack and calls `docker exec throughline-web throughline <job>` directly, no local PostgreSQL client or Python install needed. A native Windows install falls back to a shared env file and, for backup only, a PowerShell reimplementation of the dump-verify-rotate sequence: the CLI's own `backup` subcommand shells out to `bash scripts/backup.sh`, which a native Windows install has no reason to have on `PATH`.
+The walkthrough uses fictional data from [`scripts/seed_demo_data.py`](scripts/seed_demo_data.py). An [MP4 version](docs/assets/pm-walkthrough.mp4) and [captions](docs/assets/pm-walkthrough.srt) are also available.
 
----
+## Development
 
-## Command line interface
+Install the development dependencies, then run the same checks as CI:
 
 ```bash
-throughline ingest --list-sources   # show all adapters and whether they are present
-throughline ingest --all            # ingest from every present adapter
-throughline ingest --source vibe    # ingest from one tool
-throughline extract-memory          # distill structured memory chunks from conversations
-throughline generate-titles         # title untitled conversations
-throughline search "authentication" # semantic search across all tools' history
-throughline ask "why did we drop X?"  # a cited answer assembled from your own history
-throughline reflect                 # self-reflecting memory maintenance (dedup, decay)
-throughline status                  # database and ingestion status
-throughline doctor                  # diagnose environment, schema, and archive integrity
-throughline serve                   # web UI + API on http://127.0.0.1:8790
+pip install -r requirements-dev.txt
+pytest tests/ -m "not integration" --ignore=tests/integration
+ruff check throughline memory_mcp scripts skill/scripts evals tests
+black --check throughline memory_mcp scripts skill/scripts evals tests
+npm --prefix web ci
+npm --prefix web run typecheck
+npm --prefix web test
+npm --prefix web run build
 ```
 
-Usage guide with examples: [docs/USAGE.md](docs/USAGE.md).
+Integration tests require a disposable PostgreSQL 16 instance with pgvector. The frontend suite currently contains 192 tests. Documentation screenshots are generated from [`examples/demo_data.sql`](examples/demo_data.sql), never from a personal database. The capture procedure is in [`docs/screenshots/`](docs/screenshots/).
 
-### The web UI
+Contributions are welcome. Read [Contributing](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report bugs in [Issues](https://github.com/mkupermann/throughline/issues). Report security problems through the channel in [Security](SECURITY.md).
 
-`throughline serve` runs the UI and its JSON API from one process on one port (default `http://127.0.0.1:8790`). Six surfaces in the navigation, Overview, Find, Timeline, Curate, Operate, Console, and two more you reach by following something rather than by navigating to it: a project's own page, and Ask, which sits beside the search box on Find. Most carry a provider bar showing each tool that has material here, its conversation count, and whether anything is waiting to be ingested. Clicking a tool scopes the page to it. Overview and Console do without: one is a worklist about every tool at once, the other answers to SQL rather than to a filter.
+## Status
 
-| Surface | What it is for |
-|---|---|
-| **Overview** | A worklist, not a dashboard. What needs doing first, then what you worked on in the last seven days, by project. |
-| **Projects** | One project's whole history, every session in it, newest or oldest first, with a search that covers session titles and every message inside them. A project is the working directory a session ran in, so nothing has to be maintained for this to work. |
-| **Find** | One query across conversations, messages, memory, skills, projects, and prompts, lexical and semantic retrieval fused, with facets and three views (list, table, graph), plus a reading pane: `↓` from the search box, then `j`/`k` walks results without leaving the page. |
-| **Ask** | A question in plain language, answered from your own records. Every claim carries a citation you can click through to the message or memory chunk it came from. An answer that cites nothing is labelled unverified, and a question the records cannot answer is told so rather than guessed at. |
-| **Timeline** | The same corpus browsed by time rather than by query: one column per day across every tool, opening the most recent active day on arrival, drilling from a day into a session and its full transcript, prose, the commands that ran, and what they returned. |
-| **Curate** | Eight queues that keep memory trustworthy: contradictions, drift, superseded chains, low confidence, missing embeddings, expiring, never accessed, forgotten. Bulk actions, with a confirmation before anything is forgotten and an undo after. |
-| **Operate** | Pipeline state and the jobs that change it, with live streamed output, provider coverage, and a Markdown export with an in-app folder browser confined to a configured root, since the API has no authentication and nothing server-side can browse a host's real filesystem from inside a container. |
-| **Console** | Read-only SQL. Every statement runs in a `READ ONLY` transaction, so PostgreSQL rejects writes, not a keyword filter. |
-
-### What it looks like
-
-![Overview: the worklist, then the last seven days by project](docs/screenshots/overview.png)
-
-Overview answers "what should I deal with?" before it shows a single statistic: what needs doing, then the projects you actually worked in this week, with the tools each one spanned, which is the thing no per-tool interface can show you.
-
-![Ask: a cited answer assembled from your own records](docs/screenshots/ask.png)
-
-Ask answers in prose and cites the records it used, and says which model answered and whether it ran on your machine. Every screenshot here is generated from the bundled demo fixture by `npm run screenshots`. The rest are in [docs/screenshots/](docs/screenshots/).
-
-Press `⌘K` for the command palette: jump to a surface, run a job (ingest, extract, embed, reflect, diagnostics) with no destination and no selection needed first, or jump straight to a specific project, conversation, or memory chunk by typing what it's about. Press `/` to search from anywhere, `g` then `o f t c p s` to jump between surfaces. Light and dark both supported. The theme follows your system by default.
-
----
-
-## Technical deep-dive
-
-### Adapter contract
-
-Each adapter implements a deliberately small interface:
-
-- `discover()`, yield the files ingestion will process
-- `parse(path)`, convert one file into a `NormalisedConversation`
-
-Two optional hooks separate what *exists* from what is *safe to ingest*, which is what lets the provider bar report honest coverage:
-
-- `discover_all()`, every candidate on disk, including ones ingestion skips. Defaults to `discover()`, so an adapter with no exclusions writes no extra code.
-- `excluded_reason(path)`, why a discovered file must not be ingested, or `None`
-
-The Claude Code adapter uses both, because it has the most awkward layout to work with. It searches `~/.claude/projects` recursively (older transcripts sit one level deeper than the flat layout assumed), then excludes subagent transcripts, which are machine-generated and would drown the corpus. Vibe needs neither hook and implements neither. The base class covers it in four lines. `is_present` is derived: a tool counts as present when `discover_all()` yields at least one file, so a tool whose directory exists but is empty is reported as absent rather than as silently contributing nothing.
-
-Everything else, database connections, idempotency via the ingestion log, project bucketing, error handling, lives in the shared writer, so adapters stay small and individually testable. Re-ingestion is idempotent: unchanged files are skipped, changed files are refreshed without duplicates.
-
-Every adapter has its own test module built on a sample of that tool's real on-disk format, and shared suites assert what must hold for all of them: each writes its own `source_tool`, and each is a registered provider. An end-to-end test then drops a synthetic session for **all nine** into a live PostgreSQL, runs the real writer, and asserts per tool that rows landed, that re-running changes nothing, and that an edited file refreshes rather than duplicates. `tests/test_adapter_*.py` and `tests/integration/test_adapter_e2e.py` are the files to read first if you doubt the nine-tool claim.
-
-That test earned its keep the day it was written. Extending it from three tools to nine found that Cursor, Zed, and Vibe sessions could not be stored at all. Their message ids are not UUIDs, the column is, and PostgreSQL rejected every insert, so the writer discarded the whole session rather than importing it imperfectly. Parsing was fine, which is why unit tests had passed for months.
-
-### Storage and retrieval
-
-- **PostgreSQL 16 + pgvector**: conversations, messages, and extracted memory chunks in a normalised schema (`sql/schema.sql`), with vector similarity search over embeddings and trigram search over content.
-- **Memory extraction**: an LLM pass distills durable facts (preferences, decisions, error solutions, project context) from raw transcripts into typed, tagged memory chunks. It runs through the same swappable backend as everything else, as do title generation and the reflection engine, so a machine running Ollama fills its memory without a network call and without an API key. Memory comes back in the language the session was held in, so a bilingual corpus stays bilingual instead of being translated one conversation at a time. `THROUGHLINE_MEMORY_LANG` forces a single language when that is what you want.
-- **MCP server**: `memory_mcp` exposes the memory database to any MCP-capable client over stdio, so every supported CLI can query the shared memory at runtime.
-- **Bring your own model.** Embeddings use hosted OpenAI in `auto` mode when `OPENAI_API_KEY` exists, otherwise Ollama. Answers, extraction, title generation, and reflection share a separate probe that prefers an available local Ollama generation model but may select a configured remote OpenAI-compatible endpoint or hosted OpenAI. Nothing here is tied to one vendor:
-
-  | Variable | Purpose |
-  |---|---|
-  | `THROUGHLINE_ANSWER_BACKEND` | `auto` (default), `ollama`, `openai` |
-  | `THROUGHLINE_ANSWER_MODEL` | model name for that backend |
-  | `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server, LM Studio, llama.cpp, vLLM, LiteLLM |
-  | `OPENAI_API_KEY` | makes embedding `auto` use hosted OpenAI, and enables the OpenAI model backend |
-  | `THROUGHLINE_EXTRACT_MODEL` · `THROUGHLINE_TITLE_MODEL` · `THROUGHLINE_REFLECT_MODEL` | per-job model override, when one job wants a bigger model than the rest |
-  | `THROUGHLINE_MEMORY_LANG` | force the language memory is written in. By default it follows the session. |
-
-  `throughline doctor` reports which model will answer and whether it runs locally, and every answer in the UI says so on screen.
-
-- **A tool that reads its own output must not count it.** Throughline calls a model to title conversations, extract memory, and answer questions. Those calls are themselves sessions on disk. The writer recognizes those known prompts and drops their source file at ingest, recording a zero-row decision in `ingestion_log`. Existing rows from versions that predate that guard can be labelled by `backfill_generated_by`. Listings, charts, search, and answers exclude those legacy labelled rows by default.
-- **Privacy**: sources mount read-only. Content can leave the machine for embedding, answering, extraction, title generation, or reflection whenever a selected model backend is hosted. Select local backends where that boundary is unacceptable. `THROUGHLINE_REDACT_PROMPTS=1` strips secrets from answer excerpts, off by default, because a memory tool that hides your own credentials from you is failing at its job. PII scanning utilities are included (`throughline/pii.py`).
-- **The database outlives its sources.** Assistant CLIs rotate their transcripts away. On a corpus measured while writing this, 91% of the Claude Code sessions Throughline had ingested no longer existed on disk. For those the database is not an index over files you still have, it is the only copy. Schema changes are packaged as ordered migrations. Use `throughline migrate --status` to inspect them and `throughline migrate` to apply them. Compose applies them automatically before it starts the web UI or MCP service. `throughline doctor --category archive` reports the store's consistency and whether a recent backup exists. `throughline backup` creates a private local dump, or use the scheduled job above.
-
-> **About the numbers in this section.** Every measurement quoted here, the 3,017, the 91%, the recall figures, comes from one real corpus: the author's own, roughly 3,600 sessions across nine tools. They are reported because a design decision explained by the observation that forced it is easier to argue with than one asserted as a principle. They are not benchmarks, and your corpus will differ. `throughline status` and `throughline doctor` print the equivalent numbers for yours.
-
-Performance characteristics and tuning: [docs/PERFORMANCE.md](docs/PERFORMANCE.md). Security model: [SECURITY.md](SECURITY.md).
-
----
-
-## Extending Throughline
-
-To support a new AI CLI, implement the adapter contract and register it:
-
-```python
-from pathlib import Path
-from typing import Iterable
-from throughline.adapters.base import Adapter, NormalisedConversation
-
-class MyToolAdapter(Adapter):
-    name = "my_tool"
-    label = "My Tool"
-    home = Path("~/.my_tool/sessions").expanduser()
-
-    def discover(self) -> Iterable[Path]:
-        yield from sorted(self.home.glob("*.json"))
-
-    def parse(self, path: Path) -> NormalisedConversation | None:
-        ...
-```
-
-Register it either in `throughline/adapters/registry.py` (built-in) or via the `throughline.adapters` entry point in your own package, no core changes needed. The complete guide, including normalisation rules and test patterns, is in [docs/ADAPTER_DEVELOPMENT.md](docs/ADAPTER_DEVELOPMENT.md).
-
----
-
-## Contributing and support
-
-Contributions are welcome, new adapters especially. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, style, and PR conventions, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Run the frontend suite with `npm --prefix web test` and the Python suite with `pytest`. Integration tests expect a reachable PostgreSQL (`docker compose up -d postgres`).
-
-Bugs and feature requests go to [GitHub Issues](https://github.com/mkupermann/throughline/issues), questions and ideas to [Discussions](https://github.com/mkupermann/throughline/discussions). Security reports have their own channel, see [SECURITY.md](SECURITY.md). Current version and what changed: [CHANGELOG.md](CHANGELOG.md).
-
-**Status: beta.** The schema is migration-tracked. CI runs 128 frontend tests and a PostgreSQL-backed integration suite, including an end-to-end ingestion run through a live database for each of the nine adapters. It has been used in earnest on more than one person's machine now, Windows included, so report setup-specific rough edges in an issue. The claims on this page are checked before publishing by an adversarial review run through a second vendor's model. The procedure and its findings are in [CONTRIBUTING.md](CONTRIBUTING.md#reviewing-user-facing-claims).
+Throughline is beta software. Its schema is migration-tracked and its core paths run in CI against PostgreSQL. Back up a corpus you care about. Treat every model boundary as a data boundary.
 
 ## License
 
 Throughline is released under the [MIT License](LICENSE).
-
-## Acknowledgments
-
-- [pgvector](https://github.com/ankane/pgvector), vector similarity search in PostgreSQL
-- [FastAPI](https://github.com/fastapi/fastapi) and [React](https://react.dev), web UI and API
-- [Model Context Protocol](https://modelcontextprotocol.io), runtime memory access for AI clients
