@@ -39,6 +39,7 @@ def _run_eval(
         cwd=REPO,
         capture_output=True,
         text=True,
+        encoding=console_encoding,
         env=env,
         timeout=timeout,
     )

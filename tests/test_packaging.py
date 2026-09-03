@@ -22,7 +22,7 @@ def _venv_executable(env: Path, name: str) -> Path:
 def _build_wheel(tmp_path: Path) -> Path:
     wheel_dir = tmp_path / "wheel"
     env = {**os.environ, "PIP_CACHE_DIR": str(tmp_path / "pip-cache")}
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -34,11 +34,12 @@ def _build_wheel(tmp_path: Path) -> Path:
             str(wheel_dir),
             str(ROOT),
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=env,
     )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     return next(wheel_dir.glob("throughline-*.whl"))
 
 
@@ -128,7 +129,7 @@ def test_source_script_wrapper_remains_directly_executable() -> None:
 
 
 def test_source_wrapper_bootstraps_before_importing_optional_dependencies(tmp_path: Path) -> None:
-    """A bare interpreter delegates to the project's dependency-bearing venv."""
+    """A bare interpreter delegates to the configured dependency-bearing interpreter."""
     bare_env = tmp_path / "bare-python"
     subprocess.run([sys.executable, "-m", "venv", str(bare_env)], check=True)
     result = subprocess.run(
@@ -137,6 +138,7 @@ def test_source_wrapper_bootstraps_before_importing_optional_dependencies(tmp_pa
         check=False,
         capture_output=True,
         text=True,
+        env={**os.environ, "THROUGHLINE_PYTHON": sys.executable},
     )
 
     assert result.returncode == 0, result.stderr

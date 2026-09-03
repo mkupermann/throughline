@@ -9,9 +9,14 @@ all — they check formatting, size and private keys.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path, PurePosixPath, PureWindowsPath
+
 import pytest
 
 from scripts.check_toplevel import ALLOWED, stray_entries
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_a_file_inside_a_known_directory_is_fine():
@@ -42,10 +47,27 @@ def test_a_stray_file_at_the_root_is_refused_too():
 
 def test_the_allowlist_covers_everything_this_repository_tracks():
     # A hook that fires on the project's own files gets disabled within a day.
-    import subprocess
-
     tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.splitlines()
     assert stray_entries(tracked) == []
+
+
+def test_tracked_symlinks_never_escape_the_repository():
+    tracked = subprocess.run(["git", "ls-files", "-s"], capture_output=True, text=True, check=True).stdout.splitlines()
+    violations: list[str] = []
+
+    for entry in tracked:
+        metadata, path = entry.split("\t", 1)
+        if metadata.split()[0] != "120000":
+            continue
+        target = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True, check=True).stdout.strip()
+        if PurePosixPath(target).is_absolute() or PureWindowsPath(target).is_absolute():
+            violations.append(path)
+            continue
+        resolved = (ROOT / path).parent.joinpath(target).resolve()
+        if not resolved.is_relative_to(ROOT.resolve()) or not resolved.exists():
+            violations.append(path)
+
+    assert violations == []
 
 
 @pytest.mark.parametrize("path", ["", "   "])

@@ -8,10 +8,10 @@ interpreter — where those dependencies are not installed — causing confusing
 ``ModuleNotFoundError: No module named 'psycopg2'`` failures.
 
 This helper, when called at the top of a script (before any third-party
-imports), detects a ``.venv`` (or ``venv``) directory at the repo root and
-re-execs the current process under that interpreter. If no venv is found, the
-call is a no-op and the script continues with whatever interpreter the user
-invoked.
+imports), first honours ``THROUGHLINE_PYTHON`` and then detects a ``.venv``
+(or ``venv``) directory at the repo root. It re-execs the current process
+under the first available interpreter. If none is found, the call is a no-op
+and the script continues with whatever interpreter the user invoked.
 
 Usage at the top of a script::
 
@@ -34,10 +34,16 @@ from pathlib import Path
 def _candidate_interpreters(repo_root: Path) -> list[Path]:
     bin_dir = "Scripts" if os.name == "nt" else "bin"
     exe = "python.exe" if os.name == "nt" else "python"
-    return [
-        repo_root / ".venv" / bin_dir / exe,
-        repo_root / "venv" / bin_dir / exe,
-    ]
+    candidates: list[Path] = []
+    if configured := os.environ.get("THROUGHLINE_PYTHON"):
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            repo_root / ".venv" / bin_dir / exe,
+            repo_root / "venv" / bin_dir / exe,
+        ]
+    )
+    return candidates
 
 
 def use_venv() -> None:
