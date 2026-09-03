@@ -418,17 +418,21 @@ def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
     was found by looking at a documentation screenshot: twenty rows of
     `/Users/<real-name>/...`, headed for a public repository.
     """
+    # Keep this privacy assertion independent of the machine's local timezone.
+    # PostgreSQL runs in UTC in Docker, while a Windows test host may already be
+    # on the next calendar day around midnight.
+    day = date(2026, 5, 5)
     with db_connection.cursor() as cur:
         cur.execute(
             """
             INSERT INTO ingestion_log (file_path, file_hash, record_count, ingested_at)
-            VALUES (%s, 'h', 3, now())
+            VALUES (%s, 'h', 3, '2026-05-05T09:00:00Z')
             """,
             ("/Users/somebody/.claude/projects/-Users-somebody-work/abc123.jsonl",),
         )
     db_connection.commit()
 
-    rows = T.day_detail(db_connection, date.today(), kinds=["ingestion"], providers=[], limit=50)
+    rows = T.day_detail(db_connection, day, kinds=["ingestion"], providers=[], limit=50)
     labels = [r["title"] for r in rows]
     assert labels, "expected the ingestion row back"
     assert "abc123.jsonl" in labels
