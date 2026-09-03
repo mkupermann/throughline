@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { Copy } from "lucide-react";
 import type { FindItem, Kind } from "@/lib/api";
 
 /** Route for a result, so the list and the table cannot disagree. */
@@ -90,6 +91,7 @@ export const ResultRow = forwardRef<
     terms: string[];
     isSelected?: boolean;
     onSelect?: () => void;
+    onCopy?: (item: FindItem) => void | Promise<void>;
     /** The category vocabulary /api/facets actually reports (the same set
      *  FacetRail's category filter is built from). A message row's
      *  `category` field sometimes holds the message's own internal ROLE
@@ -97,7 +99,7 @@ export const ResultRow = forwardRef<
      *  set is how the row tells the two apart (UI audit full-app L1). */
     knownCategories?: Set<string>;
   }
->(function ResultRow({ item, terms, isSelected, onSelect, knownCategories }, ref) {
+>(function ResultRow({ item, terms, isSelected, onSelect, onCopy, knownCategories }, ref) {
   // A message's own text is the snippet — its `title` is the *conversation*
   // summary, which is identical for every message in that conversation. Using
   // it as the heading made five distinct results look like the same row, so
@@ -136,6 +138,7 @@ export const ResultRow = forwardRef<
         .filter(Boolean)
         .join(", ")
     : undefined;
+  const copyName = item.title || item.category || item.snippet?.slice(0, 60) || `${item.kind} #${item.id}`;
 
   return (
     <li
@@ -183,6 +186,18 @@ export const ResultRow = forwardRef<
           {item.occurred_at && <span>{when(item.occurred_at)}</span>}
         </div>
       </Link>
+      {onCopy && (
+        <button
+          type="button"
+          className="result-copy"
+          aria-label={`Copy context for ${copyName}`}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => void onCopy(item)}
+        >
+          <Copy size={13} aria-hidden />
+          <span>Copy context</span>
+        </button>
+      )}
     </li>
   );
 });
@@ -192,12 +207,14 @@ export function ResultList({
   terms,
   selected,
   onSelect,
+  onCopy,
   knownCategories,
 }: {
   items: FindItem[];
   terms: string[];
   selected?: number;
   onSelect?: (i: number) => void;
+  onCopy?: (item: FindItem) => void | Promise<void>;
   knownCategories?: Set<string>;
 }) {
   // Keeps the selected row in view as j/k walk past the fold. `nearest` rather
@@ -222,6 +239,7 @@ export function ResultList({
           isSelected={i === selected}
           ref={i === selected ? selectedRef : undefined}
           onSelect={() => onSelect?.(i)}
+          onCopy={onCopy}
           knownCategories={knownCategories}
         />
       ))}

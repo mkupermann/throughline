@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CornerDownLeft, Info } from "lucide-react";
+import { Copy, CornerDownLeft, Info } from "lucide-react";
 
 import { askApi, type AskResponse, type AskSource } from "@/lib/api";
+import { contextForAnswer } from "./copyContext";
 
 /**
  * A question, answered from the stored history, with citations.
@@ -57,7 +58,14 @@ export function routeForSource(s: AskSource): string {
   return `/m/${s.id}`;
 }
 
-export function AskPanel({ question }: { question: string }) {
+export function AskPanel({
+  question,
+  onAsked,
+}: {
+  question: string;
+  onAsked?: (question: string) => void;
+}) {
+  const [copyStatus, setCopyStatus] = useState<{ id: number; message: string } | null>(null);
   const ask = useMutation({
     mutationFn: (q: string) => askApi.ask({ question: q }),
   });
@@ -79,10 +87,15 @@ export function AskPanel({ question }: { question: string }) {
     if (q.length < 3 || q === asked.current) return;
     const t = window.setTimeout(() => {
       asked.current = q;
+      onAsked?.(q);
       mutate(q);
     }, 900);
     return () => window.clearTimeout(t);
-  }, [question, mutate]);
+  }, [question, mutate, onAsked]);
+
+  useEffect(() => {
+    setCopyStatus(null);
+  }, [question]);
 
   if (!question.trim()) {
     return (
@@ -97,22 +110,43 @@ export function AskPanel({ question }: { question: string }) {
     );
   }
 
-  if (ask.isPending) {
-    return <p className="ask-status">Reading your history…</p>;
+  const currentQuestion = question.trim();
+  const currentRequest = ask.variables?.trim() === currentQuestion;
+
+  if (ask.isPending && currentRequest) {
+    return <p className="ask-status" role="status">Reading your history…</p>;
   }
 
-  if (ask.isError) {
-    return <p className="ask-status">{(ask.error as Error).message}</p>;
+  if (ask.isError && currentRequest) {
+    return <p className="ask-status" role="alert">{(ask.error as Error).message}</p>;
   }
 
-  const data = ask.data as AskResponse | undefined;
+  const response = ask.data as AskResponse | undefined;
+  const data = response?.question.trim() === currentQuestion ? response : undefined;
   if (!data) return null;
+  const answer = data;
 
   const cited = data.sources.filter((s) => data.cited.includes(s.n));
   // With citations, the cited records are the evidence. Without them, the
   // retrieved records ARE the answer as far as the reader is concerned, so
   // show more of them rather than a token three.
   const shown = cited.length > 0 ? cited : data.sources.slice(0, 8);
+
+  async function copyAnswer() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(contextForAnswer(answer));
+      setCopyStatus((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        message: "Answer and sources copied.",
+      }));
+    } catch {
+      setCopyStatus((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        message: "Could not copy the answer. Check browser permissions and try again.",
+      }));
+    }
+  }
 
   return (
     <div className="ask">
@@ -124,10 +158,26 @@ export function AskPanel({ question }: { question: string }) {
       )}
 
       {data.answer && (
-        <p className="ask-answer">
-          <WithCitations text={data.answer} sources={data.sources} />
-        </p>
+        <>
+          <p className="ask-answer">
+            <WithCitations text={data.answer} sources={data.sources} />
+          </p>
+          <div className="ask-actions">
+            <button
+              type="button"
+              className="button ask-copy"
+              aria-label="Copy answer with sources"
+              onClick={() => void copyAnswer()}
+            >
+              <Copy size={14} aria-hidden />
+              Copy answer with sources
+            </button>
+          </div>
+        </>
       )}
+      <p className="sr-only" role="status" aria-live="polite">
+        {copyStatus && <span key={copyStatus.id}>{copyStatus.message}</span>}
+      </p>
 
       {/* An uncited answer must say so — but saying so is not the useful part.
         * The first version put a warning box between the reader and the

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Download, Info, LayoutList, MessageCircleQuestion, Network, OctagonAlert, Rows3, Search, X } from "lucide-react";
@@ -11,8 +11,10 @@ import { AskPanel } from "./AskPanel";
 import { ResultPreview, previewTarget } from "./ResultPreview";
 import { ResultTable } from "./ResultTable";
 import { ResultGraph } from "./ResultGraph";
-import { toApiParams, useFindState } from "./useFindState";
+import { toApiParams, useFindState, type ViewMode } from "./useFindState";
 import { downloadCsv } from "./exportCsv";
+import { contextForFindItem } from "./copyContext";
+import { readRecentQueries, rememberQuery, type RecentQuery } from "./recentQueries";
 
 /** Debounce so every keystroke does not become a query. */
 function useDebounced<T>(value: T, ms: number): T {
@@ -29,6 +31,15 @@ export function FindPage() {
   const [draft, setDraft] = useState(state.q);
   const debounced = useDebounced(draft, 220);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [recent, setRecent] = useState<RecentQuery[]>(readRecentQueries);
+  const [copyStatus, setCopyStatus] = useState<{ id: number; message: string } | null>(null);
+  const lastFindMode = useRef<Exclude<ViewMode, "ask">>(
+    state.mode === "ask" ? "list" : state.mode,
+  );
+
+  useEffect(() => {
+    if (state.mode !== "ask") lastFindMode.current = state.mode;
+  }, [state.mode]);
 
   // The URL is the source of truth; the input is a view of it. Typing pushes
   // into the URL (replace, so one search is one history entry rather than
@@ -71,12 +82,16 @@ export function FindPage() {
     queryFn: () => findApi.search(params),
     // Browsing counts as a query: with filters set and no text, the API
     // returns a time-ordered listing rather than nothing.
-    enabled: hasActiveQuery,
+    enabled: state.mode !== "ask" && hasActiveQuery,
     // Keep the previous page on screen while the next one loads — a list that
     // blanks on every keystroke is unreadable.
     placeholderData: keepPreviousData,
   });
-  const { data: facets } = useQuery({ queryKey: ["facets"], queryFn: findApi.facets });
+  const { data: facets } = useQuery({
+    queryKey: ["facets"],
+    queryFn: findApi.facets,
+    enabled: state.mode !== "ask",
+  });
   // The real category vocabulary, for ResultList to tell a message's actual
   // category apart from its internal role leaking through the same field
   // (UI audit full-app L1).
@@ -99,6 +114,39 @@ export function FindPage() {
   useEffect(() => {
     setSelected(0);
   }, [params.toString()]);
+
+  useEffect(() => {
+    if (
+      state.mode !== "ask" &&
+      !isFetching &&
+      data &&
+      state.q.trim() &&
+      data.query === state.q
+    ) {
+      setRecent(rememberQuery(state.q, "find"));
+    }
+  }, [data, isFetching, state.mode, state.q]);
+
+  const rememberAnswer = useCallback((question: string) => {
+    setRecent(rememberQuery(question, "ask"));
+  }, []);
+
+  async function copyResult(item: (typeof items)[number]) {
+    const itemName = item.title || item.category || `${item.kind} #${item.id}`;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(contextForFindItem(item));
+      setCopyStatus((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        message: `Context copied for ${itemName}.`,
+      }));
+    } catch {
+      setCopyStatus((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        message: "Could not copy context. Check browser permissions and try again.",
+      }));
+    }
+  }
 
   // Prefetch the neighbours of whatever is selected. Without this, holding j
   // is a series of round trips and the panel flashes empty between them — the
@@ -129,8 +177,10 @@ export function FindPage() {
     if (!listMode || items.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      // Never steal a key from a field the reader is typing in.
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Never steal a key from a control. Enter must activate the focused
+      // button or link instead of opening whichever result happens to be
+      // selected behind it.
+      if (el?.closest("a, button, input, textarea, select, [contenteditable='true'], [role='button']")) return;
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         setSelected((i) => Math.min(i + 1, items.length - 1));
@@ -155,11 +205,32 @@ export function FindPage() {
         </p>
       </header>
 
+      <div className="find-intent mode-switch" role="group" aria-label="Knowledge action">
+        <button
+          type="button"
+          className={state.mode !== "ask" ? "is-on" : ""}
+          onClick={() => state.mode === "ask" && update({ mode: lastFindMode.current })}
+          aria-pressed={state.mode !== "ask"}
+        >
+          <Search size={14} aria-hidden /> Find
+        </button>
+        <button
+          type="button"
+          className={state.mode === "ask" ? "is-on" : ""}
+          onClick={() => update({ mode: "ask" })}
+          aria-pressed={state.mode === "ask"}
+        >
+          <MessageCircleQuestion size={14} aria-hidden /> Ask
+        </button>
+      </div>
+
       <div className="searchbar">
         <Search size={16} aria-hidden className="searchbar-icon" />
         <input
           ref={inputRef}
           type="search"
+          name="throughline-query"
+          autoComplete="off"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           // The field is auto-focused, so j and k would otherwise be typed into
@@ -181,7 +252,7 @@ export function FindPage() {
               ? "Ask a question about your history…"
               : "Search everything…   (/ to focus, ↓ for results)"
           }
-          aria-label="Search"
+          aria-label={state.mode === "ask" ? "Ask your history" : "Search your history"}
           autoFocus
           className="searchbar-input"
         />
@@ -190,56 +261,81 @@ export function FindPage() {
             <X size={15} aria-hidden />
           </button>
         )}
-        <div className="mode-switch" role="group" aria-label="View mode">
-          <button
-            type="button"
-            className={state.mode === "list" ? "is-on" : ""}
-            onClick={() => update({ mode: "list" })}
-            aria-pressed={state.mode === "list"}
-          >
-            <LayoutList size={14} aria-hidden /> List
-          </button>
-          <button
-            type="button"
-            className={state.mode === "table" ? "is-on" : ""}
-            onClick={() => update({ mode: "table" })}
-            aria-pressed={state.mode === "table"}
-          >
-            <Rows3 size={14} aria-hidden /> Table
-          </button>
-          <button
-            type="button"
-            className={state.mode === "graph" ? "is-on" : ""}
-            onClick={() => update({ mode: "graph" })}
-            aria-pressed={state.mode === "graph"}
-          >
-            <Network size={14} aria-hidden /> Graph
-          </button>
-          {/* Not a fourth view of the same rows — a different question. List,
-              Table and Graph all show what matched; Ask says what it means. */}
-          <button
-            type="button"
-            className={state.mode === "ask" ? "is-on" : ""}
-            onClick={() => update({ mode: "ask" })}
-            aria-pressed={state.mode === "ask"}
-          >
-            <MessageCircleQuestion size={14} aria-hidden /> Ask
-          </button>
-        </div>
+        {state.mode !== "ask" && (
+          <div className="mode-switch" role="group" aria-label="Result layout">
+            <button
+              type="button"
+              className={state.mode === "list" ? "is-on" : ""}
+              onClick={() => update({ mode: "list" })}
+              aria-pressed={state.mode === "list"}
+            >
+              <LayoutList size={14} aria-hidden /> List
+            </button>
+            <button
+              type="button"
+              className={state.mode === "table" ? "is-on" : ""}
+              onClick={() => update({ mode: "table" })}
+              aria-pressed={state.mode === "table"}
+            >
+              <Rows3 size={14} aria-hidden /> Table
+            </button>
+            <button
+              type="button"
+              className={state.mode === "graph" ? "is-on" : ""}
+              onClick={() => update({ mode: "graph" })}
+              aria-pressed={state.mode === "graph"}
+            >
+              <Network size={14} aria-hidden /> Graph
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="find-layout">
-        <FacetRail
-          facets={facets}
-          state={state}
-          onToggle={toggle}
-          onUpdate={update}
-          onClear={clearAll}
-          activeCount={activeFilterCount}
-        />
+      {recent.length > 0 && (
+        <nav className="recent-queries" aria-label="Recent queries">
+          <span className="recent-queries-label">Recent</span>
+          <ul>
+            {recent.map((item) => (
+              <li key={`${item.intent}:${item.query.toLocaleLowerCase()}`}>
+                <button
+                  type="button"
+                  aria-label={`${item.intent === "ask" ? "Ask" : "Find"}: ${item.query}`}
+                  onClick={() => {
+                    setDraft(item.query);
+                    update({
+                      q: item.query,
+                      mode: item.intent === "ask" ? "ask" : lastFindMode.current,
+                    });
+                  }}
+                >
+                  <span className="recent-query-intent">{item.intent}</span>
+                  <span className="recent-query-text">{item.query}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+      <p className="sr-only" role="status" aria-live="polite">
+        {copyStatus && <span key={copyStatus.id}>{copyStatus.message}</span>}
+      </p>
+
+      <div className={`find-layout${state.mode === "ask" ? " is-ask" : ""}`}>
+        {state.mode !== "ask" && (
+          <FacetRail
+            facets={facets}
+            state={state}
+            onToggle={toggle}
+            onUpdate={update}
+            onClear={clearAll}
+            activeCount={activeFilterCount}
+          />
+        )}
 
         <div className="find-main">
-          {state.mode === "ask" && <AskPanel question={state.q} />}
+          {state.mode === "ask" && (
+            <AskPanel question={state.q} onAsked={rememberAnswer} />
+          )}
 
           {state.mode !== "ask" && hasActiveQuery && isPending && (
             <p className="muted">Searching…</p>
@@ -343,6 +439,7 @@ export function FindPage() {
                   selected={selected}
                   onSelect={setSelected}
                   knownCategories={knownCategories}
+                  onCopy={copyResult}
                 />
               )}
 
