@@ -51,6 +51,23 @@ describe("Shell", () => {
     expect(screen.getByRole("link", { name: /^Find/ }).getAttribute("href")).toBe("/find?provider=hermes");
   });
 
+  it("keeps every navigation link named when its visible text is collapsed", () => {
+    renderShell();
+
+    for (const name of [
+      "Overview",
+      "Find",
+      "Timeline",
+      "Review",
+      "Operate",
+      "Console",
+      "Project Management",
+    ]) {
+      const link = screen.getByRole("link", { name });
+      expect(link.getAttribute("aria-label")).toBe(name);
+    }
+  });
+
   it("opens keyboard help with the command palette and every go chord", async () => {
     const user = userEvent.setup();
     renderShell();

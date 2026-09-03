@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert, Play } from "lucide-react";
@@ -31,18 +31,25 @@ function QueueTab({
   queue,
   active,
   onSelect,
+  onKeyDown,
 }: {
   queue: QueueSummary;
   active: boolean;
   onSelect: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const Icon = SEVERITY_ICON[queue.severity as keyof typeof SEVERITY_ICON] ?? Info;
   return (
     <button
+      id={`queue-tab-${queue.name}`}
       type="button"
+      role="tab"
       className={`queue-tab${active ? " is-on" : ""}`}
       onClick={onSelect}
-      aria-current={active ? "true" : undefined}
+      onKeyDown={onKeyDown}
+      aria-selected={active}
+      aria-controls="curation-queue-panel"
+      tabIndex={active ? 0 : -1}
     >
       <Icon size={14} aria-hidden className={`sev-${queue.severity}`} />
       <span className="queue-tab-title">{queue.title}</span>
@@ -59,6 +66,8 @@ export function CuratePage() {
   const toast = useToast();
   const qc = useQueryClient();
   const [auditJobId, setAuditJobId] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const confirmTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const { data: audit, error: auditError } = useQuery({
     queryKey: ["curate", "audit"],
@@ -132,6 +141,26 @@ export function CuratePage() {
     [sp, setSp],
   );
 
+  const queueTabs = queues?.queues ?? [];
+  const handleQueueKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % queueTabs.length;
+    else if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + queueTabs.length) % queueTabs.length;
+    }
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = queueTabs.length - 1;
+    if (nextIndex === null || !queueTabs[nextIndex]) return;
+
+    event.preventDefault();
+    const next = queueTabs[nextIndex];
+    setQueue(next.name);
+    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+      '[role="tab"]',
+    );
+    tabs?.[nextIndex]?.focus();
+  };
+
   const items = queue?.items ?? [];
   const allSelected = items.length > 0 && selected.size === items.length;
 
@@ -198,10 +227,11 @@ export function CuratePage() {
   // through the ones that matter.
   const DESTRUCTIVE = new Set(["forget", "supersede"]);
 
-  const run = (action: string) => {
+  const run = (action: string, trigger?: HTMLButtonElement) => {
     const ids = [...selected];
     if (!ids.length) return;
     if (DESTRUCTIVE.has(action)) {
+      confirmTriggerRef.current = trigger ?? null;
       setPending({ action, ids });
       return;
     }
@@ -212,17 +242,48 @@ export function CuratePage() {
     if (!pending) return;
     act.mutate({ action: pending.action, ids: pending.ids });
     setPending(null);
+    confirmTriggerRef.current?.focus();
+  };
+
+  const cancelPending = () => {
+    setPending(null);
+    confirmTriggerRef.current?.focus();
+  };
+
+  const handleConfirmKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelPending();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = confirmRef.current?.querySelectorAll<HTMLButtonElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (
+      (event.shiftKey && document.activeElement === first) ||
+      (!event.shiftKey && document.activeElement === last)
+    ) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
   };
 
   const totalOutstanding = queues?.total ?? 0;
 
   const confirmDialog = pending ? (
-    <div className="confirm-scrim" role="presentation" onClick={() => setPending(null)}>
+    <div className="confirm-scrim" role="presentation" onClick={cancelPending}>
       <div
+        ref={confirmRef}
         className="confirm"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-h"
+        onKeyDown={handleConfirmKeyDown}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="confirm-h">
@@ -235,7 +296,7 @@ export function CuratePage() {
             : "They are marked as replaced and drop out of active memory. Nothing is erased."}
         </p>
         <div className="confirm-actions">
-          <button type="button" className="button" onClick={() => setPending(null)} autoFocus>
+          <button type="button" className="button" onClick={cancelPending} autoFocus>
             Cancel
           </button>
           <button type="button" className="button is-danger" onClick={commit}>
@@ -368,60 +429,75 @@ export function CuratePage() {
       </div>
 
       <div className="queue-tabs" role="tablist" aria-label="Curation queues">
-        {queues?.queues.map((q) => (
-          <QueueTab key={q.name} queue={q} active={q.name === active} onSelect={() => setQueue(q.name)} />
+        {queueTabs.map((q, index) => (
+          <QueueTab
+            key={q.name}
+            queue={q}
+            active={q.name === active}
+            onSelect={() => setQueue(q.name)}
+            onKeyDown={(event) => handleQueueKeyDown(event, index)}
+          />
         ))}
       </div>
 
-      {queue && (
-        <div className="queue-head">
-          <div>
-            <h2 className="queue-title">{queue.title}</h2>
-            <p className="queue-desc">{queue.description}</p>
-          </div>
-          <span className={`queue-urgency sev-${queue.severity}`}>
-            {queue.severity === "warning" ? "Needs review" : "Maintenance"}
-          </span>
-        </div>
-      )}
+      {resolved !== undefined && (
+        <div
+          id="curation-queue-panel"
+          role="tabpanel"
+          aria-labelledby={`queue-tab-${active}`}
+          tabIndex={0}
+        >
+          {queue && (
+            <div className="queue-head">
+              <div>
+                <h2 className="queue-title">{queue.title}</h2>
+                <p className="queue-desc">{queue.description}</p>
+              </div>
+              <span className={`queue-urgency sev-${queue.severity}`}>
+                {queue.severity === "warning" ? "Needs review" : "Maintenance"}
+              </span>
+            </div>
+          )}
 
-      {items.length > 0 && (
-        <div className="bulkbar">
-          <label className="facet-value">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={() =>
-                setSelected(allSelected ? new Set() : new Set(items.map((i) => i.id)))
-              }
-            />
-            <span>{selected.size ? `${selected.size} selected` : "Select all"}</span>
-          </label>
-          <div className="bulkbar-actions">
-            {(queue?.actions ?? []).map((a) => (
-              <button
-                key={a}
-                type="button"
-                className={`button${a === "forget" ? " is-danger" : ""}`}
-                disabled={!selected.size || act.isPending}
-                onClick={() => run(a)}
-              >
-                {ACTION_LABEL[a] ?? a}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+          {items.length > 0 && (
+            <div className="bulkbar">
+              <label className="facet-value">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() =>
+                    setSelected(allSelected ? new Set() : new Set(items.map((i) => i.id)))
+                  }
+                />
+                <span>{selected.size ? `${selected.size} selected` : "Select all"}</span>
+              </label>
+              <div className="bulkbar-actions">
+                {(queue?.actions ?? []).map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    className={`button${a === "forget" ? " is-danger" : ""}`}
+                    disabled={!selected.size || act.isPending}
+                    onClick={(event) => run(a, event.currentTarget)}
+                  >
+                    {ACTION_LABEL[a] ?? a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {body}
+          {body}
 
-      {active === "forgotten" && items.length > 0 && (
-        <div className="disclosure">
-          <OctagonAlert size={15} aria-hidden />
-          <div>
-            These are soft-deleted and excluded from search, but still in the database.
-            Permanent deletion lives under Operate and cannot be undone.
-          </div>
+          {active === "forgotten" && items.length > 0 && (
+            <div className="disclosure">
+              <OctagonAlert size={15} aria-hidden />
+              <div>
+                These are soft-deleted and excluded from search, but still in the database.
+                Permanent deletion lives under Operate and cannot be undone.
+              </div>
+            </div>
+          )}
         </div>
       )}
 

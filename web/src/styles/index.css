@@ -74,6 +74,11 @@ body {
   outline: none;
 }
 
+/* Sticky work bars must not cover the control the browser just focused. */
+:focus-visible {
+  scroll-margin-block: var(--space-7);
+}
+
 /* Numeric columns must not jitter as values change. */
 .tabular {
   font-variant-numeric: tabular-nums;

@@ -142,6 +142,35 @@ describe("CuratePage default queue", () => {
     await waitFor(() => expect(queue).toHaveBeenCalledWith("contradictions"));
     expect(await screen.findByText(/Nothing in this queue/i)).toBeTruthy();
   });
+
+  it("exposes the queues as keyboard-operable tabs with one associated panel", async () => {
+    const user = userEvent.setup();
+    queues.mockResolvedValue({
+      queues: [
+        summary("contradictions", "Contradictions", 2),
+        summary("low-confidence", "Low confidence", 1),
+        summary("never-accessed", "Never accessed", 0),
+      ],
+      total: 3,
+    });
+
+    renderAt();
+
+    const first = await screen.findByRole("tab", { name: /contradictions/i });
+    const second = screen.getByRole("tab", { name: /low confidence/i });
+    expect(first.getAttribute("aria-selected")).toBe("true");
+    expect(first.getAttribute("tabindex")).toBe("0");
+    expect(second.getAttribute("tabindex")).toBe("-1");
+    expect(first.getAttribute("aria-controls")).toBe("curation-queue-panel");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(first.id);
+
+    first.focus();
+    await user.keyboard("{ArrowRight}");
+
+    await waitFor(() => expect(second.getAttribute("aria-selected")).toBe("true"));
+    expect(document.activeElement).toBe(second);
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(second.id);
+  });
 });
 
 describe("CuratePage destructive actions", () => {
@@ -188,6 +217,37 @@ describe("CuratePage destructive actions", () => {
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(act).not.toHaveBeenCalled();
+  });
+
+  it("closes the confirmation with Escape and restores the action focus", async () => {
+    const user = userEvent.setup();
+    await withItems();
+    await user.click(screen.getByRole("checkbox", { name: /select all/i }));
+    const trigger = screen.getByRole("button", { name: /^forget$/i });
+    await user.click(trigger);
+
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps tab focus inside the confirmation", async () => {
+    const user = userEvent.setup();
+    await withItems();
+    await user.click(screen.getByRole("checkbox", { name: /select all/i }));
+    await user.click(screen.getByRole("button", { name: /^forget$/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    const confirm = within(dialog).getByRole("button", { name: /forget 2/i });
+    expect(document.activeElement).toBe(cancel);
+
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(document.activeElement).toBe(confirm);
+    await user.tab();
+    expect(document.activeElement).toBe(cancel);
   });
 
   it("confirming sends exactly the selected ids", async () => {

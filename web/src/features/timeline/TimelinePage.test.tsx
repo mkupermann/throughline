@@ -157,6 +157,16 @@ describe("TimelinePage", () => {
     expect(labels.length).toBeLessThanOrEqual(13);
   });
 
+  it("keeps empty dates out of the keyboard order", async () => {
+    renderAt();
+    const table = await screen.findByRole("table", { name: /activity by provider over time/i });
+
+    expect(
+      within(table).queryByRole("button", { name: /^Claude Code, 2026-01-06, 0 events$/ }),
+    ).toBeNull();
+    expect(within(table).getAllByRole("button")).toHaveLength(5);
+  });
+
   // ── Cell click loads that day's rows (§5.1) ─────────────────────────────
   // These cover the drill-down: a day cell loads that day scoped to its OWN
   // lane (not every provider), a week/month cell zooms instead, the

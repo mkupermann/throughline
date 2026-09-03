@@ -54,8 +54,10 @@ describe("ExportPanel", () => {
 
   it("offers the suggested destination without the user typing one", async () => {
     renderPanel();
-    const field = (await screen.findByLabelText(/destination/i)) as HTMLInputElement;
+    const field = (await screen.findByRole("textbox", { name: "Destination" })) as HTMLInputElement;
     await waitFor(() => expect(field.value).toBe("/Users/dev/Throughline-Export"));
+    expect(field.getAttribute("name")).toBe("destination");
+    expect(screen.getByRole("button", { name: "Choose folder…" })).toBeTruthy();
   });
 
   it("says where the export is allowed to write", async () => {

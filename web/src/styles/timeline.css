@@ -105,16 +105,15 @@
   min-width: 24px;
 }
 .timeline-cell {
-  /* A real <button> (spec: clickable cells must be real buttons with an
-     accessible name, not divs with onClick — keyboard-reachable natively),
-     so the usual button chrome needs resetting to keep the density-strip
-     look. Sized independently of its wrap (see .timeline-cell-wrap above):
-     a fixed narrow bar centred inside a >=24px hit area, rather than
-     stretching to fill it. */
-  flex: 0 0 auto;
-  width: 100%;
-  max-width: 8px;
-  min-width: 4px;
+  /* Active dates use a real button with an accessible name. Empty dates use
+     the same box as inert decoration, so they preserve the grid without
+     flooding the keyboard order. The narrow inner bar keeps the density-strip
+     look while this outer box provides the >=24px target. */
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  width: 24px;
+  min-width: 24px;
   /* Was 18px, which packed five lanes into ~90px and left the rest of the
      viewport empty. A timeline is the page's subject here, not a strip of
      trim, and taller cells also give the click target real area. */
@@ -123,8 +122,18 @@
   border: 0;
   border-radius: 2px;
   /* One token, opacity varying — that IS the intensity encoding (§5.2). */
-  background: var(--seq-5);
+  background: transparent;
   cursor: pointer;
+}
+.timeline-cell-bar {
+  display: block;
+  width: 8px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--seq-5);
+}
+.timeline-cell.is-empty {
+  cursor: default;
 }
 .timeline-cell:hover,
 .timeline-cell:focus-visible {
@@ -279,6 +288,10 @@
   flex: 0 0 auto;
   cursor: default;
   pointer-events: none;
+}
+.timeline-key .timeline-cell-bar {
+  width: 22px;
+  height: 12px;
 }
 .timeline-key-label {
   color: var(--text-muted);

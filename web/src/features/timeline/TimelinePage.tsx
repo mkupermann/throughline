@@ -328,21 +328,34 @@ export function TimelinePage() {
               <div className="timeline-cells">
                 {buckets.map((b) => {
                   const n = totals.get(`${lane}|${b}`) ?? 0;
+                  const bar = (
+                    <span
+                      className="timeline-cell-bar"
+                      style={{ opacity: cellOpacity(n, max) }}
+                      aria-hidden
+                    />
+                  );
                   return (
-                    // The wrapper carries the grid's `cell` role; the button
-                    // inside stays an unmodified, un-role-overridden button
-                    // (role="button" would be dropped if `role="cell"` sat
-                    // on the button itself), so it is findable and operable
-                    // as a button by both assistive tech and tests.
+                    // The wrapper carries the grid's `cell` role. Active days
+                    // contain a real button. Empty days stay visual but inert,
+                    // keeping hundreds of no-op targets out of the keyboard
+                    // order without breaking the continuous date grid.
                     <span key={b} role="cell" className="timeline-cell-wrap">
-                      <button
-                        type="button"
-                        className="timeline-cell"
-                        style={{ opacity: cellOpacity(n, max) }}
-                        title={`${laneLabel(lane, providerLabels)} · ${b} · ${n}`}
-                        aria-label={`${laneLabel(lane, providerLabels)}, ${b}, ${n} events`}
-                        onClick={() => handleCellClick(lane, b)}
-                      />
+                      {n > 0 ? (
+                        <button
+                          type="button"
+                          className="timeline-cell"
+                          title={`${laneLabel(lane, providerLabels)} · ${b} · ${n}`}
+                          aria-label={`${laneLabel(lane, providerLabels)}, ${b}, ${n} events`}
+                          onClick={() => handleCellClick(lane, b)}
+                        >
+                          {bar}
+                        </button>
+                      ) : (
+                        <span className="timeline-cell is-empty" aria-hidden>
+                          {bar}
+                        </span>
+                      )}
                     </span>
                   );
                 })}
@@ -367,7 +380,9 @@ export function TimelinePage() {
           <span className="timeline-key-scale" aria-hidden="true">
             <span className="timeline-key-label">quiet</span>
             {[0.08, 0.32, 0.55, 0.78, 1].map((o) => (
-              <span key={o} className="timeline-cell" style={{ opacity: o }} />
+              <span key={o} className="timeline-cell">
+                <span className="timeline-cell-bar" style={{ opacity: o }} />
+              </span>
             ))}
             <span className="timeline-key-label">busy ({formatCount(max)})</span>
           </span>

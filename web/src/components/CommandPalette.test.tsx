@@ -83,6 +83,16 @@ describe("CommandPalette", () => {
     expect(await screen.findByText(/export as markdown/i)).toBeTruthy();
   });
 
+  it("applies the visible panel geometry to the dialog itself", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.keyboard("{Meta>}k{/Meta}");
+
+    expect((await screen.findByRole("dialog", { name: "Command palette" })).classList).toContain(
+      "palette",
+    );
+  });
+
   it("organises navigation under the same task groups as the sidebar", async () => {
     const user = userEvent.setup();
     open();

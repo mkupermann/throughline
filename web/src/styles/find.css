@@ -191,6 +191,7 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
+  min-height: 24px;
 }
 .rail-clear:hover {
   border-color: var(--border);
@@ -555,6 +556,7 @@
 
 .result-actions { margin-left: auto; margin-right: var(--space-3); }
 .linkbutton {
+  min-height: 24px;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);

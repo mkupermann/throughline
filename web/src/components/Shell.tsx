@@ -192,6 +192,7 @@ export function Shell() {
                     <NavLink
                       to={carryProviders(item.to, sp)}
                       end={item.to === "/"}
+                      aria-label={item.label}
                       className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
                     >
                       <item.icon size={16} aria-hidden />

@@ -191,6 +191,7 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  flex-shrink: 0;
   transition: background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
@@ -463,6 +464,9 @@
   }
   .nav-link {
     justify-content: center;
+  }
+  .sidebar-foot {
+    flex-direction: column;
   }
   .main {
     padding: var(--space-5) var(--space-4) var(--space-6);

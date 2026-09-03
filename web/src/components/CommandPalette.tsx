@@ -127,7 +127,7 @@ export function CommandPalette() {
       open={open}
       onOpenChange={handleOpenChange}
       label="Command palette"
-      className="palette"
+      contentClassName="palette"
       // Escape and outside-click both close: a modal must always have a way
       // out that does not require finding a button.
     >

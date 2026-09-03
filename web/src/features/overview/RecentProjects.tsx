@@ -64,8 +64,8 @@ export function RecentProjects() {
             <Link to={`/project/${encodeURIComponent(p.project)}`} className="proj-row">
               <span className="proj-name">{p.project}</span>
               <span className="proj-stats">
-                <span className="tabular">{pluralise(p.sessions, "session")}</span>
-                <span className="tabular">{pluralise(p.messages, "message")}</span>
+                <span className="proj-sessions tabular">{pluralise(p.sessions, "session")}</span>
+                <span className="proj-messages tabular">{pluralise(p.messages, "message")}</span>
                 {/* Which assistants were used. A project spanning two tools is
                     the thing this product exists to make visible, and it is
                     invisible in every per-tool interface. */}

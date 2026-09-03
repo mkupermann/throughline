@@ -146,11 +146,14 @@ export function ExportPanel() {
       </div>
 
       <div className="export-form">
-        <label className="export-field">
-          <span>Destination</span>
+        <div className="export-field">
+          <label htmlFor="export-destination">Destination</label>
           <div className="export-field-row">
             <input
+              id="export-destination"
+              name="destination"
               type="text"
+              autoComplete="off"
               value={out}
               spellCheck={false}
               onChange={(e) => setOut(e.target.value)}
@@ -161,7 +164,7 @@ export function ExportPanel() {
               Choose folder…
             </button>
           </div>
-        </label>
+        </div>
 
         {browsing && (
           // Always starts at the root, not at `out`: a suggested or typed
