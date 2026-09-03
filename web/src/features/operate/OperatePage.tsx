@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
+import { ChevronRight, Download, Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
 
-import { ApiError, operateApi, providersApi, type JobSummary, type ProviderCoverage } from "@/lib/api";
+import { operateApi, type JobSummary, type OperateStatus, type ProviderCoverage } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { useToast } from "@/components/Toaster";
 import { ExportPanel } from "./ExportPanel";
-import { JobConsole } from "./JobConsole";
+import { JobConsole, type JobCompletion } from "./JobConsole";
+import { Pipeline } from "./Pipeline";
 
 /** Text label per status — colour alone never carries the meaning. */
 const STATUS_LABEL: Record<ProviderCoverage["status"], string> = {
@@ -144,7 +145,7 @@ function JobCard({
   activeJobId: string | null;
   onRun: () => void;
   onStop: (id: string) => void;
-  onFinished: () => void;
+  onFinished: (jobId: string, completion: JobCompletion) => void;
 }) {
   // `activeJobId` is already resolved by the parent from either the local
   // "I just started this" state or the server's view. Re-checking job.running
@@ -157,8 +158,8 @@ function JobCard({
           <h3 className="job-title">{job.title}</h3>
           <p className="job-desc">{job.description}</p>
         </div>
-        {job.running && job.job_id ? (
-          <button type="button" className="button is-danger" onClick={() => onStop(job.job_id!)}>
+        {activeJobId ? (
+          <button type="button" className="button is-danger" onClick={() => onStop(activeJobId)}>
             <Square size={13} aria-hidden />
             Stop
           </button>
@@ -181,7 +182,12 @@ function JobCard({
           <span>{job.unavailable}</span>
         </p>
       )}
-      {activeJobId && <JobConsole jobId={activeJobId} onFinished={onFinished} />}
+      {activeJobId && (
+        <JobConsole
+          jobId={activeJobId}
+          onFinished={(completion) => onFinished(activeJobId, completion)}
+        />
+      )}
     </div>
   );
 }
@@ -190,32 +196,58 @@ export function OperatePage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [activeJob, setActiveJob] = useState<{ name: string; id: string } | null>(null);
+  const [jobAnnouncement, setJobAnnouncement] = useState("");
 
   const { data, isPending, error } = useQuery({
     queryKey: ["operate", "status"],
     queryFn: operateApi.status,
     // While a job runs the counts move underneath us; refresh gently.
-    refetchInterval: activeJob ? 4000 : false,
-  });
-
-  // Same queryKey as ProviderBar — one shared cache entry, not a second
-  // request for the same data.
-  const { data: providersData, error: providersError } = useQuery({
-    queryKey: ["providers"],
-    queryFn: () => providersApi.list(),
-    staleTime: 60_000,
+    refetchInterval: (query) =>
+      activeJob || (query.state.data as OperateStatus | undefined)?.jobs?.some((job) => job.running)
+        ? 4000
+        : false,
   });
 
   const runJob = useMutation({
     mutationFn: (name: string) => operateApi.run(name),
-    onSuccess: (res) => setActiveJob({ name: res.name, id: res.job_id }),
+    onSuccess: (res) => {
+      setActiveJob({ name: res.name, id: res.job_id });
+      setJobAnnouncement(`${res.name} started.`);
+    },
     onError: (e) => toast.push({ message: (e as Error).message, tone: "error", duration: 8000 }),
   });
 
   const stopJob = useMutation({
     mutationFn: (id: string) => operateApi.stop(id),
-    onSuccess: () => toast.push({ message: "Stop requested." }),
+    onSuccess: () => {
+      setJobAnnouncement("Stop requested.");
+      toast.push({ message: "Stop requested." });
+    },
+    onError: (e) => toast.push({ message: (e as Error).message, tone: "error", duration: 8000 }),
   });
+
+  const finishJob = useCallback(
+    (jobId: string, name: string, completion: JobCompletion) => {
+      setActiveJob((current) => (current?.id === jobId ? null : current));
+      void qc.invalidateQueries({ queryKey: ["operate"] });
+      void qc.invalidateQueries({ queryKey: ["curate"] });
+      void qc.invalidateQueries({ queryKey: ["overview"] });
+      // The job just cleared the server-side scan cache (jobs.py _pump), but
+      // the other surfaces can still hold their pre-ingest coverage response.
+      void qc.invalidateQueries({ queryKey: ["providers"] });
+      if (completion.ok) {
+        setJobAnnouncement(`${name} completed. Pipeline status refreshed.`);
+      } else {
+        setJobAnnouncement(`${name} failed. Pipeline status refreshed.`);
+        toast.push({
+          message: `${name} failed. It may have completed part of the work. Check the refreshed pipeline state before retrying.`,
+          tone: "error",
+          duration: 8000,
+        });
+      }
+    },
+    [qc, toast],
+  );
 
   if (error) {
     return (
@@ -247,6 +279,19 @@ export function OperatePage() {
 
   const cov = data.embedding.coverage;
   const covPct = cov.total ? Math.round((100 * cov.embedded) / cov.total) : 100;
+  const pipelineStages = data.pipeline ?? [];
+  const hasPipeline = pipelineStages.length > 0;
+  const pipelineJobNames = new Set(
+    pipelineStages.flatMap((stage) => (stage.job_name ? [stage.job_name] : [])),
+  );
+  const hasIngestStage = pipelineStages.some((stage) => stage.key === "ingest");
+  const advancedJobs = hasPipeline
+    ? data.jobs.filter(
+        (job) =>
+          !pipelineJobNames.has(job.name) &&
+          !(hasIngestStage && (job.name === "ingest" || job.name.startsWith("ingest_"))),
+      )
+    : data.jobs;
 
   return (
     <>
@@ -254,6 +299,9 @@ export function OperatePage() {
         <h1 className="page-title">Operate</h1>
         <p className="page-subtitle">Pipeline state, and the jobs that change it.</p>
       </header>
+      <p className="sr-only" role="status" aria-live="polite">
+        {jobAnnouncement}
+      </p>
 
       {!data.extensions.pgvector_usable && (
         <div className="verdict verdict-broken">
@@ -262,7 +310,16 @@ export function OperatePage() {
         </div>
       )}
 
-      <section>
+      <Pipeline
+        stages={pipelineStages}
+        activeJob={activeJob}
+        startingJob={runJob.isPending ? runJob.variables : null}
+        onRun={(name) => runJob.mutate(name)}
+        onStop={(id) => stopJob.mutate(id)}
+        onFinished={finishJob}
+      />
+
+      <section className="stack-top">
         <h2 className="section-label">Environment</h2>
         <dl className="totals">
           <div className="total">
@@ -332,27 +389,22 @@ export function OperatePage() {
         </dl>
       </section>
 
-      <section className="stack-top" aria-labelledby="coverage-h">
+      <section id="provider-coverage" className="stack-top" aria-labelledby="coverage-h">
         <h2 id="coverage-h" className="section-label">
           Provider coverage
         </h2>
-        {providersData ? (
+        {data.providers ? (
           <ProvidersTable
-            providers={providersData.providers}
+            providers={data.providers}
             jobs={data.jobs}
             onIngest={(name) => runJob.mutate(`ingest_${name}`)}
           />
-        ) : providersError ? (
+        ) : (
           <div className="empty-state">
             <OctagonAlert size={22} aria-hidden />
             <h3>Provider coverage unavailable</h3>
-            <p>{(providersError as ApiError).message}</p>
-            {(providersError as ApiError).hint && (
-              <p className="empty-hint">{(providersError as ApiError).hint}</p>
-            )}
+            <p>This server did not return source coverage. Refresh after the backend is updated.</p>
           </div>
-        ) : (
-          <div className="skeleton skeleton-row" />
         )}
       </section>
 
@@ -361,38 +413,49 @@ export function OperatePage() {
           Run buttons it was there and nobody found it. */}
       <section className="stack-top">
         <h2 className="section-label">
-          <Download size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Export
+          <Download size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Export and portability
         </h2>
         <div className="jobs">
           <ExportPanel />
         </div>
       </section>
 
-      <section className="stack-top">
-        <h2 className="section-label">
-          <Terminal size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Jobs
-        </h2>
-        <div className="jobs">
-          {data.jobs.map((job) => (
-            <JobCard
-              key={job.name}
-              job={job}
-              activeJobId={activeJob?.name === job.name ? activeJob.id : job.running ? job.job_id : null}
-              onRun={() => runJob.mutate(job.name)}
-              onStop={(id) => stopJob.mutate(id)}
-              onFinished={() => {
-                qc.invalidateQueries({ queryKey: ["operate"] });
-                qc.invalidateQueries({ queryKey: ["curate"] });
-                qc.invalidateQueries({ queryKey: ["overview"] });
-                // The job just cleared the server-side scan cache (jobs.py
-                // _pump), but the client still holds the pre-ingest coverage
-                // response until this query is told to refetch too.
-                qc.invalidateQueries({ queryKey: ["providers"] });
-              }}
-            />
-          ))}
-        </div>
-      </section>
+      {advancedJobs.length > 0 && (
+        <section className="stack-top" aria-labelledby="maintenance-heading">
+          <h2 id="maintenance-heading" className="section-label">
+            {hasPipeline ? "Maintenance" : "Jobs"}
+          </h2>
+          <details className="advanced-operations" open={!hasPipeline ? true : undefined}>
+            <summary>
+              <span className="advanced-operations-title">
+                <ChevronRight className="advanced-operations-chevron" size={14} aria-hidden />
+                <Terminal size={14} aria-hidden />
+                {hasPipeline ? "Advanced maintenance" : "Available jobs"}
+              </span>
+              <span className="advanced-operations-count">
+                {advancedJobs.length} action{advancedJobs.length === 1 ? "" : "s"}
+              </span>
+            </summary>
+            <div className="advanced-operations-body">
+              <p>Low-frequency repair, metadata and diagnostic jobs.</p>
+              <div className="jobs">
+                {advancedJobs.map((job) => (
+                  <JobCard
+                    key={job.name}
+                    job={job}
+                    activeJobId={
+                      activeJob?.name === job.name ? activeJob.id : job.running ? job.job_id : null
+                    }
+                    onRun={() => runJob.mutate(job.name)}
+                    onStop={(id) => stopJob.mutate(id)}
+                    onFinished={(jobId, completion) => finishJob(jobId, job.name, completion)}
+                  />
+                ))}
+              </div>
+            </div>
+          </details>
+        </section>
+      )}
 
       {data.ingestion.length > 0 && (
         <section className="stack-top">

@@ -235,6 +235,27 @@ def queue_drift(conn, limit: int = 200) -> list[Row]:
     )
 
 
+def drift_count(conn, audit: Row | None = None) -> int:
+    """Count active findings from the latest reviewable audit."""
+    latest = audit if audit is not None else latest_audit(conn)
+    if not latest or not latest.get("findings_available") or not latest.get("finding_ids"):
+        return 0
+    return int(
+        scalar(
+            conn,
+            """
+            SELECT count(*)
+            FROM memory_chunks mc
+            WHERE mc.id = ANY(%s)
+              AND COALESCE(mc.status, 'active') = 'active'
+            """,
+            (list(latest["finding_ids"]),),
+            0,
+        )
+        or 0
+    )
+
+
 def queue_contradictions(conn, limit: int = 200) -> list[Row]:
     """Outstanding contradiction pairs.
 

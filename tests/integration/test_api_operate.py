@@ -9,9 +9,11 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from throughline import queries as Q  # noqa: E402
 from throughline.api import jobs as jobs_mod  # noqa: E402
 from throughline.api.app import create_app  # noqa: E402
 from throughline.api.jobs import JobRunner, JobSpec  # noqa: E402
+from throughline.api.routers.operate import derive_pipeline_stages  # noqa: E402
 from throughline.api.settings import Settings  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -81,11 +83,320 @@ def test_status_shape(client):
         "ingestion",
         "jobs",
         "history",
+        "pipeline",
+        "providers",
     }
     assert isinstance(body["database"]["reachable"], bool)
     assert isinstance(body["extensions"]["pgvector_usable"], bool)
     assert body["database"]["dbname"], "the panel must name the database it is talking to"
     assert "password" not in body["database"], "credentials must never be serialised"
+    assert [stage["key"] for stage in body["pipeline"]] == [
+        "discover",
+        "ingest",
+        "extract",
+        "embed",
+        "review",
+    ]
+
+
+def _pipeline(**overrides):
+    values = {
+        "provider_coverage": [
+            {
+                "name": "claude_code",
+                "label": "Claude Code",
+                "on_disk": 4,
+                "pending": 0,
+                "status": "ok",
+            }
+        ],
+        "pending": {"extraction": 0, "titles": 0},
+        "embedding_coverage": {"total": 3, "embedded": 3},
+        "vector_ok": True,
+        "jobs": [
+            {
+                "name": name,
+                "running": False,
+                "job_id": None,
+                "unavailable": None,
+            }
+            for name in ("ingest", "extract", "embed", "audit-extraction")
+        ],
+        "history": [],
+        "snapshot": {
+            "captured_at": "2026-09-03T10:00:00+00:00",
+            "last_extraction_at": "2026-09-02T10:00:00+00:00",
+            "last_audit_at": "2026-09-03T09:00:00+00:00",
+            "last_audit_sampled": 20,
+            "last_audit_drifted": 0,
+        },
+        "last_ingestion_at": "2026-09-03T08:00:00+00:00",
+        "last_embedding_at": "2026-09-03T08:30:00+00:00",
+        "audit_findings_available": True,
+        "drift_findings": 0,
+    }
+    values.update(overrides)
+    return derive_pipeline_stages(**values)
+
+
+def test_pipeline_derives_healthy_and_due_states_in_workflow_order():
+    providers = [
+        {
+            "name": "claude_code",
+            "label": "Claude Code",
+            "on_disk": 4,
+            "pending": 2,
+            "status": "pending",
+        }
+    ]
+    stages = _pipeline(
+        provider_coverage=providers,
+        pending={"extraction": 3, "titles": 0},
+        embedding_coverage={"total": 5, "embedded": 4},
+        snapshot={
+            "captured_at": "2026-09-03T10:00:00+00:00",
+            "last_extraction_at": None,
+            "last_audit_at": None,
+            "last_audit_sampled": 0,
+            "last_audit_drifted": 0,
+        },
+    )
+
+    assert [stage["key"] for stage in stages] == [
+        "discover",
+        "ingest",
+        "extract",
+        "embed",
+        "review",
+    ]
+    assert [stage["state"] for stage in stages] == [
+        "healthy",
+        "due",
+        "due",
+        "due",
+        "due",
+    ]
+    assert stages[1]["last_success"] == "2026-09-03T08:00:00+00:00"
+
+
+def test_pipeline_running_failed_and_blocked_states_take_precedence():
+    jobs = [
+        {"name": "ingest", "running": True, "job_id": "run-1", "unavailable": None},
+        {"name": "extract", "running": False, "job_id": None, "unavailable": None},
+        {
+            "name": "embed",
+            "running": False,
+            "job_id": None,
+            "unavailable": "Ollama is not running.",
+        },
+        {
+            "name": "audit-extraction",
+            "running": False,
+            "job_id": None,
+            "unavailable": None,
+        },
+    ]
+    history = [
+        {
+            "name": "extract",
+            "running": False,
+            "returncode": 2,
+            "error": None,
+            "finished_at": 1788426000.0,
+        }
+    ]
+    by_key = {stage["key"]: stage for stage in _pipeline(jobs=jobs, history=history)}
+
+    assert by_key["ingest"]["state"] == "running"
+    assert by_key["ingest"]["job_id"] == "run-1"
+    assert by_key["extract"]["state"] == "failed"
+    assert "code 2" in by_key["extract"]["blocked_reason"]
+    assert by_key["embed"]["state"] == "blocked"
+    assert by_key["embed"]["blocked_reason"] == "Ollama is not running."
+
+
+def test_pipeline_ignores_a_stale_web_failure_after_a_newer_persisted_success():
+    history = [
+        {
+            "name": "ingest",
+            "running": False,
+            "returncode": 2,
+            "finished_at": 1_000.0,
+        }
+    ]
+
+    ingest = {
+        stage["key"]: stage
+        for stage in _pipeline(
+            history=history,
+            last_ingestion_at="1970-01-01T00:20:00+00:00",
+        )
+    }["ingest"]
+
+    assert ingest["state"] == "healthy"
+    assert ingest["last_success"] == "1970-01-01T00:20:00+00:00"
+
+
+def test_pipeline_exposes_the_actual_running_provider_job():
+    jobs = [
+        {"name": "ingest", "running": False, "job_id": None, "unavailable": None},
+        {"name": "ingest_hermes", "running": True, "job_id": "provider-1", "unavailable": None},
+        {"name": "extract", "running": False, "job_id": None, "unavailable": None},
+        {"name": "embed", "running": False, "job_id": None, "unavailable": None},
+        {"name": "audit-extraction", "running": False, "job_id": None, "unavailable": None},
+    ]
+
+    ingest = {stage["key"]: stage for stage in _pipeline(jobs=jobs)}["ingest"]
+
+    assert ingest["state"] == "running"
+    assert ingest["job_id"] == "provider-1"
+    assert ingest["job_name"] == "ingest_hermes"
+
+
+def test_pipeline_turns_drift_findings_into_a_review_action():
+    snapshot = {
+        "captured_at": "2026-09-03T10:00:00+00:00",
+        "last_extraction_at": "2026-09-02T10:00:00+00:00",
+        "last_audit_at": "2026-09-03T09:00:00+00:00",
+        "last_audit_sampled": 20,
+        "last_audit_drifted": 2,
+    }
+    review = {stage["key"]: stage for stage in _pipeline(snapshot=snapshot, drift_findings=2)}["review"]
+
+    assert review["state"] == "due"
+    assert review["action_href"] == "/curate?queue=drift"
+    assert review["action_label"] == "Review findings"
+
+
+def test_pipeline_does_not_link_legacy_audit_counts_to_an_empty_queue():
+    snapshot = {
+        "captured_at": "2026-09-03T10:00:00+00:00",
+        "last_extraction_at": "2026-09-02T10:00:00+00:00",
+        "last_audit_at": "2026-09-03T09:00:00+00:00",
+        "last_audit_sampled": 20,
+        "last_audit_drifted": 2,
+    }
+
+    review = {
+        stage["key"]: stage
+        for stage in _pipeline(
+            snapshot=snapshot,
+            audit_findings_available=False,
+            drift_findings=0,
+        )
+    }["review"]
+
+    assert review["state"] == "due"
+    assert review["action_href"] is None
+    assert review["action_label"] == "Run drift audit"
+    assert "current audit" in review["detail"].lower()
+
+
+def test_pipeline_marks_resolved_drift_findings_current():
+    snapshot = {
+        "captured_at": "2026-09-03T10:00:00+00:00",
+        "last_extraction_at": "2026-09-02T10:00:00+00:00",
+        "last_audit_at": "2026-09-03T09:00:00+00:00",
+        "last_audit_sampled": 20,
+        "last_audit_drifted": 2,
+    }
+
+    review = {
+        stage["key"]: stage
+        for stage in _pipeline(
+            snapshot=snapshot,
+            audit_findings_available=True,
+            drift_findings=0,
+        )
+    }["review"]
+
+    assert review["state"] == "healthy"
+    assert "resolved" in review["detail"].lower()
+
+
+def test_status_scopes_embedding_state_to_the_active_backend(client, monkeypatch):
+    from throughline import embedding
+
+    seen = {}
+
+    monkeypatch.setattr(
+        embedding,
+        "backend_info",
+        lambda preferred="auto": embedding.BackendInfo(
+            available=True,
+            name="ollama",
+            model="active-model",
+            column="embedding_768",
+            dim=768,
+        ),
+    )
+
+    def coverage(conn, model, column):
+        seen["coverage"] = (model, column)
+        return {"total": 2, "embedded": 1}
+
+    def last_embedding(conn, model, column):
+        seen["last"] = (model, column)
+        return None
+
+    monkeypatch.setattr(Q.health, "embedding_coverage", coverage)
+    monkeypatch.setattr(Q.health, "last_embedding_at", last_embedding)
+
+    response = client.get("/api/operate/status")
+
+    assert response.status_code == 200
+    assert seen == {
+        "coverage": ("active-model", "embedding_768"),
+        "last": ("active-model", "embedding_768"),
+    }
+
+
+def test_embedding_health_queries_require_the_active_model_and_vector_column(db_connection):
+    with db_connection.cursor() as cur:
+        chunk_ids = []
+        for label in ("usable", "wrong model", "wrong column"):
+            cur.execute(
+                "INSERT INTO memory_chunks (source_type, content, category) "
+                "VALUES ('manual', %s, 'insight') RETURNING id",
+                (label,),
+            )
+            chunk_ids.append(cur.fetchone()[0])
+        cur.execute(
+            "INSERT INTO embeddings "
+            "(source_type, source_id, model, embedding_768, created_at) "
+            "VALUES ('memory_chunk', %s, 'active-model', "
+            "array_fill(0.1::real, ARRAY[768])::vector, '2026-09-01T10:00:00+00:00')",
+            (chunk_ids[0],),
+        )
+        cur.execute(
+            "INSERT INTO embeddings "
+            "(source_type, source_id, model, embedding_768, created_at) "
+            "VALUES ('memory_chunk', %s, 'old-model', "
+            "array_fill(0.1::real, ARRAY[768])::vector, '2026-09-02T10:00:00+00:00')",
+            (chunk_ids[1],),
+        )
+        cur.execute(
+            "INSERT INTO embeddings "
+            "(source_type, source_id, model, embedding_1536, created_at) "
+            "VALUES ('memory_chunk', %s, 'active-model', "
+            "array_fill(0.1::real, ARRAY[1536])::vector, '2026-09-03T10:00:00+00:00')",
+            (chunk_ids[2],),
+        )
+    db_connection.commit()
+
+    coverage = Q.health.embedding_coverage(
+        db_connection,
+        model="active-model",
+        column="embedding_768",
+    )
+    last = Q.health.last_embedding_at(
+        db_connection,
+        model="active-model",
+        column="embedding_768",
+    )
+
+    assert coverage == {"total": 3, "embedded": 1}
+    assert last.isoformat() == "2026-09-01T10:00:00+00:00"
 
 
 def test_run_unknown_job_404s(client, fake_jobs):

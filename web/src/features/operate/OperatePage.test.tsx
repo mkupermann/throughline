@@ -4,15 +4,38 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { JobSummary, OperateStatus, ProviderCoverage } from "@/lib/api";
+import type { JobSummary, OperateStatus, PipelineStage, ProviderCoverage } from "@/lib/api";
 import { ToastProvider } from "@/components/Toaster";
 import { OperatePage } from "./OperatePage";
 
 // jsdom has no EventSource; a run that "succeeds" mounts <JobConsole>, which
 // opens one. Only its shape matters here, not the stream itself.
 class FakeEventSource {
-  addEventListener() {}
-  removeEventListener() {}
+  static instances: FakeEventSource[] = [];
+  readonly url: string;
+  private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  emit(type: string, data: string) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(new MessageEvent(type, { data }));
+    }
+  }
+
   close() {}
 }
 vi.stubGlobal("EventSource", FakeEventSource);
@@ -36,6 +59,43 @@ function job(name: string, overrides: Partial<JobSummary> = {}): JobSummary {
   };
 }
 
+const providers: ProviderCoverage[] = [
+  { name: "hermes", label: "Hermes", chart_slot: 3, on_disk: 33, pending: 33,
+    excluded: 0, ingested: 0, last_run: null, status: "not_ingested" },
+  { name: "claude_code", label: "Claude Code", chart_slot: 1, on_disk: 265, pending: 1,
+    excluded: 138, ingested: 3142, last_run: "2026-08-09T12:00:00", status: "pending" },
+  { name: "(unattributed)", label: "(unattributed)", chart_slot: 0, on_disk: 0, pending: 0,
+    excluded: 0, ingested: 8, last_run: null, status: "unknown" },
+];
+
+function stage(
+  key: PipelineStage["key"],
+  label: string,
+  overrides: Partial<PipelineStage> = {},
+): PipelineStage {
+  return {
+    key,
+    label,
+    state: "healthy",
+    detail: `${label} is current.`,
+    last_success: "2026-09-03T08:00:00+00:00",
+    blocked_reason: null,
+    job_name: key === "discover" ? null : key === "review" ? "audit-extraction" : key,
+    job_id: null,
+    action_label: label,
+    action_href: key === "discover" ? "#provider-coverage" : null,
+    ...overrides,
+  };
+}
+
+const basePipeline: PipelineStage[] = [
+  stage("discover", "Discover sources"),
+  stage("ingest", "Ingest sessions"),
+  stage("extract", "Extract knowledge"),
+  stage("embed", "Create embeddings"),
+  stage("review", "Review quality"),
+];
+
 const baseStatus: OperateStatus = {
   counts: {},
   database: { reachable: true, tables: {}, dbname: "throughline" },
@@ -50,31 +110,29 @@ const baseStatus: OperateStatus = {
   generation: { available: true, backend: "ollama", model: "qwen3.5:9b", local: true, detail: "qwen3.5:9b" },
   pending: { extraction: 0, titles: 0 },
   ingestion: [],
-  jobs: [job("doctor"), job("ingest_hermes"), job("ingest_vibe")],
+  providers,
+  pipeline: basePipeline,
+  jobs: [
+    job("ingest"),
+    job("extract"),
+    job("embed"),
+    job("audit-extraction"),
+    job("doctor"),
+    job("ingest_hermes"),
+    job("ingest_vibe"),
+  ],
   history: [],
 };
 
-const providers: ProviderCoverage[] = [
-  { name: "hermes", label: "Hermes", chart_slot: 3, on_disk: 33, pending: 33,
-    excluded: 0, ingested: 0, last_run: null, status: "not_ingested" },
-  { name: "claude_code", label: "Claude Code", chart_slot: 1, on_disk: 265, pending: 1,
-    excluded: 138, ingested: 3142, last_run: "2026-08-09T12:00:00", status: "pending" },
-  { name: "(unattributed)", label: "(unattributed)", chart_slot: 0, on_disk: 0, pending: 0,
-    excluded: 0, ingested: 8, last_run: null, status: "unknown" },
-];
-
 const statusFn = vi.fn(async () => baseStatus);
-const listFn = vi.fn(async () => ({ providers }));
 const runFn = vi.fn(async (name: string) => ({ job_id: "abc123", name, running: true }));
+const stopFn = vi.fn(async (id: string) => ({ stopped: id }));
 
 vi.mock("@/lib/api", () => ({
   operateApi: {
     status: () => statusFn(),
     run: (name: string) => runFn(name),
-    stop: vi.fn(),
-  },
-  providersApi: {
-    list: () => listFn(),
+    stop: (id: string) => stopFn(id),
   },
   // The page now carries the export panel, which asks for its own options
   // on mount. Without this the whole page fails to render.
@@ -105,9 +163,11 @@ function renderPage() {
 
 describe("OperatePage provider coverage table", () => {
   beforeEach(() => {
+    FakeEventSource.instances = [];
     statusFn.mockClear();
-    listFn.mockClear();
+    statusFn.mockResolvedValue(baseStatus);
     runFn.mockClear();
+    stopFn.mockClear();
   });
 
   it("lists every provider with an accessible name and column headers", async () => {
@@ -158,6 +218,183 @@ describe("OperatePage provider coverage table", () => {
     renderPage();
     await screen.findByRole("table", { name: /coverage/i });
     expect(runFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Knowledge pipeline", () => {
+  beforeEach(() => {
+    FakeEventSource.instances = [];
+    statusFn.mockResolvedValue(baseStatus);
+    runFn.mockClear();
+    stopFn.mockClear();
+  });
+
+  it("shows the five stages in their operating order", async () => {
+    renderPage();
+    const pipeline = await screen.findByRole("list", { name: "Knowledge pipeline" });
+    const steps = within(pipeline).getAllByRole("listitem");
+
+    expect(steps.map((step) => within(step).getByRole("heading", { level: 3 }).textContent)).toEqual([
+      "Discover sources",
+      "Ingest sessions",
+      "Extract knowledge",
+      "Create embeddings",
+      "Review quality",
+    ]);
+  });
+
+  it("makes the next due action explicit", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: basePipeline.map((item) =>
+        item.key === "ingest"
+          ? stage("ingest", "Ingest sessions", {
+              state: "due",
+              detail: "2 session files are waiting to import.",
+              action_label: "Ingest sessions",
+            })
+          : item,
+      ),
+    });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Ingest sessions" }));
+    expect(runFn).toHaveBeenCalledWith("ingest");
+  });
+
+  it("shows why a stage is blocked and disables its action", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: basePipeline.map((item) =>
+        item.key === "embed"
+          ? stage("embed", "Create embeddings", {
+              state: "blocked",
+              detail: "Create embeddings cannot run in the current environment.",
+              blocked_reason: "Ollama is not running.",
+            })
+          : item,
+      ),
+    });
+    renderPage();
+
+    expect(await screen.findByText("Ollama is not running.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Create embeddings" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("offers a retry after a failed stage", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: basePipeline.map((item) =>
+        item.key === "extract"
+          ? stage("extract", "Extract knowledge", {
+              state: "failed",
+              detail: "The last extract knowledge run failed.",
+              blocked_reason: "Last run exited with code 2.",
+              action_label: "Retry extract knowledge",
+            })
+          : item,
+      ),
+    });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Retry extract knowledge" }));
+    expect(runFn).toHaveBeenCalledWith("extract");
+  });
+
+  it("can stop a running pipeline stage", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: basePipeline.map((item) =>
+        item.key === "ingest"
+          ? stage("ingest", "Ingest sessions", {
+              state: "running",
+              detail: "Ingest sessions is running now.",
+              job_id: "run-1",
+            })
+          : item,
+      ),
+    });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Stop ingest sessions" }));
+    expect(stopFn).toHaveBeenCalledWith("run-1");
+  });
+
+  it("keeps low-frequency jobs in a collapsed secondary section", async () => {
+    renderPage();
+    const summary = await screen.findByText("Advanced maintenance");
+    const details = summary.closest("details")!;
+
+    expect(details.open).toBe(false);
+    expect(within(details).getByRole("heading", { name: "doctor" })).toBeTruthy();
+    expect(within(details).queryByRole("heading", { name: "ingest" })).toBeNull();
+  });
+
+  it("offers Stop immediately after an advanced job starts", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const summary = await screen.findByText("Advanced maintenance");
+    await user.click(summary);
+    const details = summary.closest("details")!;
+
+    await user.click(within(details).getByRole("button", { name: "Run" }));
+
+    expect(await within(details).findByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(runFn).toHaveBeenCalledWith("doctor");
+  });
+
+  it("tracks a provider-specific ingest through the pipeline and announces completion", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const table = await screen.findByRole("table", { name: /coverage/i });
+    const hermesRow = within(table).getByRole("rowheader", { name: "Hermes" }).closest("tr")!;
+
+    await user.click(within(hermesRow).getByRole("button", { name: /ingest/i }));
+
+    expect(await screen.findByRole("button", { name: "Stop ingest sessions" })).toBeTruthy();
+    expect(screen.getByText("ingest_hermes started.")).toBeTruthy();
+    expect(FakeEventSource.instances[0]?.url).toBe("/api/operate/job/abc123/stream");
+
+    FakeEventSource.instances[0].emit("done", "exit=0 duration=1.0s");
+
+    expect(await screen.findByText("ingest_hermes completed. Pipeline status refreshed.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop ingest sessions" })).toBeNull();
+  });
+
+  it("keeps all jobs available when an older backend has no pipeline payload", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: undefined as unknown as PipelineStage[],
+    });
+    renderPage();
+
+    const summary = await screen.findByText("Available jobs");
+    const details = summary.closest("details")!;
+    expect(details.open).toBe(true);
+    expect(within(details).getByRole("heading", { name: "ingest" })).toBeTruthy();
+    expect(within(details).getByRole("heading", { name: "extract" })).toBeTruthy();
+    expect(within(details).getByRole("heading", { name: "embed" })).toBeTruthy();
+  });
+
+  it("does not duplicate a pipeline recovery job in advanced maintenance", async () => {
+    statusFn.mockResolvedValue({
+      ...baseStatus,
+      pipeline: basePipeline.map((item) =>
+        item.key === "discover"
+          ? stage("discover", "Discover sources", {
+              state: "failed",
+              job_name: "doctor",
+              action_label: "Run diagnostics",
+              action_href: null,
+            })
+          : item,
+      ),
+    });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Run diagnostics" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "doctor" })).toBeNull();
+    expect(screen.queryByText("Advanced maintenance")).toBeNull();
   });
 });
 

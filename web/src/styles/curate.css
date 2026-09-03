@@ -268,6 +268,182 @@
 .toast-close:hover { color: var(--text-primary); }
 
 /* ── Operate ─────────────────────────────────────────────────────────── */
+.pipeline-section {
+  margin-bottom: var(--space-6);
+}
+.pipeline-heading-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.pipeline-heading-row .section-label {
+  margin-bottom: var(--space-1);
+  color: var(--text-primary);
+}
+.pipeline-heading-row p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+}
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pipeline-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 220px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-muted);
+  border-top-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.pipeline-stage.state-healthy { border-top-color: var(--status-good); }
+.pipeline-stage.state-due { border-top-color: var(--status-warning); }
+.pipeline-stage.state-running { border-top-color: var(--accent); }
+.pipeline-stage.state-failed { border-top-color: var(--status-critical); }
+.pipeline-stage.state-blocked { border-top-color: var(--border-strong); }
+.pipeline-stage.state-blocked .pipeline-reason { color: var(--status-warning); }
+.pipeline-stage-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.pipeline-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.pipeline-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.state-healthy .pipeline-state { color: var(--status-good); }
+.state-due .pipeline-state { color: var(--status-warning); }
+.state-running .pipeline-state { color: var(--accent); }
+.state-failed .pipeline-state { color: var(--status-critical); }
+.pipeline-stage h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+.pipeline-detail,
+.pipeline-reason,
+.pipeline-last {
+  margin: var(--space-1) 0 0;
+  line-height: var(--leading-normal);
+}
+.pipeline-detail {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+}
+.pipeline-reason {
+  color: var(--status-critical);
+  font-size: var(--text-sm);
+}
+.pipeline-last {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.pipeline-action {
+  align-self: flex-start;
+  margin-top: auto;
+}
+a.pipeline-action {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.pipeline-console {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.pipeline-console h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+.advanced-operations {
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.advanced-operations > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+}
+.advanced-operations > summary::-webkit-details-marker {
+  display: none;
+}
+.advanced-operations-chevron {
+  flex: 0 0 auto;
+  transition: transform 150ms ease;
+}
+.advanced-operations[open] .advanced-operations-chevron {
+  transform: rotate(90deg);
+}
+.advanced-operations-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.advanced-operations-count {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.advanced-operations-body {
+  padding: 0 var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-muted);
+}
+.advanced-operations-body > p {
+  margin: var(--space-3) 0;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+}
+
+@media (max-width: 1100px) {
+  .pipeline {
+    grid-template-columns: 1fr;
+  }
+  .pipeline-stage {
+    min-height: 0;
+  }
+  .pipeline-action {
+    margin-top: var(--space-3);
+  }
+}
+
 .jobs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

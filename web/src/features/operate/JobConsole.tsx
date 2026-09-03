@@ -32,21 +32,27 @@ export function JobConsole({
   const [done, setDone] = useState<string | null>(null);
   const boxRef = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
+  const onFinishedRef = useRef(onFinished);
+
+  useEffect(() => {
+    onFinishedRef.current = onFinished;
+  }, [onFinished]);
 
   useEffect(() => {
     setLines([]);
     setDone(null);
+    pinned.current = true;
     const es = new EventSource(`/api/operate/job/${jobId}/stream`);
     es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data]));
     es.addEventListener("done", (e) => {
       const summary = String((e as MessageEvent).data);
       setDone(summary);
       es.close();
-      onFinished(parseJobCompletion(summary));
+      onFinishedRef.current(parseJobCompletion(summary));
     });
     es.onerror = () => es.close();
     return () => es.close();
-  }, [jobId, onFinished]);
+  }, [jobId]);
 
   // Follow the tail, but stop fighting the user the moment they scroll up.
   useEffect(() => {

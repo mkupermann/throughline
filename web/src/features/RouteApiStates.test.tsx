@@ -188,14 +188,13 @@ describe("route API states", () => {
 
   it("shows Operate's degraded pgvector state from the returned status", async () => {
     reply({
-      "/api/providers": json({ providers: [] }),
       "/api/operate/status": json({
         counts: {},
         database: { reachable: true, tables: {}, dbname: "throughline" },
         extensions: { pgvector_usable: false, note: "pgvector extension is unavailable" },
         embedding: { backend: "ollama", available: false, reason: "Ollama is offline", coverage: { total: 0, embedded: 0 }, by_model: [] },
         pending: { extraction: 0, titles: 0 },
-        ingestion: [], jobs: [], history: [],
+        ingestion: [], providers: [], pipeline: [], jobs: [], history: [],
       }),
     });
     renderRoute(
@@ -209,16 +208,15 @@ describe("route API states", () => {
     expect(screen.getByText("Ollama is offline")).toBeTruthy();
   });
 
-  it("shows provider coverage as unavailable when its dependency fails", async () => {
+  it("shows provider coverage as unavailable when an older status response omits it", async () => {
     reply({
-      "/api/providers": new TypeError("network down"),
       "/api/operate/status": json({
         counts: {},
         database: { reachable: true, tables: {}, dbname: "throughline" },
         extensions: { pgvector_usable: true, note: null },
         embedding: { backend: "ollama", available: true, reason: null, coverage: { total: 0, embedded: 0 }, by_model: [] },
         pending: { extraction: 0, titles: 0 },
-        ingestion: [], jobs: [], history: [],
+        ingestion: [], pipeline: [], jobs: [], history: [],
       }),
     });
     renderRoute(

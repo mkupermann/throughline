@@ -405,6 +405,21 @@ export interface JobSummary {
   unavailable: string | null;
 }
 
+export type PipelineStageState = "healthy" | "due" | "running" | "failed" | "blocked";
+
+export interface PipelineStage {
+  key: "discover" | "ingest" | "extract" | "embed" | "review";
+  label: string;
+  state: PipelineStageState;
+  detail: string;
+  last_success: string | null;
+  blocked_reason: string | null;
+  job_name: string | null;
+  job_id: string | null;
+  action_label: string | null;
+  action_href: string | null;
+}
+
 export interface OperateStatus {
   counts: Record<string, number>;
   database: Record<string, unknown> & { reachable: boolean; tables: Record<string, number> };
@@ -426,6 +441,8 @@ export interface OperateStatus {
   };
   pending: { extraction: number; titles: number };
   ingestion: Record<string, unknown>[];
+  providers: ProviderCoverage[];
+  pipeline: PipelineStage[];
   jobs: JobSummary[];
   history: Record<string, unknown>[];
 }

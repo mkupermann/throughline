@@ -79,12 +79,29 @@ def missing_titles(conn, min_messages: int = 2) -> int:
     )
 
 
-def embedding_coverage(conn, model: str | None = None) -> Row:
-    """Share of active memory chunks that have an embedding."""
+def _embedding_column_filter(column: str | None) -> str:
+    filters = {
+        None: "TRUE",
+        "embedding_768": "e.embedding_768 IS NOT NULL",
+        "embedding_1536": "e.embedding_1536 IS NOT NULL",
+    }
+    try:
+        return filters[column]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported embedding column: {column}") from exc
+
+
+def embedding_coverage(
+    conn,
+    model: str | None = None,
+    column: str | None = None,
+) -> Row:
+    """Share of active chunks usable by the selected embedding backend."""
+    column_filter = _embedding_column_filter(column)
     return (
         one(
             conn,
-            """
+            f"""
         SELECT
             count(*) AS total,
             count(*) FILTER (
@@ -93,6 +110,7 @@ def embedding_coverage(conn, model: str | None = None) -> Row:
                     WHERE e.source_type = 'memory_chunk'
                       AND e.source_id = mc.id
                       AND (%s IS NULL OR e.model = %s)
+                      AND {column_filter}
                 )
             ) AS embedded
         FROM memory_chunks mc
@@ -119,6 +137,26 @@ def recent_ingestion(conn, limit: int = 50) -> list[Row]:
 
 def last_ingestion_at(conn):
     return scalar(conn, "SELECT max(ingested_at) FROM ingestion_log")
+
+
+def last_embedding_at(
+    conn,
+    model: str | None = None,
+    column: str | None = None,
+):
+    """Most recent memory embedding usable by the selected backend."""
+    column_filter = _embedding_column_filter(column)
+    return scalar(
+        conn,
+        f"""
+        SELECT max(e.created_at)
+        FROM embeddings e
+        WHERE e.source_type = 'memory_chunk'
+          AND (%s IS NULL OR e.model = %s)
+          AND {column_filter}
+        """,
+        (model, model),
+    )
 
 
 def embeddings_by_model(conn) -> list[Row]:
