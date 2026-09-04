@@ -289,7 +289,8 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
 
         for fp in files:
             try:
-                fhash = adapter.sha256_file(fp)
+                content_hash = adapter.sha256_file(fp)
+                decline_hash = adapter.declined_ingestion_fingerprint(content_hash)
             except OSError as e:
                 summary.errors += 1
                 if verbose:
@@ -297,12 +298,27 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
                 continue
 
             cur.execute(
-                "SELECT 1 FROM ingestion_log WHERE file_path=%s AND file_hash=%s",
-                (str(fp), fhash),
+                "SELECT record_count FROM ingestion_log WHERE file_path=%s AND file_hash=%s",
+                (str(fp), content_hash),
             )
-            if cur.fetchone():
+            content_decision = cur.fetchone()
+            if content_decision is not None and (content_decision[0] != 0 or decline_hash == content_hash):
                 summary.skipped += 1
                 continue
+
+            # A parser-specific fingerprint is only consulted for declines.
+            # Successful imports remain keyed by the raw content hash, so a
+            # parser upgrade never rewrites an unchanged conversation and its
+            # derived data. A matching current-parser decline or recovery is
+            # already settled and can be skipped too.
+            if decline_hash != content_hash:
+                cur.execute(
+                    "SELECT 1 FROM ingestion_log WHERE file_path=%s AND file_hash=%s",
+                    (str(fp), decline_hash),
+                )
+                if cur.fetchone():
+                    summary.skipped += 1
+                    continue
 
             cur.execute(
                 "SELECT 1 FROM ingestion_log WHERE file_path=%s LIMIT 1",
@@ -318,7 +334,7 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
                 # (Hermes state.db SQLite) uniformly.
                 if parsed is None:
                     summary.skipped += 1
-                    _record_decision(conn, cur, fp, fhash)
+                    _record_decision(conn, cur, fp, decline_hash)
                     continue
                 convs = parsed if isinstance(parsed, list) else [parsed]
                 convs = [c for c in convs if c and c.messages]
@@ -343,7 +359,7 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
 
                 if not convs:
                     summary.skipped += 1
-                    _record_decision(conn, cur, fp, fhash)
+                    _record_decision(conn, cur, fp, decline_hash)
                     continue
                 written = 0
                 for conv in convs:
@@ -351,8 +367,10 @@ def run_adapter(adapter: Adapter, *, conn: Any | None = None, verbose: bool = Tr
                     written += _replace_messages(cur, conv_id, conv)
                 cur.execute(
                     "INSERT INTO ingestion_log (file_path, file_hash, record_count) "
-                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                    (str(fp), fhash, written),
+                    "VALUES (%s, %s, %s) "
+                    "ON CONFLICT (file_path, file_hash) DO UPDATE "
+                    "SET record_count = EXCLUDED.record_count",
+                    (str(fp), content_hash, written),
                 )
                 conn.commit()
                 summary.messages_written += written

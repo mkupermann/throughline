@@ -193,3 +193,12 @@ class Adapter(ABC):
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    def declined_ingestion_fingerprint(self, content_hash: str) -> str:
+        """Key for a parser-specific decision not to ingest a file.
+
+        Most adapters use the content hash directly. An adapter can override
+        this when a parser upgrade must reconsider only files an older parser
+        declined, while leaving successful imports idempotent.
+        """
+        return content_hash

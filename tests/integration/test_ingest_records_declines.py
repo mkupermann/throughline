@@ -13,6 +13,7 @@ pending.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ import psycopg2
 import pytest
 
 from throughline.adapters.base import Adapter, NormalisedConversation, NormalisedMessage
+from throughline.adapters.codex import CodexAdapter
 from throughline.adapters.writer import run_adapter
 
 pytestmark = pytest.mark.integration
@@ -143,5 +145,125 @@ def test_a_growing_file_is_judged_again(db_env, tmp_path):
         with conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM conversations")
             assert cur.fetchone()[0] == 1, "the file grew into a real conversation but was never re-judged"
+    finally:
+        conn.close()
+
+
+def test_codex_parser_upgrade_reconsiders_prior_zero_record_decision(db_env, tmp_path, monkeypatch):
+    """A parser upgrade must recover files an older Codex parser declined."""
+    day = tmp_path / "2026" / "09" / "04"
+    day.mkdir(parents=True)
+    path = day / "rollout-current-schema.jsonl"
+    events = [
+        {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "id": "RECOVER-S1",
+                "session_id": "RECOVER-S1",
+                "cwd": "/repo/recovered",
+                "timestamp": "2026-09-04T00:00:00Z",
+            },
+        },
+        {
+            "timestamp": "2026-09-04T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Import this Codex session."}],
+            },
+        },
+        {
+            "timestamp": "2026-09-04T00:00:02Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Imported."}],
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    adapter = CodexAdapter()
+    adapter.home = tmp_path
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        # This is the decision written by the old parser, which found the file
+        # but did not understand any of its nested response_item messages.
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ingestion_log (file_path, file_hash, record_count) VALUES (%s, %s, 0)",
+                (str(path), adapter.sha256_file(path)),
+            )
+        conn.commit()
+
+        summary = run_adapter(adapter, conn=conn, verbose=False)
+
+        assert summary.refreshed == 1
+        assert summary.messages_written == 2
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM conversations WHERE source_tool = 'codex'")
+            assert cur.fetchone()[0] == 1
+            cur.execute(
+                "SELECT record_count FROM ingestion_log WHERE file_path = %s ORDER BY id",
+                (str(path),),
+            )
+            assert [row[0] for row in cur.fetchall()] == [2]
+
+        monkeypatch.setattr(adapter, "declined_ingestion_fingerprint", lambda _content_hash: "f" * 64)
+        future_summary = run_adapter(adapter, conn=conn, verbose=False)
+        assert future_summary.skipped == 1
+        assert future_summary.refreshed == 0
+        assert future_summary.messages_written == 0
+    finally:
+        conn.close()
+
+
+def test_codex_parser_upgrade_preserves_prior_success(db_env, tmp_path):
+    """A successful raw-hash decision stays idempotent across parser upgrades."""
+    day = tmp_path / "2026" / "09" / "04"
+    day.mkdir(parents=True)
+    path = day / "rollout-already-ingested.jsonl"
+    events = [
+        {
+            "timestamp": "2026-09-04T00:00:00Z",
+            "type": "session_meta",
+            "payload": {"id": "KEEP-S1", "cwd": "/repo/keep"},
+        },
+        {
+            "timestamp": "2026-09-04T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Do not rewrite this session."}],
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    adapter = CodexAdapter()
+    adapter.home = tmp_path
+
+    conn = psycopg2.connect(**db_env)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ingestion_log (file_path, file_hash, record_count) VALUES (%s, %s, 1)",
+                (str(path), adapter.sha256_file(path)),
+            )
+        conn.commit()
+
+        summary = run_adapter(adapter, conn=conn, verbose=False)
+
+        assert summary.skipped == 1
+        assert summary.refreshed == 0
+        assert summary.messages_written == 0
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM conversations WHERE source_tool = 'codex'")
+            assert cur.fetchone()[0] == 0
+            cur.execute("SELECT count(*) FROM ingestion_log WHERE file_path = %s", (str(path),))
+            assert cur.fetchone()[0] == 1
     finally:
         conn.close()

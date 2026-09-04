@@ -137,3 +137,153 @@ class TestCodexAdapter:
         conv = CodexAdapter().parse(path)
         assert conv is not None
         assert conv.started_at.year >= 2024
+
+    def test_parse_current_nested_rollout_without_event_message_duplicates(self, tmp_path):
+        """Current Codex rollouts nest durable transcript items in payload."""
+        events = [
+            {
+                "timestamp": "2026-09-04T00:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "CURRENT-S1",
+                    "session_id": "SHARED-WINDOW",
+                    "cwd": r"C:\repo\current",
+                    "timestamp": "2026-09-04T00:00:00Z",
+                    "model_provider": "openai",
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:01Z",
+                "type": "turn_context",
+                "payload": {"cwd": r"C:\repo\current", "model": "gpt-5.6-sol"},
+            },
+            {
+                "timestamp": "2026-09-04T00:00:02Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "Run the focused tests."},
+            },
+            {
+                "timestamp": "2026-09-04T00:00:02Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Run the focused tests."},
+                        {"type": "input_image", "image_url": "data:image/png;base64,fixture"},
+                    ],
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:03Z",
+                "type": "event_msg",
+                "payload": {"type": "agent_message", "message": "I will run pytest."},
+            },
+            {
+                "timestamp": "2026-09-04T00:00:03Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will run pytest."}],
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:04Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "name": "shell",
+                    "input": '{"cmd":"pytest -q"}',
+                    "call_id": "call-custom",
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:05Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call-custom",
+                    "output": "2 passed",
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:06Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "read_file",
+                    "arguments": '{"path":"README.md"}',
+                    "call_id": "call-function",
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:07Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call-function",
+                    "output": "Throughline",
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:08Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "agent_message",
+                    "id": "agent-message-1",
+                    "author": "researcher",
+                    "recipient": "coordinator",
+                    "content": [
+                        {"type": "input_text", "text": "Subagent result."},
+                        {"type": "encrypted_content", "encrypted_content": "opaque"},
+                    ],
+                },
+            },
+            {
+                "timestamp": "2026-09-04T00:00:09Z",
+                "type": "response_item",
+                "payload": {"type": "reasoning", "encrypted_content": "not-transcript"},
+            },
+            {
+                "timestamp": "2026-09-04T00:00:10Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Internal instructions"}],
+                },
+            },
+        ]
+        path = _write_rollout(tmp_path, events)
+
+        conv = CodexAdapter().parse(path)
+
+        assert conv is not None
+        assert conv.project_path == r"C:\repo\current"
+        assert conv.model == "gpt-5.6-sol"
+        assert conv.started_at.isoformat() == "2026-09-04T00:00:00+00:00"
+        assert conv.ended_at.isoformat() == "2026-09-04T00:00:10+00:00"
+        assert [message.role for message in conv.messages] == [
+            "user",
+            "assistant",
+            "assistant",
+            "tool_result",
+            "assistant",
+            "tool_result",
+            "assistant",
+        ]
+        assert [message.content for message in conv.messages[:2]] == [
+            "Run the focused tests.",
+            "I will run pytest.",
+        ]
+        assert conv.messages[0].content_blocks == events[3]["payload"]["content"]
+        assert conv.messages[2].tool_name == "shell"
+        assert conv.messages[3].tool_name == "shell"
+        assert conv.messages[4].tool_name == "read_file"
+        assert conv.messages[5].tool_name == "read_file"
+        assert conv.messages[6].content == "Subagent result."
+        assert conv.messages[6].content_blocks == events[10]["payload"]["content"]
+        assert conv.messages[6].metadata["author"] == "researcher"
+        assert conv.messages[6].metadata["recipient"] == "coordinator"
+        assert conv.metadata["codex_session_id"] == "CURRENT-S1"

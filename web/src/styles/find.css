@@ -324,7 +324,6 @@
   margin-bottom: var(--space-3);
   background: var(--surface-raised);
   border: 1px solid var(--border-muted);
-  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-md);
   font-size: var(--text-base);
   color: var(--text-secondary);
@@ -667,11 +666,10 @@
   overflow-wrap: anywhere;
 }
 
-/* The selected row. A left marker plus a wash, so selection is never carried
-   by colour alone — and `aria-current` states it for anyone not seeing either. */
+/* The selected row uses a quiet wash; `aria-current` carries the same state
+   semantically without adding a decorative edge rail. */
 .result.is-selected {
   background: var(--accent-wash);
-  box-shadow: inset 3px 0 0 var(--accent);
   border-radius: var(--radius-sm);
 }
 

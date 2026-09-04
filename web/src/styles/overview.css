@@ -67,21 +67,11 @@
   padding: var(--space-3) var(--space-4);
   background: var(--surface-raised);
   border: 1px solid var(--border-muted);
-  border-left-width: 3px;
   border-radius: var(--radius-md);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 .attn:hover {
   border-color: var(--border);
-}
-.attn-critical {
-  border-left-color: var(--status-critical);
-}
-.attn-warning {
-  border-left-color: var(--status-warning);
-}
-.attn-info {
-  border-left-color: var(--border-strong);
 }
 .attn-critical .attn-icon {
   color: var(--status-critical);

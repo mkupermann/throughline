@@ -194,6 +194,7 @@ def test_docker_image_runs_a_crlf_normalised_packaged_shell_script(tmp_path: Pat
             ".git",
             ".pytest_cache",
             ".pytest-tmp*",
+            ".tmp",
             ".venv",
             ".superpowers",
             "__pycache__",

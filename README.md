@@ -165,6 +165,8 @@ Embedding `auto` uses hosted OpenAI when `OPENAI_API_KEY` is present. Generation
 
 Adapters normalise each source into conversations and messages. Re-ingestion is idempotent. Changed source files refresh their stored conversation without creating duplicates. Third-party adapters can register through the `throughline.adapters` entry point. See [Adapter development](docs/ADAPTER_DEVELOPMENT.md).
 
+Codex rollouts from current app builds and older CLI builds are both supported. Parser upgrades reconsider files that an older parser could not read.
+
 ## The daily loop
 
 Most days Throughline should update itself in the background.

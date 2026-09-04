@@ -131,10 +131,11 @@ and baselined before later migrations apply; migration history is never rewritte
    files per task under the VS Code extension's global storage, Hermes maintains a live
    SQLite `state.db` alongside JSON exports, and Windsurf produces plan documents in
    Markdown.
-2. **Hash and check.** The writer computes a SHA-256 over the file contents and looks it up
-   in `ingestion_log`. A matching `(path, hash)` pair means the file has not changed since
-   the last run, and it is skipped without parsing. A known path with a new hash is a
-   refresh.
+2. **Fingerprint and check.** The writer computes a SHA-256 content hash and looks it up in
+   `ingestion_log`. A successful match remains idempotent across parser upgrades. An adapter
+   can add a parser revision only to declined-file decisions, so a format upgrade reconsiders
+   files an older parser could not read without rewriting successful imports. A known path
+   with changed content is a refresh.
 3. **Parse.** The adapter converts the file into one or more `NormalisedConversation`
    objects, each holding `NormalisedMessage` records with roles mapped to the
    `message_role` enum.
@@ -144,7 +145,7 @@ and baselined before later migrations apply; migration history is never rewritte
    removed in the same transaction. Advisory locks prevent a concurrent derived-data producer
    from writing against messages that have just been replaced. A growing transcript therefore
    refreshes cleanly instead of accumulating duplicate or stale data.
-5. **Record.** The file hash and message count go into `ingestion_log`, and the transaction
+5. **Record.** The fingerprint and message count go into `ingestion_log`, and the transaction
    commits. Errors roll back that one file only and increment an error counter — a single
    malformed session cannot abort an unattended nightly run.
 
