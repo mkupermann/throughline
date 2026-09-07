@@ -1,3 +1,4 @@
+import { OutputDisclosure } from "./OutputDisclosure";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
 import { useState } from "react";
@@ -18,8 +19,8 @@ import { ChevronRight, Terminal, User, Bot, CornerUpRight } from "lucide-react";
  * name and its input (the bash command, the file path, the patch), and a
  * `tool_result` block holds what came back. Both are rendered here.
  *
- * Tool-call details can be expanded. Recorded output stays explicit; readers
- * may bound large output with a scrolling area instead of truncating it.
+ * Tool-call details can be expanded. Recorded output starts collapsed; its
+ * label and the message timestamp remain visible.
  * Keeping the full stored content available lets the reader inspect the work.
  */
 
@@ -249,14 +250,14 @@ export function Transcript({
               ) : <span className="tx-time">{when(m.created_at)}</span>)}
             </div>
 
-            {prose && <div className="tx-prose">{prose}</div>}
+            {prose && (m.role === "tool_result" || m.role === "tool" ? <OutputDisclosure body={prose} /> : <div className="tx-prose">{prose}</div>)}
 
             {tools.map((b, i) => (
               <ToolCall key={i} block={b} />
             ))}
 
             {results.map((b, i) => (
-              <section className="tx-result" key={i}><strong>{t("Result / tool output")}</strong><pre>{textOf(b.content)}</pre></section>
+              <section className="tx-result" key={i}><OutputDisclosure body={textOf(b.content)} /></section>
             ))}
             {files.map((b, i) => (
               <section className="tx-result" key={`file-${i}`}><strong>{m.role === "user" ? t("Input file") : t("Result / file")}</strong><p>{t("File reference from source data; availability has not been verified.")}</p><pre>{[b.filename, b.path, b.file_path, b.file_id, b.url && !b.url.startsWith("data:") ? b.url : null].filter(Boolean).join("\n") || t("File reference without a recorded path")}</pre></section>

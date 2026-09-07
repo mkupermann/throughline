@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Collapsible output
+
+Tool output starts collapsed in conversation readers and project previews. Expand each output independently with mouse or keyboard; prompts, answers, file references and exact timestamps remain visible.
+
 ### Conversation navigation
 
 Conversations now has its own project selector, compact conversation list and single-conversation reader. Prompt, answer, recorded output and exact times stay visible in context; the conversation list remains available while reading. The EN/DE interface and recorded demo walkthrough have been updated.

@@ -1,3 +1,4 @@
+import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -111,7 +112,7 @@ function ConversationReader({ project, id, session, scope }: {project: string; i
     {session && <dl className="conversation-summary">
       <div><dt>{t("Prompt")} <small>{t("First prompt · excerpt")}</small></dt><dd>{session.opening || t("No prompt recorded")}</dd><dd><Timestamp value={session.prompt_at} /></dd></div>
       <div><dt>{t("Answer")} <small>{t("Last answer · excerpt")}</small></dt><dd>{session.answer || t("No text answer recorded")}</dd><dd><Timestamp value={session.answer_at} /></dd></div>
-      <div><dt>{t("Result / file")} <small>{session.result_at ? t("Latest tool output · not proof of success") : session.file_at ? t("File-reference message · availability not verified") : t("No result timestamp recorded")}</small></dt><dd>{session.result || (session.file_count ? t("{count} file references recorded.", {count:session.file_count}) : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><Timestamp value={session.result_at ?? session.file_at} /></dd></div>
+      <div><dt>{t("Result / file")} <small>{session.result_at ? t("Latest tool output · not proof of success") : session.file_at ? t("File-reference message · availability not verified") : t("No result timestamp recorded")}</small></dt><dd>{session.result ? <OutputDisclosure key={session.id} body={session.result} /> : (session.file_count ? t("{count} file references recorded.", {count:session.file_count}) : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><Timestamp value={session.result_at ?? session.file_at} /></dd></div>
     </dl>}
     {!!detail.data?.pages[0].matches?.length && <details open className="conversation-notes"><summary>{t("Matching source messages (up to 30)")}</summary>{detail.data.pages[0].matches.map(match => <p key={match.id}><Link to={`/c/${id}#m${match.id}`}>{match.excerpt}</Link></p>)}</details>}
     <h3>{t("Original messages")}</h3>

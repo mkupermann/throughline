@@ -1,3 +1,4 @@
+import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -407,7 +408,7 @@ function Session({
       <dl className="story-exchange-preview">
         <div><dt>{t("Prompt ")}<small>{t("First prompt · excerpt")}</small></dt><dd>{s.opening || t("No prompt recorded")}</dd><dd><time dateTime={s.prompt_at ?? undefined}>{date(s.prompt_at ?? null)}</time></dd></div>
         <div><dt>{t("Answer ")}<small>{t("Last answer · excerpt")}</small></dt><dd>{s.answer || t("No text answer recorded")}</dd><dd><time dateTime={s.answer_at ?? undefined}>{date(s.answer_at ?? null)}</time></dd></div>
-        <div><dt>{t("Result / file ")}<small>{t("Latest tool output · not proof of success")}</small></dt><dd>{s.result || ((s.file_count ?? 0) > 0 ? `${s.file_count} ${t("file references recorded. Open the conversation for details.")}` : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><time dateTime={s.result_at ?? s.file_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : t("No result timestamp recorded")}</time></dd></div>
+        <div><dt>{t("Result / file ")}<small>{t("Latest tool output · not proof of success")}</small></dt><dd>{s.result ? <OutputDisclosure key={s.id} body={s.result} /> : ((s.file_count ?? 0) > 0 ? `${s.file_count} ${t("file references recorded. Open the conversation for details.")}` : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><time dateTime={s.result_at ?? s.file_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : t("No result timestamp recorded")}</time></dd></div>
       </dl>
       {open && (
         <div className="story-session-body" id={`session-body-${s.id}`}>

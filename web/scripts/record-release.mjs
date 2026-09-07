@@ -26,8 +26,12 @@ const scenarios = [
  ['conversations','/conversations','Choose a project, then read one conversation at a time.',async p=>{
    await p.getByRole('combobox',{name:'Project',exact:true}).selectOption('Atlas (demo)');
    await p.getByRole('button',{name:/Counterexample: long documents/}).click();
+   const output=p.locator('.output-disclosure').first();
+   await output.locator('summary').click();
+   await p.waitForTimeout(700);
+   await output.locator('summary').click();
    await p.getByText('evaluation.md',{exact:false}).last().scrollIntoViewIfNeeded();
- },'Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.'],
+ },'Output starts collapsed. Expand it when needed; file references and exact times remain visible.'],
  ['find','/find?q=boundary','Search across imported records.',async p=>{
    await p.evaluate(()=>window.scrollBy(0,400));
  },'Results retain source links. Search does not require a generation model.'],

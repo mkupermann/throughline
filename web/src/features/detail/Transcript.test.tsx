@@ -43,7 +43,7 @@ describe("Transcript", () => {
 
 it("retains structured tool output instead of silently discarding objects", () => {
   render(<Transcript messages={[{id:999,role:"tool_result",content:null,content_blocks:[{type:"tool_result",content:{status:"passed",checks:12}}]}]} />);
-  expect(screen.getByText(/"status": "passed"/)).toBeTruthy();
+  expect(screen.getByText(/"status": "passed"/).closest("details")!.open).toBe(false);
   expect(screen.getByText(/"checks": 12/)).toBeTruthy();
 });
 it("renders imported HTML as text and makes invalid source times explicit", () => {
@@ -53,4 +53,25 @@ it("renders imported HTML as text and makes invalid source times explicit", () =
   expect(document.querySelector('img[src="x"]')).toBeNull();
   expect(screen.getByText("Invalid recorded time: invalid-time")).toBeTruthy();
   expect(document.querySelector('time[datetime="invalid-time"]')).toBeNull();
+});
+
+it.each(["tool_result", "tool"])("collapses %s output of any length while preserving prompts and timestamps", (role) => {
+  render(<Transcript messages={[
+    {id: 2001, role: "user", content: "Run the check"},
+    {id: 2002, role, content: "OK", created_at: "2026-08-01T10:02:34Z"},
+    {id: 2003, role, content: "long output\n".repeat(100)},
+    {id: 2004, role: "assistant", content: "Check complete"},
+  ]} />);
+  const short = screen.getByText("OK").closest("details")!;
+  const long = screen.getByText(/long output/).closest("details")!;
+  expect(short.open).toBe(false);
+  expect(long.open).toBe(false);
+  short.querySelector("summary")!.click();
+  expect(short.open).toBe(true);
+  expect(long.open).toBe(false);
+  short.querySelector("summary")!.click();
+  expect(short.open).toBe(false);
+  expect(screen.getByText("Run the check").closest("details")).toBeNull();
+  expect(screen.getByText("Check complete").closest("details")).toBeNull();
+  expect(screen.getByText(/:02:34/).closest("details")).toBeNull();
 });

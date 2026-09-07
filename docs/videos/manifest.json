@@ -86,8 +86,8 @@
       "name": "conversations",
       "route": "/conversations",
       "intro": "Choose a project, then read one conversation at a time.",
-      "outro": "Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.",
-      "durationSeconds": 12.56
+      "outro": "Output starts collapsed. Expand it when needed; file references and exact times remain visible.",
+      "durationSeconds": 8.4
     }
   ]
 }
