@@ -101,7 +101,7 @@ describe("CommandPalette", () => {
     expect(await screen.findByText("Work")).toBeTruthy();
     expect(screen.getByText("Trust")).toBeTruthy();
     expect(screen.getByText("System")).toBeTruthy();
-    expect(screen.getAllByText("KI-Teamsteuerung").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AI team operations").length).toBeGreaterThan(0);
     expect(screen.getByText("Review")).toBeTruthy();
     expect(screen.queryByText("Curate")).toBeNull();
   });

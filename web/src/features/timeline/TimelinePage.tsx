@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -79,6 +81,7 @@ function axisLabel(bucketDate: string, bucket: string): string {
 }
 
 export function TimelinePage() {
+  useLanguage();
   const [sp] = useSearchParams();
   const [range, setRange] = useState<Range>(() => presetRange(90));
   // The day whose detail is open, or null when no cell is selected. Only a
@@ -265,35 +268,32 @@ export function TimelinePage() {
   return (
     <section className="timeline-page">
       <header className="page-header">
-        <h1 className="page-title">Timeline</h1>
+        <h1 className="page-title">{t("Timeline")}</h1>
         {/* Says what the page answers, then defines the total in reader terms
             rather than pretending every source row is a message. */}
-        <p className="page-subtitle">What happened, and when.</p>
+        <p className="page-subtitle">{t("What happened, and when.")}</p>
         <p className="page-hint">
-          {formatCount(grandTotal)} events across conversations and system
-          activity from {range.since} to {range.until}. One column per {data?.bucket ?? "day"}.
+          {formatCount(grandTotal)}{t(" events across conversations and system activity from ")}{range.since} to {range.until}. One column per {data?.bucket ?? "day"}.
         </p>
       </header>
 
       <RangeControl value={range} onChange={handleRangeChange} />
 
-      {isLoading && <p className="muted">Loading…</p>}
+      {isLoading && <p className="muted">{t("Loading…")}</p>}
 
       {error && (
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h2>Cannot load the timeline</h2>
+          <h2>{t("Cannot load the timeline")}</h2>
           <p>{(error as ApiError).message}</p>
           {(error as ApiError).hint && <p className="empty-hint">{(error as ApiError).hint}</p>}
           <button type="button" className="button" onClick={() => refetch()}>
-            <RefreshCw size={14} aria-hidden />
-            Try again
-          </button>
+            <RefreshCw size={14} aria-hidden />{t("Try again")}</button>
         </div>
       )}
 
       {!isLoading && !error && lanes.length === 0 && (
-        <p className="empty-state">No activity in this range.</p>
+        <p className="empty-state">{t("No activity in this range.")}</p>
       )}
 
       {lanes.length > 0 && (

@@ -78,7 +78,7 @@ function RepoLinksSection({ projectId }: { projectId: number }) {
         <ul className="pm-repo-chips">
           {linked.map((r) => (
             <li key={r.id} className="pm-chip pm-repo-chip">
-              <Link to={`/project/${encodeURIComponent(r.name)}`}>{r.name} · Conversations öffnen</Link>
+              <Link to={`/project/${encodeURIComponent(r.name)}`}>{r.name} · Open conversations</Link>
               <span className="pm-repo-chip-sessions tabular">{fmtInt(r.sessions)}</span>
               <InlineConfirmButton
                 className="pm-repo-chip-remove"

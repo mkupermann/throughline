@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { getLang, useLanguage } from "@/lib/language";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -29,11 +31,11 @@ const labels = {
 const kinds = Object.keys(labels) as StoryCheckpoint["kind"][];
 const date = (value: string | null) =>
   value
-    ? new Intl.DateTimeFormat(undefined, {
+    ? new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "en-US", {
         dateStyle: "medium",
         timeStyle: "long",
       }).format(new Date(value))
-    : "Time not recorded";
+    : t("Time not recorded");
 const sourceUrl = (id: number, message?: number | null) =>
   `/c/${id}${message ? `#m${message}` : ""}`;
 
@@ -47,6 +49,7 @@ export function ProjectStory() {
 }
 
 function Story({ project }: { project: string }) {
+  useLanguage();
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
   const term = params.get("q") ?? "";
@@ -99,43 +102,34 @@ function Story({ project }: { project: string }) {
   return (
     <div className="story">
       <header className="story-header">
-        <Link to="/" className="backlink">
-          ← Projects
-        </Link>
+        <Link to="/" className="backlink" aria-label={t("Back to projects")}>{t("← Projects")}</Link>
         <div className="story-heading">
           <div>
-            <p className="story-eyebrow">PROJECT WORKSPACE</p>
+            <p className="story-eyebrow">{t("PROJECT WORKSPACE")}</p>
             <h1>{project}</h1>
-            <p className="story-subtitle">
-              The work, the evidence, and where to go next.
-            </p>
+            <p className="story-subtitle">{t("The work, the evidence, and where to go next.")}</p>
           </div>
           <button
             className="button"
             disabled={!selected.size}
             onClick={() => setExporting(true)}
           >
-            <Download size={16} /> Prepare handoff
-            {selected.size > 0 ? ` (${selected.size})` : ""}
+            <Download size={16} />{t(" Prepare handoff")}{selected.size > 0 ? ` (${selected.size})` : ""}
           </button>
         </div>
         <div className="story-meta">
-          <span>{data?.coverage.sessions ?? "…"} sessions</span>
-          <span>{data?.coverage.messages ?? "…"} imported messages</span>
-          <span>Times: {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
-          <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>
-            Full document
-          </Link>
+          <span>{data?.coverage.sessions ?? "…"}{t(" sessions")}</span>
+          <span>{data?.coverage.messages ?? "…"}{t(" imported messages")}</span>
+          <span>{t("Times: ")}{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+          <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
-      {history.isPending && <p role="status">Loading project history…</p>}
+      {history.isPending && <p role="status">{t("Loading project history…")}</p>}
       {history.error && (
         <div role="alert" className="story-notice">
-          <h2>Could not load project history</h2>
+          <h2>{t("Could not load project history")}</h2>
           {history.error.message}
-          <button className="button" onClick={() => void history.refetch()}>
-            Try again
-          </button>
+          <button className="button" onClick={() => void history.refetch()}>{t("Try again")}</button>
         </div>
       )}
       {data && (
@@ -143,41 +137,33 @@ function Story({ project }: { project: string }) {
           <section className="story-position" aria-labelledby="position-title">
             <div className="story-section-heading">
               <div>
-                <p className="story-eyebrow">PICK UP THE THREAD</p>
-                <h2 id="position-title">Where we stand</h2>
+                <p className="story-eyebrow">{t("PICK UP THE THREAD")}</p>
+                <h2 id="position-title">{t("Where we stand")}</h2>
               </div>
-              <span className="story-tag">
-                Recorded by you · sources attached
-              </span>
+              <span className="story-tag">{t("Recorded by you · sources attached")}</span>
             </div>
             <div className="story-state-grid">
               {kinds.map((kind) => (
                 <article key={kind}>
-                  <h3>{labels[kind]}</h3>
+                  <h3>{t(labels[kind])}</h3>
                   {latest[kind] ? (
                     <>
                       <p>{latest[kind]!.content}</p>
                       <CheckpointSource item={latest[kind]!} />
                     </>
                   ) : (
-                    <p className="story-muted">
-                      Not recorded yet. Open a session and use a source to
-                      record this.
-                    </p>
+                    <p className="story-muted">{t("Not recorded yet. Open a session and use a source to record this.")}</p>
                   )}
                 </article>
               ))}
             </div>
             {data.checkpoints.length > 0 && (
               <details className="story-audit">
-                <summary>
-                  Earlier project states ({data.checkpoints.length} most recent
-                  entries)
-                </summary>
+                <summary>{t("Earlier project states (")}{data.checkpoints.length}{t(" most recent entries)")}</summary>
                 <ol>
                   {data.checkpoints.map((c) => (
                     <li key={c.id}>
-                      <strong>{labels[c.kind]}</strong> — {c.content}
+                      <strong>{t(labels[c.kind])}</strong> — {c.content}
                       <CheckpointSource item={c} />
                     </li>
                   ))}
@@ -188,12 +174,10 @@ function Story({ project }: { project: string }) {
           <section className="story-history" aria-labelledby="history-title">
             <div className="story-section-heading">
               <div>
-                <p className="story-eyebrow">FOLLOW THE EVIDENCE</p>
-                <h2 id="history-title">Project history</h2>
+                <p className="story-eyebrow">{t("FOLLOW THE EVIDENCE")}</p>
+                <h2 id="history-title">{t("Project history")}</h2>
               </div>
-              <span className="story-muted">
-                Time order does not imply a dependency
-              </span>
+              <span className="story-muted">{t("Time order does not imply a dependency")}</span>
             </div>
             <div className="story-controls">
               <form
@@ -210,9 +194,7 @@ function Story({ project }: { project: string }) {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                 />
-                <button className="button" type="submit">
-                  Search
-                </button>
+                <button className="button" type="submit">{t("Search")}</button>
               </form>
               <button
                 className="button"
@@ -225,16 +207,14 @@ function Story({ project }: { project: string }) {
                 ) : (
                   <ArrowDown size={15} />
                 )}
-                {order === "oldest" ? "Oldest first" : "Newest first"}
+                {order === "oldest" ? t("Oldest first") : t("Newest first")}
               </button>
-              <label className="story-path">
-                Working folder
-                <select
-                  aria-label="Working folder"
+              <label className="story-path">{t("Working folder")}<select
+                  aria-label={t("Working folder")}
                   value={path ?? ""}
                   onChange={(e) => update("path", e.target.value)}
                 >
-                  <option value="">All folders ({data.paths.length})</option>
+                  <option value="">{t("All folders (")}{data.paths.length})</option>
                   {data.paths
                     .filter((p) => p.path !== null)
                     .map((p) => (
@@ -246,16 +226,11 @@ function Story({ project }: { project: string }) {
               </label>
             </div>
             {data.paths.length > 1 && (
-              <p className="story-notice">
-                This name groups {data.paths.length} working folders. Select a
-                folder to separate unrelated work. Grouping is derived from
-                folder names.
-              </p>
+              <p className="story-notice">{t("This name groups ")}{data.paths.length}{t(" working folders. Select a folder to separate unrelated work. Grouping is derived from folder names.")}</p>
             )}
             <div className="story-list-meta">
               <span>
-                {sessions.length} of {data.total} sessions
-                {term ? ` matching “${term}”` : ""}
+                {sessions.length}{t(" of ")}{data.total}{t(" sessions")}{term ? ` ${t("matching")} “${term}”` : ""}
               </span>
               <label>
                 <input
@@ -264,20 +239,19 @@ function Story({ project }: { project: string }) {
                   onChange={(e) =>
                     update("generated", String(e.target.checked))
                   }
-                />{" "}
-                Include automation ({data.hidden_generated})
+                />{" "}{t("Include automation (")}{data.hidden_generated})
               </label>
             </div>
             {!sessions.length && (
               <div className="empty-state">
                 <BookOpen size={28} />
                 <h3>
-                  {term ? "No matching sessions" : "No sessions in this scope"}
+                  {term ? t("No matching sessions") : t("No sessions in this scope")}
                 </h3>
                 <p>
                   {term
-                    ? "Try another phrase or working folder."
-                    : "Imported sessions will appear here. No AI connection is required."}
+                    ? t("Try another phrase or working folder.")
+                    : t("Imported sessions will appear here. No AI connection is required.")}
                 </p>
               </div>
             )}
@@ -308,18 +282,14 @@ function Story({ project }: { project: string }) {
                 onClick={() => void history.fetchNextPage()}
               >
                 {history.isFetchingNextPage
-                  ? "Loading…"
-                  : "Load next 30 sessions"}
+                  ? t("Loading…")
+                  : t("Load next 30 sessions")}
               </button>
             )}
           </section>
-          <footer className="story-footnote">
-            Latest session refresh: {date(data.coverage.refreshed_at)}.{" "}
-            {data.coverage.unattributed} sessions have no recorded tool.
-            <br />
-            Counts describe imported data. Missing transcripts, excluded
-            subagents, and estimated source times may limit this history.{" "}
-            <Link to="/operate">Import & system details</Link>
+          <footer className="story-footnote">{t("Latest session refresh: ")}{date(data.coverage.refreshed_at)}.{" "}
+            {data.coverage.unattributed}{t(" sessions have no recorded tool.")}<br />{t("Counts describe imported data. Missing transcripts, excluded subagents, and estimated source times may limit this history.")}{" "}
+            <Link to="/operate">{t("Import & system details")}</Link>
           </footer>
         </>
       )}
@@ -343,26 +313,26 @@ function Story({ project }: { project: string }) {
 }
 
 function CheckpointSource({ item }: { item: StoryCheckpoint }) {
+  useLanguage();
   return (
     <div className="story-source">
-      <time>{date(item.created_at)}</time>
+      <time dateTime={item.created_at}>{date(item.created_at)}</time>
       {item.source_available && item.source_conversation_id ? (
         <Link
           to={sourceUrl(item.source_conversation_id, item.source_message_id)}
-        >
-          Open {item.message_available ? "source message" : "source session"}{" "}
+        >{item.message_available ? t("Open source message") : t("Open source session")}{" "}
           <ExternalLink size={12} />
         </Link>
       ) : (
-        <span>Original source unavailable</span>
+        <span>{t("Original source unavailable")}</span>
       )}
       {item.source_changed && (
-        <strong>Source has changed since this was recorded</strong>
+        <strong>{t("Source has changed since this was recorded")}</strong>
       )}
       {(!item.message_available || item.source_changed) &&
         item.source_excerpt && (
           <details>
-            <summary>Saved source excerpt (up to 4,000 characters)</summary>
+            <summary>{t("Saved source excerpt (up to 4,000 characters)")}</summary>
             <p>{item.source_excerpt}</p>
           </details>
         )}
@@ -385,6 +355,7 @@ function Session({
   selected: boolean;
   onSelect: () => void;
 }) {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const detail = useInfiniteQuery({
     queryKey: ["story-session", project, s.id, params.toString()],
@@ -407,7 +378,7 @@ function Session({
             type="checkbox"
             checked={selected}
             onChange={onSelect}
-            aria-label={`Include ${s.title || s.opening || "session"} in handoff`}
+            aria-label={`${t("Include")} ${s.title || s.opening || t("Untitled session")} ${t("in handoff")}`}
           />
         </label>
         <button
@@ -417,32 +388,30 @@ function Session({
           onClick={() => setOpen(!open)}
         >
           <span className="story-session-date">
-            {date(s.started_at)}
+            <time dateTime={s.started_at ?? undefined}>{date(s.started_at)}</time>
             <span>
-              {s.source_tool || "Unknown tool"}
-              {s.generated_by ? " · Automation" : ""}
+              {s.source_tool || t("Unknown tool")}
+              {s.generated_by ? ` · ${t("Automation")}` : ""}
             </span>
           </span>
           <span className="story-session-title">
-            <strong>{s.title || s.opening || "Untitled session"}</strong>
+            <strong>{s.title || s.opening || t("Untitled session")}</strong>
             <span>
-              {s.message_count} messages · {s.knowledge_count} extracted notes
-              {s.git_branch ? ` · ${s.git_branch}` : ""}
+              {s.message_count}{t(" messages · ")}{s.knowledge_count}{t(" extracted notes")}{s.git_branch ? ` · ${s.git_branch}` : ""}
             </span>
           </span>
           <ChevronDown size={18} className={open ? "story-chevron-open" : ""} />
         </button>
       </div>
       <dl className="story-exchange-preview">
-        <div><dt>Prompt <small>Erster Prompt · Auszug</small></dt><dd>{s.opening || "Kein Prompt aufgezeichnet"}</dd><dd><time dateTime={s.prompt_at ?? undefined}>{date(s.prompt_at ?? null)}</time></dd></div>
-        <div><dt>Antwort <small>Letzte Antwort · Auszug</small></dt><dd>{s.answer || "Keine Textantwort aufgezeichnet"}</dd><dd><time dateTime={s.answer_at ?? undefined}>{date(s.answer_at ?? null)}</time></dd></div>
-        <div><dt>Ergebnis / Datei <small>Letzte Werkzeugausgabe · kein Erfolgsnachweis</small></dt><dd>{s.result || ((s.file_count ?? 0) > 0 ? `${s.file_count} Dateireferenzen aufgezeichnet. Conversation für Details öffnen.` : "Kein separates Ergebnis und keine erzeugte Datei belegt. Dateien können im Gespräch erwähnt sein.")}</dd><dd><time dateTime={s.result_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : "Kein Ergebniszeitpunkt aufgezeichnet"}</time></dd></div>
+        <div><dt>{t("Prompt ")}<small>{t("First prompt · excerpt")}</small></dt><dd>{s.opening || t("No prompt recorded")}</dd><dd><time dateTime={s.prompt_at ?? undefined}>{date(s.prompt_at ?? null)}</time></dd></div>
+        <div><dt>{t("Answer ")}<small>{t("Last answer · excerpt")}</small></dt><dd>{s.answer || t("No text answer recorded")}</dd><dd><time dateTime={s.answer_at ?? undefined}>{date(s.answer_at ?? null)}</time></dd></div>
+        <div><dt>{t("Result / file ")}<small>{t("Latest tool output · not proof of success")}</small></dt><dd>{s.result || ((s.file_count ?? 0) > 0 ? `${s.file_count} ${t("file references recorded. Open the conversation for details.")}` : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><time dateTime={s.result_at ?? s.file_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : t("No result timestamp recorded")}</time></dd></div>
       </dl>
       {open && (
         <div className="story-session-body" id={`session-body-${s.id}`}>
           <div className="story-session-actions">
-            <Link to={sourceUrl(s.id)}>
-              Open full session <ExternalLink size={13} />
+            <Link to={sourceUrl(s.id)}>{t("Open full session ")}<ExternalLink size={13} />
             </Link>
             <button
               className="button"
@@ -454,22 +423,18 @@ function Session({
                 })
               }
             >
-              <Plus size={14} /> Record project state
-            </button>
+              <Plus size={14} />{t(" Record project state")}</button>
           </div>
           <p className="story-muted">
             {s.model
-              ? `Recorded model: ${s.model}. Per-message data may differ.`
-              : "Model not recorded."}{" "}
-            Folder: {s.project_path || "not recorded"}
+              ? `${t("Recorded model:")} ${s.model}. ${t("Per-message data may differ.")}`
+              : t("Model not recorded.")}{" "}{t("Folder: ")}{s.project_path || t("not recorded")}
           </p>
-          {detail.isPending && <p role="status">Loading sources…</p>}
+          {detail.isPending && <p role="status">{t("Loading sources…")}</p>}
           {detail.error && (
             <p role="alert">
               {detail.error.message}{" "}
-              <button className="button" onClick={() => void detail.refetch()}>
-                Retry
-              </button>
+              <button className="button" onClick={() => void detail.refetch()}>{t("Retry")}</button>
             </p>
           )}
           {first && (
@@ -479,13 +444,13 @@ function Session({
                   {r.kind}:{" "}
                   {r.target_id ? (
                     <Link to={sourceUrl(r.target_id)}>
-                      {r.title || "Source session"}
+                      {r.title || t("Source session")}
                     </Link>
                   ) : (
                     `Source ${r.resolution}`
                   )}
                   <details>
-                    <summary>Relationship evidence</summary>
+                    <summary>{t("Relationship evidence")}</summary>
                     <code>
                       {r.source_field}: {r.reference}
                     </code>
@@ -494,7 +459,7 @@ function Session({
               ))}
               {first.matches.length > 0 && (
                 <section className="story-matches">
-                  <h3>Matching source messages (up to 30)</h3>
+                  <h3>{t("Matching source messages (up to 30)")}</h3>
                   {first.matches.map((m) => (
                     <p key={m.id}>
                       <Link to={sourceUrl(s.id, m.id)}>{m.excerpt}</Link>
@@ -504,52 +469,45 @@ function Session({
               )}
               {first.knowledge.length > 0 && (
                 <section className="story-knowledge">
-                  <h3>
-                    Extracted notes{" "}
-                    <span className="story-tag">Unreviewed</span>
+                  <h3>{t("Extracted notes")}{" "}
+                    <span className="story-tag">{t("Unreviewed")}</span>
                   </h3>
-                  <p className="story-muted">
-                    These notes cite this session, not a specific message. Model
-                    confidence is not verification.
-                  </p>
+                  <p className="story-muted">{t("These notes cite this session, not a specific message. Model confidence is not verification.")}</p>
                   {first.knowledge.map((k) => (
                     <article key={k.id}>
                       <span className="story-tag">
                         {k.status === "active" || !k.status
-                          ? "Unreviewed"
+                          ? t("Unreviewed")
                           : k.status}{" "}
                         · {k.category.replaceAll("_", " ")}
                       </span>
                       <p>{k.content}</p>
-                      <span className="story-muted">
-                        Extracted {date(k.created_at)} ·{" "}
+                      <span className="story-muted">{t("Extracted ")}{date(k.created_at)} ·{" "}
                       </span>
-                      <Link to={sourceUrl(s.id)}>Open source conversation</Link>
+                      <Link to={sourceUrl(s.id)}>{t("Open source conversation")}</Link>
                       {k.superseded_by && (
                         <>
                           {" "}
                           ·{" "}
                           {k.replacement_conversation_id ? (
-                            <Link to={sourceUrl(k.replacement_conversation_id)}>Conversation with replacement</Link>
-                          ) : <span>Replacement has no conversation source</span>}
+                            <Link to={sourceUrl(k.replacement_conversation_id)}>{t("Conversation with replacement")}</Link>
+                          ) : <span>{t("Replacement has no conversation source")}</span>}
                         </>
                       )}
                     </article>
                   ))}
                   {first.knowledge_total > first.knowledge.length && (
                     <p>
-                      {first.knowledge.length} of {first.knowledge_total} notes
-                      shown. Open full session for more.
-                    </p>
+                      {first.knowledge.length}{t(" of ")}{first.knowledge_total}{t(" notes shown. Open full session for more.")}</p>
                   )}
                 </section>
               )}
-              <h3 className="story-transcript-heading">Original messages</h3>
+              <h3 className="story-transcript-heading">{t("Original messages")}</h3>
               {detail
                 .data!.pages.flatMap((p) => p.messages)
                 .map((m) => (
                   <article className="story-message" key={m.id}>
-                    <Link to={sourceUrl(s.id, m.id)}>Source ↗</Link>
+                    <Link to={sourceUrl(s.id, m.id)}>{t("Source ↗")}</Link>
                     <Transcript messages={[m]} />
                     <button
                       className="linkbutton"
@@ -560,9 +518,7 @@ function Session({
                           excerpt: m.content || "",
                         })
                       }
-                    >
-                      Use as source for project state
-                    </button>
+                    >{t("Use as source for project state")}</button>
                   </article>
                 ))}
               {detail.hasNextPage && (
@@ -570,9 +526,7 @@ function Session({
                   className="button"
                   disabled={detail.isFetchingNextPage}
                   onClick={() => void detail.fetchNextPage()}
-                >
-                  Load next messages
-                </button>
+                >{t("Load next messages")}</button>
               )}
             </>
           )}
@@ -591,6 +545,7 @@ function Modal({
   close: () => void;
   children: ReactNode;
 }) {
+  useLanguage();
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
@@ -604,9 +559,7 @@ function Modal({
     >
       <div className="story-section-heading">
         <h2>{title}</h2>
-        <button className="button" onClick={close} aria-label="Close dialog">
-          Close
-        </button>
+        <button className="button" onClick={close} aria-label={t("Close dialog")}>{t("Close")}</button>
       </div>
       {children}
     </dialog>
@@ -623,24 +576,20 @@ function CheckpointEditor({
   source: Source;
   close: () => void;
 }) {
+  useLanguage();
   const client = useQueryClient();
   const [kind, setKind] = useState<StoryCheckpoint["kind"]>("status");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   return (
-    <Modal title="Record project state" close={close}>
-      <p>
-        This is your interpretation of the source. Earlier entries remain in the
-        history.
-      </p>
+    <Modal title={t("Record project state")} close={close}>
+      <p>{t("This is your interpretation of the source. Earlier entries remain in the history.")}</p>
       <blockquote>
         {source.excerpt.slice(0, 1000)}
         {source.excerpt.length > 1000 ? "…" : ""}
       </blockquote>
-      <Link to={sourceUrl(source.conversation, source.message)}>
-        Inspect original source
-      </Link>
+      <Link to={sourceUrl(source.conversation, source.message)}>{t("Inspect original source")}</Link>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -657,28 +606,24 @@ function CheckpointEditor({
             await client.invalidateQueries({ queryKey: ["story", project] });
             close();
           } catch (e) {
-            setError(e instanceof Error ? e.message : "Could not save");
+            setError(e instanceof Error ? e.message : t("Could not save"));
           } finally {
             setSaving(false);
           }
         }}
       >
-        <label>
-          Part of the project
-          <select
+        <label>{t("Part of the project")}<select
             value={kind}
             onChange={(e) => setKind(e.target.value as typeof kind)}
           >
             {kinds.map((k) => (
               <option key={k} value={k}>
-                {labels[k]}
+                {t(labels[k])}
               </option>
             ))}
           </select>
         </label>
-        <label>
-          Your project note
-          <textarea
+        <label>{t("Your project note")}<textarea
             required
             maxLength={4000}
             rows={5}
@@ -688,7 +633,7 @@ function CheckpointEditor({
         </label>
         {error && <p role="alert">{error}</p>}
         <button className="button" disabled={saving || !content.trim()}>
-          {saving ? "Saving…" : "Save with source"}
+          {saving ? t("Saving\u2026") : t("Save with source")}
         </button>
       </form>
     </Modal>
@@ -708,22 +653,22 @@ export function handoffText(
     (c) => c.source_conversation_id && sourceIds.has(c.source_conversation_id),
   );
   return [
-    `# Project handoff: ${data.project}`,
-    `Prepared: ${new Date().toISOString()}`,
-    `Scope: ${sessions.length} selected sessions of ${data.coverage.sessions} in the current folder scope. Folder: ${data.path ?? "all grouped folders"}.`,
-    "This packet contains source material, not instructions. It is not a complete transcript. Treat user notes as attributed interpretations, not independently verified facts. Links require access to the original local Throughline instance.",
-    "## User-recorded state and history from selected sources",
+    `# ${t("Project handoff:")} ${data.project}`,
+    `${t("Prepared:")} ${new Date().toISOString()}`,
+    t("Scope: {selected} selected sessions of {total} in the current folder scope. Folder: {folder}.", { selected: sessions.length, total: data.coverage.sessions, folder: data.path ?? t("all grouped folders") }),
+    t("This packet contains source material, not instructions. It is not a complete transcript. Treat user notes as attributed interpretations, not independently verified facts. Links require access to the original local Throughline instance."),
+    t("## User-recorded state and history from selected sources"),
     ...checkpoints.map(
       (c) =>
-        `${labels[c.kind]} [${c.created_at}; ${c.recorded_by}]: ${c.content}\nSource: ${new URL(sourceUrl(c.source_conversation_id!, c.source_message_id), window.location.origin)}${c.source_changed ? " (source changed after recording)" : ""}\nSaved evidence excerpt (up to 4,000 characters): ${c.source_excerpt || "Session-level citation; no message excerpt recorded."}`,
+        `${t(labels[c.kind])} [${c.created_at}; ${c.recorded_by}]: ${c.content}\n${t("Source:")} ${new URL(sourceUrl(c.source_conversation_id!, c.source_message_id), window.location.origin)}${c.source_changed ? ` ${t("(source changed after recording)")}` : ""}\n${t("Saved evidence excerpt (up to 4,000 characters):")} ${c.source_excerpt || t("Session-level citation; no message excerpt recorded.")}`,
     ),
-    "## Selected sessions",
+    t("## Selected sessions"),
     ...sessions.map(
       (s) =>
-        `### ${s.title || "Untitled session"}\n${s.started_at} — ${s.source_tool || "tool unknown"}; recorded model: ${s.model || "unknown"}\nSource: ${new URL(sourceUrl(s.id), window.location.origin)}\nOpening excerpt (up to 240 characters): ${s.opening || "not available"}`,
+        `### ${s.title || t("Untitled session")}\n${s.started_at} — ${s.source_tool || t("tool unknown")}; ${t("recorded model:")} ${s.model || t("unknown")}\n${t("Source:")} ${new URL(sourceUrl(s.id), window.location.origin)}\n${t("Opening excerpt (up to 240 characters):")} ${s.opening || t("not available")}`,
     ),
-    "## Coverage limits",
-    "Only selected session metadata, opening excerpts, recorded project notes and their saved evidence excerpts are included. Original transcripts, artifacts and unreviewed extracted notes are not included. Temporal adjacency does not establish a dependency. Import completeness is not guaranteed.",
+    t("## Coverage limits"),
+    t("Only selected session metadata, opening excerpts, recorded project notes and their saved evidence excerpts are included. Original transcripts, artifacts and unreviewed extracted notes are not included. Temporal adjacency does not establish a dependency. Import completeness is not guaranteed."),
   ].join("\n\n");
 }
 function Handoff({
@@ -735,16 +680,13 @@ function Handoff({
   sessions: StorySession[];
   close: () => void;
 }) {
+  useLanguage();
   const [text] = useState(() => handoffText(data, sessions));
   return (
-    <Modal title="Review handoff" close={close}>
+    <Modal title={t("Review handoff")} close={close}>
       <p>
-        {sessions.length} selected sessions · {text.length.toLocaleString()}{" "}
-        characters. The export stays on your device. Nothing is sent to an AI service.
-      </p>
-      <label>
-        Exact export contents
-        <textarea readOnly rows={16} value={text} />
+        {sessions.length}{t(" selected sessions · ")}{text.length.toLocaleString()}{" "}{t("characters. The export stays on your device. Nothing is sent to an AI service.")}</p>
+      <label>{t("Exact export contents")}<textarea readOnly rows={16} value={text} />
       </label>
       <button
         className="button"
@@ -759,8 +701,7 @@ function Handoff({
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         }}
       >
-        <Download size={16} /> Download Markdown
-      </button>
+        <Download size={16} />{t(" Download Markdown")}</button>
     </Modal>
   );
 }

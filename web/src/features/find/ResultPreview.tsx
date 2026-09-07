@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
@@ -58,6 +60,7 @@ export function previewTarget(item: FindItem): { kind: string; id: string } | nu
 }
 
 export function ResultPreview({ item }: { item: FindItem | null }) {
+  useLanguage();
   const target = item ? previewTarget(item) : null;
 
   const { data, isPending } = useQuery({
@@ -74,7 +77,7 @@ export function ResultPreview({ item }: { item: FindItem | null }) {
   if (!item) {
     return (
       <aside className="preview preview-empty" aria-label="Preview">
-        <p>Select a result to read it here.</p>
+        <p>{t("Select a result to read it here.")}</p>
         <p className="preview-hint">
           <kbd>↓</kbd> from the search box, then <kbd>j</kbd> <kbd>k</kbd> to move ·{" "}
           <kbd>Enter</kbd> to open in full
@@ -86,7 +89,7 @@ export function ResultPreview({ item }: { item: FindItem | null }) {
   if (!target) {
     return (
       <aside className="preview" aria-label="Preview">
-        <p className="preview-hint">This result has no record to show.</p>
+        <p className="preview-hint">{t("This result has no record to show.")}</p>
       </aside>
     );
   }
@@ -100,9 +103,7 @@ export function ResultPreview({ item }: { item: FindItem | null }) {
     <aside className="preview" aria-label="Preview" aria-busy={isPending}>
       <div className="preview-head">
         <span className="preview-kind">{item.kind}</span>
-        <Link to={routeFor(item)} className="preview-open">
-          Open in full
-          <ArrowUpRight size={14} aria-hidden />
+        <Link to={routeFor(item)} className="preview-open">{t("Open in full")}<ArrowUpRight size={14} aria-hidden />
         </Link>
       </div>
 
@@ -112,7 +113,7 @@ export function ResultPreview({ item }: { item: FindItem | null }) {
           series of requests. */}
       <h2 className="preview-title">{item.title || `${item.kind} ${item.id}`}</h2>
 
-      {isPending && <p className="preview-hint">Loading…</p>}
+      {isPending && <p className="preview-hint">{t("Loading…")}</p>}
 
       {!isPending &&
         long.map(([k, v]) => (

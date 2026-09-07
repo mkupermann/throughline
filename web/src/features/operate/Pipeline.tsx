@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { Ban, CheckCircle2, CircleAlert, Clock3, LoaderCircle, Play, Square } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -29,6 +31,7 @@ function PipelineAction({
   onRun: (name: string) => void;
   onStop: (id: string) => void;
 }) {
+  useLanguage();
   if (runningJobId) {
     return (
       <button
@@ -37,14 +40,12 @@ function PipelineAction({
         onClick={() => onStop(runningJobId)}
         aria-label={`Stop ${stage.label.toLowerCase()}`}
       >
-        <Square size={13} aria-hidden />
-        Stop
-      </button>
+        <Square size={13} aria-hidden />{t("Stop")}</button>
     );
   }
 
   if (stage.action_href) {
-    const content = <>{stage.action_label ?? "Open"}</>;
+    const content = <>{stage.action_label ?? t("Open")}</>;
     return stage.action_href.startsWith("#") ? (
       <a className="button pipeline-action" href={stage.action_href}>{content}</a>
     ) : (
@@ -82,6 +83,7 @@ export function Pipeline({
   onStop: (id: string) => void;
   onFinished: (jobId: string, name: string, completion: JobCompletion) => void;
 }) {
+  useLanguage();
   const runningJob = (stage: PipelineStage) => {
     const activeMatches =
       activeJob &&
@@ -98,17 +100,17 @@ export function Pipeline({
     <section className="pipeline-section" aria-labelledby="pipeline-heading">
       <div className="pipeline-heading-row">
         <div>
-          <h2 id="pipeline-heading" className="section-label">Knowledge pipeline</h2>
-          <p>Move stored sessions from discovery to trusted, reusable knowledge.</p>
+          <h2 id="pipeline-heading" className="section-label">{t("Knowledge pipeline")}</h2>
+          <p>{t("Move stored sessions from discovery to trusted, reusable knowledge.")}</p>
         </div>
       </div>
       {stages.length === 0 ? (
         <div className="disclosure">
           <CircleAlert size={15} aria-hidden />
-          <div>Pipeline state is not available from this server.</div>
+          <div>{t("Pipeline state is not available from this server.")}</div>
         </div>
       ) : (
-        <ol className="pipeline" aria-label="Knowledge pipeline">
+        <ol className="pipeline" aria-label={t("Knowledge pipeline")}>
           {stages.map((stage, index) => {
             const activeStageJob = runningJob(stage);
             const renderedState = activeStageJob ? "running" : stage.state;
@@ -134,8 +136,7 @@ export function Pipeline({
                   <p className="pipeline-reason">{stage.blocked_reason}</p>
                 )}
                 {stage.last_success && (
-                  <p className="pipeline-last">
-                    Last success <time dateTime={stage.last_success}>{formatDateTime(stage.last_success)}</time>
+                  <p className="pipeline-last">{t("Last success ")}<time dateTime={stage.last_success}>{formatDateTime(stage.last_success)}</time>
                   </p>
                 )}
                 <PipelineAction

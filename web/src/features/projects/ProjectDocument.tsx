@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { Link } from "react-router-dom";
 
 import { Transcript } from "@/features/detail/Transcript";
@@ -46,12 +48,12 @@ function groupSessionRuns(messages: ProjectContextMessage[]): SessionGroup[] {
 }
 
 function Provenance({ item }: { item: Knowledge }) {
+  useLanguage();
   if (item.source_type === "conversation" && item.source_id) {
-    return <Link to={`/c/${item.source_id}`}>Open source conversation</Link>;
+    return <Link to={`/c/${item.source_id}`}>{t("Open source conversation")}</Link>;
   }
   return (
-    <span className="project-knowledge-source">
-      Source: {item.source_type.replace(/_/g, " ")}
+    <span className="project-knowledge-source">{t("Source: ")}{item.source_type.replace(/_/g, " ")}
       {item.source_id ? ` #${item.source_id}` : ""}
     </span>
   );
@@ -72,6 +74,7 @@ export function ProjectDocument({
   onLoadComplete: () => void;
   loading: boolean;
 }) {
+  useLanguage();
   const knowledgeGroups = groupKnowledge(knowledge);
   // A session can overlap another session in wall-clock time. Group only
   // contiguous runs so A1, B1, A2 remains A1, B1, A2 in the document.
@@ -82,7 +85,7 @@ export function ProjectDocument({
       <p className="project-summary">{summary}</p>
 
       <section aria-labelledby="project-knowledge-heading">
-        <h2 id="project-knowledge-heading">Knowledge</h2>
+        <h2 id="project-knowledge-heading">{t("Knowledge")}</h2>
         {knowledgeGroups.length ? (
           <div className="project-knowledge-groups">
             {knowledgeGroups.map(([category, items]) => (
@@ -94,7 +97,7 @@ export function ProjectDocument({
                       <p>{item.content}</p>
                       <div className="project-knowledge-meta">
                         <Provenance item={item} />
-                        <span>Confidence {Math.round(item.confidence * 100)}%</span>
+                        <span>{t("Confidence ")}{Math.round(item.confidence * 100)}%</span>
                       </div>
                     </li>
                   ))}
@@ -103,12 +106,12 @@ export function ProjectDocument({
             ))}
           </div>
         ) : (
-          <p className="empty-state">No extracted knowledge yet.</p>
+          <p className="empty-state">{t("No extracted knowledge yet.")}</p>
         )}
       </section>
 
       <section aria-labelledby="project-transcript-heading">
-        <h2 id="project-transcript-heading">Transcript</h2>
+        <h2 id="project-transcript-heading">{t("Transcript")}</h2>
         {sessions.length ? (
           <div className="project-session-documents">
             {sessions.map((session, index) => (
@@ -124,7 +127,7 @@ export function ProjectDocument({
             ))}
           </div>
         ) : (
-          <p className="empty-state">No transcript messages yet.</p>
+          <p className="empty-state">{t("No transcript messages yet.")}</p>
         )}
       </section>
 

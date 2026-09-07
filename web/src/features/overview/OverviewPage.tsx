@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -31,6 +33,7 @@ const SEVERITY_LABEL = {
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 } as const;
 
 function AttentionRow({ item }: { item: AttentionItem }) {
+  useLanguage();
   const Icon = SEVERITY_ICON[item.severity];
   return (
     <li className={`attn attn-${item.severity}`}>
@@ -54,7 +57,7 @@ function AttentionRow({ item }: { item: AttentionItem }) {
       </div>
       {item.action && (
         <Link to={item.action} className="attn-action">
-          {item.action_label ?? "Open"}
+          {item.action_label ?? t("Open")}
           <ArrowRight size={14} aria-hidden />
         </Link>
       )}
@@ -63,11 +66,12 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 }
 
 function VerdictBanner({ data }: { data: Overview }) {
+  useLanguage();
   if (data.verdict === "ok") {
     return (
       <div className="verdict verdict-ok">
         <CheckCircle2 size={18} aria-hidden />
-        <span>Nothing needs your attention.</span>
+        <span>{t("Nothing needs your attention.")}</span>
       </div>
     );
   }
@@ -81,6 +85,7 @@ function VerdictBanner({ data }: { data: Overview }) {
 }
 
 export function OverviewPage() {
+  useLanguage();
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,
@@ -92,7 +97,7 @@ export function OverviewPage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Overview</h1>
+          <h1 className="page-title">{t("Overview")}</h1>
         </header>
         <div className="skeleton skeleton-headline" />
         <div className="skeleton skeleton-row" />
@@ -106,17 +111,15 @@ export function OverviewPage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Overview</h1>
+          <h1 className="page-title">{t("Overview")}</h1>
         </header>
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h2>Cannot load the overview</h2>
+          <h2>{t("Cannot load the overview")}</h2>
           <p>{e.message}</p>
           {e.hint && <p className="empty-hint">{e.hint}</p>}
           <button type="button" className="button" onClick={() => refetch()}>
-            <RefreshCw size={14} aria-hidden />
-            Try again
-          </button>
+            <RefreshCw size={14} aria-hidden />{t("Try again")}</button>
         </div>
       </>
     );
@@ -127,12 +130,12 @@ export function OverviewPage() {
       <header className="page-header">
         <div className="page-header-row">
           <div>
-            <h1 className="page-title">Overview</h1>
+            <h1 className="page-title">{t("Overview")}</h1>
             {/* States what the page is for. It used to echo the headline's
               * label — "Memory chunks under management" — which describes a
               * database table rather than telling the reader why they are
               * here. */}
-            <p className="page-subtitle">What needs doing, and what is in here.</p>
+            <p className="page-subtitle">{t("What needs doing, and what is in here.")}</p>
           </div>
           <button
             type="button"
@@ -158,9 +161,7 @@ export function OverviewPage() {
         * exactly the case where the reader needs telling. */}
       {data.attention.length > 0 ? (
         <section aria-labelledby="attn-h" className="worklist">
-          <h2 id="attn-h" className="worklist-title">
-            Needs attention
-          </h2>
+          <h2 id="attn-h" className="worklist-title">{t("Needs attention")}</h2>
           <ul className="attn-list">
             {/* Most urgent first. The server appends items in the order its
               * checks happen to run, which is an implementation detail, not a
@@ -191,9 +192,7 @@ export function OverviewPage() {
         * competing with its own contents; space groups them just as well and
         * leaves the page quiet enough for the worklist above to lead. */}
       <section aria-labelledby="stock-h" className="stock">
-        <h2 id="stock-h" className="sr-only">
-          What is stored
-        </h2>
+        <h2 id="stock-h" className="sr-only">{t("What is stored")}</h2>
         <div className="stock-lead">
           <div className="stock-value tabular">{formatCompact(data.headline.value)}</div>
           <div className="stock-label">
@@ -224,17 +223,13 @@ export function OverviewPage() {
         * at. Falls back to one column below 1100px. */}
       <div className="panels">
         <section aria-labelledby="activity-h" className="panel">
-          <h2 id="activity-h" className="panel-title">
-            Activity
-          </h2>
+          <h2 id="activity-h" className="panel-title">{t("Activity")}</h2>
           <Sparkline data={data.activity} days={30} label="Conversations, last 30 days" />
         </section>
 
         {data.categories.length > 0 && (
           <section aria-labelledby="cats-h" className="panel">
-            <h2 id="cats-h" className="panel-title">
-              Memory by category
-            </h2>
+            <h2 id="cats-h" className="panel-title">{t("Memory by category")}</h2>
             <CategoryBars categories={data.categories} />
           </section>
         )}

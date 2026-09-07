@@ -73,3 +73,55 @@ Real interface recordings with fictional conversations, people, outcomes and age
 [![Models walkthrough](models.png)](models.mp4)
 
 [Play MP4](models.mp4) · [WebVTT captions](models.vtt)
+
+## Inline previews
+
+The GIFs play in GitHub Markdown. Open the MP4 for the full-size recording. All recordings use the English interface and English captions.
+
+### Projects
+
+[![Projects](./projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4)
+
+### Conversations
+
+[![Conversations](./conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4)
+
+### Find
+
+[![Find](./find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4)
+
+### Timeline
+
+[![Timeline](./timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4)
+
+### Review
+
+[![Review](./review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4)
+
+### Operate
+
+[![Operate](./operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4)
+
+### Console
+
+[![Console](./console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4)
+
+### AI team operations
+
+[![AI team operations](./teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4)
+
+### Roles
+
+[![Roles](./roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4)
+
+### Members
+
+[![Members](./members.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4)
+
+### Team pipelines
+
+[![Team pipelines](./pipelines.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4)
+
+### Model providers
+
+[![Model providers](./models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4)

@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -36,6 +38,7 @@ export type DetailKind = (typeof DETAIL_KINDS)[keyof typeof DETAIL_KINDS];
  * rules don't reach here" in the UI audit.
  */
 export function DetailPage({ kind }: { kind: DetailKind }) {
+  useLanguage();
   const { id } = useParams();
   const navigate = useNavigate();
 
@@ -60,9 +63,7 @@ export function DetailPage({ kind }: { kind: DetailKind }) {
   if (isPending) {
     return (
       <>
-        <p className="sr-only" role="status">
-          Loading…
-        </p>
+        <p className="sr-only" role="status">{t("Loading…")}</p>
         {/* Mirrors the loaded page's bones — crumb, title, meta row, content —
             so nothing jumps when the data lands. */}
         <div aria-hidden>
@@ -86,13 +87,9 @@ export function DetailPage({ kind }: { kind: DetailKind }) {
         {e.hint && <p className="empty-hint">{e.hint}</p>}
         {/* A 404 is an answer; anything else is worth one more try. */}
         {!notFound && (
-          <button type="button" className="button" onClick={() => refetch()}>
-            Try again
-          </button>
+          <button type="button" className="button" onClick={() => refetch()}>{t("Try again")}</button>
         )}
-        <Link to="/find" className="button">
-          Back to Find
-        </Link>
+        <Link to="/find" className="button">{t("Back to Find")}</Link>
       </div>
     );
   }

@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import {
   createContext,
   useCallback,
@@ -89,6 +91,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  useLanguage();
   const [busy, setBusy] = useState(false);
   return (
     <div className={`toast toast-${toast.tone ?? "default"}`}>
@@ -107,9 +110,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
             }
           }}
         >
-          <Undo2 size={13} aria-hidden />
-          Undo
-        </button>
+          <Undo2 size={13} aria-hidden />{t("Undo")}</button>
       )}
       <button type="button" className="toast-close" onClick={onDismiss} aria-label="Dismiss">
         <X size={13} aria-hidden />

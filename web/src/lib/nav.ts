@@ -28,14 +28,14 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
-  { to: "/", label: "Projekte", icon: Compass, group: "Work", chord: "o", description: "Resume your projects" },
-  { to: "/conversations", label: "Conversations", icon: MessagesSquare, group: "Work", chord: "v", description: "Gespräche nach Projekt öffnen" },
+  { to: "/", label: "Projects", icon: Compass, group: "Work", chord: "o", description: "Resume your projects" },
+  { to: "/conversations", label: "Conversations", icon: MessagesSquare, group: "Work", chord: "v", description: "Open conversations by project" },
   { to: "/find", label: "Find", icon: Search, group: "Work", chord: "f", description: "Search everything" },
   { to: "/timeline", label: "Timeline", icon: CalendarRange, group: "Work", chord: "t", description: "Activity over time" },
   { to: "/curate", label: "Review", icon: ClipboardCheck, group: "Trust", chord: "c", description: "Keep memory trustworthy" },
   { to: "/operate", label: "Operate", icon: Cog, group: "System", chord: "p", description: "Pipeline and jobs" },
   { to: "/console", label: "Console", icon: Terminal, group: "System", chord: "s", description: "SQL console" },
-  { to: "/pm", label: "KI-Teamsteuerung", icon: Users, group: "System", chord: "m", description: "Virtual team ops" },
+  { to: "/pm", label: "AI team operations", icon: Users, group: "System", chord: "m", description: "Virtual team ops" },
 ];
 
 export const NAV_GROUPS = ["Work", "Trust", "System"] as const;

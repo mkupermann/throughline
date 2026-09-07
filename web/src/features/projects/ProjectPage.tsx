@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -47,6 +49,7 @@ export function ProjectPage() {
 }
 
 export function LegacyProjectPage() {
+  useLanguage();
   const { name } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const project = decodeURIComponent(name ?? "");
@@ -353,9 +356,7 @@ export function LegacyProjectPage() {
   return (
     <>
       <header className="page-header">
-        <Link to="/" className="backlink">
-          ← Overview
-        </Link>
+        <Link to="/" className="backlink">{t("← Overview")}</Link>
         <h1 className="page-title">{project}</h1>
         <p className="page-subtitle">{pageSubtitle}</p>
       </header>
@@ -372,9 +373,7 @@ export function LegacyProjectPage() {
           className={mode === "document" ? "is-on" : ""}
           onClick={() => selectMode("document")}
           onKeyDown={handleTabKeyDown}
-        >
-          Document
-        </button>
+        >{t("Document")}</button>
         <button
           ref={sessionsTab}
           id="project-sessions-tab"
@@ -386,9 +385,7 @@ export function LegacyProjectPage() {
           className={mode === "sessions" ? "is-on" : ""}
           onClick={() => selectMode("sessions")}
           onKeyDown={handleTabKeyDown}
-        >
-          Sessions
-        </button>
+        >{t("Sessions")}</button>
       </div>
 
       <section
@@ -405,20 +402,18 @@ export function LegacyProjectPage() {
                 aria-pressed={documentOrder === "oldest"}
                 onClick={() => void setDocumentOrder("oldest")}
               >
-                <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
-              </button>
+                <ArrowUpWideNarrow size={14} aria-hidden />{t(" Oldest first")}</button>
               <button
                 type="button"
                 className={documentOrder === "newest" ? "is-on" : ""}
                 aria-pressed={documentOrder === "newest"}
                 onClick={() => void setDocumentOrder("newest")}
               >
-                <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
-              </button>
+                <ArrowDownWideNarrow size={14} aria-hidden />{t(" Newest first")}</button>
             </div>
           </div>
 
-          {context.isPending && <p className="ask-status">Loading…</p>}
+          {context.isPending && <p className="ask-status">{t("Loading…")}</p>}
           {context.error && (
             <ProjectError error={context.error as ApiError} onRetry={() => context.refetch()} />
           )}
@@ -479,20 +474,18 @@ export function LegacyProjectPage() {
                 aria-pressed={sessionOrder === "newest"}
                 onClick={() => update({ order: null })}
               >
-                <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
-              </button>
+                <ArrowDownWideNarrow size={14} aria-hidden />{t(" Newest first")}</button>
               <button
                 type="button"
                 className={sessionOrder === "oldest" ? "is-on" : ""}
                 aria-pressed={sessionOrder === "oldest"}
                 onClick={() => update({ order: "oldest" })}
               >
-                <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
-              </button>
+                <ArrowUpWideNarrow size={14} aria-hidden />{t(" Oldest first")}</button>
             </div>
           </div>
 
-          {sessionIndex.isPending && <p className="ask-status">Loading…</p>}
+          {sessionIndex.isPending && <p className="ask-status">{t("Loading…")}</p>}
           {sessionIndex.error && (
             <ProjectError error={sessionIndex.error as ApiError} onRetry={() => sessionIndex.refetch()} />
           )}
@@ -500,7 +493,7 @@ export function LegacyProjectPage() {
           {!sessionIndex.isPending && !sessionIndex.error && visibleSessions.length === 0 && (
             <div className="empty-state">
               <h2>{query ? `Nothing in ${project} matches “${query}”` : "No sessions yet"}</h2>
-              {query && <p>Search covers session titles and every message inside them.</p>}
+              {query && <p>{t("Search covers session titles and every message inside them.")}</p>}
             </div>
           )}
           {sessionLoadError && <p className="ask-status" role="alert">{sessionLoadError}</p>}
@@ -547,20 +540,13 @@ export function LegacyProjectPage() {
           {sessionIndex.data && sessionIndex.data.hidden_generated > 0 && (
             <p className="proj-hidden">
               {includeGenerated ? (
-                <>
-                  Showing machine-generated sessions too. These are tool calls Throughline and other
-                  automation made on your behalf.{" "}
-                  <button type="button" className="linkbutton" onClick={() => update({ generated: null })}>
-                    Hide them
-                  </button>
+                <>{t("Showing machine-generated sessions too. These are tool calls Throughline and other automation made on your behalf.")}{" "}
+                  <button type="button" className="linkbutton" onClick={() => update({ generated: null })}>{t("Hide them")}</button>
                 </>
               ) : (
                 <>
-                  {formatCount(sessionIndex.data.hidden_generated)} machine-generated sessions in this
-                  project are not listed. They are stored, not deleted.{" "}
-                  <button type="button" className="linkbutton" onClick={() => update({ generated: "1" })}>
-                    Show them
-                  </button>
+                  {formatCount(sessionIndex.data.hidden_generated)}{t(" machine-generated sessions in this project are not listed. They are stored, not deleted.")}{" "}
+                  <button type="button" className="linkbutton" onClick={() => update({ generated: "1" })}>{t("Show them")}</button>
                 </>
               )}
             </p>
@@ -571,14 +557,13 @@ export function LegacyProjectPage() {
 }
 
 function ProjectError({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
+  useLanguage();
   return (
     <div className="empty-state">
-      <h2>Could not load project history</h2>
+      <h2>{t("Could not load project history")}</h2>
       <p>{error.message}</p>
       {error.hint && <p className="empty-hint">{error.hint}</p>}
-      <button type="button" className="button" onClick={onRetry}>
-        Try again
-      </button>
+      <button type="button" className="button" onClick={onRetry}>{t("Try again")}</button>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { forwardRef, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Copy } from "lucide-react";
@@ -100,6 +102,7 @@ export const ResultRow = forwardRef<
     knownCategories?: Set<string>;
   }
 >(function ResultRow({ item, terms, isSelected, onSelect, onCopy, knownCategories }, ref) {
+  useLanguage();
   // A message's own text is the snippet — its `title` is the *conversation*
   // summary, which is identical for every message in that conversation. Using
   // it as the heading made five distinct results look like the same row, so
@@ -195,7 +198,7 @@ export const ResultRow = forwardRef<
           onClick={() => void onCopy(item)}
         >
           <Copy size={13} aria-hidden />
-          <span>Copy context</span>
+          <span>{t("Copy context")}</span>
         </button>
       )}
     </li>

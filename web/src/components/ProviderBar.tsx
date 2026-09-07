@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 
@@ -44,6 +46,7 @@ const HIDDEN_EXACT = ["/"];
 const UNATTRIBUTED = "(unattributed)";
 
 export function ProviderBar() {
+  useLanguage();
   const { pathname } = useLocation();
   const [sp, setSp] = useSearchParams();
   const { data } = useQuery({
@@ -142,9 +145,7 @@ export function ProviderBar() {
           type="button"
           className="provider-chip provider-chip-clear"
           onClick={() => setSp(withProviders(sp, []))}
-        >
-          Clear scope
-        </button>
+        >{t("Clear scope")}</button>
       )}
       {/* Says the omission out loud. Silently dropping the empty tools would
           make "Throughline supports nine assistants" and a bar showing three

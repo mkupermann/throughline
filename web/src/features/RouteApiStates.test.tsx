@@ -349,7 +349,7 @@ describe("route API states", () => {
     // Transcript with humanised role labels, not raw column values.
     expect(screen.getByText("Transcript")).toBeTruthy();
     expect(screen.getByText("Prompt")).toBeTruthy();
-    expect(screen.getByText("Antwort")).toBeTruthy();
+    expect(screen.getByText("Answer")).toBeTruthy();
     // Token counts formatted through Intl.
     expect(screen.getByText("365,390")).toBeTruthy();
   });

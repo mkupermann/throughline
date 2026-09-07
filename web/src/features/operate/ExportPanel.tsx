@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUp, Check, Download, Folder, FolderOpen, Info } from "lucide-react";
@@ -23,6 +25,7 @@ function FolderBrowser({
   onChoose: (path: string) => void;
   onCancel: () => void;
 }) {
+  useLanguage();
   const [path, setPath] = useState<string | undefined>(startPath);
 
   const { data, error, isPending } = useQuery({
@@ -50,9 +53,9 @@ function FolderBrowser({
             </button>
           </li>
         )}
-        {isPending && <li className="folder-browser-empty">Loading…</li>}
+        {isPending && <li className="folder-browser-empty">{t("Loading…")}</li>}
         {data && data.dirs.length === 0 && !data.parent && (
-          <li className="folder-browser-empty">No subfolders here.</li>
+          <li className="folder-browser-empty">{t("No subfolders here.")}</li>
         )}
         {data?.dirs.map((d) => (
           <li key={d.path}>
@@ -65,13 +68,9 @@ function FolderBrowser({
       </ul>
 
       <div className="folder-browser-actions">
-        <button type="button" className="button" onClick={onCancel}>
-          Cancel
-        </button>
+        <button type="button" className="button" onClick={onCancel}>{t("Cancel")}</button>
         <button type="button" className="button" disabled={!data} onClick={() => data && onChoose(data.path)}>
-          <Check size={13} aria-hidden />
-          Use this folder
-        </button>
+          <Check size={13} aria-hidden />{t("Use this folder")}</button>
       </div>
     </div>
   );
@@ -87,6 +86,7 @@ function FolderBrowser({
  * design than one they can read beforehand.
  */
 export function ExportPanel() {
+  useLanguage();
   const toast = useToast();
   const [out, setOut] = useState("");
   const [redact, setRedact] = useState(false);
@@ -132,12 +132,8 @@ export function ExportPanel() {
     <div className="job" id="export">
       <div className="job-head">
         <div className="job-text">
-          <h3 className="job-title">Export as Markdown</h3>
-          <p className="job-desc">
-            Plain Markdown for Obsidian or any editor: one folder per project, sessions oldest
-            first. Each turn is labelled prompt, answer or execution, and names the model that
-            produced it. Re-running updates the same folder and leaves your own notes alone.
-          </p>
+          <h3 className="job-title">{t("Export as Markdown")}</h3>
+          <p className="job-desc">{t("Plain Markdown for Obsidian or any editor: one folder per project, sessions oldest first. Each turn is labelled prompt, answer or execution, and names the model that produced it. Re-running updates the same folder and leaves your own notes alone.")}</p>
         </div>
         <button type="button" className="button" onClick={submit} disabled={start.isPending}>
           <Download size={13} aria-hidden />
@@ -147,7 +143,7 @@ export function ExportPanel() {
 
       <div className="export-form">
         <div className="export-field">
-          <label htmlFor="export-destination">Destination</label>
+          <label htmlFor="export-destination">{t("Destination")}</label>
           <div className="export-field-row">
             <input
               id="export-destination"
@@ -160,9 +156,7 @@ export function ExportPanel() {
               placeholder={options?.suggested ?? "/absolute/path/to/a/folder"}
             />
             <button type="button" className="button is-small" onClick={() => setBrowsing(true)}>
-              <FolderOpen size={13} aria-hidden />
-              Choose folder…
-            </button>
+              <FolderOpen size={13} aria-hidden />{t("Choose folder…")}</button>
           </div>
         </div>
 
@@ -204,7 +198,7 @@ export function ExportPanel() {
         <div className="export-toggles">
           <label>
             <input type="checkbox" checked={redact} onChange={(e) => setRedact(e.target.checked)} />
-            <span>Redact keys, tokens, emails and home paths</span>
+            <span>{t("Redact keys, tokens, emails and home paths")}</span>
           </label>
           <label>
             <input
@@ -212,7 +206,7 @@ export function ExportPanel() {
               checked={includeGenerated}
               onChange={(e) => setIncludeGenerated(e.target.checked)}
             />
-            <span>Include the tool&rsquo;s own model calls</span>
+            <span>{t("Include the tool&rsquo;s own model calls")}</span>
           </label>
           <label>
             <input
@@ -220,7 +214,7 @@ export function ExportPanel() {
               checked={toolOutput > 0}
               onChange={(e) => setToolOutput(e.target.checked ? 400 : 0)}
             />
-            <span>Keep the first 400 characters of tool output</span>
+            <span>{t("Keep the first 400 characters of tool output")}</span>
           </label>
         </div>
       </div>

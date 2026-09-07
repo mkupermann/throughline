@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 
@@ -31,6 +33,7 @@ function FacetGroup({
   labels?: Record<string, string>;
   max?: number;
 }) {
+  useLanguage();
   const [open, setOpen] = useState(initiallyOpen);
   const [showAll, setShowAll] = useState(false);
   if (!values.length) return null;
@@ -72,8 +75,7 @@ function FacetGroup({
           })}
           {hidden > 0 && (
             <li>
-              <button type="button" className="facet-more" onClick={() => setShowAll(true)}>
-                Show {hidden} more
+              <button type="button" className="facet-more" onClick={() => setShowAll(true)}>{t("Show ")}{hidden} more
               </button>
             </li>
           )}
@@ -98,9 +100,10 @@ export function FacetRail({
   onClear: () => void;
   activeCount: number;
 }) {
+  useLanguage();
   if (!facets) {
     return (
-      <aside className="rail" aria-label="Filters">
+      <aside className="rail" aria-label={t("Filters")}>
         <div className="skeleton skeleton-row" />
         <div className="skeleton skeleton-row" />
       </aside>
@@ -108,18 +111,15 @@ export function FacetRail({
   }
 
   return (
-    <aside className="rail" aria-label="Filters">
+    <aside className="rail" aria-label={t("Filters")}>
       <div className="rail-head">
         {/* A real heading, not a styled span: the facet groups below are h3,
             and jumping straight from the page h1 to h3 breaks heading
             navigation for screen-reader users. */}
-        <h2 className="section-label" style={{ margin: 0 }}>
-          Filters
-        </h2>
+        <h2 className="section-label" style={{ margin: 0 }}>{t("Filters")}</h2>
         {activeCount > 0 && (
           <button type="button" className="rail-clear" onClick={onClear}>
-            <X size={12} aria-hidden />
-            Clear {activeCount}
+            <X size={12} aria-hidden />{t("Clear ")}{activeCount}
           </button>
         )}
       </div>
@@ -133,20 +133,20 @@ export function FacetRail({
         max={6}
       />
       <FacetGroup
-        title="Category"
+        title={t("Category")}
         values={facets.categories}
         selected={state.categories}
         onToggle={(v) => onToggle("category", v)}
       />
       <FacetGroup
-        title="Project"
+        title={t("Project")}
         values={facets.projects}
         selected={state.projects}
         onToggle={(v) => onToggle("project", v)}
         initiallyOpen={false}
       />
       <FacetGroup
-        title="Status"
+        title={t("Status")}
         values={facets.statuses}
         selected={state.statuses}
         onToggle={(v) => onToggle("status", v)}
@@ -162,7 +162,7 @@ export function FacetRail({
 
       <section className="facet">
         <h3>
-          <span className="facet-head as-text">Confidence</span>
+          <span className="facet-head as-text">{t("Confidence")}</span>
         </h3>
         <label className="facet-range">
           <input
@@ -185,7 +185,7 @@ export function FacetRail({
 
       <section className="facet">
         <h3>
-          <span className="facet-head as-text">Embedding</span>
+          <span className="facet-head as-text">{t("Embedding")}</span>
         </h3>
         <ul className="facet-values">
           {[

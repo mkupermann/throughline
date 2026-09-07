@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { Moon, Sun, Monitor, Keyboard } from "lucide-react";
@@ -62,10 +64,11 @@ function useGoChords(sp: URLSearchParams, enabled: boolean) {
 }
 
 function ThemeToggle() {
+  useLanguage();
   const { theme, cycleTheme } = useTheme();
   const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
   const label =
-    theme === "light" ? "Light theme" : theme === "dark" ? "Dark theme" : "Matching system theme";
+    theme === "light" ? t("Light theme") : theme === "dark" ? t("Dark theme") : t("Matching system theme");
   return (
     <button
       type="button"
@@ -82,6 +85,7 @@ function ThemeToggle() {
 }
 
 function KeyboardHelp({ onClose }: { onClose: () => void }) {
+  useLanguage();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -117,20 +121,20 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
         className="keyboard-help"
         role="dialog"
         aria-modal="true"
-        aria-label="Keyboard shortcuts"
+        aria-label={t("Keyboard shortcuts")}
         onKeyDown={onKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="keyboard-help-header">
-          <h2>Keyboard shortcuts</h2>
-          <button ref={closeRef} type="button" className="icon-button" aria-label="Close keyboard shortcuts" onClick={onClose}>
+          <h2>{t("Keyboard shortcuts")}</h2>
+          <button ref={closeRef} type="button" className="icon-button" aria-label={t("Close keyboard shortcuts")} onClick={onClose}>
             ×
           </button>
         </div>
         <dl>
-          <div><dt><kbd>Cmd/Ctrl+K</kbd></dt><dd>Open the command palette</dd></div>
+          <div><dt><kbd>Cmd/Ctrl+K</kbd></dt><dd>{t("Open the command palette")}</dd></div>
           {NAV.map((item) => (
-            <div key={item.to}><dt><kbd>g {item.chord}</kbd></dt><dd>{item.label}</dd></div>
+            <div key={item.to}><dt><kbd>g {item.chord}</kbd></dt><dd>{t(item.label)}</dd></div>
           ))}
         </dl>
       </div>
@@ -139,6 +143,8 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
 }
 
 export function Shell() {
+  const { lang, setLang } = useLanguage();
+  useEffect(() => { document.documentElement.lang = lang; }, [lang]);
   const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sp] = useSearchParams();
   const [paletteHintSeen, setPaletteHintSeen] = useState(false);
@@ -168,9 +174,7 @@ export function Shell() {
 
   return (
     <div className="shell">
-      <a href="#main" className="sr-only">
-        Skip to main content
-      </a>
+      <a href="#main" className="sr-only">{t("Skip to main content")}</a>
 
       <aside className="sidebar">
         <div className="brand">
@@ -179,25 +183,25 @@ export function Shell() {
           </div>
           <div className="brand-text">
             <div className="brand-title">Throughline</div>
-            <div className="brand-sub">Memory</div>
+            <div className="brand-sub">{t("Memory")}</div>
           </div>
         </div>
 
         <div className="nav-groups">
           {NAV_GROUPS.map((group) => (
-            <nav key={group} aria-label={group}>
-              <h2 className="nav-group-title">{group}</h2>
+            <nav key={group} aria-label={t(group)}>
+              <h2 className="nav-group-title">{t(group)}</h2>
               <ul className="nav-list">
                 {NAV.filter((item) => item.group === group).map((item) => (
                   <li key={item.to}>
                     <NavLink
                       to={carryProviders(item.to, sp)}
                       end={item.to === "/"}
-                      aria-label={item.label}
+                      aria-label={t(item.label)}
                       className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
                     >
                       <item.icon size={16} aria-hidden />
-                      <span>{item.label}</span>
+                      <span>{t(item.label)}</span>
                       <kbd className="nav-kbd">g {item.chord}</kbd>
                     </NavLink>
                   </li>
@@ -210,16 +214,19 @@ export function Shell() {
         <div className="sidebar-foot">
           {!paletteHintSeen && (
             <div className="palette-nudge">
-              <span>
-                Press <kbd>{paletteShortcut}</kbd>
+              <span>{t("Press ")}<kbd>{paletteShortcut}</kbd>
               </span>
             </div>
           )}
+          <div className="language-toggle" role="group" aria-label={t("Interface language")}>
+            <button type="button" aria-label={t("Use English")} aria-pressed={lang === "en"} onClick={() => setLang("en")}>EN</button>
+            <button type="button" aria-label={t("Use German")} aria-pressed={lang === "de"} onClick={() => setLang("de")}>DE</button>
+          </div>
           <ThemeToggle />
-          <button ref={helpTriggerRef} type="button" className="icon-button" aria-label="Keyboard shortcuts" onClick={() => setHelpOpen(true)}>
+          <button ref={helpTriggerRef} type="button" className="icon-button" aria-label={t("Keyboard shortcuts")} onClick={() => setHelpOpen(true)}>
             <Keyboard size={16} aria-hidden />
           </button>
-          <div className="density-toggle" role="group" aria-label="Display density">
+          <div className="density-toggle" role="group" aria-label={t("Display density")}>
             {(["comfortable", "compact"] as const).map((option) => (
               <button
                 key={option}
@@ -228,7 +235,7 @@ export function Shell() {
                 aria-pressed={density === option}
                 onClick={() => setDensity(option)}
               >
-                {option === "comfortable" ? "Comfortable" : "Compact"}
+                {option === "comfortable" ? t("Comfortable") : t("Compact")}
               </button>
             ))}
           </div>

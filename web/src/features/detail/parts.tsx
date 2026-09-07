@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -87,11 +89,12 @@ export function whenEntry(label: string, iso: unknown): MetaEntry | null {
 /** Find › Kind › This record. The kind crumb is a live filter link, not a
  *  label: it lands on Find already narrowed to that kind. */
 export function Crumbs({ kind, current }: { kind: string; current: string }) {
+  useLanguage();
   return (
     <nav aria-label="Breadcrumb" className="detail-crumbs">
       <ol>
         <li>
-          <Link to="/find">Find</Link>
+          <Link to="/find">{t("Find")}</Link>
         </li>
         <li>
           <Link to={`/find?kinds=${kind}`}>{KIND_LABEL[kind] ?? humanize(kind)}</Link>
@@ -183,9 +186,10 @@ export function RelatedSection({
  *  page. Power users keep complete access to what the API returned; the page
  *  above stops depending on it. */
 export function RawData({ record }: { record: Record<string, unknown> }) {
+  useLanguage();
   return (
     <details className="detail-raw stack-top">
-      <summary>Raw data</summary>
+      <summary>{t("Raw data")}</summary>
       <pre className="detail-raw-json">{JSON.stringify(record, null, 2)}</pre>
     </details>
   );

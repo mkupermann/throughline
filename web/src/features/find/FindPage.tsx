@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -27,6 +29,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function FindPage() {
+  useLanguage();
   const { state, update, toggle, clearAll, activeFilterCount } = useFindState();
   const [draft, setDraft] = useState(state.q);
   const debounced = useDebounced(draft, 220);
@@ -199,10 +202,8 @@ export function FindPage() {
   return (
     <>
       <header className="page-header">
-        <h1 className="page-title">Find</h1>
-        <p className="page-subtitle">
-          One query across conversations, messages, memory, skills, projects and prompts.
-        </p>
+        <h1 className="page-title">{t("Find")}</h1>
+        <p className="page-subtitle">{t("One query across conversations, messages, memory, skills, projects and prompts.")}</p>
       </header>
 
       <div className="find-intent mode-switch" role="group" aria-label="Knowledge action">
@@ -212,16 +213,14 @@ export function FindPage() {
           onClick={() => state.mode === "ask" && update({ mode: lastFindMode.current })}
           aria-pressed={state.mode !== "ask"}
         >
-          <Search size={14} aria-hidden /> Find
-        </button>
+          <Search size={14} aria-hidden />{t(" Find")}</button>
         <button
           type="button"
           className={state.mode === "ask" ? "is-on" : ""}
           onClick={() => update({ mode: "ask" })}
           aria-pressed={state.mode === "ask"}
         >
-          <MessageCircleQuestion size={14} aria-hidden /> Ask
-        </button>
+          <MessageCircleQuestion size={14} aria-hidden />{t(" Ask")}</button>
       </div>
 
       <div className="searchbar">
@@ -269,37 +268,34 @@ export function FindPage() {
               onClick={() => update({ mode: "list" })}
               aria-pressed={state.mode === "list"}
             >
-              <LayoutList size={14} aria-hidden /> List
-            </button>
+              <LayoutList size={14} aria-hidden />{t(" List")}</button>
             <button
               type="button"
               className={state.mode === "table" ? "is-on" : ""}
               onClick={() => update({ mode: "table" })}
               aria-pressed={state.mode === "table"}
             >
-              <Rows3 size={14} aria-hidden /> Table
-            </button>
+              <Rows3 size={14} aria-hidden />{t(" Table")}</button>
             <button
               type="button"
               className={state.mode === "graph" ? "is-on" : ""}
               onClick={() => update({ mode: "graph" })}
               aria-pressed={state.mode === "graph"}
             >
-              <Network size={14} aria-hidden /> Graph
-            </button>
+              <Network size={14} aria-hidden />{t(" Graph")}</button>
           </div>
         )}
       </div>
 
       {recent.length > 0 && (
         <nav className="recent-queries" aria-label="Recent queries">
-          <span className="recent-queries-label">Recent</span>
+          <span className="recent-queries-label">{t("Recent")}</span>
           <ul>
             {recent.map((item) => (
               <li key={`${item.intent}:${item.query.toLocaleLowerCase()}`}>
                 <button
                   type="button"
-                  aria-label={`${item.intent === "ask" ? "Ask" : "Find"}: ${item.query}`}
+                  aria-label={`${item.intent === "ask" ? t("Ask") : t("Find")}: ${item.query}`}
                   onClick={() => {
                     setDraft(item.query);
                     update({
@@ -338,25 +334,21 @@ export function FindPage() {
           )}
 
           {state.mode !== "ask" && hasActiveQuery && isPending && (
-            <p className="muted">Searching…</p>
+            <p className="muted">{t("Searching…")}</p>
           )}
 
           {state.mode !== "ask" && !state.q.trim() && activeFilterCount === 0 && (
             <div className="empty-state">
               <Search size={22} aria-hidden />
-              <h2>Search or browse your memory</h2>
-              <p>
-                Type to search across every record type at once — text matching always
-                runs, and meaning-based matching joins in when an embedding backend is
-                configured. Or pick a filter on the left to browse by time instead.
-              </p>
+              <h2>{t("Search or browse your memory")}</h2>
+              <p>{t("Type to search across every record type at once — text matching always runs, and meaning-based matching joins in when an embedding backend is configured. Or pick a filter on the left to browse by time instead.")}</p>
             </div>
           )}
 
           {state.mode !== "ask" && error && (
             <div className="empty-state">
               <OctagonAlert size={22} aria-hidden />
-              <h2>Search failed</h2>
+              <h2>{t("Search failed")}</h2>
               <p>{(error as ApiError).message}</p>
               {(error as ApiError).hint && <p className="empty-hint">{(error as ApiError).hint}</p>}
             </div>
@@ -400,7 +392,7 @@ export function FindPage() {
                 <div className="disclosure">
                   <Info size={15} aria-hidden />
                   <div>
-                    <strong>Text matching only.</strong>{" "}
+                    <strong>{t("Text matching only.")}</strong>{" "}
                     {data.notes.find((n) => n.includes("Semantic")) ?? data.notes[0]}
                   </div>
                 </div>
@@ -409,7 +401,7 @@ export function FindPage() {
                 <div className="disclosure">
                   <Info size={15} aria-hidden />
                   <div>
-                    <strong>Browsing by time.</strong> {data.notes[0]}
+                    <strong>{t("Browsing by time.")}</strong> {data.notes[0]}
                   </div>
                 </div>
               )}
@@ -423,8 +415,7 @@ export function FindPage() {
                       : "Try a different term. Text matching looks for the literal string."}
                   </p>
                   {activeFilterCount > 0 && (
-                    <button type="button" className="button" onClick={clearAll}>
-                      Clear {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}
+                    <button type="button" className="button" onClick={clearAll}>{t("Clear ")}{activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}
                     </button>
                   )}
                 </div>
@@ -450,20 +441,15 @@ export function FindPage() {
                     className="button"
                     disabled={state.page === 0}
                     onClick={() => update({ page: state.page - 1 })}
-                  >
-                    Previous
-                  </button>
-                  <span className="tabular">
-                    Page {state.page + 1} of {pageCount}
+                  >{t("Previous")}</button>
+                  <span className="tabular">{t("Page ")}{state.page + 1} of {pageCount}
                   </span>
                   <button
                     type="button"
                     className="button"
                     disabled={state.page + 1 >= pageCount}
                     onClick={() => update({ page: state.page + 1 })}
-                  >
-                    Next
-                  </button>
+                  >{t("Next")}</button>
                 </nav>
               )}
             </>

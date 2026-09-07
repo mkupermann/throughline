@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Download, Info, OctagonAlert, Play, Square, Terminal } from "lucide-react";
@@ -65,27 +67,23 @@ function ProvidersTable({
   jobs: JobSummary[];
   onIngest: (name: string) => void;
 }) {
+  useLanguage();
   const jobByName = new Map(jobs.map((j) => [j.name, j]));
   return (
     <div className="table-wrap scroll-x">
       <table className="sqltable providers-table">
-        <caption className="sr-only">
-          Coverage per source: files on disk, pending, excluded and imported, with an ingest
-          action for each.
-        </caption>
+        <caption className="sr-only">{t("Coverage per source: files on disk, pending, excluded and imported, with an ingest action for each.")}</caption>
         <thead>
           <tr>
-            <th scope="col">Provider</th>
-            <th scope="col">On disk</th>
-            <th scope="col">Pending</th>
-            <th scope="col" title="Discovered but not ingested (subagent transcripts).">
-              Excluded
-            </th>
-            <th scope="col">Ingested</th>
-            <th scope="col">Last import</th>
-            <th scope="col">Status</th>
+            <th scope="col">{t("Provider")}</th>
+            <th scope="col">{t("On disk")}</th>
+            <th scope="col">{t("Pending")}</th>
+            <th scope="col" title="Discovered but not ingested (subagent transcripts).">{t("Excluded")}</th>
+            <th scope="col">{t("Ingested")}</th>
+            <th scope="col">{t("Last import")}</th>
+            <th scope="col">{t("Status")}</th>
             <th scope="col">
-              <span className="sr-only">Action</span>
+              <span className="sr-only">{t("Action")}</span>
             </th>
           </tr>
         </thead>
@@ -147,6 +145,7 @@ function JobCard({
   onStop: (id: string) => void;
   onFinished: (jobId: string, completion: JobCompletion) => void;
 }) {
+  useLanguage();
   // `activeJobId` is already resolved by the parent from either the local
   // "I just started this" state or the server's view. Re-checking job.running
   // here required the status query to have refetched first, so the console
@@ -160,9 +159,7 @@ function JobCard({
         </div>
         {activeJobId ? (
           <button type="button" className="button is-danger" onClick={() => onStop(activeJobId)}>
-            <Square size={13} aria-hidden />
-            Stop
-          </button>
+            <Square size={13} aria-hidden />{t("Stop")}</button>
         ) : (
           <button
             type="button"
@@ -171,9 +168,7 @@ function JobCard({
             disabled={Boolean(job.unavailable)}
             title={job.unavailable ?? undefined}
           >
-            <Play size={13} aria-hidden />
-            Run
-          </button>
+            <Play size={13} aria-hidden />{t("Run")}</button>
         )}
       </div>
       {job.unavailable && (
@@ -193,6 +188,7 @@ function JobCard({
 }
 
 export function OperatePage() {
+  useLanguage();
   const qc = useQueryClient();
   const toast = useToast();
   const [activeJob, setActiveJob] = useState<{ name: string; id: string } | null>(null);
@@ -253,11 +249,11 @@ export function OperatePage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Operate</h1>
+          <h1 className="page-title">{t("Operate")}</h1>
         </header>
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h2>Cannot load pipeline state</h2>
+          <h2>{t("Cannot load pipeline state")}</h2>
           <p>{(error as Error).message}</p>
         </div>
       </>
@@ -270,7 +266,7 @@ export function OperatePage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Operate</h1>
+          <h1 className="page-title">{t("Operate")}</h1>
         </header>
         <div className="skeleton skeleton-row" />
       </>
@@ -296,8 +292,8 @@ export function OperatePage() {
   return (
     <>
       <header className="page-header">
-        <h1 className="page-title">Operate</h1>
-        <p className="page-subtitle">Pipeline state, and the jobs that change it.</p>
+        <h1 className="page-title">{t("Operate")}</h1>
+        <p className="page-subtitle">{t("Pipeline state, and the jobs that change it.")}</p>
       </header>
       <p className="sr-only" role="status" aria-live="polite">
         {jobAnnouncement}
@@ -320,7 +316,7 @@ export function OperatePage() {
       />
 
       <section className="stack-top">
-        <h2 className="section-label">Environment</h2>
+        <h2 className="section-label">{t("Environment")}</h2>
         <dl className="totals">
           <div className="total">
             <dt>database</dt>
@@ -378,7 +374,7 @@ export function OperatePage() {
       </section>
 
       <section className="stack-top">
-        <h2 className="section-label">Inventory</h2>
+        <h2 className="section-label">{t("Inventory")}</h2>
         <dl className="totals totals--metric">
           {Object.entries(data.counts).map(([k, v]) => (
             <div key={k} className="total">
@@ -390,9 +386,7 @@ export function OperatePage() {
       </section>
 
       <section id="provider-coverage" className="stack-top" aria-labelledby="coverage-h">
-        <h2 id="coverage-h" className="section-label">
-          Provider coverage
-        </h2>
+        <h2 id="coverage-h" className="section-label">{t("Provider coverage")}</h2>
         {data.providers ? (
           <ProvidersTable
             providers={data.providers}
@@ -402,8 +396,8 @@ export function OperatePage() {
         ) : (
           <div className="empty-state">
             <OctagonAlert size={22} aria-hidden />
-            <h3>Provider coverage unavailable</h3>
-            <p>This server did not return source coverage. Refresh after the backend is updated.</p>
+            <h3>{t("Provider coverage unavailable")}</h3>
+            <p>{t("This server did not return source coverage. Refresh after the backend is updated.")}</p>
           </div>
         )}
       </section>
@@ -413,8 +407,7 @@ export function OperatePage() {
           Run buttons it was there and nobody found it. */}
       <section className="stack-top">
         <h2 className="section-label">
-          <Download size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> Export and portability
-        </h2>
+          <Download size={13} aria-hidden style={{ verticalAlign: "-2px" }} />{t(" Export and portability")}</h2>
         <div className="jobs">
           <ExportPanel />
         </div>
@@ -437,7 +430,7 @@ export function OperatePage() {
               </span>
             </summary>
             <div className="advanced-operations-body">
-              <p>Low-frequency repair, metadata and diagnostic jobs.</p>
+              <p>{t("Low-frequency repair, metadata and diagnostic jobs.")}</p>
               <div className="jobs">
                 {advancedJobs.map((job) => (
                   <JobCard
@@ -459,7 +452,7 @@ export function OperatePage() {
 
       {data.ingestion.length > 0 && (
         <section className="stack-top">
-          <h2 className="section-label">Recent ingestion</h2>
+          <h2 className="section-label">{t("Recent ingestion")}</h2>
           <ul className="results">
             {data.ingestion.slice(0, 10).map((r, i) => {
               const { label, full } = fmtIngestPath(String(r.file_path ?? ""));

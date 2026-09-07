@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { Link } from "react-router-dom";
 import { OctagonAlert } from "lucide-react";
 
@@ -60,6 +62,7 @@ export function TimelineDetail({
   error: unknown;
   onClose: () => void;
 }) {
+  useLanguage();
   const items = data?.items ?? [];
   const truncated = total !== undefined && items.length < total;
 
@@ -72,25 +75,22 @@ export function TimelineDetail({
             <span className="timeline-detail-scope"> · scoped to {providers.join(", ")}</span>
           )}
         </h2>
-        <button type="button" className="linkbutton" onClick={onClose}>
-          Close
-        </button>
+        <button type="button" className="linkbutton" onClick={onClose}>{t("Close")}</button>
       </div>
 
-      {isLoading && <p className="muted">Loading…</p>}
+      {isLoading && <p className="muted">{t("Loading…")}</p>}
 
       {error ? (
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h3>Cannot load events for this day</h3>
+          <h3>{t("Cannot load events for this day")}</h3>
           <p>{(error as ApiError).message}</p>
           {(error as ApiError).hint && <p className="empty-hint">{(error as ApiError).hint}</p>}
         </div>
       ) : null}
 
       {!isLoading && !error && items.length === 0 && (
-        <p className="empty-state">
-          No events on {day}
+        <p className="empty-state">{t("No events on ")}{day}
           {providers.length > 0 ? " for the current provider scope." : "."}
         </p>
       )}
@@ -98,8 +98,7 @@ export function TimelineDetail({
       {items.length > 0 && (
         <>
           {truncated && (
-            <p className="timeline-detail-truncated muted">
-              Showing {formatCount(items.length)} of {formatCount(total)}.
+            <p className="timeline-detail-truncated muted">{t("Showing ")}{formatCount(items.length)} of {formatCount(total)}.
             </p>
           )}
           {/* Each row links to the record it names. A timeline that shows you

@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -59,6 +61,7 @@ function QueueTab({
 }
 
 export function CuratePage() {
+  useLanguage();
   const [sp, setSp] = useSearchParams();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   //: A destructive action waiting to be confirmed, or null.
@@ -296,9 +299,7 @@ export function CuratePage() {
             : "They are marked as replaced and drop out of active memory. Nothing is erased."}
         </p>
         <div className="confirm-actions">
-          <button type="button" className="button" onClick={cancelPending} autoFocus>
-            Cancel
-          </button>
+          <button type="button" className="button" onClick={cancelPending} autoFocus>{t("Cancel")}</button>
           <button type="button" className="button is-danger" onClick={commit}>
             {pending.action === "forget" ? "Forget" : "Supersede"} {pending.ids.length}
           </button>
@@ -313,12 +314,10 @@ export function CuratePage() {
       return (
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h2>Cannot load this queue</h2>
+          <h2>{t("Cannot load this queue")}</h2>
           <p>{e.message}</p>
           {e.hint && <p className="empty-hint">{e.hint}</p>}
-          <button type="button" className="button" onClick={() => refetchQueue()}>
-            Try again
-          </button>
+          <button type="button" className="button" onClick={() => refetchQueue()}>{t("Try again")}</button>
         </div>
       );
     }
@@ -327,7 +326,7 @@ export function CuratePage() {
       return (
         <div className="empty-state">
           <CheckCircle2 size={22} aria-hidden />
-          <h2>Nothing in this queue</h2>
+          <h2>{t("Nothing in this queue")}</h2>
           <p>{queue?.description}</p>
         </div>
       );
@@ -357,16 +356,14 @@ export function CuratePage() {
     return (
       <>
         <header className="page-header">
-          <h1 className="page-title">Review</h1>
+          <h1 className="page-title">{t("Review")}</h1>
         </header>
         <div className="empty-state">
           <OctagonAlert size={22} aria-hidden />
-          <h2>Cannot load curation queues</h2>
+          <h2>{t("Cannot load curation queues")}</h2>
           <p>{e.message}</p>
           {e.hint && <p className="empty-hint">{e.hint}</p>}
-          <button type="button" className="button" onClick={() => refetchQueues()}>
-            Try again
-          </button>
+          <button type="button" className="button" onClick={() => refetchQueues()}>{t("Try again")}</button>
         </div>
       </>
     );
@@ -378,7 +375,7 @@ export function CuratePage() {
   return (
     <>
       <header className="page-header">
-        <h1 className="page-title">Review</h1>
+        <h1 className="page-title">{t("Review")}</h1>
         <p className="page-subtitle">
           {totalOutstanding === 0
             ? "Every queue is clear."
@@ -388,14 +385,13 @@ export function CuratePage() {
 
       <section className="audit-panel" aria-labelledby="drift-audit-heading">
         <div className="audit-panel-copy">
-          <h2 id="drift-audit-heading">Memory drift audit</h2>
+          <h2 id="drift-audit-heading">{t("Memory drift audit")}</h2>
           <p>{auditSummary(audit?.last_run ?? null)}</p>
           {audit?.last_run?.created_at && (
-            <p className="audit-last-run">
-              Last run {new Date(audit.last_run.created_at).toLocaleString("en-US")}
+            <p className="audit-last-run">{t("Last run ")}{new Date(audit.last_run.created_at).toLocaleString("en-US")}
             </p>
           )}
-          {auditError && <p className="job-unavailable">Audit status is unavailable.</p>}
+          {auditError && <p className="job-unavailable">{t("Audit status is unavailable.")}</p>}
           {audit?.job?.unavailable && (
             <p className="job-unavailable">{audit.job.unavailable}</p>
           )}
@@ -492,10 +488,7 @@ export function CuratePage() {
           {active === "forgotten" && items.length > 0 && (
             <div className="disclosure">
               <OctagonAlert size={15} aria-hidden />
-              <div>
-                These are soft-deleted and excluded from search, but still in the database.
-                Permanent deletion lives under Operate and cannot be undone.
-              </div>
+              <div>{t("These are soft-deleted and excluded from search, but still in the database. Permanent deletion lives under Operate and cannot be undone.")}</div>
             </div>
           )}
         </div>

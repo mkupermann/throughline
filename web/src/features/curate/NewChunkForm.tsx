@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
@@ -14,6 +16,7 @@ import { useToast } from "@/components/Toaster";
  * this form; it is here for parity.
  */
 export function NewChunkForm() {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("insight");
@@ -58,9 +61,7 @@ export function NewChunkForm() {
   if (!open) {
     return (
       <button type="button" className="button" onClick={() => setOpen(true)}>
-        <Plus size={13} aria-hidden />
-        New chunk
-      </button>
+        <Plus size={13} aria-hidden />{t("New chunk")}</button>
     );
   }
 
@@ -73,14 +74,14 @@ export function NewChunkForm() {
       }}
     >
       <div className="newchunk-head">
-        <strong>New memory chunk</strong>
-        <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="Cancel">
+        <strong>{t("New memory chunk")}</strong>
+        <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label={t("Cancel")}>
           <X size={14} aria-hidden />
         </button>
       </div>
 
       <label className="field">
-        <span>Content</span>
+        <span>{t("Content")}</span>
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
@@ -93,7 +94,7 @@ export function NewChunkForm() {
 
       <div className="newchunk-row">
         <label className="field">
-          <span>Category</span>
+          <span>{t("Category")}</span>
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
             {(cats?.categories ?? [category]).map((c) => (
               <option key={c} value={c}>
@@ -103,11 +104,11 @@ export function NewChunkForm() {
           </select>
         </label>
         <label className="field">
-          <span>Project</span>
+          <span>{t("Project")}</span>
           <input value={project} onChange={(e) => setProject(e.target.value)} placeholder="optional" />
         </label>
         <label className="field">
-          <span>Tags</span>
+          <span>{t("Tags")}</span>
           <input
             value={tags}
             onChange={(e) => setTags(e.target.value)}
@@ -117,7 +118,7 @@ export function NewChunkForm() {
       </div>
 
       <button type="submit" className="button" disabled={!content.trim() || create.isPending}>
-        {create.isPending ? "Saving…" : "Save"}
+        {create.isPending ? "Saving…" : t("Save")}
       </button>
     </form>
   );

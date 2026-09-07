@@ -50,7 +50,7 @@ const scenarios = [
    await p.getByRole('link',{name:/Acme Storefront Relaunch/}).first().click();
    await p.getByRole('heading',{name:'Tasks',exact:true}).scrollIntoViewIfNeeded();
    await p.evaluate(()=>window.scrollBy(0,350));
- },'Fictional tasks show completed, blocked and running states. No agent is launched.'],
+ },'Fictional tasks show passed, budget-exhausted and stopped states. No agent is launched.'],
  ['roles','/pm/roles','Define the responsibility and tool for a role.',async p=>{await p.evaluate(()=>window.scrollBy(0,300));},'The demo separates analysis, execution, testing and review.'],
  ['members','/pm/members','See the people and agents available to teams.',async p=>{await p.evaluate(()=>window.scrollBy(0,250));},'These identities are invented fixtures, not real team members.'],
  ['pipelines','/pm/teams','Inspect the roles and sequence in a team pipeline.',async p=>{await p.evaluate(()=>window.scrollBy(0,300));},'Team configuration is reusable across linked projects.'],
@@ -61,6 +61,7 @@ const manifest=selected ? JSON.parse(await readFile(path.join(out,'manifest.json
 for (const [name,route,intro,act,outro] of scenarios) {
  if(selected && !selected.includes(name)) continue;
  const ctx=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,locale:'en-GB',timezoneId:'Europe/Amsterdam',recordVideo:{dir:out,size:{width:1440,height:900}},reducedMotion:'reduce'});
+ await ctx.addInitScript(() => localStorage.setItem("pm-lang", "en"));
  const page=await ctx.newPage();
  await page.goto(base+route);
  await page.waitForLoadState('networkidle');
@@ -78,6 +79,8 @@ for (const [name,route,intro,act,outro] of scenarios) {
  const raw=await video.path(); const mp4=path.join(out,`${name}.mp4`);
  const result=spawnSync(process.env.FFMPEG_BIN || 'ffmpeg',['-y','-i',raw,'-an','-c:v','libx264','-preset','fast','-crf','25','-pix_fmt','yuv420p','-movflags','+faststart',mp4],{encoding:'utf8'});
  if(result.status!==0) throw Error(result.stderr);
+ const preview=spawnSync(process.env.FFMPEG_BIN || 'ffmpeg',['-y','-i',mp4,'-vf','fps=6,scale=800:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=96[p];[s1][p]paletteuse=dither=bayer','-loop','0',path.join(out,`${name}.gif`)],{encoding:'utf8'});
+ if(preview.status!==0) throw Error(preview.stderr);
  await unlink(raw);
  const probe=spawnSync('ffprobe',['-v','error','-show_entries','format=duration','-of','csv=p=0',mp4],{encoding:'utf8'});
  const duration=Number(probe.stdout.trim());

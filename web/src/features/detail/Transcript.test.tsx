@@ -35,8 +35,8 @@ describe("Transcript", () => {
 
  it("keeps output references and exact times visible without opening a disclosure", () => {
    render(<Transcript messages={[{id: 99, role: "assistant", content: "Done", created_at: "2026-08-01T10:02:34Z", content_blocks: [{type: "output_file", path: "report.md"}]}]} />);
-   expect(screen.getByText("Antwort")).toBeTruthy();
-   expect(screen.getByText("Ergebnis / Datei")).toBeTruthy();
+   expect(screen.getByText("Answer")).toBeTruthy();
+   expect(screen.getByText("Result / file")).toBeTruthy();
    expect(screen.getByText("report.md").closest("details")).toBeNull();
    expect(screen.getByText(/:02:34/)).toBeTruthy();
  });

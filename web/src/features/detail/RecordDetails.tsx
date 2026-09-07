@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { Link } from "react-router-dom";
 
 import { formatCount, formatDateTime, pluralise } from "@/lib/format";
@@ -38,6 +40,7 @@ function memoryStatus(status: string | null): { label: string; cls: string } | n
 }
 
 export function MemoryDetail({ id, record }: { id: string; record: Rec }) {
+  useLanguage();
   const category = str(record.category);
   const content = str(record.content) ?? "";
   const project = str(record.project_name);
@@ -55,16 +58,15 @@ export function MemoryDetail({ id, record }: { id: string; record: Rec }) {
       <Crumbs kind="memory" current={category ? humanize(category) : `#${id}`} />
       <header className="page-header detail-head">
         <p className="detail-kicker">
-          <span className="kind kind-memory">Memory</span>
+          <span className="kind kind-memory">{t("Memory")}</span>
           <span className="detail-id tabular">#{id}</span>
           {status && <span className={`detail-status ${status.cls}`}>{status.label}</span>}
         </p>
         <h1 className="page-title detail-title">
-          {category ? humanize(category) : "Memory"}
+          {category ? humanize(category) : t("Memory")}
         </h1>
         {createdAt && (
-          <p className="page-subtitle">
-            Remembered {formatDateTime(createdAt)}
+          <p className="page-subtitle">{t("Remembered ")}{formatDateTime(createdAt)}
             {sourceType === "conversation" && sourceId !== null && (
               <>
                 {" from "}
@@ -83,17 +85,17 @@ export function MemoryDetail({ id, record }: { id: string; record: Rec }) {
       <MetaList
         label="Memory details"
         items={[
-          { label: "Confidence", value: percent(record.confidence), num: true },
+          { label: t("Confidence"), value: percent(record.confidence), num: true },
           project
             ? {
-                label: "Project",
+                label: t("Project"),
                 value: <Link to={`/project/${encodeURIComponent(project)}`}>{project}</Link>,
               }
             : null,
           sourceType === "conversation" && sourceId !== null
-            ? { label: "Source", value: <Link to={`/c/${sourceId}`}>Conversation #{sourceId}</Link> }
+            ? { label: t("Source"), value: <Link to={`/c/${sourceId}`}>Conversation #{sourceId}</Link> }
             : sourceType
-              ? { label: "Source", value: humanize(sourceType) }
+              ? { label: t("Source"), value: humanize(sourceType) }
               : null,
           { label: "Expires", value: str(record.expires_at) ? <When iso={str(record.expires_at)} /> : "Never" },
           num(record.access_count) !== null
@@ -119,7 +121,7 @@ export function MemoryDetail({ id, record }: { id: string; record: Rec }) {
         ]}
       />
 
-      <ChipList label="Tags" items={strList(record.tags)} />
+      <ChipList label={t("Tags")} items={strList(record.tags)} />
 
       {mergedFrom.length > 0 && (
         <RelatedSection title="Merged from" count={mergedFrom.length}>
@@ -127,7 +129,7 @@ export function MemoryDetail({ id, record }: { id: string; record: Rec }) {
             <li key={m} className="result">
               <Link to={`/m/${m}`} className="result-link">
                 <div className="result-head">
-                  <span className="kind kind-memory">Memory</span>
+                  <span className="kind kind-memory">{t("Memory")}</span>
                   <span className="result-title">#{m}</span>
                 </div>
               </Link>
@@ -198,6 +200,7 @@ export function SkillDetail({ id, record }: { id: string; record: Rec }) {
 // ── Prompt ───────────────────────────────────────────────────────────────
 
 export function PromptDetail({ id, record }: { id: string; record: Rec }) {
+  useLanguage();
   const name = str(record.name) ?? `Prompt #${id}`;
   const category = str(record.category);
   const usageCount = num(record.usage_count);
@@ -207,7 +210,7 @@ export function PromptDetail({ id, record }: { id: string; record: Rec }) {
       <Crumbs kind="prompt" current={name} />
       <header className="page-header detail-head">
         <p className="detail-kicker">
-          <span className="kind kind-prompt">Prompt</span>
+          <span className="kind kind-prompt">{t("Prompt")}</span>
           {category && <span className="detail-status is-muted">{humanize(category)}</span>}
         </p>
         <h1 className="page-title detail-title">{name}</h1>
@@ -230,14 +233,14 @@ export function PromptDetail({ id, record }: { id: string; record: Rec }) {
       <MetaList
         label="Prompt details"
         items={[
-          { label: "Source", value: str(record.source_path), mono: true },
+          { label: t("Source"), value: str(record.source_path), mono: true },
           whenEntry("Added", record.created_at),
           whenEntry("Updated", record.updated_at),
         ]}
       />
 
       <ChipList label="Variables" items={strList(record.variables)} />
-      <ChipList label="Tags" items={strList(record.tags)} />
+      <ChipList label={t("Tags")} items={strList(record.tags)} />
 
       <RawData record={record} />
     </>
@@ -266,6 +269,7 @@ interface Relation {
 }
 
 export function EntityDetail({ id, record, related }: { id: string; record: Rec; related: Rec }) {
+  useLanguage();
   const name = str(record.name) ?? `Entity #${id}`;
   const entityType = str(record.entity_type);
   const canonical = str(record.canonical_name);
@@ -289,7 +293,7 @@ export function EntityDetail({ id, record, related }: { id: string; record: Rec;
       <Crumbs kind="entity" current={name} />
       <header className="page-header detail-head">
         <p className="detail-kicker">
-          <span className="kind kind-entity">Entity</span>
+          <span className="kind kind-entity">{t("Entity")}</span>
           {entityType && <span className="detail-status is-muted">{humanize(entityType)}</span>}
         </p>
         <h1 className="page-title detail-title">{name}</h1>
@@ -303,14 +307,14 @@ export function EntityDetail({ id, record, related }: { id: string; record: Rec;
         items={[
           project
             ? {
-                label: "Project",
+                label: t("Project"),
                 value: <Link to={`/project/${encodeURIComponent(project)}`}>{project}</Link>,
               }
             : null,
           num(record.mention_count) !== null
             ? { label: "Mentions", value: formatCount(num(record.mention_count)!), num: true }
             : null,
-          { label: "Confidence", value: percent(record.confidence), num: true },
+          { label: t("Confidence"), value: percent(record.confidence), num: true },
           whenEntry("First seen", record.first_seen),
           whenEntry("Last seen", record.last_seen),
         ]}
@@ -318,7 +322,7 @@ export function EntityDetail({ id, record, related }: { id: string; record: Rec;
 
       {Object.keys(attributes).length > 0 && (
         <section className="stack-top">
-          <h2 className="section-label">Attributes</h2>
+          <h2 className="section-label">{t("Attributes")}</h2>
           <MetaList
             label="Entity attributes"
             items={Object.entries(attributes).map(([k, v]) => ({

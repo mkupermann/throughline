@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Database, Download, History, Play, ShieldCheck, Table2 } from "lucide-react";
@@ -34,6 +36,7 @@ function toCsv(result: ConsoleResult): string {
 }
 
 export function ConsolePage() {
+  useLanguage();
   const [sql, setSql] = useState("SELECT category::text, count(*) AS n\nFROM memory_chunks\nGROUP BY 1 ORDER BY n DESC;");
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [showSchema, setShowSchema] = useState(true);
@@ -76,8 +79,8 @@ export function ConsolePage() {
   return (
     <>
       <header className="page-header">
-        <h1 className="page-title">Console</h1>
-        <p className="page-subtitle">Read-only SQL against your memory database.</p>
+        <h1 className="page-title">{t("Console")}</h1>
+        <p className="page-subtitle">{t("Read-only SQL against your memory database.")}</p>
       </header>
 
       {/* State the guarantee and where it comes from. "Read-only" asserted by
@@ -85,10 +88,8 @@ export function ConsolePage() {
       <div className="disclosure">
         <ShieldCheck size={15} aria-hidden />
         <div>
-          <strong>Read-only.</strong> Every statement runs inside a{" "}
-          <code>READ ONLY</code> transaction, so PostgreSQL itself rejects writes — not a
-          keyword filter that clever SQL could slip past. Use Curate to change memory.
-        </div>
+          <strong>{t("Read-only.")}</strong>{t(" Every statement runs inside a")}{" "}
+          <code>{t("READ ONLY")}</code>{t(" transaction, so PostgreSQL itself rejects writes — not a keyword filter that clever SQL could slip past. Use Curate to change memory.")}</div>
       </div>
 
       <div className="console-layout">
@@ -111,7 +112,7 @@ export function ConsolePage() {
                 disabled={run.isPending || !sql.trim()}
               >
                 <Play size={13} aria-hidden />
-                {run.isPending ? "Running…" : "Run"}
+                {run.isPending ? "Running…" : t("Run")}
               </button>
               <kbd className="editor-kbd">⌘↵</kbd>
               {result && !result.error && (
@@ -178,20 +179,16 @@ export function ConsolePage() {
           )}
 
           {result && !result.error && result.truncated && (
-            <p className="empty-hint">
-              Output capped at {formatCount(result.row_count)} rows. Add a LIMIT to see a
-              deliberate slice.
-            </p>
+            <p className="empty-hint">{t("Output capped at ")}{formatCount(result.row_count)}{t(" rows. Add a LIMIT to see a deliberate slice.")}</p>
           )}
         </div>
 
         <aside className="console-side">
           <div className="rail-head">
             <span className="section-label" style={{ margin: 0 }}>
-              <Table2 size={12} aria-hidden style={{ verticalAlign: "-2px" }} /> Schema
-            </span>
+              <Table2 size={12} aria-hidden style={{ verticalAlign: "-2px" }} />{t(" Schema")}</span>
             <button type="button" className="rail-clear" onClick={() => setShowSchema((v) => !v)}>
-              {showSchema ? "Hide" : "Show"}
+              {showSchema ? "Hide" : t("Show")}
             </button>
           </div>
 
@@ -221,12 +218,10 @@ export function ConsolePage() {
             ))}
 
           {showSchema && schemaError && (
-            <p className="empty-hint">Schema unavailable: {(schemaError as Error).message}</p>
+            <p className="empty-hint">{t("Schema unavailable: ")}{(schemaError as Error).message}</p>
           )}
 
-          <div className="section-label" style={{ marginTop: "var(--space-4)" }}>
-            Starting points
-          </div>
+          <div className="section-label" style={{ marginTop: "var(--space-4)" }}>{t("Starting points")}</div>
           <ul className="snippets">
             {schema?.snippets.map((s) => (
               <li key={s.title}>
@@ -240,8 +235,7 @@ export function ConsolePage() {
           {history.length > 0 && (
             <>
               <div className="section-label" style={{ marginTop: "var(--space-4)" }}>
-                <History size={12} aria-hidden style={{ verticalAlign: "-2px" }} /> History
-              </div>
+                <History size={12} aria-hidden style={{ verticalAlign: "-2px" }} />{t(" History")}</div>
               <ul className="snippets">
                 {history.slice(0, 8).map((h, i) => (
                   <li key={i}>

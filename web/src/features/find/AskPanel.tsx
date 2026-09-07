@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -65,6 +67,7 @@ export function AskPanel({
   question: string;
   onAsked?: (question: string) => void;
 }) {
+  useLanguage();
   const [copyStatus, setCopyStatus] = useState<{ id: number; message: string } | null>(null);
   const ask = useMutation({
     mutationFn: (q: string) => askApi.ask({ question: q }),
@@ -100,12 +103,8 @@ export function AskPanel({
   if (!question.trim()) {
     return (
       <div className="ask-empty">
-        <h2>Ask your history a question</h2>
-        <p>
-          Not keywords — a question. “Why did we move the web UI off 8787?”,
-          “What did I decide about embeddings?”. The answer is assembled from
-          your own records, and every claim links back to the one it came from.
-        </p>
+        <h2>{t("Ask your history a question")}</h2>
+        <p>{t("Not keywords — a question. “Why did we move the web UI off 8787?”, “What did I decide about embeddings?”. The answer is assembled from your own records, and every claim links back to the one it came from.")}</p>
       </div>
     );
   }
@@ -114,7 +113,7 @@ export function AskPanel({
   const currentRequest = ask.variables?.trim() === currentQuestion;
 
   if (ask.isPending && currentRequest) {
-    return <p className="ask-status" role="status">Reading your history…</p>;
+    return <p className="ask-status" role="status">{t("Reading your history…")}</p>;
   }
 
   if (ask.isError && currentRequest) {
@@ -166,12 +165,10 @@ export function AskPanel({
             <button
               type="button"
               className="button ask-copy"
-              aria-label="Copy answer with sources"
+              aria-label={t("Copy answer with sources")}
               onClick={() => void copyAnswer()}
             >
-              <Copy size={14} aria-hidden />
-              Copy answer with sources
-            </button>
+              <Copy size={14} aria-hidden />{t("Copy answer with sources")}</button>
           </div>
         </>
       )}
@@ -185,10 +182,7 @@ export function AskPanel({
         * cannot be trusted is the evidence, not a lecture about it. One quiet
         * line here; the records get the space. */}
       {data.answer && cited.length === 0 && (
-        <p className="ask-caveat">
-          Nothing in this answer is cited, so it cannot be checked against your
-          history — the records it was built from are below.
-        </p>
+        <p className="ask-caveat">{t("Nothing in this answer is cited, so it cannot be checked against your history — the records it was built from are below.")}</p>
       )}
 
       {/* Where the answer came from, and whether the excerpts left this
@@ -196,8 +190,7 @@ export function AskPanel({
           about this feature a privacy-minded reader actually wants, and
           burying it in a config file would be a way of not saying it. */}
       {data.model && (
-        <p className="ask-provenance">
-          Answered by <strong>{data.model}</strong>{" "}
+        <p className="ask-provenance">{t("Answered by ")}<strong>{data.model}</strong>{" "}
           {data.local ? "on this machine" : `via ${data.backend} — excerpts left this machine`}
         </p>
       )}

@@ -1,36 +1,19 @@
-/** Formatting helpers. Numbers in tables also need the `.tabular` class so
- *  columns do not jitter as values change.
- *
- *  Numbers are formatted in `UI_LOCALE`, not the browser's. Every label in
- *  this app is written in English, and `new Intl.NumberFormat()` follows the
- *  browser instead — so on a German-configured machine the interface read
- *  "3.330 conversations" and "37.255 event(s)". To an English reader that is
- *  three-point-three-three-zero: the separator means the opposite of what it
- *  says, and there is nothing on screen to signal which convention is in play.
- *  Matching the numbers to the language of the words around them removes the
- *  ambiguity. When the interface itself becomes translatable, this constant is
- *  the single place that has to follow it.
- *
- *  Dates follow the same rule, and for a stronger reason: `formatDay` renders a
- *  month NAME, so the browser locale put "13. Juli" and "11. Aug." on the axis
- *  of a chart captioned "Conversations, last 30 days". A separator can at least
- *  be misread silently; a German month name beside English words is simply a
- *  different language on the same line. */
+/** Format numbers and dates in the selected interface language. */
+import { getLang } from "./language";
+const uiLocale = () => getLang() === "de" ? "de-DE" : "en-US";
 
-const UI_LOCALE = "en-US";
-
-const nf = new Intl.NumberFormat(UI_LOCALE);
+const numberFormat = () => new Intl.NumberFormat(uiLocale());
 
 export function formatCount(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return nf.format(n);
+  return numberFormat().format(n);
 }
 
 /** Compact form for headline numbers only — tables keep full precision. */
 export function formatCompact(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  if (Math.abs(n) < 10_000) return nf.format(n);
-  return new Intl.NumberFormat(UI_LOCALE, {
+  if (Math.abs(n) < 10_000) return numberFormat().format(n);
+  return new Intl.NumberFormat(uiLocale(), {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(n);
@@ -39,10 +22,10 @@ export function formatCompact(n: number | null | undefined): string {
 export function formatDay(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(UI_LOCALE, { month: "short", day: "numeric" }).format(d);
+  return new Intl.DateTimeFormat(uiLocale(), { month: "short", day: "numeric" }).format(d);
 }
 
-const dtf = new Intl.DateTimeFormat(UI_LOCALE, {
+const dateTimeFormat = () => new Intl.DateTimeFormat(uiLocale(), {
   year: "numeric",
   month: "short",
   day: "numeric",
@@ -51,7 +34,7 @@ const dtf = new Intl.DateTimeFormat(UI_LOCALE, {
 });
 
 /**
- * A full timestamp (date + time), in the same fixed UI_LOCALE as every
+ * A full timestamp (date + time), in the selected interface locale as every
  * other formatter here. `DetailPage`'s generic field renderer used to print
  * whatever ISO-8601 string the API returned verbatim — microseconds, UTC
  * offset and all (`2026-08-25T18:42:40.747073+00:00`) — the one place in the
@@ -62,7 +45,7 @@ const dtf = new Intl.DateTimeFormat(UI_LOCALE, {
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return dtf.format(d);
+  return dateTimeFormat().format(d);
 }
 
 /** True for a string shaped like an ISO-8601 timestamp (date, optionally
@@ -72,16 +55,16 @@ export function looksLikeIsoDate(v: string): boolean {
   return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?/.test(v);
 }
 
-const tf = new Intl.DateTimeFormat(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
+const timeFormat = () => new Intl.DateTimeFormat(uiLocale(), { hour: "2-digit", minute: "2-digit" });
 
-/** HH:MM only, in the same fixed UI_LOCALE as every other formatter here —
+/** HH:MM only, in the selected interface locale as every other formatter here —
  *  for a list of same-day rows where the date is already known from
  *  context and only the time distinguishes one row from the next
  *  (Timeline's day-detail panel). */
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return tf.format(d);
+  return timeFormat().format(d);
 }
 
 /**

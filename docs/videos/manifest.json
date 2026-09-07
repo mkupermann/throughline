@@ -10,14 +10,14 @@
       "route": "/",
       "intro": "Open a project and recover its current state.",
       "outro": "Goal, current position, blocker and next step each link to a source.",
-      "durationSeconds": 11.44
+      "durationSeconds": 11.48
     },
     {
       "name": "conversations",
       "route": "/conversations",
       "intro": "Conversations are organised by project.",
       "outro": "Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.",
-      "durationSeconds": 11.48
+      "durationSeconds": 11.64
     },
     {
       "name": "find",
@@ -31,7 +31,7 @@
       "route": "/timeline",
       "intro": "Compare conversation activity across tools and dates.",
       "outro": "Open a dated bucket to inspect its conversations. Messages and memories are not separate events.",
-      "durationSeconds": 12.48
+      "durationSeconds": 12.52
     },
     {
       "name": "review",
@@ -45,7 +45,7 @@
       "route": "/operate",
       "intro": "Understand the import and processing stages.",
       "outro": "Discovery, import, extraction and embeddings have separate states. No processing is started in this clip.",
-      "durationSeconds": 11.52
+      "durationSeconds": 11.56
     },
     {
       "name": "console",
@@ -59,14 +59,14 @@
       "route": "/pm/roles",
       "intro": "Define the responsibility and tool for a role.",
       "outro": "The demo separates analysis, execution, testing and review.",
-      "durationSeconds": 12.4
+      "durationSeconds": 12.52
     },
     {
       "name": "members",
       "route": "/pm/members",
       "intro": "See the people and agents available to teams.",
       "outro": "These identities are invented fixtures, not real team members.",
-      "durationSeconds": 12.52
+      "durationSeconds": 12.4
     },
     {
       "name": "pipelines",
@@ -80,14 +80,14 @@
       "route": "/pm/models",
       "intro": "Inspect provider configuration separately from project history.",
       "outro": "Provider entries are fictional. This recording performs no hosted generation.",
-      "durationSeconds": 13
+      "durationSeconds": 12.48
     },
     {
       "name": "teams",
       "route": "/pm",
       "intro": "Connect project history with optional AI-team operations.",
-      "outro": "Fictional tasks show completed, blocked and running states. No agent is launched.",
-      "durationSeconds": 11.48
+      "outro": "Fictional tasks show passed, budget-exhausted and stopped states. No agent is launched.",
+      "durationSeconds": 11.64
     }
   ]
 }

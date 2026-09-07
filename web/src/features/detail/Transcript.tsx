@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { getLang, useLanguage } from "@/lib/language";
 import { useState } from "react";
 import { ChevronRight, Terminal, User, Bot, CornerUpRight } from "lucide-react";
 
@@ -129,7 +131,7 @@ function when(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   // Date AND time: a transcript without timestamps cannot be placed against
   // anything else that happened that day.
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -149,9 +151,9 @@ function roleLabel(role: string): string {
     case "user":
       return "Prompt";
     case "assistant":
-      return "Antwort";
+      return t("Answer");
     case "tool_result":
-      return "Ergebnis / Werkzeugausgabe";
+      return t("Result / tool output");
     case "system":
       return "System";
     default: {
@@ -212,6 +214,7 @@ export function Transcript({
   messages: TranscriptMessage[];
   targetId?: string | null;
 }) {
+  useLanguage();
   return (
     <ol className="tx">
       {messages.map((m) => {
@@ -240,7 +243,7 @@ export function Transcript({
           >
             <div className="tx-meta">
               <Icon size={13} aria-hidden />
-              <span className="tx-role">{results.length && !prose ? "Ergebnis / Werkzeugausgabe" : roleLabel(m.role)}</span>
+              <span className="tx-role">{results.length && !prose ? t("Result / tool output") : roleLabel(m.role)}</span>
               {m.model && <span className="tx-model">{m.model}</span>}
               {m.created_at && (
                 <time className="tx-time" dateTime={m.created_at}>
@@ -256,10 +259,10 @@ export function Transcript({
             ))}
 
             {results.map((b, i) => (
-              <section className="tx-result" key={i}><strong>Ergebnis / Werkzeugausgabe</strong><pre>{textOf(b.content)}</pre></section>
+              <section className="tx-result" key={i}><strong>{t("Result / tool output")}</strong><pre>{textOf(b.content)}</pre></section>
             ))}
             {files.map((b, i) => (
-              <section className="tx-result" key={`file-${i}`}><strong>{m.role === "user" ? "Eingabedatei" : "Ergebnis / Datei"}</strong><p>Dateireferenz aus den Quelldaten; Verfügbarkeit nicht geprüft.</p><pre>{[b.filename, b.path, b.file_path, b.file_id, b.url && !b.url.startsWith("data:") ? b.url : null].filter(Boolean).join("\n") || "Dateireferenz ohne aufgezeichneten Pfad"}</pre></section>
+              <section className="tx-result" key={`file-${i}`}><strong>{m.role === "user" ? t("Input file") : t("Result / file")}</strong><p>{t("File reference from source data; availability has not been verified.")}</p><pre>{[b.filename, b.path, b.file_path, b.file_id, b.url && !b.url.startsWith("data:") ? b.url : null].filter(Boolean).join("\n") || t("File reference without a recorded path")}</pre></section>
             ))}
 
             {/* A message with neither prose nor blocks is a real thing in the

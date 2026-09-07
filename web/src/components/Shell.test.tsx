@@ -55,14 +55,14 @@ describe("Shell", () => {
     renderShell();
 
     for (const name of [
-      "Projekte",
+      "Projects",
       "Conversations",
       "Find",
       "Timeline",
       "Review",
       "Operate",
       "Console",
-      "KI-Teamsteuerung",
+      "AI team operations",
     ]) {
       const link = screen.getByRole("link", { name });
       expect(link.getAttribute("aria-label")).toBe(name);
@@ -144,4 +144,15 @@ describe("Shell", () => {
     expect(localStorage.getItem("throughline-density")).toBe("compact");
     expect(screen.getByTestId("location").textContent).toBe("/curate?provider=hermes");
   });
+});
+
+it("shows the active interface language and switches navigation without leaving the route", async () => {
+  renderShell("/conversations");
+  await userEvent.click(screen.getByRole("button", { name: "Use German" }));
+  expect(screen.getByRole("button", { name: "Deutsch verwenden" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("link", { name: "Gespräche" }).getAttribute("aria-current")).toBe("page");
+  expect(document.documentElement.lang).toBe("de");
+  await userEvent.click(screen.getByRole("button", { name: "Englisch verwenden" }));
+  expect(screen.getByRole("button", { name: "Use English" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByTestId("location").textContent).toBe("/conversations");
 });

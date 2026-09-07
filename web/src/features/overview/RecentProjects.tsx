@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
@@ -34,6 +36,7 @@ function lastSeen(iso: string | null): string {
 }
 
 export function RecentProjects() {
+  useLanguage();
   const { data, isPending } = useQuery({
     queryKey: ["projects-recent", DAYS],
     queryFn: () => projectsApi.recent(DAYS),
@@ -46,9 +49,8 @@ export function RecentProjects() {
     return (
       <section aria-labelledby="proj-h" className="stack-top">
         <h2 id="proj-h" className="section-label">
-          Last {DAYS} days
-        </h2>
-        <p className="empty-hint">No sessions in the last {DAYS} days.</p>
+          Last {DAYS}{t(" days")}</h2>
+        <p className="empty-hint">{t("No sessions in the last ")}{DAYS}{t(" days.")}</p>
       </section>
     );
   }
@@ -56,8 +58,7 @@ export function RecentProjects() {
   return (
     <section aria-labelledby="proj-h" className="stack-top">
       <h2 id="proj-h" className="section-label">
-        Last {DAYS} days
-      </h2>
+        Last {DAYS}{t(" days")}</h2>
       <ul className="proj-list">
         {projects.map((p) => (
           <li key={p.project}>

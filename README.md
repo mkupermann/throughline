@@ -11,7 +11,7 @@ Throughline brings locally stored AI conversations into a source-linked project 
 
 The core workflow works without a connected AI model. Optional models add semantic search, extraction and generated answers. Throughline is currently a local, single-user application; it is not an authenticated team service.
 
-[Start locally](#quick-start-with-docker) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
+[Start locally](#quick-start-with-docker) · [Upgrade an existing installation](docs/UPGRADING.md) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
 
 ## Follow the work
 
@@ -37,24 +37,26 @@ Time order describes chronology, not causality. Throughline displays supported e
 
 The demo seeder reseeds its target tables; use a separate database ending in `_demo`. Its optional `--reset` flag drops that demo database.
 
-Each link opens a short MP4 recorded from the actual interface using the bundled fictional corpus. Videos have burned-in captions and separate WebVTT tracks. They demonstrate navigation and inspection; no real model call or agent execution is presented as a demo result.
+The animated previews below play directly in this README. Click a preview or **Full video** to open its MP4. Every recording uses the actual English interface and the bundled fictional corpus. Videos have burned-in English captions and separate WebVTT tracks. They demonstrate navigation and inspection; no real model call or agent execution is presented as a demo result.
 
-| Area | What the clip demonstrates | Video |
-|---|---|---|
-| **Projects / Projekte** | Find Atlas and recover its source-linked state | [Watch](docs/videos/projects.mp4) |
-| **Conversations** | Choose a project, open a conversation and inspect its output reference | [Watch](docs/videos/conversations.mp4) |
-| **Find** | Search imported records with their source context | [Watch](docs/videos/find.mp4) |
-| **Timeline** | Compare activity across tools and open a dated bucket | [Watch](docs/videos/timeline.mp4) |
-| **Review** | Inspect contradictory and superseded knowledge | [Watch](docs/videos/review.mp4) |
-| **Operate** | Understand import, extraction and embedding stages | [Watch](docs/videos/operate.mp4) |
-| **Console** | Count conversations by source with read-only SQL | [Watch](docs/videos/console.mp4) |
-| **AI-team operations / KI-Teamsteuerung** | Inspect linked projects, task states and budgets | [Watch](docs/videos/teams.mp4) |
-| **Roles** | Separate analysis, execution, testing and review responsibilities | [Watch](docs/videos/roles.mp4) |
-| **Members** | Inspect fictional people and agents | [Watch](docs/videos/members.mp4) |
-| **Team pipelines** | Inspect reusable team configuration | [Watch](docs/videos/pipelines.mp4) |
-| **Model providers** | Inspect provider configuration independently of project history | [Watch](docs/videos/models.mp4) |
+| Area and walkthrough | Animated preview |
+|---|---|
+| **Projects**<br>Find Atlas and recover its source-linked state.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) · [Captions](docs/videos/projects.vtt) | [![Projects walkthrough — fictional demo](docs/videos/projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) |
+| **Conversations**<br>Choose a project, open a conversation and inspect its output reference.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) · [Captions](docs/videos/conversations.vtt) | [![Conversations walkthrough — fictional demo](docs/videos/conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) |
+| **Find**<br>Search imported records with their source context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) · [Captions](docs/videos/find.vtt) | [![Find walkthrough — fictional demo](docs/videos/find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) |
+| **Timeline**<br>Compare activity across tools and open a dated bucket.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](docs/videos/timeline.vtt) | [![Timeline walkthrough — fictional demo](docs/videos/timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) |
+| **Review**<br>Inspect contradictory and superseded knowledge.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) · [Captions](docs/videos/review.vtt) | [![Review walkthrough — fictional demo](docs/videos/review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) |
+| **Operate**<br>Understand import, extraction and embedding stages.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) · [Captions](docs/videos/operate.vtt) | [![Operate walkthrough — fictional demo](docs/videos/operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) |
+| **Console**<br>Count conversations by source with read-only SQL.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) · [Captions](docs/videos/console.vtt) | [![Console walkthrough — fictional demo](docs/videos/console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) |
+| **AI team operations**<br>Inspect linked projects, task states and budgets.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) · [Captions](docs/videos/teams.vtt) | [![AI team operations walkthrough — fictional demo](docs/videos/teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) |
+| **Roles**<br>Separate analysis, execution, testing and review responsibilities.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) · [Captions](docs/videos/roles.vtt) | [![Roles walkthrough — fictional demo](docs/videos/roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) |
+| **Members**<br>Inspect fictional people and agents.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4) · [Captions](docs/videos/members.vtt) | [![Members walkthrough — fictional demo](docs/videos/members.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4) |
+| **Team pipelines**<br>Inspect reusable team configuration.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4) · [Captions](docs/videos/pipelines.vtt) | [![Team pipelines walkthrough — fictional demo](docs/videos/pipelines.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4) |
+| **Model providers**<br>Inspect provider configuration independently of project history.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) · [Captions](docs/videos/models.vtt) | [![Model providers walkthrough — fictional demo](docs/videos/models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) |
 
 [Video gallery and captions](docs/videos/README.md) · [Reproduce the recordings](docs/DEMO.md)
+
+Use **EN / DE** in the sidebar to switch interface language; the choice is shared with AI team operations and saved in this browser. English is the default. Imported conversations, project notes, tool output and file names retain their original language. Technical identifiers and diagnostic output can remain English. This README and the walkthroughs are English.
 
 The navigation keeps daily work separate from system operations. Labels remain visible in narrow panels. Use `Ctrl+K` / `Cmd+K` for the command palette; `g` then `v` opens Conversations. Project history is the default project view; **Full document** opens the alternative complete document layout.
 

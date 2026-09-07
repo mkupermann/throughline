@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow } from "lucide-react";
@@ -42,6 +44,7 @@ export function ConversationDetail({
   record: Record<string, unknown>;
   related: Record<string, unknown>;
 }) {
+  useLanguage();
   const [sp, setSp] = useSearchParams();
   const { hash } = useLocation();
 
@@ -149,13 +152,12 @@ export function ConversationDetail({
       <Crumbs kind="conversation" current={title} />
       <header className="page-header detail-head">
         <p className="detail-kicker">
-          <span className="kind kind-conversation">Conversation</span>
+          <span className="kind kind-conversation">{t("Conversation")}</span>
           <span className="detail-id tabular">#{id}</span>
         </p>
         <h1 className="page-title detail-title">{title}</h1>
         {startedAt && (
-          <p className="page-subtitle">
-            Started {formatDateTime(startedAt)}
+          <p className="page-subtitle">{t("Started ")}{formatDateTime(startedAt)}
             {ran ? ` · ran ${ran}` : ""}
             {project ? " · " : ""}
             {project && <Link to={`/project/${encodeURIComponent(project)}`}>{project}</Link>}
@@ -168,14 +170,14 @@ export function ConversationDetail({
         items={[
           project
             ? {
-                label: "Project",
+                label: t("Project"),
                 value: <Link to={`/project/${encodeURIComponent(project)}`}>{project}</Link>,
               }
             : null,
           { label: "Tool", value: str(meta.source) ?? str(record.entrypoint) },
           { label: "Model", value: str(record.model), mono: true },
           { label: "Branch", value: str(record.git_branch), mono: true },
-          whenEntry("Started", startedAt),
+          whenEntry(t("Started"), startedAt),
           whenEntry("Ended", endedAt),
           num(record.message_count) !== null
             ? { label: "Messages", value: formatCount(num(record.message_count)!), num: true }
@@ -192,8 +194,7 @@ export function ConversationDetail({
 
       <section className="stack-top">
         <div className="detail-tx-head">
-          <h2 className="section-label">
-            Transcript{" "}
+          <h2 className="section-label">{t("Transcript")}{" "}
             <span className="tabular">
               ({formatCount(shownCount)} of {formatCount(messageTotal)})
             </span>
@@ -207,16 +208,14 @@ export function ConversationDetail({
               aria-pressed={order === "oldest"}
               onClick={() => setOrder("oldest")}
             >
-              <ArrowUpWideNarrow size={14} aria-hidden /> Oldest first
-            </button>
+              <ArrowUpWideNarrow size={14} aria-hidden />{t(" Oldest first")}</button>
             <button
               type="button"
               className={order === "newest" ? "is-on" : ""}
               aria-pressed={order === "newest"}
               onClick={() => setOrder("newest")}
             >
-              <ArrowDownWideNarrow size={14} aria-hidden /> Newest first
-            </button>
+              <ArrowDownWideNarrow size={14} aria-hidden />{t(" Newest first")}</button>
           </div>
         </div>
         <Transcript messages={orderedMessages} targetId={targetId} />

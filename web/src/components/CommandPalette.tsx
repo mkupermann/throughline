@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -46,6 +48,7 @@ const QUICK_JOBS: { name: string; label: string; hint: string }[] = [
  * fast path.
  */
 export function CommandPalette() {
+  useLanguage();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -126,7 +129,7 @@ export function CommandPalette() {
     <Command.Dialog
       open={open}
       onOpenChange={handleOpenChange}
-      label="Command palette"
+      label={t("Command palette")}
       contentClassName="palette"
       // Escape and outside-click both close: a modal must always have a way
       // out that does not require finding a button.
@@ -138,20 +141,20 @@ export function CommandPalette() {
         className="palette-input"
       />
       <Command.List className="palette-list">
-        <Command.Empty className="palette-empty">No matches.</Command.Empty>
+        <Command.Empty className="palette-empty">{t("No matches.")}</Command.Empty>
 
         {NAV_GROUPS.map((group) => (
-          <Command.Group key={group} heading={group} className="palette-group">
+          <Command.Group key={group} heading={t(group)} className="palette-group">
             {NAV.filter((item) => item.group === group).map((item) => (
               <Command.Item
                 key={item.to}
-                value={`${item.label} ${item.description ?? ""}`}
+                value={`${t(item.label)} ${item.description ?? ""}`}
                 onSelect={() => run(() => navigate(carryProviders(item.to, sp)))}
                 className="palette-item"
               >
                 <item.icon size={15} aria-hidden />
-                <span>{item.label}</span>
-                <span className="palette-hint">{item.description}</span>
+                <span>{t(item.label)}</span>
+                <span className="palette-hint">{t(item.description ?? "")}</span>
                 <kbd className="palette-kbd">g {item.chord}</kbd>
               </Command.Item>
             ))}
@@ -189,7 +192,7 @@ export function CommandPalette() {
             return (
               <Command.Item
                 key={spec.name}
-                value={`${spec.label} ${spec.hint}`}
+                value={`${t(spec.label)} ${spec.hint}`}
                 onSelect={() =>
                   run(() => {
                     if (blocked) {
@@ -204,8 +207,8 @@ export function CommandPalette() {
                 className="palette-item"
               >
                 <Play size={15} aria-hidden />
-                <span>{spec.label}</span>
-                <span className="palette-hint">{blocked ?? spec.hint}</span>
+                <span>{t(spec.label)}</span>
+                <span className="palette-hint">{blocked ?? t(spec.hint)}</span>
               </Command.Item>
             );
           })}
@@ -218,25 +221,25 @@ export function CommandPalette() {
             className="palette-item"
           >
             <Download size={15} aria-hidden />
-            <span>Export as Markdown</span>
-            <span className="palette-hint">One folder per project, for Obsidian or any editor</span>
+            <span>{t("Export as Markdown")}</span>
+            <span className="palette-hint">{t("One folder per project, for Obsidian or any editor")}</span>
           </Command.Item>
         </Command.Group>
 
         <Command.Group heading="Theme" className="palette-group">
           <Command.Item value="theme light" onSelect={() => run(() => setTheme("light"))} className="palette-item">
             <Sun size={15} aria-hidden />
-            <span>Light</span>
+            <span>{t("Light")}</span>
             {resolved === "light" && <span className="palette-hint">current</span>}
           </Command.Item>
           <Command.Item value="theme dark" onSelect={() => run(() => setTheme("dark"))} className="palette-item">
             <Moon size={15} aria-hidden />
-            <span>Dark</span>
+            <span>{t("Dark")}</span>
             {resolved === "dark" && <span className="palette-hint">current</span>}
           </Command.Item>
           <Command.Item value="theme system" onSelect={() => run(() => setTheme("system"))} className="palette-item">
             <Monitor size={15} aria-hidden />
-            <span>Match system</span>
+            <span>{t("Match system")}</span>
           </Command.Item>
         </Command.Group>
       </Command.List>

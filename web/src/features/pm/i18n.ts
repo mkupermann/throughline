@@ -11,13 +11,14 @@
  * language instead of fixed to one locale.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useLanguage, type Lang } from "@/lib/language";
+export { getLang, type Lang } from "@/lib/language";
 
 import type { PmProject, PmTaskStatus } from "@/lib/api";
 
-export type Lang = "de" | "en";
 
-const STORAGE_KEY = "pm-lang";
+
+
 
 // ── Dictionary ───────────────────────────────────────────────────────────
 
@@ -399,7 +400,7 @@ const en: typeof de = {
     // mandate from the second UI/UX review round (Vibe critique item 7 is
     // deliberately NOT applied, see Paket 3.4 in the improvement plan).
     // Not a translation gap.
-    projectManagement: "Project Management",
+    projectManagement: "AI team operations",
     confirmQuestion: "Really?",
   },
   status: {
@@ -448,7 +449,7 @@ const en: typeof de = {
     add: "Add",
   },
   dashboard: {
-    subtitle: "Virtual teams, pipelines and budgets at a glance.",
+    subtitle: "Plan and monitor AI teams, tasks and budgets. To follow your own conversations, open Projects or Conversations in the sidebar.",
     createProject: "Create project",
     nameLabel: "Name",
     namePlaceholder: "e.g. Demoscene Tribute",
@@ -473,7 +474,7 @@ const en: typeof de = {
     repoProjects: {
       h2: "Repository projects",
       summary: (n: string) => `Show repository projects (${n})`,
-      subtitle: "Existing projects from memory — adopt as a PM project or link them.",
+      subtitle: "Open a repository’s conversation history, or adopt and link it to an AI team project.",
       searchPlaceholder: "Filter by name…",
       searchLabel: "Filter repository projects",
       errorTitle: "Repository projects cannot be loaded",
@@ -736,54 +737,7 @@ export type Dict = typeof de;
 
 const DICT: Record<Lang, Dict> = { de, en };
 
-// ── Language state ──────────────────────────────────────────────────────
-// Module-level, with a tiny pub/sub: every component using useLang() re-
-// renders when the language changes anywhere, without a context provider.
-
-function readStored(): Lang {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    if (v === "de" || v === "en") return v;
-  } catch {
-    // localStorage unavailable (private mode, disabled storage, …) — fall
-    // back to the default silently.
-  }
-  return "de";
-}
-
-let currentLang: Lang | null = null;
-const listeners = new Set<(l: Lang) => void>();
-
-function getLang(): Lang {
-  if (currentLang === null) currentLang = readStored();
-  return currentLang;
-}
-
-function setGlobalLang(l: Lang) {
-  currentLang = l;
-  try {
-    localStorage.setItem(STORAGE_KEY, l);
-  } catch {
-    // Best effort — the in-memory state still switches for this session.
-  }
-  listeners.forEach((fn) => fn(l));
-}
-
-export { getLang };
-
-export function useLang(): { lang: Lang; t: Dict; setLang: (l: Lang) => void; toggle: () => void } {
-  const [lang, setLangState] = useState<Lang>(getLang);
-
-  useEffect(() => {
-    const listener = (l: Lang) => setLangState(l);
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  }, []);
-
-  const setLang = useCallback((l: Lang) => setGlobalLang(l), []);
-  const toggle = useCallback(() => setGlobalLang(lang === "de" ? "en" : "de"), [lang]);
-
-  return { lang, t: DICT[lang], setLang, toggle };
+export function useLang() {
+  const state = useLanguage();
+  return { ...state, t: DICT[state.lang] };
 }

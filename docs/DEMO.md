@@ -33,3 +33,5 @@ node web/scripts/record-release.mjs
 The recordings drive the real UI and save MP4s, representative PNGs, WebVTT captions and a manifest under `docs/videos/`. They do not stub API responses or launch generation, import jobs or agents. Operate displays the local runtime's genuine status; capabilities and discovery counts can differ across machines.
 
 Inspect every resulting clip before publication. Regenerate the gallery after substantial navigation changes. Old recordings in `docs/assets/` document the earlier interface and are not the current walkthrough set.
+
+The recorder explicitly selects English without changing your normal browser preference. It also builds 800-pixel animated GIF previews for GitHub from the MP4 recordings.

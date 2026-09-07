@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -54,6 +56,7 @@ const W = 720;
 const H = 420;
 
 export function ResultGraph({ items }: { items: FindItem[] }) {
+  useLanguage();
   // entity_mentions keys on the *source* record. Messages are attributed to
   // their conversation, which is how extraction records them.
   const sources = useMemo(() => {
@@ -140,11 +143,8 @@ export function ResultGraph({ items }: { items: FindItem[] }) {
     return (
       <div className="empty-state">
         <Network size={22} aria-hidden />
-        <h2>No entities in these results</h2>
-        <p>
-          The graph is built from entities the current results mention. Run the entity
-          extractor from Operate, or widen the search.
-        </p>
+        <h2>{t("No entities in these results")}</h2>
+        <p>{t("The graph is built from entities the current results mention. Run the entity extractor from Operate, or widen the search.")}</p>
       </div>
     );
   }
@@ -154,8 +154,7 @@ export function ResultGraph({ items }: { items: FindItem[] }) {
   return (
     <figure className="graph">
       <figcaption className="spark-caption">
-        <span>
-          Entities mentioned by these results — {nodes.length} node
+        <span>{t("Entities mentioned by these results — ")}{nodes.length} node
           {nodes.length === 1 ? "" : "s"}, {edges.length} edge{edges.length === 1 ? "" : "s"}
         </span>
       </figcaption>
@@ -227,7 +226,7 @@ export function ResultGraph({ items }: { items: FindItem[] }) {
             <span>
               {hover.entity_type} · {hover.hits_in_results} in results · {hover.mention_count} total
             </span>
-            <Link to={`/e/${hover.id}`}>Open</Link>
+            <Link to={`/e/${hover.id}`}>{t("Open")}</Link>
           </div>
         )}
       </div>

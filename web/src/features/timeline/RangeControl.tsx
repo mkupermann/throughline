@@ -1,3 +1,5 @@
+import { t } from "@/lib/ui";
+import { useLanguage } from "@/lib/language";
 /** Preset ranges plus explicit dates. The Timeline's own control — it no
  * longer borrows the search page's pagination, which was the actual defect. */
 export interface Range {
@@ -106,11 +108,12 @@ export function RangeControl({
   value: Range;
   onChange: (r: Range) => void;
 }) {
+  useLanguage();
   const presets: Array<[string, number]> = [
     ["30d", 30],
     ["90d", 90],
     ["1y", 365],
-    ["All", 3650],
+    [t("All"), 3650],
   ];
   return (
     <div className="range-control" role="group" aria-label="Date range">
@@ -124,17 +127,13 @@ export function RangeControl({
           {label}
         </button>
       ))}
-      <label className="range-date">
-        From
-        <input
+      <label className="range-date">{t("From")}<input
           type="date"
           value={value.since}
           onChange={(e) => onChange({ ...value, since: e.target.value })}
         />
       </label>
-      <label className="range-date">
-        To
-        <input
+      <label className="range-date">{t("To")}<input
           type="date"
           value={value.until}
           onChange={(e) => onChange({ ...value, until: e.target.value })}
