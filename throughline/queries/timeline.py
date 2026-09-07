@@ -35,11 +35,6 @@ BUCKETS = ("day", "week", "month")
 #: how it reaches a provider (None = the not-tool-specific lane).
 _SOURCES: dict[str, tuple[str, str, str | None]] = {
     "conversation": ("conversations c", "c.started_at", "c.source_tool"),
-    "message": (
-        "messages m JOIN conversations c ON c.id = m.conversation_id",
-        "m.created_at",
-        "c.source_tool",
-    ),
     # Column names verified against throughline/queries/activity.py, which
     # already reads all six tables. `skills` has no single event timestamp —
     # activity.py coalesces the same three columns, and so must this.
@@ -72,7 +67,6 @@ def _split_providers(providers: list[str]) -> tuple[list[str], bool]:
 #: this event inventory: extraction time is not a separate work event.
 _HUMAN_FILTER: dict[str, str] = {
     "conversation": "AND c.generated_by IS NULL",
-    "message": "AND c.generated_by IS NULL",
 }
 
 
@@ -259,7 +253,6 @@ def _detail_columns(kind: str) -> tuple[str, str, str]:
     return {
         # A conversation IS its own conversation; a message names its parent.
         "conversation": ("c.id", "COALESCE(c.summary, c.project_name, '(conversation)')", "c.id"),
-        "message": ("m.id", "left(m.content, 200)", "m.conversation_id"),
         # The rest belong to no conversation and open on their own routes.
         "skill": ("s.id", "s.name", "NULL::bigint"),
         "project": ("p.id", "p.name", "NULL::bigint"),

@@ -1,0 +1,93 @@
+{
+  "fixture": "scripts/seed_demo_data.py",
+  "corpus": {
+    "conversations": 44,
+    "messages": 249
+  },
+  "clips": [
+    {
+      "name": "projects",
+      "route": "/",
+      "intro": "Open a project and recover its current state.",
+      "outro": "Goal, current position, blocker and next step each link to a source.",
+      "durationSeconds": 11.44
+    },
+    {
+      "name": "conversations",
+      "route": "/conversations",
+      "intro": "Conversations are organised by project.",
+      "outro": "Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.",
+      "durationSeconds": 11.48
+    },
+    {
+      "name": "find",
+      "route": "/find?q=boundary",
+      "intro": "Search across imported records.",
+      "outro": "Results retain source links. Search does not require a generation model.",
+      "durationSeconds": 11.6
+    },
+    {
+      "name": "timeline",
+      "route": "/timeline",
+      "intro": "Compare conversation activity across tools and dates.",
+      "outro": "Open a dated bucket to inspect its conversations. Messages and memories are not separate events.",
+      "durationSeconds": 12.48
+    },
+    {
+      "name": "review",
+      "route": "/curate",
+      "intro": "Inspect knowledge that may need correction.",
+      "outro": "The fixture includes contradictory and superseded statements. A suggestion is not a verified fact.",
+      "durationSeconds": 13.16
+    },
+    {
+      "name": "operate",
+      "route": "/operate",
+      "intro": "Understand the import and processing stages.",
+      "outro": "Discovery, import, extraction and embeddings have separate states. No processing is started in this clip.",
+      "durationSeconds": 11.52
+    },
+    {
+      "name": "console",
+      "route": "/console",
+      "intro": "Inspect the fictional corpus with read-only SQL.",
+      "outro": "The query counts conversations by source tool. PostgreSQL enforces read-only execution.",
+      "durationSeconds": 11.48
+    },
+    {
+      "name": "roles",
+      "route": "/pm/roles",
+      "intro": "Define the responsibility and tool for a role.",
+      "outro": "The demo separates analysis, execution, testing and review.",
+      "durationSeconds": 12.4
+    },
+    {
+      "name": "members",
+      "route": "/pm/members",
+      "intro": "See the people and agents available to teams.",
+      "outro": "These identities are invented fixtures, not real team members.",
+      "durationSeconds": 12.52
+    },
+    {
+      "name": "pipelines",
+      "route": "/pm/teams",
+      "intro": "Inspect the roles and sequence in a team pipeline.",
+      "outro": "Team configuration is reusable across linked projects.",
+      "durationSeconds": 12.56
+    },
+    {
+      "name": "models",
+      "route": "/pm/models",
+      "intro": "Inspect provider configuration separately from project history.",
+      "outro": "Provider entries are fictional. This recording performs no hosted generation.",
+      "durationSeconds": 13
+    },
+    {
+      "name": "teams",
+      "route": "/pm",
+      "intro": "Connect project history with optional AI-team operations.",
+      "outro": "Fictional tasks show completed, blocked and running states. No agent is launched.",
+      "durationSeconds": 11.48
+    }
+  ]
+}

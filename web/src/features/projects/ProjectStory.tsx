@@ -17,6 +17,7 @@ import {
   type StorySession,
   type StoryHistory,
 } from "@/lib/api";
+import { Transcript } from "@/features/detail/Transcript";
 import "./story.css";
 
 const labels = {
@@ -30,7 +31,7 @@ const date = (value: string | null) =>
   value
     ? new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
-        timeStyle: "short",
+        timeStyle: "long",
       }).format(new Date(value))
     : "Time not recorded";
 const sourceUrl = (id: number, message?: number | null) =>
@@ -432,6 +433,11 @@ function Session({
           <ChevronDown size={18} className={open ? "story-chevron-open" : ""} />
         </button>
       </div>
+      <dl className="story-exchange-preview">
+        <div><dt>Prompt <small>Erster Prompt · Auszug</small></dt><dd>{s.opening || "Kein Prompt aufgezeichnet"}</dd><dd><time dateTime={s.prompt_at ?? undefined}>{date(s.prompt_at ?? null)}</time></dd></div>
+        <div><dt>Antwort <small>Letzte Antwort · Auszug</small></dt><dd>{s.answer || "Keine Textantwort aufgezeichnet"}</dd><dd><time dateTime={s.answer_at ?? undefined}>{date(s.answer_at ?? null)}</time></dd></div>
+        <div><dt>Ergebnis / Datei <small>Letzte Werkzeugausgabe · kein Erfolgsnachweis</small></dt><dd>{s.result || ((s.file_count ?? 0) > 0 ? `${s.file_count} Dateireferenzen aufgezeichnet. Conversation für Details öffnen.` : "Kein separates Ergebnis und keine erzeugte Datei belegt. Dateien können im Gespräch erwähnt sein.")}</dd><dd><time dateTime={s.result_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : "Kein Ergebniszeitpunkt aufgezeichnet"}</time></dd></div>
+      </dl>
       {open && (
         <div className="story-session-body" id={`session-body-${s.id}`}>
           <div className="story-session-actions">
@@ -543,22 +549,8 @@ function Session({
                 .data!.pages.flatMap((p) => p.messages)
                 .map((m) => (
                   <article className="story-message" key={m.id}>
-                    <div className="story-message-meta">
-                      <strong>
-                        {m.role.replaceAll("_", " ")}
-                        {m.model ? ` · ${m.model}` : ""}
-                        {m.tool_name ? ` · ${m.tool_name}` : ""}
-                      </strong>
-                      <time>{date(m.created_at)}</time>
-                      <Link to={sourceUrl(s.id, m.id)}>Source ↗</Link>
-                    </div>
-                    <details open={Boolean(m.matches)}>
-                      <summary>
-                        {m.content?.slice(0, 220) || "No text content"}
-                        {(m.content?.length ?? 0) > 220 ? "…" : ""}
-                      </summary>
-                      <pre>{m.content || "No text content"}</pre>
-                    </details>
+                    <Link to={sourceUrl(s.id, m.id)}>Source ↗</Link>
+                    <Transcript messages={[m]} />
                     <button
                       className="linkbutton"
                       onClick={() =>
@@ -748,7 +740,7 @@ function Handoff({
     <Modal title="Review handoff" close={close}>
       <p>
         {sessions.length} selected sessions · {text.length.toLocaleString()}{" "}
-        characters. Downloaded to your device. Nothing is sent to an AI service.
+        characters. The export stays on your device. Nothing is sent to an AI service.
       </p>
       <label>
         Exact export contents

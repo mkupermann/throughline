@@ -348,8 +348,8 @@ describe("route API states", () => {
     expect(projLinks.some((a) => a.getAttribute("href") === "/project/razor1911-demo-tribute")).toBe(true);
     // Transcript with humanised role labels, not raw column values.
     expect(screen.getByText("Transcript")).toBeTruthy();
-    expect(screen.getByText("User")).toBeTruthy();
-    expect(screen.getByText("Assistant")).toBeTruthy();
+    expect(screen.getByText("Prompt")).toBeTruthy();
+    expect(screen.getByText("Antwort")).toBeTruthy();
     // Token counts formatted through Intl.
     expect(screen.getByText("365,390")).toBeTruthy();
   });

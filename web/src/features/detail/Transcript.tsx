@@ -39,6 +39,7 @@ interface Block {
   name?: string;
   input?: Record<string, unknown>;
   content?: unknown;
+  path?: string; file_path?: string; filename?: string; file_id?: string; url?: string;
 }
 
 interface StoredToolCall {
@@ -134,6 +135,9 @@ function when(iso: string | null | undefined): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "longOffset",
+    hour12: false,
   }).format(d);
 }
 
@@ -143,11 +147,11 @@ function when(iso: string | null | undefined): string {
 function roleLabel(role: string): string {
   switch (role) {
     case "user":
-      return "User";
+      return "Prompt";
     case "assistant":
-      return "Assistant";
+      return "Antwort";
     case "tool_result":
-      return "Tool result";
+      return "Ergebnis / Werkzeugausgabe";
     case "system":
       return "System";
     default: {
@@ -215,6 +219,7 @@ export function Transcript({
         const blockTools = blocks.filter((b) => b.type === "tool_use");
         const tools = blockTools.length ? blockTools : storedToolCallsOf(m.tool_calls);
         const results = blocks.filter((b) => b.type === "tool_result");
+        const files = blocks.filter(b => ["file", "output_file", "image", "output_image"].includes(b.type ?? ""));
         const prose =
           blocks
             .filter((b) => b.type === "text")
@@ -235,7 +240,7 @@ export function Transcript({
           >
             <div className="tx-meta">
               <Icon size={13} aria-hidden />
-              <span className="tx-role">{roleLabel(m.role)}</span>
+              <span className="tx-role">{results.length && !prose ? "Ergebnis / Werkzeugausgabe" : roleLabel(m.role)}</span>
               {m.model && <span className="tx-model">{m.model}</span>}
               {m.created_at && (
                 <time className="tx-time" dateTime={m.created_at}>
@@ -251,13 +256,16 @@ export function Transcript({
             ))}
 
             {results.map((b, i) => (
-              <Collapsible key={i} label="Show output ({n} lines)" body={textOf(b.content)} />
+              <section className="tx-result" key={i}><strong>Ergebnis / Werkzeugausgabe</strong><pre>{textOf(b.content)}</pre></section>
+            ))}
+            {files.map((b, i) => (
+              <section className="tx-result" key={`file-${i}`}><strong>{m.role === "user" ? "Eingabedatei" : "Ergebnis / Datei"}</strong><p>Dateireferenz aus den Quelldaten; Verfügbarkeit nicht geprüft.</p><pre>{[b.filename, b.path, b.file_path, b.file_id, b.url && !b.url.startsWith("data:") ? b.url : null].filter(Boolean).join("\n") || "Dateireferenz ohne aufgezeichneten Pfad"}</pre></section>
             ))}
 
             {/* A message with neither prose nor blocks is a real thing in the
                 data — a system marker, or a shape no adapter maps yet. Saying
                 so beats an empty row the reader cannot account for. */}
-            {!prose && tools.length === 0 && results.length === 0 && (
+            {!prose && tools.length === 0 && results.length === 0 && files.length === 0 && (
               <div className="tx-empty">({m.tool_name ? `${m.tool_name} — no recorded content` : "no recorded content"})</div>
             )}
           </li>

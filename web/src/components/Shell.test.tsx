@@ -40,7 +40,7 @@ describe("Shell", () => {
   it("groups task navigation, names Review, and retains provider scope", () => {
     renderShell();
 
-    for (const group of ["Work", "Trust", "System", "Project Management"]) {
+    for (const group of ["Work", "Trust", "System"]) {
       expect(screen.getByRole("navigation", { name: group })).toBeTruthy();
     }
 
@@ -55,13 +55,14 @@ describe("Shell", () => {
     renderShell();
 
     for (const name of [
-      "Projects",
+      "Projekte",
+      "Conversations",
       "Find",
       "Timeline",
       "Review",
       "Operate",
       "Console",
-      "Project Management",
+      "KI-Teamsteuerung",
     ]) {
       const link = screen.getByRole("link", { name });
       expect(link.getAttribute("aria-label")).toBe(name);

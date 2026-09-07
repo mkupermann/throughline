@@ -144,6 +144,11 @@ Throughline reads `OPENAI_API_KEY` from the environment. It must never be
 committed. `.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 
+Provider keys entered through AI-team operations are stored as plaintext in
+`pm_ai_providers.api_key`. Application responses mask them, but database access
+and backups can expose the underlying values. Protect the database and backup
+files as credentials. Encrypted or external secret storage is not implemented.
+
 ### Acceptable use
 
 Whichever model you point Throughline at, its provider's terms still apply.

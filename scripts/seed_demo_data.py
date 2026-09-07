@@ -59,6 +59,8 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 import psycopg2
+from demo_story import seed_project_story
+from psycopg2 import sql
 from psycopg2.extras import Json
 
 from throughline.config import load_dotenv, repo_root
@@ -123,11 +125,11 @@ def ensure_database(dbname: str, reset: bool) -> None:
         with conn.cursor() as cur:
             if reset:
                 print(f"==> Dropping database {dbname!r} (if it exists)")
-                cur.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+                cur.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(dbname)))
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
             if cur.fetchone() is None:
                 print(f"==> Creating database {dbname!r}")
-                cur.execute(f'CREATE DATABASE "{dbname}"')
+                cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
     finally:
         conn.close()
 
@@ -1771,9 +1773,9 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv()
 
-    if args.dbname == "throughline":
+    if not args.dbname.endswith("_demo") or len(args.dbname) > 63:
         print(
-            "Refusing to seed a database named 'throughline' — that is the live database name. Pick another --dbname.",
+            "Demo database names must end in '_demo' and contain at most 63 characters.",
             file=sys.stderr,
         )
         return 2
@@ -1801,6 +1803,7 @@ def main(argv: list[str] | None = None) -> int:
             task_ids = seed_pm(cur, project_ids, workspace)
         conn.commit()
 
+        seed_project_story(conn)
         summarize(conn)
         print(f"\nRun-log workspace: {workspace}")
         print(f"pm_tasks ids: {task_ids}")

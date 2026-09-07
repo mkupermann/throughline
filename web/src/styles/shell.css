@@ -480,3 +480,10 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* Keep navigation names discoverable in the narrow in-app panel. */
+@media (max-width: 1024px) {
+  .shell { grid-template-columns: 110px minmax(0, 1fr); }
+  .nav-link { flex-direction: column; gap: 4px; padding: 8px 3px; }
+  .nav-link span { display: block; font-size: 11px; text-align: center; overflow-wrap: anywhere; }
+}

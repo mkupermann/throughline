@@ -44,6 +44,7 @@ const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { index: true, element: <ProjectLibrary /> },
+      { path: "conversations", element: <ProjectLibrary conversations /> },
       { path: "system-overview", element: <OverviewPage /> },
       { path: "find", element: <FindPage /> },
       { path: "timeline", element: <TimelinePage /> },

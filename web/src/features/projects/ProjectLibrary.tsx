@@ -6,7 +6,7 @@ import { carryProviders } from "@/lib/providerScope";
 import { projectsApi } from "@/lib/api";
 import "./story.css";
 
-export function ProjectLibrary() {
+export function ProjectLibrary({ conversations = false }: { conversations?: boolean }) {
   const [term, setTerm] = useState("");
   const [params] = useSearchParams();
   const providers = params.getAll("provider");
@@ -25,9 +25,9 @@ export function ProjectLibrary() {
         <p className="story-eyebrow">YOUR CONTINUING WORK</p>
         <div className="story-heading">
           <div>
-            <h1>Projects</h1>
+            <h1>{conversations ? "Conversations" : "Projekte"}</h1>
             <p className="story-subtitle">
-              Return to the question. Follow what changed. Keep moving.
+              {conversations ? "Conversations gehören zu Projekten. Wähle ein Projekt, um seine Gespräche mit Prompts, Antworten und Ergebnissen im Verlauf zu öffnen." : "Ziel, aktueller Stand und Conversations deiner Projekte an einem Ort."}
             </p>
           </div>
           <FolderOpen size={32} />
@@ -72,7 +72,7 @@ export function ProjectLibrary() {
             <div>
               <h2>{p.project}</h2>
               <p>
-                {p.sessions} sessions · {p.messages} messages
+                {p.sessions} Conversations · {p.messages} Nachrichten
               </p>
               <p className="story-muted">
                 {p.tool_names?.join(" · ") || "Tool not recorded"}

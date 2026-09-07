@@ -984,6 +984,7 @@ export interface StoryCheckpoint {
   message_available: boolean; source_changed: boolean; recorded_by: string;
 }
 export interface StorySession extends ProjectSession {
+  file_count?: number; file_at?: string | null; prompt_at?: string | null; answer?: string | null; answer_at?: string | null; result?: string | null; result_at?: string | null;
   opening: string | null; project_path: string | null; knowledge_count: number;
 }
 export interface StoryHistory {
@@ -993,7 +994,7 @@ export interface StoryHistory {
   checkpoints: StoryCheckpoint[]; latest_checkpoints: StoryCheckpoint[]; hidden_generated: number; query: string; order: string;
 }
 export interface StoryDetail {
-  messages: { id: number; uuid: string | null; content: string | null; role: string; created_at: string;
+  messages: { id: number; uuid: string | null; content: string | null; content_blocks?: unknown; tool_calls?: unknown; role: string; created_at: string;
     model: string | null; tool_name: string | null; matches: boolean }[];
   knowledge: { id: number; content: string; category: string; status: string | null;
     confidence: number | null; superseded_by: number | null; replacement_conversation_id?: number | null; created_at: string }[];

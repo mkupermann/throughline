@@ -41,7 +41,7 @@ const de = {
     // Bleibt in beiden Sprachen unübersetzt — explizite Nutzervorgabe aus
     // der zweiten UI/UX-Review-Runde (Vibe-Kritikpunkt 7 wird bewusst NICHT
     // umgesetzt, siehe Paket 3.4 im Verbesserungsplan). Kein Übersetzungsfehler.
-    projectManagement: "Project Management",
+    projectManagement: "KI-Teamsteuerung",
     confirmQuestion: "Wirklich?",
   },
   status: {
@@ -90,7 +90,7 @@ const de = {
     add: "Hinzufügen",
   },
   dashboard: {
-    subtitle: "Virtuelle Teams, Pipelines und Budgets im Blick.",
+    subtitle: "KI-Aufgaben mit Teams ausführen und Budgets verfolgen. Zum Lesen vorhandener Gespräche öffne Projekte oder Conversations.",
     createProject: "Projekt anlegen",
     nameLabel: "Name",
     namePlaceholder: "z. B. Demoscene Tribute",
@@ -102,8 +102,8 @@ const de = {
     catalogMembers: "Mitglieder",
     catalogTeams: "Teams",
     catalogModels: "AI-Modelle",
-    emptyTitle: "Noch keine Projekte",
-    emptyBody: "Ein Projekt bündelt Teams, Tasks und Budgets. Lege das erste an, um zu starten.",
+    emptyTitle: "Noch keine KI-Teams für Projekte eingerichtet",
+    emptyBody: "Verknüpfe unten ein vorhandenes Projekt oder lege einen neuen Arbeitsbereich an. Richte anschließend Rollen und ein Team ein; im Projekt kannst du dann Aufgaben starten.",
     errorTitle: "Übersicht kann nicht geladen werden",
     noTasksYet: "Noch keine Tasks",
     teamOne: "Team",
@@ -115,7 +115,7 @@ const de = {
     repoProjects: {
       h2: "Repository-Projekte",
       summary: (n: string) => `Repository-Projekte anzeigen (${n})`,
-      subtitle: "Bestehende Projekte aus dem Gedächtnis — als PM-Projekt übernehmen oder verknüpfen.",
+      subtitle: "Vorhandene Projekte: Der Projektname öffnet den Gesprächsverlauf. „Als PM-Projekt übernehmen“ richtet zusätzlich einen verknüpften Bereich für Teams, Aufgaben und Budgets ein. Deine Conversations bleiben im bisherigen Projekt.",
       searchPlaceholder: "Nach Name filtern…",
       searchLabel: "Repository-Projekte filtern",
       errorTitle: "Repository-Projekte können nicht geladen werden",

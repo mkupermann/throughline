@@ -449,3 +449,14 @@
   color: var(--text-secondary);
   white-space: nowrap;
 }
+
+.story-exchange-preview { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin: 0 12px 24px 38px; }
+.story-exchange-preview > div { border-top: 2px solid var(--border-strong); padding-top: 12px; min-width: 0; }
+.story-exchange-preview dt { font-weight: 700; font-size: 14px; }
+.story-exchange-preview small { display: block; font-weight: 400; font-size: 11px; color: var(--text-secondary); margin: 6px 0; }
+.story-exchange-preview dd { margin: 0 0 8px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.story-exchange-preview time { font-size: 11px; color: var(--text-secondary); }
+.tx-role { font-weight: 750; color: var(--text-primary); }
+.tx-time { font-variant-numeric: tabular-nums; }
+.tx-result pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media(max-width:900px) { .story-exchange-preview { grid-template-columns: 1fr; } }

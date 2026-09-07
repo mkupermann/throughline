@@ -165,7 +165,6 @@ def test_timeline_sources_exclude_standalone_memory():
     """Memories enrich conversations; extraction must not add work events."""
     assert set(T._SOURCES) == {
         "conversation",
-        "message",
         "skill",
         "project",
         "prompt",
@@ -363,7 +362,7 @@ def test_aggregate_unattributed_alone_does_not_pull_in_named_providers(mixed_att
 # ── A day opens on what a person recognises ─────────────────────────────────
 
 
-def test_day_detail_lists_conversations_before_messages(db_env):
+def test_day_detail_keeps_messages_inside_conversations(db_env):
     """Ordering by time alone let messages fill the page.
 
     Measured on a real day: 1,678 messages against 20 conversations, so the
@@ -396,7 +395,7 @@ def test_day_detail_lists_conversations_before_messages(db_env):
 
         rows = T.day_detail(conn, date(2026, 5, 5), kinds=[], providers=[], limit=5)
         assert rows, "the day should not be empty"
-        assert rows[0]["kind"] == "conversation", f"a container must lead the list, got {rows[0]['kind']}"
+        assert [row["kind"] for row in rows] == ["conversation"]
     finally:
         conn.close()
 

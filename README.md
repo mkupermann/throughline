@@ -1,91 +1,75 @@
-# Throughline
+<p align="center"><img src="docs/brand/wordmark.svg" alt="Throughline — Your AI work, in context" width="100%"></p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-336791.svg)](sql/schema.sql)
-[![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-151b1e.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-151b1e.svg)](pyproject.toml)
+[![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-151b1e.svg)](sql/schema.sql)
+[![Status: beta](https://img.shields.io/badge/status-beta-c55234.svg)](CHANGELOG.md)
 
-**Your AI work should compound. Throughline makes it searchable, structured, and reusable.**
+**Open a project after four weeks. Understand what you investigated, why the decisions changed, which results still hold, and what comes next.**
 
-Throughline imports the sessions that AI coding tools already store on your computer. It brings them into one local PostgreSQL database, organises them by project, extracts durable knowledge, and keeps every result linked to its source.
+Throughline brings locally stored AI conversations into a source-linked project history. It imports sessions from nine supported tools into PostgreSQL, keeps prompts and answers in their conversations, and helps you resume work without assembling the story from separate archives.
 
-You can change tools without abandoning what you learned in the last one. Throughline currently reads Claude Code, Cline, Codex CLI, Continue, Cursor, Hermes, Vibe, Windsurf, and Zed.
+The core workflow works without a connected AI model. Optional models add semantic search, extraction and generated answers. Throughline is currently a local, single-user application; it is not an authenticated team service.
 
-![Throughline Overview with knowledge from several AI tools](docs/screenshots/hero.png)
+[Start locally](#quick-start-with-docker) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
 
-No account. No telemetry. No proprietary archive.
+## Follow the work
 
-## The problem it solves
+1. **Choose a project.** See its recorded goal, current position, blocker and next step, with links to the messages supporting them.
+2. **Follow its conversations.** Browse across tools and dates. Expand a conversation to read the full messages and their extracted notes.
+3. **Inspect the evidence.** Prompt, answer and recorded output have distinct labels. Timestamps include seconds and timezone when available. An absent timestamp or unrecorded file is shown as missing.
+4. **See what changed.** Earlier project notes remain available. A superseded memory points to its replacement and source conversation.
+5. **Prepare the next session.** Select conversations, inspect a compact Markdown handoff, then download it for another tool.
 
-AI tools remember their own sessions, if they remember them at all. They do not know what happened in another tool. Useful decisions disappear into transcripts. Fixes get rediscovered. Context has to be explained again.
+![Atlas project: a source-linked goal, current position and next step](docs/videos/projects.png)
 
-Throughline treats those transcripts as one body of work.
+The collapsed conversation card previews the **first prompt**, **last recorded answer**, and **latest recorded tool output or file-reference count**. These are explicitly labelled excerpts, not an inferred prompt/answer pairing. Open the conversation to inspect the sequence. A tool output is not automatically proof that a file was successfully created; explicit file blocks are shown as references, without claiming the file still exists.
 
-- A project becomes a continuous document with its sessions and extracted knowledge.
-- Find searches conversations, messages, memory, skills, projects, and prompts together.
-- Ask turns retrieved records into a cited answer.
-- Timeline shows how work evolved across tools.
-- Review exposes contradictions, drift, stale knowledge, and weak evidence.
-- Markdown export and MCP put the knowledge back into the tools where you need it.
+## A project is the context
 
-The result is not another chat history. It is working memory you control.
+Conversations belong in projects. Messages and extracted memories belong in their conversations. A message may be a search hit or a direct source link, but it is not an independent event on the Timeline.
 
-## What the interface does
+Project grouping currently derives from source working-folder names. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Persistently correcting that grouping is still planned.
 
-The navigation follows the work rather than the storage model.
+Time order describes chronology, not causality. Throughline displays supported explicit source relationships where recorded; it does not infer a dependency because two sessions happened close together. See the [relationship and provenance audit](docs/PROJECT_STORY.md).
 
-| Area | Purpose |
+## See every area
+
+The demo seeder reseeds its target tables; use a separate database ending in `_demo`. Its optional `--reset` flag drops that demo database.
+
+Each link opens a short MP4 recorded from the actual interface using the bundled fictional corpus. Videos have burned-in captions and separate WebVTT tracks. They demonstrate navigation and inspection; no real model call or agent execution is presented as a demo result.
+
+| Area | What the clip demonstrates | Video |
+|---|---|---|
+| **Projects / Projekte** | Find Atlas and recover its source-linked state | [Watch](docs/videos/projects.mp4) |
+| **Conversations** | Choose a project, open a conversation and inspect its output reference | [Watch](docs/videos/conversations.mp4) |
+| **Find** | Search imported records with their source context | [Watch](docs/videos/find.mp4) |
+| **Timeline** | Compare activity across tools and open a dated bucket | [Watch](docs/videos/timeline.mp4) |
+| **Review** | Inspect contradictory and superseded knowledge | [Watch](docs/videos/review.mp4) |
+| **Operate** | Understand import, extraction and embedding stages | [Watch](docs/videos/operate.mp4) |
+| **Console** | Count conversations by source with read-only SQL | [Watch](docs/videos/console.mp4) |
+| **AI-team operations / KI-Teamsteuerung** | Inspect linked projects, task states and budgets | [Watch](docs/videos/teams.mp4) |
+| **Roles** | Separate analysis, execution, testing and review responsibilities | [Watch](docs/videos/roles.mp4) |
+| **Members** | Inspect fictional people and agents | [Watch](docs/videos/members.mp4) |
+| **Team pipelines** | Inspect reusable team configuration | [Watch](docs/videos/pipelines.mp4) |
+| **Model providers** | Inspect provider configuration independently of project history | [Watch](docs/videos/models.mp4) |
+
+[Video gallery and captions](docs/videos/README.md) · [Reproduce the recordings](docs/DEMO.md)
+
+The navigation keeps daily work separate from system operations. Labels remain visible in narrow panels. Use `Ctrl+K` / `Cmd+K` for the command palette; `g` then `v` opens Conversations. Project history is the default project view; **Full document** opens the alternative complete document layout.
+
+## Know what you can trust
+
+| What you see | What it means |
 |---|---|
-| **Overview** | Shows what needs attention, then the projects active in the last seven days. |
-| **Projects** | Combines structured knowledge with the complete project transcript. Switch between oldest first and newest first. |
-| **Find** | Runs one lexical and semantic query across every stored object. Copy selected context as clean Markdown. |
-| **Ask** | Answers from your records and cites the messages or memory chunks it used. Copy the answer with its sources. |
-| **Timeline** | Browses the same corpus by date and tool. Open any active day and follow it back to the session. |
-| **Review** | Works through contradictions, drift, superseded chains, low confidence, missing embeddings, expiring records, unused records, and forgotten records. |
-| **Operate** | Presents discovery, ingestion, extraction, embeddings, and quality review as one recoverable pipeline. |
-| **Console** | Runs read-only SQL. PostgreSQL itself rejects writes. |
+| A project-state note | A user-recorded statement with a source; it is not independent verification |
+| Extracted memory | A model-derived note to inspect in its conversation |
+| A replacement or supersession | The earlier statement remains traceable; status alone does not establish truth |
+| A generated answer | A model response whose citations need checking |
+| A file reference | An explicit recorded output block; current file availability is not verified |
+| A missing relationship or timestamp | The imported data did not establish it |
 
-Project Management remains available as a separate area for local team pipelines. It does not compete with the personal knowledge workflow.
-
-### One project, in full
-
-The Project page opens in Document mode. It groups extracted knowledge by category, keeps provenance visible, and follows it with the complete transcript across every matching session. Content loads incrementally. One explicit action loads the complete project. Switching an incomplete document to newest first loads the remainder before reversing it, so a partial list never pretends to be the latest history.
-
-![A complete project document with knowledge and transcript](docs/screenshots/project.png)
-
-Sessions mode keeps the compact searchable index for fast navigation.
-
-### Find it, answer it, reuse it
-
-Find and Ask share filters and stable URL state. Recent queries stay in the browser. They are not written to PostgreSQL.
-
-Find is for retrieval. Ask is for synthesis. Both can produce Markdown that carries its source references into another AI tool.
-
-![A cited answer assembled from synthetic records](docs/screenshots/ask.png)
-
-Every answer states which model produced it and whether the request stayed on the machine. An uncited answer is labelled as unverified. When generation is unavailable, Throughline still returns the records it found.
-
-### Trust needs its own workflow
-
-Memory becomes dangerous when old decisions look current. Review makes that failure visible. Its drift audit samples extracted memory against the source conversations and records the result without changing either source conversations or memory chunks.
-
-![Review queues and the visible drift audit action](docs/screenshots/review.png)
-
-Destructive actions require confirmation. Forgetting repairs related references and leaves an audit record. The interface offers an undo window for reversible review actions.
-
-### Operate the pipeline, not a wall of jobs
-
-Operate shows five stages in order: discover sources, ingest sessions, extract knowledge, create embeddings, and review quality. Each stage states whether it is current, due, running, blocked, or failed. The next useful action stays beside the stage that needs it.
-
-![The knowledge pipeline, environment, inventory, and Markdown export](docs/screenshots/operate.png)
-
-Markdown export includes an in-app folder browser. Server-side browsing is confined to `THROUGHLINE_EXPORT_ROOT`. A container cannot open the host operating system's native folder dialog, so the browser presents only the directory tree the service is allowed to use.
-
-### Built for daily use
-
-Press `Cmd+K` on macOS or `Ctrl+K` elsewhere for the command palette. It navigates, finds specific records, and runs safe pipeline jobs. Press `/` to focus search. Press `g` and then `o`, `f`, `t`, `c`, `p`, `s`, or `m` to move between areas.
-
-Comfortable and compact density settings persist locally. The interface supports keyboard navigation, visible focus, reduced motion, narrow screens, and light or dark themes.
+Counts describe imported records, not every conversation that ever existed. Unsupported formats, missing files, source timestamps and excluded automation can limit coverage. The project view exposes its source folders, refresh time and automation filter. The latest state fields remain separate from the last 100 historical state notes.
 
 ## Quick start with Docker
 
@@ -102,6 +86,8 @@ docker compose exec web throughline ingest --all
 On Windows, use `py -3 scripts/init_compose_env.py` if `python3` is not available.
 
 Open [http://127.0.0.1:8788](http://127.0.0.1:8788).
+
+The initializer detects Cline’s task directory for macOS, Linux or Windows. For another editor profile, set `THROUGHLINE_CLINE_DIR` in `.env` after initialization to its task directory. Other source mounts are listed in `docker-compose.yml`.
 
 The setup script creates an ignored `.env` with a random database password. Source directories are mounted read-only. The web API binds to loopback because it has no authentication. The first ingestion is explicit.
 
@@ -138,6 +124,8 @@ docker compose exec web throughline embed --backend ollama
 ```
 
 Use a smaller or larger generation model to match the machine. Throughline inspects the models Ollama actually has. `throughline doctor` reports what will run.
+
+Provider keys entered in AI-team operations are currently stored in the local database as plaintext. Database access and backups must therefore be treated as credential access. Environment-based model keys and team-provider keys are separate configuration paths; see [Security](SECURITY.md).
 
 Model use is an explicit privacy boundary:
 
@@ -242,13 +230,11 @@ The application reads standard `PG*` variables and an ignored repository-root `.
 
 Full setup details are in [Installation](docs/INSTALLATION.md).
 
-## Project Management
+## Optional AI-team operations
 
-The optional Project Management area defines projects, team pipelines, roles, members, model providers, and hard token budgets. It can launch supported local agent workflows or adopt an external run and display its history.
+The system area can configure projects, roles, members, pipelines, providers and token budgets, and inspect supported local agent runs. Its project records are separate from imported-history projects and are connected through explicit links. A linked project name opens its conversation history.
 
-![A walkthrough of the separate Project Management area](docs/assets/pm-walkthrough.gif)
-
-The walkthrough uses fictional data from [`scripts/seed_demo_data.py`](scripts/seed_demo_data.py). An [MP4 version](docs/assets/pm-walkthrough.mp4) and [captions](docs/assets/pm-walkthrough.srt) are also available.
+This remains an advanced setup workflow. A guided path from project goal to team to first task, persistent project reassignment, multi-user permissions and broader user validation remain open. See [the roadmap](docs/ROADMAP.md).
 
 ## Development
 
@@ -265,7 +251,7 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
-Integration tests require a disposable PostgreSQL 16 instance with pgvector. The frontend suite currently contains 199 tests. Documentation screenshots are generated from [`examples/demo_data.sql`](examples/demo_data.sql), never from a personal database. The capture procedure is in [`docs/screenshots/`](docs/screenshots/).
+Integration tests require a disposable PostgreSQL 16 instance with pgvector. Current walkthroughs use [`scripts/seed_demo_data.py`](scripts/seed_demo_data.py). The older screenshot fixture remains in [`examples/demo_data.sql`](examples/demo_data.sql). See [demo reproduction](docs/DEMO.md) for the current media workflow.
 
 Contributions are welcome. Read [Contributing](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report bugs in [Issues](https://github.com/mkupermann/throughline/issues). Report security problems through the channel in [Security](SECURITY.md).
 

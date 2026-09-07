@@ -212,3 +212,23 @@ def test_library_includes_old_projects(corpus, db_env):
         assert "other" in {p["project"] for p in projects}
         assert client.get("/api/projects/all?provider=vibe").json()["projects"] == []
     deps.close_pool()
+
+
+def test_explicit_output_file_and_prompt_keep_source_time(corpus):
+    conn, ids, _ = corpus
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO messages (conversation_id, role, content, created_at, content_blocks)
+            VALUES (%s, 'user', 'Make a report', '2026-08-01T10:01:23Z',
+                    '[{"type":"file","path":"input.csv"}]'),
+                   (%s, 'assistant', 'Report ready', '2026-08-01T10:02:34Z',
+                    '[{"type":"output_file","path":"report.md"}]')""",
+            (ids[0], ids[0]),
+        )
+    conn.commit()
+    session = next(s for s in story.history(conn, "demo")["sessions"] if s["id"] == ids[0])
+    assert session["file_count"] == 1
+    assert session["prompt_at"].second == 23
+    assert session["file_at"].second == 34
+    detail = story.session_detail(conn, "demo", ids[0])
+    assert any(m["content_blocks"] == [{"type": "output_file", "path": "report.md"}] for m in detail["messages"])

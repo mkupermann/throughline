@@ -207,7 +207,7 @@ function RepoProjectRow({ rp }: { rp: PmRepoProject }) {
 
   return (
     <li className="pm-repo-row">
-      <span className="pm-repo-row-name">{rp.name}</span>
+      <Link className="pm-repo-row-name" to={`/project/${encodeURIComponent(rp.name)}`}>{rp.name}</Link>
       <span className="pm-repo-row-meta tabular">
         {plural(rp.sessions, t.dashboard.repoProjects.sessionOne, t.dashboard.repoProjects.sessionMany)}
       </span>
@@ -372,6 +372,7 @@ export function DashboardPage() {
     <section className="pm-page">
       {header}
 
+      <p className="page-subtitle">{t.dashboard.repoProjects.subtitle} <Link to="/conversations">Conversations →</Link></p>
       <div className="pm-catalog-links" role="group" aria-label={t.dashboard.catalogGroupLabel}>
         <Link to="/pm/roles" className="pm-catalog-link">
           <IdCard size={15} aria-hidden />

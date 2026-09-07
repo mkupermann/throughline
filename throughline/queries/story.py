@@ -66,6 +66,28 @@ def history(
                c.generated_by,
                (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
                 AND m.role = 'user' ORDER BY m.created_at, m.id LIMIT 1) AS opening,
+               (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
+                AND m.role = 'user' ORDER BY m.created_at, m.id LIMIT 1) AS prompt_at,
+               (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
+                AND m.role = 'assistant' AND NULLIF(m.content, '') IS NOT NULL
+                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS answer,
+               (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
+                AND m.role = 'assistant' AND NULLIF(m.content, '') IS NOT NULL
+                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS answer_at,
+               (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
+                AND m.role = 'tool_result' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS result,
+               (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
+                AND m.role = 'tool_result' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS result_at,
+               (SELECT count(*) FROM messages m CROSS JOIN LATERAL jsonb_array_elements(
+                  CASE jsonb_typeof(m.content_blocks) WHEN 'array' THEN m.content_blocks
+                    WHEN 'object' THEN jsonb_build_array(m.content_blocks) ELSE '[]'::jsonb END) b
+                WHERE m.conversation_id = c.id AND m.role <> 'user'
+                  AND b->>'type' IN ('file', 'output_file', 'image', 'output_image')) AS file_count,
+               (SELECT max(m.created_at) FROM messages m CROSS JOIN LATERAL jsonb_array_elements(
+                  CASE jsonb_typeof(m.content_blocks) WHEN 'array' THEN m.content_blocks
+                    WHEN 'object' THEN jsonb_build_array(m.content_blocks) ELSE '[]'::jsonb END) b
+                WHERE m.conversation_id = c.id AND m.role <> 'user'
+                  AND b->>'type' IN ('file', 'output_file', 'image', 'output_image')) AS file_at,
                (SELECT count(*) FROM memory_chunks mc WHERE mc.source_type = 'conversation'
                 AND mc.source_id = c.id AND COALESCE(mc.status, 'active') <> 'forgotten') AS knowledge_count
         FROM conversations c WHERE {predicate}{search}
@@ -125,7 +147,7 @@ def session_detail(
     messages = rows(
         conn,
         """
-        SELECT m.id, m.uuid, m.role, m.content, m.created_at, m.model, m.tool_name,
+        SELECT m.id, m.uuid, m.role, m.content, m.content_blocks, m.tool_calls, m.created_at, m.model, m.tool_name,
                m.parent_uuid, m.is_sidechain, (%(has_query)s AND m.content ILIKE %(term)s) AS matches
         FROM messages m WHERE m.conversation_id = %(id)s
         ORDER BY m.created_at, m.id LIMIT %(limit)s OFFSET %(offset)s

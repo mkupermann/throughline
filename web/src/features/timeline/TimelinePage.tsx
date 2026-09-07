@@ -270,7 +270,7 @@ export function TimelinePage() {
             rather than pretending every source row is a message. */}
         <p className="page-subtitle">What happened, and when.</p>
         <p className="page-hint">
-          {formatCount(grandTotal)} events across conversations, messages and system
+          {formatCount(grandTotal)} events across conversations and system
           activity from {range.since} to {range.until}. One column per {data?.bucket ?? "day"}.
         </p>
       </header>

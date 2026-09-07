@@ -15,10 +15,6 @@ function timelineRouteFor(item: TimelineDayItem): string | null {
   switch (item.kind) {
     case "conversation":
       return `/c/${item.id}`;
-    case "message":
-      // Open the parent conversation and jump to this message. `item.id` is
-      // the message's own id and must never be used as a conversation id.
-      return item.conversation_id ? `/c/${item.conversation_id}#m${item.id}` : null;
     case "skill":
       return `/s/${item.id}`;
     case "prompt":

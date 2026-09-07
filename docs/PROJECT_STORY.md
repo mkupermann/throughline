@@ -73,3 +73,11 @@ The handoff includes selected context, not a full transcript or artifact bundle;
 The state-history disclosure currently shows the latest 100 entries; the latest value of each field is fetched independently. Older entries remain in the database, but a dedicated older-state browser is future work.
 
 Memory is conversation context, not an independent timeline event. Timeline aggregates and day details exclude memory extraction. Project notes and their replacements link to source conversations instead of standalone memory pages.
+
+## Conversation navigation and recorded outputs
+
+Conversations has its own sidebar entry, grouped by project. Narrow panels retain navigation labels. Messages and memories are excluded from independent timeline events; source links still open individual messages within their conversations.
+
+A collapsed conversation exposes labelled excerpts of its first prompt, last recorded answer and latest tool output or explicit file-reference count. These are not a synthetic prompt/answer pair. Expanded transcripts show original content, structured file references and source timestamps with seconds and timezone. Missing timestamps or outputs remain explicitly missing; file existence and successful creation are not inferred from a reference.
+
+AI-team operations lives in the System group and links its associated project names back to conversation history. The two project record types remain distinct in storage. The interface explains this relationship; it does not implement persistent reassignment or a guided team-setup wizard.
