@@ -1,3 +1,4 @@
+import { ProjectName, projectLabel } from "./ProjectName";
 import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
@@ -107,7 +108,7 @@ function Story({ project }: { project: string }) {
         <div className="story-heading">
           <div>
             <p className="story-eyebrow">{t("PROJECT WORKSPACE")}</p>
-            <h1>{project}</h1>
+            <h1>{projectLabel({project, display_name:data?.identity?.display_name})}</h1>
             <p className="story-subtitle">{t("The work, the evidence, and where to go next.")}</p>
           </div>
           <button
@@ -126,6 +127,7 @@ function Story({ project }: { project: string }) {
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
+      {data && <ProjectName project={project} name={data.identity?.display_name} folders={data.paths.length} />}
       {history.isPending && <p role="status">{t("Loading project history…")}</p>}
       {history.error && (
         <div role="alert" className="story-notice">

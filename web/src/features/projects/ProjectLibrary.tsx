@@ -1,3 +1,4 @@
+import { projectLabel } from "./ProjectName";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
@@ -19,7 +20,7 @@ export function ProjectLibrary() {
   });
   const projects = [...(query.data?.projects ?? [])]
     .filter((p) =>
-      p.project.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+      (p.project + " " + (p.display_name ?? "")).toLocaleLowerCase().includes(term.toLocaleLowerCase()),
     )
     .sort((a, b) => (b.last_active ?? "").localeCompare(a.last_active ?? ""));
   return (
@@ -69,7 +70,8 @@ export function ProjectLibrary() {
             )}
           >
             <div>
-              <h2>{p.project}</h2>
+              <h2>{projectLabel(p)}</h2>
+              {!p.display_name && <p className="story-muted">{t("Name and project assignment need review")}</p>}
               <p>
                 {p.sessions}{t(" Conversations · ")}{p.messages}{t(" messages")}</p>
               <p className="story-muted">

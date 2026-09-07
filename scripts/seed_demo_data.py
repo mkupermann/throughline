@@ -1804,6 +1804,11 @@ def main(argv: list[str] | None = None) -> int:
         conn.commit()
 
         seed_project_story(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO project_names(project_key, display_name) VALUES ('Atlas (demo)', 'Atlas (demo)') ON CONFLICT(project_key) DO NOTHING"
+            )
+        conn.commit()
         summarize(conn)
         print(f"\nRun-log workspace: {workspace}")
         print(f"pm_tasks ids: {task_ids}")

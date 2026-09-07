@@ -98,3 +98,10 @@ Known `recommended_plugins`, `environment_context` and `in-app-browser-context` 
 The project recovery panel quotes the latest-started conversation's last user request and last text answer, with exact source-message links. It is independent of history search, pagination and display order, while preserving folder, provider and automation scope. These excerpts are explicitly not a confirmed project state or proof that an announced action succeeded. Existing confirmed checkpoints remain authoritative.
 
 The conversation reader lists up to 100 distinct explicit local file references from assistant messages, with the latest mentioning source and timestamp. Availability is checked on the application server, not on the user's browser computer. Containers may not have access to host files; such references remain visible as unavailable. Downloads require an existing file inside the recorded project directory, project/message ownership checks, and are served as attachments. Contents, freshness and successful execution are not verified by file existence. No source files are mounted or imported automatically.
+
+
+### Project naming contract
+
+Imported working-folder names are source identifiers, not confirmed semantic project names. Unnamed groups are labeled “Folder group” and flagged for review. The project header provides a name editor; the saved label appears in the library, conversation selector and project views. Search matches both labels and source keys. Labels live in `project_names`, independently of the import pipeline, so refreshing messages cannot overwrite a user's choice. Migration 010 is required on existing databases; fresh schema installations include the same table.
+
+The current grouping still uses the imported folder basename. Multiple source folders with that basename are exposed in the project view. A display-name edit applies to the entire existing group and never proves that all its conversations belong together. It neither merges nor reassigns data. Source paths, source links and checkpoint keys remain unchanged. Semantic regrouping is a separate review task.

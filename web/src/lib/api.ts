@@ -196,6 +196,7 @@ export interface AskResponse {
 }
 
 export interface ProjectSummary {
+  display_name?: string | null; name_origin?: "user" | "folder";
   project: string;
   sessions: number;
   messages: number;
@@ -239,12 +240,14 @@ export interface ProjectContextMessage {
   conversation_started_at: string | null; generated_by: string | null;
 }
 export interface ProjectContext {
+  display_name?: string | null;
   project: string; summary: string; knowledge: { id: number; type: "memory"; category: string; content: string; confidence: number; source_type: string; source_id: number | null }[];
   messages: ProjectContextMessage[]; sessionCount: number; messageCount: number;
   total: number; offset: number; limit: number; complete: boolean; order: "oldest" | "newest"; includeGenerated: boolean;
 }
 
 export const projectsApi = {
+  rename: (project: string, display_name: string) => request<{display_name: string}>(`/projects/${encodeURIComponent(project)}/name`, {method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({display_name})}),
   all: (providers: string[] = []) => request<{ projects: ProjectSummary[] }>(`/projects/all?${new URLSearchParams(providers.map(p => ["provider", p]))}`),
   recent: (days = 7) =>
     request<{ days: number; projects: ProjectSummary[] }>(`/projects/recent?days=${days}`),
@@ -990,6 +993,7 @@ export interface StorySession extends ProjectSession {
   opening: string | null; project_path: string | null; knowledge_count: number;
 }
 export interface StoryHistory {
+  identity?: {project: string; display_name: string | null; name_origin: "user" | "folder"};
   recovery?: StorySession | null;
   project: string; path: string | null; paths: { path: string | null; sessions: number }[];
   coverage: { sessions: number; messages: number; refreshed_at: string | null; unattributed: number };

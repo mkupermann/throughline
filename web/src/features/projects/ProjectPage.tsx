@@ -1,3 +1,4 @@
+import { projectLabel } from "./ProjectName";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
@@ -357,7 +358,7 @@ export function LegacyProjectPage() {
     <>
       <header className="page-header">
         <Link to="/" className="backlink">{t("← Overview")}</Link>
-        <h1 className="page-title">{project}</h1>
+        <h1 className="page-title">{projectLabel({project, display_name:contextData?.display_name})}</h1>
         <p className="page-subtitle">{pageSubtitle}</p>
       </header>
 

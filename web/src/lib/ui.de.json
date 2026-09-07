@@ -391,5 +391,18 @@
   "Available on this server": "Auf diesem Server verfügbar",
   "Not accessible on this server": "Auf diesem Server nicht erreichbar",
   "Copy path": "Pfad kopieren",
-  "Download file": "Datei herunterladen"
+  "Download file": "Datei herunterladen",
+  "Folder group": "Ordnergruppe",
+  "Display name saved separately from imported folders.": "Der Anzeigename ist unabhängig von den importierten Ordnern gespeichert.",
+  "Name not set. This is an imported folder group, not a confirmed project assignment.": "Noch kein Name vergeben. Dies ist eine importierte Ordnergruppe, keine bestätigte Projektzuordnung.",
+  "Source folder name": "Ursprünglicher Ordnername",
+  "source folders": "Quellordner",
+  "Edit project name": "Projektnamen bearbeiten",
+  "Name this project": "Projekt benennen",
+  "Project name": "Projektname",
+  "This label applies to this folder group. Renaming does not merge or reassign conversations.": "Dieser Name gilt für diese Ordnergruppe. Beim Umbenennen werden Gespräche weder zusammengeführt noch neu zugeordnet.",
+  "Save name": "Namen speichern",
+  "Could not save project name": "Projektname konnte nicht gespeichert werden",
+  "Name and project assignment need review": "Name und Projektzuordnung noch ungeprüft",
+  "Naming does not confirm that every conversation belongs to the same project.": "Die Benennung bestätigt nicht, dass alle Gespräche zum selben Projekt gehören."
 }

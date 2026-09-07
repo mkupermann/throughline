@@ -1,3 +1,4 @@
+import { projectLabel } from "./ProjectName";
 import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -40,14 +41,14 @@ export function ConversationsPage() {
       <div><h1>{t("Conversations")}</h1><p>{t("Choose a project, select a conversation, and read it in context.")}</p></div>
       <label>{t("Project")}<select aria-label={t("Project")} value={project} onChange={e => chooseProject(e.target.value)}>
         <option value="">{t("Choose a project…")}</option>
-        {[...(projects.data?.projects ?? [])].sort((a, b) => a.project.localeCompare(b.project)).map(p => <option key={p.project} value={p.project}>{p.project} ({p.sessions})</option>)}
+        {[...(projects.data?.projects ?? [])].sort((a, b) => a.project.localeCompare(b.project)).map(p => <option key={p.project} value={p.project}>{projectLabel(p)} ({p.sessions})</option>)}
       </select></label>
     </header>
     {projects.isPending && <p role="status">{t("Loading projects…")}</p>}
     {projects.error && <p role="alert">{t("Could not load projects")} <button onClick={() => void projects.refetch()}>{t("Retry")}</button></p>}
     {project ? <ConversationBrowser key={`${project}:${params.get("q")}:${params.get("path")}:${params.get("generated")}:${providers.join(",")}`} project={project} /> :
       <div className="conversation-welcome"><h2>{t("Start with a project")}</h2><p>{t("Your conversations stay with their project. Choose one above to see its conversation list and open a single transcript.")}</p>
-        <div className="conversation-projects">{[...(projects.data?.projects ?? [])].sort((a,b) => (b.last_active ?? "").localeCompare(a.last_active ?? "")).slice(0,6).map(p => <button key={p.project} onClick={() => chooseProject(p.project)}><strong>{p.project}</strong><span>{p.sessions} {t("Conversations")}</span></button>)}</div>
+        <div className="conversation-projects">{[...(projects.data?.projects ?? [])].sort((a,b) => (b.last_active ?? "").localeCompare(a.last_active ?? "")).slice(0,6).map(p => <button key={p.project} onClick={() => chooseProject(p.project)}><strong>{projectLabel(p)}</strong><span>{p.sessions} {t("Conversations")}</span></button>)}</div>
       </div>}
   </div>;
 }
@@ -74,9 +75,9 @@ function ConversationBrowser({ project }: { project: string }) {
     setParams(next);
   }
   return <>
-    <div className="conversation-project-context"><Link to={`/project/${encodeURIComponent(project)}?${scope}`}>{t("Project history")} · {project}</Link><span>{t("Times:")} {Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
+    <div className="conversation-project-context"><Link to={`/project/${encodeURIComponent(project)}?${scope}`}>{t("Project history")} · {projectLabel(first?.identity ?? {project})}</Link><span>{t("Times:")} {Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
     <div className="conversation-layout">
-      <section className="conversation-list" aria-label={t("Conversation list")}><h2 className="conversation-list-project">{project}</h2>
+      <section className="conversation-list" aria-label={t("Conversation list")}><h2 className="conversation-list-project">{projectLabel(first?.identity ?? {project})}</h2>
         <form onSubmit={e => { e.preventDefault(); changeScope("q", search.trim()); }} className="conversation-search">
           <input aria-label={t("Search conversations")} placeholder={t("Search conversations")} value={search} onChange={e => setSearch(e.target.value)} maxLength={200} />
           <button className="button" type="submit">{t("Search")}</button>
@@ -96,19 +97,19 @@ function ConversationBrowser({ project }: { project: string }) {
         </button></li>)}</ol>
         {history.hasNextPage && <button className="button" disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>{history.isFetchingNextPage ? t("Loading…") : t("Load next 30 sessions")}</button>}
       </section>
-      {id ? <ConversationReader key={`${id}:${scope.toString()}`} project={project} id={id} session={selected} scope={scope} /> : <div className="conversation-reader conversation-empty">{first && !first.total ? t("No conversations available in this scope.") : t("Select a conversation to read its prompt, answer and recorded results.")}</div>}
+      {id ? <ConversationReader key={`${id}:${scope.toString()}`} project={project} label={projectLabel(first?.identity ?? {project})} id={id} session={selected} scope={scope} /> : <div className="conversation-reader conversation-empty">{first && !first.total ? t("No conversations available in this scope.") : t("Select a conversation to read its prompt, answer and recorded results.")}</div>}
     </div>
   </>;
 }
 
-function ConversationReader({ project, id, session, scope }: {project: string; id: number; session?: StorySession; scope: URLSearchParams}) {
+function ConversationReader({ project, label, id, session, scope }: {project: string; label: string; id: number; session?: StorySession; scope: URLSearchParams}) {
   useLanguage();
   const detail = useInfiniteQuery({ queryKey: ["conversation-reader", project, id, scope.toString()], initialPageParam: 0,
     queryFn: ({pageParam}) => { const q = new URLSearchParams(scope); q.set("offset", String(pageParam)); return storyApi.session(project,id,q); },
     getNextPageParam: page => page.has_more ? page.offset + page.messages.length : undefined,
   });
   return <section className="conversation-reader" aria-label={t("Selected conversation")}>
-    <header><p>{project}</p><h2>{session?.title || t("Conversation") + ` #${id}`}</h2><Link to={`/c/${id}`}>{t("Open source conversation")}</Link></header>
+    <header><p>{label}</p><h2>{session?.title || t("Conversation") + ` #${id}`}</h2><Link to={`/c/${id}`}>{t("Open source conversation")}</Link></header>
     {session && <dl className="conversation-summary">
       <div><dt>{t("Prompt")} <small>{t("First prompt · excerpt")}</small></dt><dd>{session.opening || t("No prompt recorded")}</dd><dd><Timestamp value={session.prompt_at} /> {session.prompt_id && <Link to={`/c/${id}#m${session.prompt_id}`}> · {t("Source")}</Link>}</dd></div>
       <div><dt>{t("Answer")} <small>{t("Last answer · excerpt")}</small></dt><dd>{session.answer || t("No text answer recorded")}</dd><dd><Timestamp value={session.answer_at} /> {session.answer_id && <Link to={`/c/${id}#m${session.answer_id}`}> · {t("Source")}</Link>}</dd></div>

@@ -15,10 +15,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 
 from throughline.queries import conversations as Conversations
 from throughline.queries import memory as Memory
+from throughline.queries import project_names as Names
 from throughline.queries import projects as Q
 
 from ..deps import connection
@@ -38,7 +40,7 @@ CONTEXT_PAGE = 500
 def all_projects(provider: list[str] = Query(default=[]), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """Every observed project, including projects inactive for years."""
     with connection(settings) as conn:
-        return {"projects": Q.recent(conn, days=None, providers=provider)}
+        return {"projects": Names.attach(conn, Q.recent(conn, days=None, providers=provider))}
 
 
 @router.get("/projects/recent")
@@ -48,7 +50,7 @@ def recent(
 ) -> dict[str, Any]:
     """Projects touched in the last *days*, busiest first."""
     with connection(settings) as conn:
-        return {"days": days, "projects": Q.recent(conn, days=days)}
+        return {"days": days, "projects": Names.attach(conn, Q.recent(conn, days=days))}
 
 
 @router.get("/projects/{name:path}/context")
@@ -85,6 +87,7 @@ def context(
             for item in Memory.project_context_knowledge(conn, name, include_generated=show_generated)
         ]
         return {
+            "display_name": Names.attach(conn, [{"project": name}])[0]["display_name"],
             "project": name,
             "summary": f"{session_total} session{'s' if session_total != 1 else ''}, {message_total} message{'s' if message_total != 1 else ''}",
             "knowledge": knowledge,
@@ -133,6 +136,7 @@ def sessions(
         )
         total = Q.session_count(conn, name, q=term, include_generated=include_generated)
         return {
+            "display_name": Names.attach(conn, [{"project": name}])[0]["display_name"],
             "project": name,
             "order": order,
             "q": term,
@@ -146,3 +150,25 @@ def sessions(
             # went, or the interface is lying about how much is kept.
             "hidden_generated": Q.hidden_count(conn, name),
         }
+
+
+class ProjectName(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def clean(cls, value):
+        value = value.strip()
+        if not value or any(ord(char) < 32 for char in value):
+            raise ValueError("Use a non-empty, single-line project name.")
+        return value
+
+
+@router.put("/projects/{name:path}/name")
+def rename_project(name: str, body: ProjectName, settings: Settings = Depends(get_settings)):
+    with connection(settings) as conn:
+        result = Names.save(conn, name, body.display_name)
+        if result is None:
+            raise HTTPException(404, "Project folder group not found.")
+        conn.commit()
+    return result

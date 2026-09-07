@@ -346,3 +346,33 @@ def test_file_references_preserve_parentheses_and_spaces():
     assert list(
         markdown_files("[A](/project/Atlas (demo)/result.html) [B](<a b.md>) [D]( spaced.md ) [C](a\\(b\\).md)")
     ) == [("A", "/project/Atlas (demo)/result.html"), ("B", "a b.md"), ("D", "spaced.md"), ("C", "a(b).md")]
+
+
+def test_project_names_survive_import_refresh_and_do_not_change_source_groups(corpus):
+    from throughline.queries import project_names
+
+    conn, ids, _ = corpus
+    assert project_names.attach(conn, [{"project": "demo"}])[0]["name_origin"] == "folder"
+    assert project_names.save(conn, "demo", "Research methods")["display_name"] == "Research methods"
+    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE conversations SET summary='Imported again' WHERE id=%s", (ids[0],))
+    conn.commit()
+    identity = story.history(conn, "demo")["identity"]
+    assert identity["display_name"] == "Research methods"
+    assert identity["name_origin"] == "user"
+    assert story.history(conn, "demo")["total"] == 2
+    assert len(story.history(conn, "demo")["paths"]) == 2
+    assert project_names.save(conn, "unknown", "Unrelated") is None
+    assert project_names.attach(conn, [{"project": "other"}])[0]["display_name"] is None
+
+
+def test_project_name_validation():
+    from pydantic import ValidationError
+
+    from throughline.api.routers.projects import ProjectName
+
+    assert ProjectName(display_name="  Nebula journey  ").display_name == "Nebula journey"
+    for value in (" ", "a\nb", "x" * 121):
+        with pytest.raises(ValidationError):
+            ProjectName(display_name=value)

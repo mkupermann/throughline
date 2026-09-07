@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Durable project names
+
+Projects can now be named explicitly. Labels are stored separately from imported folder keys and survive refreshes. New and existing unnamed groups are visibly marked as folder-derived and unconfirmed. Search and navigation use saved labels while source URLs remain stable. Naming never merges or reassigns conversations. Migration 010 adds the label table.
+
 ### Source-based project recovery
 
 Project and conversation previews now skip known imported context envelopes and tool-call wrappers. They retain links to the exact source messages. Projects offer the latest conversation's user request and text answer as an explicitly unconfirmed starting point, independent of history search and pagination. Tool actions appear once and start collapsed. Explicit file references show their source and server availability; accessible files inside the recorded project folder can be downloaded as attachments. Imported records and manually confirmed checkpoints remain unchanged.

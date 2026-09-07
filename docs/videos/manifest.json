@@ -87,7 +87,7 @@
       "route": "/conversations",
       "intro": "Choose a project, then read one conversation at a time.",
       "outro": "Output starts collapsed. Expand it when needed; file references and exact times remain visible.",
-      "durationSeconds": 12.48
+      "durationSeconds": 12.52
     }
   ]
 }

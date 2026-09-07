@@ -1,3 +1,4 @@
+import { projectLabel } from "@/features/projects/ProjectName";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
@@ -63,7 +64,7 @@ export function RecentProjects() {
         {projects.map((p) => (
           <li key={p.project}>
             <Link to={`/project/${encodeURIComponent(p.project)}`} className="proj-row">
-              <span className="proj-name">{p.project}</span>
+              <span className="proj-name">{projectLabel(p)}</span>
               <span className="proj-stats">
                 <span className="proj-sessions tabular">{pluralise(p.sessions, "session")}</span>
                 <span className="proj-messages tabular">{pluralise(p.messages, "message")}</span>

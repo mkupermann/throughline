@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ._exec import one, rows
 from .presentation import artifacts, previews
+from .project_names import attach
 from .projects import project_filter_params, project_filter_sql
 
 
@@ -115,6 +116,7 @@ def history(
         params,
     )
     return dict(
+        identity=attach(conn, [{"project": project}])[0],
         recovery=recovery[0] if recovery else None,
         project=project,
         path=path,
