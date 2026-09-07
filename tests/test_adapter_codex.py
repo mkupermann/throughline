@@ -287,3 +287,16 @@ class TestCodexAdapter:
         assert conv.messages[6].metadata["author"] == "researcher"
         assert conv.messages[6].metadata["recipient"] == "coordinator"
         assert conv.metadata["codex_session_id"] == "CURRENT-S1"
+
+
+def test_model_changes_and_explicit_fork_metadata(tmp_path):
+    events = [
+        {"type": "session_meta", "payload": {"id": "child", "forked_from_id": "parent", "cwd": "/repo/demo"}},
+        {"type": "turn_context", "payload": {"model": "model-one"}},
+        {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": "First turn"}},
+        {"type": "turn_context", "payload": {"model": "model-two"}},
+        {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": "Second turn"}},
+    ]
+    conv = CodexAdapter().parse(_write_rollout(tmp_path, events))
+    assert [m.model for m in conv.messages] == ["model-one", "model-two"]
+    assert conv.metadata["source_metadata"]["forked_from_id"] == "parent"

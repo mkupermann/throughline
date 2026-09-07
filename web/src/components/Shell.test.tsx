@@ -55,7 +55,7 @@ describe("Shell", () => {
     renderShell();
 
     for (const name of [
-      "Overview",
+      "Projects",
       "Find",
       "Timeline",
       "Review",

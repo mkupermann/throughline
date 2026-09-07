@@ -32,6 +32,7 @@ from .routers import (
     pm,
     projects,
     providers,
+    story,
     timeline,
 )
 from .settings import Settings
@@ -121,6 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(timeline.router, prefix="/api")
     app.include_router(ask.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
+    app.include_router(story.router, prefix="/api")
     app.include_router(export.router, prefix="/api")
     app.include_router(pm.router, prefix="/api")
 

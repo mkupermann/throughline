@@ -10,6 +10,7 @@ import {
   type ProjectSession,
 } from "@/lib/api";
 import { formatCount } from "@/lib/format";
+import { ProjectStory } from "./ProjectStory";
 import { ProjectDocument } from "./ProjectDocument";
 
 const CONTEXT_PAGE = 500;
@@ -40,6 +41,12 @@ function duration(start: string | null, end: string | null): string {
 }
 
 export function ProjectPage() {
+  const [params] = useSearchParams();
+  return params.get("mode") === "document" || params.get("mode") === "sessions"
+    ? <LegacyProjectPage /> : <ProjectStory />;
+}
+
+export function LegacyProjectPage() {
   const { name } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const project = decodeURIComponent(name ?? "");
@@ -133,7 +140,7 @@ export function ProjectPage() {
   }
 
   function selectMode(nextMode: Mode, focus = false) {
-    update({ mode: nextMode === "sessions" ? "sessions" : null });
+    update({ mode: nextMode });
     if (focus) {
       (nextMode === "document" ? documentTab : sessionsTab).current?.focus();
     }

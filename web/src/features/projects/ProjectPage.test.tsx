@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ProjectPage } from "./ProjectPage";
+import { LegacyProjectPage as ProjectPage } from "./ProjectPage";
 
 const { context, sessions } = vi.hoisted(() => ({
   context: vi.fn(),

@@ -245,6 +245,7 @@ export interface ProjectContext {
 }
 
 export const projectsApi = {
+  all: (providers: string[] = []) => request<{ projects: ProjectSummary[] }>(`/projects/all?${new URLSearchParams(providers.map(p => ["provider", p]))}`),
   recent: (days = 7) =>
     request<{ days: number; projects: ProjectSummary[] }>(`/projects/recent?days=${days}`),
   sessions: (
@@ -974,4 +975,40 @@ export const pmApi = {
    *  value, so nothing here is cached beyond the request itself. */
   refreshAiProviderModels: (id: number) =>
     request<PmAiProviderModelsRefresh>(`/pm/ai-providers/${id}/models/refresh`, { method: "POST" }),
+};
+
+export interface StoryCheckpoint {
+  id: number; kind: "goal" | "status" | "blocker" | "next"; content: string;
+  created_at: string; source_conversation_id: number | null; source_message_id: number | null;
+  source_session_id: string; source_excerpt: string; source_available: boolean;
+  message_available: boolean; source_changed: boolean; recorded_by: string;
+}
+export interface StorySession extends ProjectSession {
+  opening: string | null; project_path: string | null; knowledge_count: number;
+}
+export interface StoryHistory {
+  project: string; path: string | null; paths: { path: string | null; sessions: number }[];
+  coverage: { sessions: number; messages: number; refreshed_at: string | null; unattributed: number };
+  sessions: StorySession[]; total: number; offset: number; has_more: boolean;
+  checkpoints: StoryCheckpoint[]; latest_checkpoints: StoryCheckpoint[]; hidden_generated: number; query: string; order: string;
+}
+export interface StoryDetail {
+  messages: { id: number; uuid: string | null; content: string | null; role: string; created_at: string;
+    model: string | null; tool_name: string | null; matches: boolean }[];
+  knowledge: { id: number; content: string; category: string; status: string | null;
+    confidence: number | null; superseded_by: number | null; created_at: string }[];
+  relations: {kind: string; target_id: number | null; title: string | null; reference: string; source_field: string; resolution: string}[];
+  knowledge_total: number; matches: { id: number; excerpt: string }[];
+  total: number; offset: number; has_more: boolean;
+}
+export const storyApi = {
+  history: (project: string, params: URLSearchParams) =>
+    request<StoryHistory>(`/story/${encodeURIComponent(project)}/history?${params}`),
+  session: (project: string, id: number, params: URLSearchParams) =>
+    request<StoryDetail>(`/story/${encodeURIComponent(project)}/session/${id}?${params}`),
+  checkpoint: (project: string, body: { path: string | null; kind: StoryCheckpoint["kind"];
+    content: string; conversation_id: number; message_id: number | null }) =>
+    request<{ id: number }>(`/story/${encodeURIComponent(project)}/checkpoints`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }),
 };

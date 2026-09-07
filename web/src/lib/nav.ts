@@ -27,7 +27,7 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: Compass, group: "Work", chord: "o", description: "What needs attention" },
+  { to: "/", label: "Projects", icon: Compass, group: "Work", chord: "o", description: "Resume your projects" },
   { to: "/find", label: "Find", icon: Search, group: "Work", chord: "f", description: "Search everything" },
   { to: "/timeline", label: "Timeline", icon: CalendarRange, group: "Work", chord: "t", description: "Activity over time" },
   { to: "/curate", label: "Review", icon: ClipboardCheck, group: "Trust", chord: "c", description: "Keep memory trustworthy" },

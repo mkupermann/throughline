@@ -111,7 +111,7 @@ def _upsert_conversation(cur: Any, conv: NormalisedConversation) -> int:
             conv.git_branch,
             conv.started_at,
             conv.ended_at,
-            len(conv.messages),
+            len({m.uuid or f"missing:{index}" for index, m in enumerate(conv.messages)}),
             conv.token_count_in,
             conv.token_count_out,
             conv.summary,
@@ -140,8 +140,8 @@ _MESSAGE_BATCH_SIZE = 500
 
 def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> int:
     lock_conversations(cur, [conv_id])
-    # Message IDs are replaced below. Remove rows keyed to those IDs first so
-    # semantic search and graph views cannot retain orphaned derivations.
+    # Invalidate derived content when a source refreshes. Preserve IDs for
+    # messages whose source UUID survives, so existing citations keep working.
     cur.execute(
         """
         DELETE FROM embeddings
@@ -159,10 +159,16 @@ def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> i
         """,
         (conv_id, conv_id),
     )
-    cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conv_id,))
+    cur.execute(
+        "DELETE FROM messages WHERE conversation_id = %s " "AND (uuid IS NULL OR NOT (uuid = ANY(%s::uuid[])))",
+        (conv_id, [m.uuid for m in conv.messages if m.uuid]),
+    )
     if not conv.messages:
         return 0
 
+    unique = {}
+    for index, message in enumerate(conv.messages):
+        unique[message.uuid or f"missing:{index}"] = message
     rows = [
         (
             conv_id,
@@ -179,7 +185,7 @@ def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> i
             m.created_at or conv.started_at,
             Json(scrub_nul(m.metadata or {})),
         )
-        for m in conv.messages
+        for m in unique.values()
     ]
 
     execute_values(
@@ -190,6 +196,13 @@ def _replace_messages(cur: Any, conv_id: int, conv: NormalisedConversation) -> i
              content_blocks, tool_calls, tool_name, is_sidechain,
              model, token_count, created_at, metadata)
         VALUES %s
+        ON CONFLICT (conversation_id, uuid) WHERE uuid IS NOT NULL
+        DO UPDATE SET parent_uuid = EXCLUDED.parent_uuid,
+            role = EXCLUDED.role, content = EXCLUDED.content,
+            content_blocks = EXCLUDED.content_blocks, tool_calls = EXCLUDED.tool_calls,
+            tool_name = EXCLUDED.tool_name, is_sidechain = EXCLUDED.is_sidechain,
+            model = EXCLUDED.model, token_count = EXCLUDED.token_count,
+            created_at = EXCLUDED.created_at, metadata = EXCLUDED.metadata
         """,
         rows,
         page_size=_MESSAGE_BATCH_SIZE,

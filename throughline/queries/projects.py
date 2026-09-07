@@ -104,7 +104,7 @@ def project_filter_params(project: str) -> dict[str, object]:
     }
 
 
-def recent(conn, days: int = 7, include_generated: bool = False) -> list[Row]:
+def recent(conn, days: int | None = 7, include_generated: bool = False, providers=None) -> list[Row]:
     """Projects with activity in the last *days*, busiest first.
 
     Activity, not creation: a project started months ago and touched yesterday
@@ -130,13 +130,15 @@ def recent(conn, days: int = 7, include_generated: bool = False) -> list[Row]:
                -- Code and Vibe says so. This is the product's whole claim.
                array_remove(array_agg(DISTINCT c.source_tool), NULL) AS tool_names
         FROM conversations c
-        WHERE c.started_at >= now() - make_interval(days => %(days)s)
+        WHERE (%(days)s::int IS NULL OR c.started_at >= now() - make_interval(days => %(days)s))
+          AND (%(providers)s::text[] IS NULL OR COALESCE(c.source_tool, 'unattributed') = ANY(%(providers)s))
           {gen}
         GROUP BY 1
         ORDER BY sessions DESC, last_active DESC
         """,
         {
             "days": days,
+            "providers": providers or None,
             "unplaced": sorted(_NOT_A_PROJECT_PATHS),
             "unplaced_label": UNPLACED,
         },

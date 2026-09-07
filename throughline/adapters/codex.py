@@ -156,7 +156,10 @@ class CodexAdapter(Adapter):
 
         norm: list[NormalisedMessage] = []
         tool_names: dict[str, str] = {}
+        current_model = model
         for idx, ev in enumerate(events):
+            if ev.get("type") == "turn_context" and isinstance(ev.get("payload"), dict):
+                current_model = ev["payload"].get("model") or current_model
             ev_type = (ev.get("type") or "").lower()
             ts = _parse_ts(ev.get("timestamp")) or started
 
@@ -172,7 +175,7 @@ class CodexAdapter(Adapter):
                             content=_stringify(content_blocks or payload.get("text")),
                             content_blocks=content_blocks,
                             created_at=ts,
-                            model=payload.get("model") or (model if role == "assistant" else None),
+                            model=payload.get("model") or (current_model if role == "assistant" else None),
                             token_count=payload.get("token_count") or payload.get("tokens"),
                             uuid=str(uuid.uuid5(_NS, f"codex:{raw_session_id}:msg:{idx}")),
                             metadata={k: v for k, v in payload.items() if k not in ("type", "role", "content", "text")},
@@ -186,7 +189,7 @@ class CodexAdapter(Adapter):
                             content=_stringify(content_blocks or payload.get("text")),
                             content_blocks=content_blocks,
                             created_at=ts,
-                            model=model,
+                            model=current_model,
                             is_sidechain=True,
                             uuid=str(uuid.uuid5(_NS, f"codex:{raw_session_id}:msg:{idx}")),
                             metadata={k: v for k, v in payload.items() if k not in ("type", "content", "text")},
@@ -205,7 +208,7 @@ class CodexAdapter(Adapter):
                             created_at=ts,
                             tool_calls=[{"tool_name": name, "input": arguments}],
                             tool_name=name,
-                            model=model,
+                            model=current_model,
                             uuid=str(uuid.uuid5(_NS, f"codex:{raw_session_id}:msg:{idx}")),
                             metadata={
                                 k: v for k, v in payload.items() if k not in ("type", "name", "input", "arguments")
@@ -244,7 +247,7 @@ class CodexAdapter(Adapter):
                         role="assistant",
                         content=_stringify(ev.get("content") or ev.get("text")),
                         created_at=ts,
-                        model=ev.get("model") or model,
+                        model=ev.get("model") or current_model,
                         token_count=ev.get("token_count") or ev.get("tokens"),
                         uuid=str(uuid.uuid5(_NS, f"codex:{raw_session_id}:msg:{idx}")),
                         metadata={k: v for k, v in ev.items() if k not in ("type", "content", "text")},
@@ -300,5 +303,10 @@ class CodexAdapter(Adapter):
                 "source": "codex",
                 "codex_session_id": raw_session_id,
                 "rollout_file": path.name,
+                "source_metadata": {
+                    k: meta_event[k]
+                    for k in ("forked_from_id", "source", "agent_role", "agent_nickname")
+                    if k in meta_event
+                },
             },
         )

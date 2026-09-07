@@ -34,6 +34,13 @@ PAGE = 50
 CONTEXT_PAGE = 500
 
 
+@router.get("/projects/all")
+def all_projects(provider: list[str] = Query(default=[]), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Every observed project, including projects inactive for years."""
+    with connection(settings) as conn:
+        return {"projects": Q.recent(conn, days=None, providers=provider)}
+
+
 @router.get("/projects/recent")
 def recent(
     days: int = Query(7, ge=1, le=365),
