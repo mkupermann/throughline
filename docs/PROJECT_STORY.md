@@ -89,3 +89,12 @@ AI-team operations lives in the System group and links its associated project na
 The selected reader distinguishes first-prompt and last-answer excerpts from the original chronological transcript. Recorded output and file references remain inside that conversation. Tool output starts collapsed in previews and original messages. Expand it to inspect the recorded content; large output scrolls within a bounded area. Extracted notes are disclosed in the same reader; search matches link to their original message context. Timestamps include seconds and timezone, with explicit fallback text for absent or invalid values.
 
 Verification covers project and conversation switching without stale transcript content, provider scope in deep links, exact timestamp markup and malformed source times. The existing story APIs and database schema are unchanged.
+
+
+### Meaningful source excerpts and files
+
+Known `recommended_plugins`, `environment_context` and `in-app-browser-context` envelopes are excluded from narrative previews. Original source messages remain available; the transcript discloses envelope content separately. Tool-call wrappers are excluded from text-answer previews and are not duplicated alongside structured tool calls. This is deterministic presentation, not model-generated interpretation.
+
+The project recovery panel quotes the latest-started conversation's last user request and last text answer, with exact source-message links. It is independent of history search, pagination and display order, while preserving folder, provider and automation scope. These excerpts are explicitly not a confirmed project state or proof that an announced action succeeded. Existing confirmed checkpoints remain authoritative.
+
+The conversation reader lists up to 100 distinct explicit local file references from assistant messages, with the latest mentioning source and timestamp. Availability is checked on the application server, not on the user's browser computer. Containers may not have access to host files; such references remain visible as unavailable. Downloads require an existing file inside the recorded project directory, project/message ownership checks, and are served as attachments. Contents, freshness and successful execution are not verified by file existence. No source files are mounted or imported automatically.

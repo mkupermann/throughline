@@ -75,3 +75,14 @@ it.each(["tool_result", "tool"])("collapses %s output of any length while preser
   expect(screen.getByText("Check complete").closest("details")).toBeNull();
   expect(screen.getByText(/:02:34/).closest("details")).toBeNull();
 });
+
+it("keeps context available without presenting it as the user request and deduplicates tools", () => {
+  render(<Transcript messages={[
+    {id:3001, role:"user", content:'<recommended_plugins>Plugin list</recommended_plugins>\n## My request:\nBuild a nebula'},
+    {id:3002, role:"assistant", content:'[Tool: exec] run()', tool_calls:[{name:'exec',input:{command:'run()'}}]},
+  ]} />);
+  expect(screen.getByText('Build a nebula').closest('details')).toBeNull();
+  expect(screen.getByText(/Plugin list/).closest('details')!.open).toBe(false);
+  expect(screen.queryByText('[Tool: exec] run()')).toBeNull();
+  expect(screen.getByText('run()').closest('details')!.open).toBe(false);
+});

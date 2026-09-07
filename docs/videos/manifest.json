@@ -6,13 +6,6 @@
   },
   "clips": [
     {
-      "name": "projects",
-      "route": "/",
-      "intro": "Open a project and recover its current state.",
-      "outro": "Goal, current position, blocker and next step each link to a source.",
-      "durationSeconds": 11.48
-    },
-    {
       "name": "find",
       "route": "/find?q=boundary",
       "intro": "Search across imported records.",
@@ -83,11 +76,18 @@
       "durationSeconds": 11.64
     },
     {
+      "name": "projects",
+      "route": "/",
+      "intro": "Open a project and recover its current state.",
+      "outro": "Goal, current position, blocker and next step each link to a source.",
+      "durationSeconds": 11.44
+    },
+    {
       "name": "conversations",
       "route": "/conversations",
       "intro": "Choose a project, then read one conversation at a time.",
       "outro": "Output starts collapsed. Expand it when needed; file references and exact times remain visible.",
-      "durationSeconds": 8.4
+      "durationSeconds": 12.48
     }
   ]
 }

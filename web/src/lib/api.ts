@@ -984,16 +984,20 @@ export interface StoryCheckpoint {
   message_available: boolean; source_changed: boolean; recorded_by: string;
 }
 export interface StorySession extends ProjectSession {
+  prompt_id?: number | null; answer_id?: number | null;
+  latest_request?: string | null; latest_request_id?: number | null; latest_request_at?: string | null; awaiting_answer?: boolean;
   file_count?: number; file_at?: string | null; prompt_at?: string | null; answer?: string | null; answer_at?: string | null; result?: string | null; result_at?: string | null;
   opening: string | null; project_path: string | null; knowledge_count: number;
 }
 export interface StoryHistory {
+  recovery?: StorySession | null;
   project: string; path: string | null; paths: { path: string | null; sessions: number }[];
   coverage: { sessions: number; messages: number; refreshed_at: string | null; unattributed: number };
   sessions: StorySession[]; total: number; offset: number; has_more: boolean;
   checkpoints: StoryCheckpoint[]; latest_checkpoints: StoryCheckpoint[]; hidden_generated: number; query: string; order: string;
 }
 export interface StoryDetail {
+  artifacts?: {label: string; path: string; message_id: number; created_at: string; availability: "available" | "unavailable"}[];
   messages: { id: number; uuid: string | null; content: string | null; content_blocks?: unknown; tool_calls?: unknown; role: string; created_at: string;
     model: string | null; tool_name: string | null; matches: boolean }[];
   knowledge: { id: number; content: string; category: string; status: string | null;

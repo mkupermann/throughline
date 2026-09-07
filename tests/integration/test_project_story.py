@@ -232,3 +232,117 @@ def test_explicit_output_file_and_prompt_keep_source_time(corpus):
     assert session["file_at"].second == 34
     detail = story.session_detail(conn, "demo", ids[0])
     assert any(m["content_blocks"] == [{"type": "output_file", "path": "report.md"}] for m in detail["messages"])
+
+
+def test_meaningful_previews_keep_source_ids_and_recovery_independent_of_search(corpus):
+    conn, ids, _ = corpus
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM messages WHERE conversation_id=%s", (ids[0],))
+        for role, text, timestamp in [
+            (
+                "user",
+                "\n<recommended_plugins>noise</recommended_plugins>\n<environment_context>host</environment_context>\n",
+                "2026-08-01T10:00:00Z",
+            ),
+            (
+                "user",
+                '<in-app-browser-context source="ambient-ui-state">noise</in-app-browser-context>\n## My request:\nBuild a nebula',
+                "2026-08-01T10:01:00Z",
+            ),
+            ("assistant", "The first version is ready.", "2026-08-01T10:02:00Z"),
+            ("user", "Add a journey", "2026-08-01T10:03:00Z"),
+            ("assistant", "[Tool: exec] command", "2026-08-01T10:04:00Z"),
+        ]:
+            cur.execute(
+                "INSERT INTO messages(conversation_id,uuid,role,content,created_at) VALUES(%s,%s,%s,%s,%s)",
+                (ids[0], str(uuid4()), role, text, timestamp),
+            )
+        cur.execute("UPDATE conversations SET summary='<recommended_plugins>noise' WHERE id=%s", (ids[0],))
+    conn.commit()
+    h = story.history(conn, "demo", path="/team/a/demo")
+    s = h["sessions"][0]
+    assert s["opening"] == "Build a nebula"
+    assert s["title"] == "Build a nebula"
+    assert s["answer"] == "The first version is ready."
+    assert s["latest_request"] == "Add a journey"
+    assert s["awaiting_answer"]
+    assert s["prompt_id"] and s["answer_id"] and s["latest_request_id"]
+    assert (
+        story.history(conn, "demo", path="/team/a/demo", q="NO_MATCH")["recovery"]["latest_request"] == "Add a journey"
+    )
+    original = story.session_detail(conn, "demo", ids[0], path="/team/a/demo")["messages"][0]
+    assert "<recommended_plugins>" in original["content"]
+
+
+def test_artifact_reference_availability_and_scope(corpus, tmp_path):
+    from throughline.queries.presentation import artifacts
+
+    conn, ids, _ = corpus
+    local = tmp_path / "animation.html"
+    local.write_text("example")
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("Outside the project; must not be downloadable")
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO messages(conversation_id,uuid,role,content,created_at) VALUES(%s,%s,'assistant',%s,now())",
+            (
+                ids[0],
+                str(uuid4()),
+                "[Animation](animation.html) [Missing](missing.html) [External](https://example.org/a) [Escape](../outside.txt)",
+            ),
+        )
+    conn.commit()
+    result = artifacts(conn, ids[0], str(tmp_path))
+    assert [(x["label"], x["availability"]) for x in result] == [
+        ("Animation", "available"),
+        ("Missing", "unavailable"),
+        ("Escape", "unavailable"),
+    ]
+    assert all(x["message_id"] for x in result)
+
+
+def test_artifact_download_requires_source_and_project_scope(corpus, tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from throughline.api.routers import story as router
+
+    conn, ids, _ = corpus
+    folder = tmp_path / "demo"
+    folder.mkdir()
+    (folder / "result.html").write_text("<script>example</script>")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE conversations SET project_path=%s WHERE id=%s", (str(folder), ids[0]))
+        cur.execute(
+            "INSERT INTO messages(conversation_id,uuid,role,content,created_at) VALUES(%s,%s,'assistant','[Result](result.html)',now()) RETURNING id",
+            (ids[0], str(uuid4())),
+        )
+        mid = cur.fetchone()[0]
+    conn.commit()
+
+    @contextmanager
+    def connect(_):
+        yield conn
+
+    monkeypatch.setattr(router, "connection", connect)
+    app = FastAPI()
+    app.include_router(router.router)
+    app.dependency_overrides[router.get_settings] = lambda: None
+    client = TestClient(app)
+    url = f"/story/demo/session/{ids[0]}/artifact/{mid}/0"
+    response = client.get(url)
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert client.get(url.replace("/demo/", "/other/")).status_code == 404
+    assert client.get(url.replace(f"/{mid}/", f"/{mid + 10000}/")).status_code == 404
+
+
+def test_file_references_preserve_parentheses_and_spaces():
+    from throughline.queries.presentation import markdown_files
+
+    assert list(
+        markdown_files("[A](/project/Atlas (demo)/result.html) [B](<a b.md>) [D]( spaced.md ) [C](a\\(b\\).md)")
+    ) == [("A", "/project/Atlas (demo)/result.html"), ("B", "a b.md"), ("D", "spaced.md"), ("C", "a(b).md")]

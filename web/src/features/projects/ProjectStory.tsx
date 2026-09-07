@@ -142,8 +142,12 @@ function Story({ project }: { project: string }) {
                 <p className="story-eyebrow">{t("PICK UP THE THREAD")}</p>
                 <h2 id="position-title">{t("Where we stand")}</h2>
               </div>
-              <span className="story-tag">{t("Recorded by you · sources attached")}</span>
+              <span className="story-tag">{t(data.checkpoints.length ? "Recorded by you · sources attached" : "No confirmed project state recorded")}</span>
             </div>
+            {data.recovery && <section className="story-recovery"><h3>{t("Resume from source messages")}</h3><p>{t("Excerpts from the latest conversation. These are not a confirmed project state.")}</p><div className="story-state-grid">{([
+              ["Latest user request", data.recovery.latest_request, data.recovery.latest_request_id, data.recovery.latest_request_at],
+              ["Latest text answer", data.recovery.answer, data.recovery.answer_id, data.recovery.answer_at],
+            ] as const).map(([label, text, message, at]) => <article key={label}><h4>{t(label)}</h4><p>{text || t("Not recorded")}</p>{message && <Link to={sourceUrl(data.recovery!.id, message)}>{t("Source")} · {date(at ?? null)}</Link>}</article>)}</div><p>{t(data.recovery.awaiting_answer ? "A newer user request has no later text answer in the imported data." : "Next step is unconfirmed. Review the latest request and answer before continuing.")}</p><Link to={`/conversations?${new URLSearchParams([...queryParams.entries()].filter(([key]) => key !== "q").concat([["project", project], ["conversation", String(data.recovery.id)]]))}`}>{t("Review this conversation")}</Link></section>}
             <div className="story-state-grid">
               {kinds.map((kind) => (
                 <article key={kind}>

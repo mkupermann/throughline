@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Source-based project recovery
+
+Project and conversation previews now skip known imported context envelopes and tool-call wrappers. They retain links to the exact source messages. Projects offer the latest conversation's user request and text answer as an explicitly unconfirmed starting point, independent of history search and pagination. Tool actions appear once and start collapsed. Explicit file references show their source and server availability; accessible files inside the recorded project folder can be downloaded as attachments. Imported records and manually confirmed checkpoints remain unchanged.
+
 ### Collapsible output
 
 Tool output starts collapsed in conversation readers and project previews. Expand each output independently with mouse or keyboard; prompts, answers, file references and exact timestamps remain visible.

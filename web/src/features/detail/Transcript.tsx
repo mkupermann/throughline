@@ -187,7 +187,8 @@ function ToolCall({ block }: { block: Block }) {
     ([, v]) => typeof v !== "string" || v !== arg,
   );
   return (
-    <div className="tx-tool">
+    <details className="tx-tool">
+      <summary>{t("Tool action")}: {block.name ?? "tool"}</summary>
       <div className="tx-tool-head">
         <Terminal size={13} aria-hidden />
         <span className="tx-tool-name">{block.name ?? "tool"}</span>
@@ -196,7 +197,7 @@ function ToolCall({ block }: { block: Block }) {
       {extra.length > 0 && (
         <Collapsible label="Show {n} more argument lines" body={JSON.stringify(Object.fromEntries(extra), null, 2)} />
       )}
-    </div>
+    </details>
   );
 }
 
@@ -223,12 +224,18 @@ export function Transcript({
         const tools = blockTools.length ? blockTools : storedToolCallsOf(m.tool_calls);
         const results = blocks.filter((b) => b.type === "tool_result");
         const files = blocks.filter(b => ["file", "output_file", "image", "output_image"].includes(b.type ?? ""));
-        const prose =
+        const rawProse =
           blocks
             .filter((b) => b.type === "text")
             .map((b) => b.text ?? "")
             .join("\n\n") || (blockTools.length || results.length ? "" : (m.content ?? ""));
 
+        const cleaned = m.role === "user" ? rawProse
+          .replace(/<(recommended_plugins|environment_context|in-app-browser-context)\b[^>]*>[\s\S]*?<\/\1>/g, "")
+          .replace(/^\s*## My request:\s*/, "").trim() : rawProse;
+        const isToolAction = tools.length > 0 && (!rawProse.trim() || rawProse.trimStart().startsWith("[Tool:"));
+        const prose = isToolAction ? "" : cleaned;
+        const hasEnvelope = cleaned !== rawProse;
         const Icon = m.role === "user" ? User : m.role === "tool_result" ? CornerUpRight : Bot;
 
         const anchor = `m${m.id}`;
@@ -243,7 +250,7 @@ export function Transcript({
           >
             <div className="tx-meta">
               <Icon size={13} aria-hidden />
-              <span className="tx-role">{results.length && !prose ? t("Result / tool output") : roleLabel(m.role)}</span>
+              <span className="tx-role">{isToolAction ? t("Tool action") : hasEnvelope && !prose ? t("Source context") : results.length && !prose ? t("Result / tool output") : roleLabel(m.role)}</span>
               {m.model && <span className="tx-model">{m.model}</span>}
               {m.created_at && (Number.isFinite(Date.parse(m.created_at)) ? (
                 <time className="tx-time" dateTime={m.created_at}>{when(m.created_at)}</time>
@@ -252,6 +259,7 @@ export function Transcript({
 
             {prose && (m.role === "tool_result" || m.role === "tool" ? <OutputDisclosure body={prose} /> : <div className="tx-prose">{prose}</div>)}
 
+            {hasEnvelope && <details className="output-disclosure"><summary>{t("Original message with source context")}</summary><pre>{rawProse}</pre></details>}
             {tools.map((b, i) => (
               <ToolCall key={i} block={b} />
             ))}
@@ -266,7 +274,7 @@ export function Transcript({
             {/* A message with neither prose nor blocks is a real thing in the
                 data — a system marker, or a shape no adapter maps yet. Saying
                 so beats an empty row the reader cannot account for. */}
-            {!prose && tools.length === 0 && results.length === 0 && files.length === 0 && (
+            {!prose && !hasEnvelope && tools.length === 0 && results.length === 0 && files.length === 0 && (
               <div className="tx-empty">({m.tool_name ? `${m.tool_name} — no recorded content` : "no recorded content"})</div>
             )}
           </li>

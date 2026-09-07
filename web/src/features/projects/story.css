@@ -460,3 +460,6 @@
 .tx-time { font-variant-numeric: tabular-nums; }
 .tx-result pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media(max-width:900px) { .story-exchange-preview { grid-template-columns: 1fr; } }
+
+.story-recovery {padding: 16px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px;}
+.conversation-artifacts article {padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere;}

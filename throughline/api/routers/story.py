@@ -91,3 +91,46 @@ def checkpoint(project: str, body: Checkpoint, settings: Settings = Depends(get_
     if result is None:
         raise HTTPException(422, "Choose an existing source in this project scope.")
     return result
+
+
+@router.get("/{project:path}/session/{conversation_id}/artifact/{message_id}/{index}")
+def artifact(
+    project: str,
+    conversation_id: int,
+    message_id: int,
+    index: int,
+    path: str | None = None,
+    generated: bool = False,
+    provider: list[str] = Query(default=[]),
+    settings: Settings = Depends(get_settings),
+):
+    """Download only an explicit source reference inside this conversation's folder."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from throughline.queries._exec import one
+    from throughline.queries.presentation import artifacts
+
+    predicate, params = Q.scope(project, path, generated, provider)
+    params["id"] = conversation_id
+    with connection(settings) as conn:
+        session = one(conn, f"SELECT c.project_path FROM conversations c WHERE c.id=%(id)s AND {predicate}", params)
+        if not session:
+            raise HTTPException(404, "Conversation is outside this project scope.")
+        refs = artifacts(conn, conversation_id, session["project_path"])
+    if index < 0 or index >= len(refs):
+        raise HTTPException(404, "File reference not found.")
+    ref = refs[index]
+    if ref["message_id"] != message_id or ref["availability"] != "available":
+        raise HTTPException(404, "Referenced file is not accessible on this server.")
+    root = Path(session["project_path"]).resolve()
+    target = (root / ref["path"]).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(404, "Referenced file is not accessible on this server.")
+    return FileResponse(
+        target,
+        filename=target.name,
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )

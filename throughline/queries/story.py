@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ._exec import one, rows
+from .presentation import artifacts, previews
 from .projects import project_filter_params, project_filter_sql
 
 
@@ -28,7 +29,7 @@ def history(
         conn,
         f"""
         SELECT c.project_path AS path, count(*) AS sessions
-        FROM conversations c WHERE {project_filter_sql('c')}
+        FROM conversations c WHERE {project_filter_sql("c")}
         GROUP BY c.project_path ORDER BY c.project_path NULLS LAST
     """,
         params,
@@ -47,7 +48,7 @@ def history(
         conn,
         f"""
         SELECT count(*) AS n FROM conversations c
-        WHERE {project_filter_sql('c')} AND c.generated_by IS NOT NULL
+        WHERE {project_filter_sql("c")} AND c.generated_by IS NOT NULL
           AND (%(path)s::text IS NULL OR c.project_path = %(path)s)
     """,
         params,
@@ -64,16 +65,6 @@ def history(
         SELECT c.id, c.session_id, c.summary AS title, c.started_at, c.ended_at,
                c.source_tool, c.model, c.git_branch, c.project_path, c.message_count,
                c.generated_by,
-               (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
-                AND m.role = 'user' ORDER BY m.created_at, m.id LIMIT 1) AS opening,
-               (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
-                AND m.role = 'user' ORDER BY m.created_at, m.id LIMIT 1) AS prompt_at,
-               (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
-                AND m.role = 'assistant' AND NULLIF(m.content, '') IS NOT NULL
-                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS answer,
-               (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
-                AND m.role = 'assistant' AND NULLIF(m.content, '') IS NOT NULL
-                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS answer_at,
                (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
                 AND m.role = 'tool_result' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS result,
                (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
@@ -96,6 +87,13 @@ def history(
     """,
         params,
     )
+    previews(conn, sessions)
+    recovery = rows(
+        conn,
+        f"SELECT c.id, c.summary AS title FROM conversations c WHERE {predicate} ORDER BY c.started_at DESC NULLS LAST, c.id DESC LIMIT 1",
+        params,
+    )
+    previews(conn, recovery)
     checkpoint_sql = """
         SELECT p.id, p.kind, p.content, p.created_at, p.recorded_by,
                p.source_conversation_id, p.source_message_id, p.source_session_id,
@@ -117,6 +115,7 @@ def history(
         params,
     )
     return dict(
+        recovery=recovery[0] if recovery else None,
         project=project,
         path=path,
         paths=paths,
@@ -139,7 +138,9 @@ def session_detail(
     predicate, params = scope(project, path, generated, providers)
     params.update(id=conversation_id, term=f"%{q}%", has_query=bool(q), offset=offset, limit=limit)
     session = one(
-        conn, f"SELECT c.id, c.source_tool, c.metadata FROM conversations c WHERE c.id = %(id)s AND {predicate}", params
+        conn,
+        f"SELECT c.id, c.source_tool, c.metadata, c.project_path FROM conversations c WHERE c.id = %(id)s AND {predicate}",
+        params,
     )
     if not session:
         return None
@@ -183,6 +184,7 @@ def session_detail(
         params,
     )
     return dict(
+        artifacts=artifacts(conn, conversation_id, session["project_path"]),
         messages=messages,
         total=total,
         offset=offset,
