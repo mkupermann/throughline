@@ -996,7 +996,7 @@ export interface StoryDetail {
   messages: { id: number; uuid: string | null; content: string | null; role: string; created_at: string;
     model: string | null; tool_name: string | null; matches: boolean }[];
   knowledge: { id: number; content: string; category: string; status: string | null;
-    confidence: number | null; superseded_by: number | null; created_at: string }[];
+    confidence: number | null; superseded_by: number | null; replacement_conversation_id?: number | null; created_at: string }[];
   relations: {kind: string; target_id: number | null; title: string | null; reference: string; source_field: string; resolution: string}[];
   knowledge_total: number; matches: { id: number; excerpt: string }[];
   total: number; offset: number; has_more: boolean;

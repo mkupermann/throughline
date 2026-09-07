@@ -71,3 +71,5 @@ Existing import exclusions and source-time fallbacks remain visible limitations.
 The handoff includes selected context, not a full transcript or artifact bundle; its local URLs require access to the originating instance.
 
 The state-history disclosure currently shows the latest 100 entries; the latest value of each field is fetched independently. Older entries remain in the database, but a dedicated older-state browser is future work.
+
+Memory is conversation context, not an independent timeline event. Timeline aggregates and day details exclude memory extraction. Project notes and their replacements link to source conversations instead of standalone memory pages.

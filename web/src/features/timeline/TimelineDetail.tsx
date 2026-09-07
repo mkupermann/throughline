@@ -7,7 +7,7 @@ import { formatCount, formatTime } from "@/lib/format";
 /** Where a timeline row opens.
  *
  * Deliberately separate from Find's `routeFor`: that takes a `FindItem`, and a
- * `TimelineDayItem` carries nine kinds rather than six — `entity`,
+ * `TimelineDayItem` has its own event kinds — `entity`,
  * `reflection` and `ingestion` have no detail route, so they render as plain
  * text instead of a link that would land on a 404.
  */
@@ -19,8 +19,6 @@ function timelineRouteFor(item: TimelineDayItem): string | null {
       // Open the parent conversation and jump to this message. `item.id` is
       // the message's own id and must never be used as a conversation id.
       return item.conversation_id ? `/c/${item.conversation_id}#m${item.id}` : null;
-    case "memory":
-      return `/m/${item.id}`;
     case "skill":
       return `/s/${item.id}`;
     case "prompt":

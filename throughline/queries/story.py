@@ -136,8 +136,11 @@ def session_detail(
     knowledge = rows(
         conn,
         """
-        SELECT id, content, category::text, status, confidence, superseded_by, created_at
-        FROM memory_chunks WHERE source_type = 'conversation' AND source_id = %(id)s
+        SELECT id, content, category::text, status, confidence, superseded_by, created_at,
+               (SELECT c.id FROM memory_chunks replacement JOIN conversations c
+                  ON replacement.source_type = 'conversation' AND replacement.source_id = c.id
+                WHERE replacement.id = mc.superseded_by) AS replacement_conversation_id
+        FROM memory_chunks mc WHERE source_type = 'conversation' AND source_id = %(id)s
           AND COALESCE(status, 'active') <> 'forgotten'
         ORDER BY created_at, id LIMIT 100
     """,

@@ -31,7 +31,7 @@ const NOT_TOOL_SPECIFIC = "not_tool_specific";
 //: `source_tool IS NULL` server-side (real rows never hold the literal
 //: string), OR'd with any named providers in the same request. Unlike
 //: NOT_TOOL_SPECIFIC, this lane's rows DO have a provider column — they're
-//: conversations/messages/memory with no recorded tool, not a different
+//: conversations/messages with no recorded tool, not a different
 //: kind of event — so it is sent through like any other lane.
 const UNATTRIBUTED = "unattributed";
 
@@ -270,7 +270,7 @@ export function TimelinePage() {
             rather than pretending every source row is a message. */}
         <p className="page-subtitle">What happened, and when.</p>
         <p className="page-hint">
-          {formatCount(grandTotal)} events across conversations, messages, memory and system
+          {formatCount(grandTotal)} events across conversations, messages and system
           activity from {range.since} to {range.until}. One column per {data?.bucket ?? "day"}.
         </p>
       </header>

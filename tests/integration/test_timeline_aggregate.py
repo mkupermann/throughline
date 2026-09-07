@@ -161,18 +161,11 @@ def test_day_detail_defaults_to_all_kinds_like_aggregate(db_connection):
     assert detail_kinds >= {"conversation", "skill"}
 
 
-def test_sources_cover_every_old_calendar_source():
-    """The old Calendar (throughline/queries/activity.py's EVENT_SOURCES) read
-    eight sources: conversations, memory, skills, projects, prompts, entities,
-    reflections, ingestion. Round 1 of this task shipped only five of the
-    eight non-conversation ones — dropping entity/reflection/ingestion
-    reproduced the exact "lost the complete picture" bug this task exists to
-    fix. This set is written out by hand, not derived from `_SOURCES` itself,
-    so a future edit that silently deletes a key still fails this test.
-    """
-    old_calendar_sources = {
+def test_timeline_sources_exclude_standalone_memory():
+    """Memories enrich conversations; extraction must not add work events."""
+    assert set(T._SOURCES) == {
         "conversation",
-        "memory",
+        "message",
         "skill",
         "project",
         "prompt",
@@ -180,7 +173,6 @@ def test_sources_cover_every_old_calendar_source():
         "reflection",
         "ingestion",
     }
-    assert old_calendar_sources <= set(T._SOURCES)
 
 
 @pytest.fixture()
@@ -442,3 +434,25 @@ def test_ingestion_rows_do_not_leak_the_absolute_path(db_connection):
     assert "def456.jsonl" in labels
     assert not any("/Users/" in (label or "") for label in labels), labels
     assert not any("C:\\Users\\" in (label or "") for label in labels), labels
+
+
+def test_memory_extraction_adds_no_timeline_events(db_connection):
+    day = date(2026, 6, 10)
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """INSERT INTO conversations (session_id, started_at, source_tool)
+            VALUES (gen_random_uuid(), %s, 'codex') RETURNING id""",
+            (day,),
+        )
+        conversation_id = cur.fetchone()[0]
+    before = T.aggregate(db_connection, day, day, "day", kinds=[], providers=[])
+    with db_connection.cursor() as cur:
+        cur.execute(
+            """INSERT INTO memory_chunks (source_type, source_id, content, category, created_at)
+            VALUES ('conversation', %s, 'A derived note', 'insight', %s)""",
+            (conversation_id, day),
+        )
+    assert T.aggregate(db_connection, day, day, "day", kinds=[], providers=[]) == before
+    assert all(item["kind"] != "memory" for item in T.day_detail(db_connection, day, kinds=[], providers=[]))
+    assert T.aggregate(db_connection, day, day, "day", kinds=["memory"], providers=[]) == []
+    assert T.day_detail(db_connection, day, kinds=["memory"], providers=[]) == []

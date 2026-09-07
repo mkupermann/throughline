@@ -16,9 +16,8 @@ from ._exec import rows
 
 #: Skills, projects, prompts, entities, reflections and ingestion runs are not
 #: per-tool. They get their own lane rather than being forced into a provider
-#: or dropped, so all eight of the old Calendar's sources
-#: (throughline/queries/activity.py's EVENT_SOURCES) stay reachable — plus
-#: `message`, which the old Calendar did not break out on its own.
+#: or dropped. Memories are shown inside their conversations rather than
+#: counted as independent events when extraction happens.
 NOT_TOOL_SPECIFIC = "not_tool_specific"
 
 #: The lane label `aggregate()`/`day_detail()` emit for rows whose provider
@@ -31,6 +30,7 @@ UNATTRIBUTED = "unattributed"
 
 BUCKETS = ("day", "week", "month")
 
+#: Memory is deliberately absent: it is contextual information inside sessions.
 #: Every kind the Timeline can show, with the table and timestamp it reads and
 #: how it reaches a provider (None = the not-tool-specific lane).
 _SOURCES: dict[str, tuple[str, str, str | None]] = {
@@ -38,11 +38,6 @@ _SOURCES: dict[str, tuple[str, str, str | None]] = {
     "message": (
         "messages m JOIN conversations c ON c.id = m.conversation_id",
         "m.created_at",
-        "c.source_tool",
-    ),
-    "memory": (
-        "memory_chunks mc LEFT JOIN conversations c ON mc.source_type = 'conversation' AND mc.source_id = c.id",
-        "mc.created_at",
         "c.source_tool",
     ),
     # Column names verified against throughline/queries/activity.py, which
@@ -73,14 +68,11 @@ def _split_providers(providers: list[str]) -> tuple[list[str], bool]:
 
 
 #: Kinds that reach a `conversations` row, and can therefore be limited to
-#: sessions a person had. Conversations and messages join it directly; a memory
-#: chunk joins it only when it was extracted from one, so its filter has to
-#: allow the LEFT JOIN's NULL through — a chunk written by hand belongs on the
-#: timeline as much as one distilled from a transcript.
+#: sessions a person had. Memory belongs inside its conversation, not in
+#: this event inventory: extraction time is not a separate work event.
 _HUMAN_FILTER: dict[str, str] = {
     "conversation": "AND c.generated_by IS NULL",
     "message": "AND c.generated_by IS NULL",
-    "memory": "AND (c.id IS NULL OR c.generated_by IS NULL)",
 }
 
 
@@ -183,7 +175,7 @@ def day_detail(
 ) -> list[dict]:
     """One day's events. Clicking a cell is what loads rows."""
     # Default must match aggregate()'s: a cell counted with no kind filter
-    # (all nine kinds) has to expand into a list of the same nine kinds, or
+    # (all supported kinds) has to expand into a list of the same kinds, or
     # the number you click and the list you get disagree.
     wanted = [k for k in (kinds or list(_SOURCES)) if k in _SOURCES]
     if not wanted:
@@ -247,7 +239,6 @@ def day_detail(
                    WHEN 'skill'        THEN 1
                    WHEN 'project'      THEN 1
                    WHEN 'prompt'       THEN 1
-                   WHEN 'memory'       THEN 2
                    ELSE 3
                  END,
                  u.ts DESC, u.id DESC
@@ -267,15 +258,8 @@ def _detail_columns(kind: str) -> tuple[str, str, str]:
     """
     return {
         # A conversation IS its own conversation; a message names its parent.
-        # memory_chunks.source_id is a conversation id only when source_type
-        # says so — the same polymorphism guarded elsewhere in this module.
         "conversation": ("c.id", "COALESCE(c.summary, c.project_name, '(conversation)')", "c.id"),
         "message": ("m.id", "left(m.content, 200)", "m.conversation_id"),
-        "memory": (
-            "mc.id",
-            "left(mc.content, 200)",
-            "CASE WHEN mc.source_type = 'conversation' THEN mc.source_id END",
-        ),
         # The rest belong to no conversation and open on their own routes.
         "skill": ("s.id", "s.name", "NULL::bigint"),
         "project": ("p.id", "p.name", "NULL::bigint"),

@@ -518,12 +518,14 @@ function Session({
                       <span className="story-muted">
                         Extracted {date(k.created_at)} ·{" "}
                       </span>
-                      <Link to={`/m/${k.id}`}>Inspect note</Link>
+                      <Link to={sourceUrl(s.id)}>Open source conversation</Link>
                       {k.superseded_by && (
                         <>
                           {" "}
                           ·{" "}
-                          <Link to={`/m/${k.superseded_by}`}>Replacement</Link>
+                          {k.replacement_conversation_id ? (
+                            <Link to={sourceUrl(k.replacement_conversation_id)}>Conversation with replacement</Link>
+                          ) : <span>Replacement has no conversation source</span>}
                         </>
                       )}
                     </article>
