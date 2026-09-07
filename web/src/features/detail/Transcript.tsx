@@ -18,10 +18,9 @@ import { ChevronRight, Terminal, User, Bot, CornerUpRight } from "lucide-react";
  * name and its input (the bash command, the file path, the patch), and a
  * `tool_result` block holds what came back. Both are rendered here.
  *
- * Output is collapsed by default and text is not truncated. Those two choices
- * belong together: a transcript is unreadable if every 40KB of command output
- * is inline, and untrustworthy if any of it is silently cut. Collapsed means
- * the reader chooses; truncated means the tool chose for them.
+ * Tool-call details can be expanded. Recorded output stays explicit; readers
+ * may bound large output with a scrolling area instead of truncating it.
+ * Keeping the full stored content available lets the reader inspect the work.
  */
 
 export interface TranscriptMessage {
@@ -118,17 +117,17 @@ function textOf(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value
-      .map((b) => (typeof b === "string" ? b : ((b as Block)?.text ?? "")))
+      .map((b) => (typeof b === "string" ? b : typeof (b as Block)?.text === "string" ? (b as Block).text! : b == null ? "" : JSON.stringify(b, null, 2)))
       .filter(Boolean)
       .join("\n");
   }
-  return "";
+  return value != null ? JSON.stringify(value, null, 2) : "";
 }
 
 function when(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
+  if (Number.isNaN(d.getTime())) return `${t("Invalid recorded time")}: ${iso}`;
   // Date AND time: a transcript without timestamps cannot be placed against
   // anything else that happened that day.
   return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "en-US", {
@@ -245,11 +244,9 @@ export function Transcript({
               <Icon size={13} aria-hidden />
               <span className="tx-role">{results.length && !prose ? t("Result / tool output") : roleLabel(m.role)}</span>
               {m.model && <span className="tx-model">{m.model}</span>}
-              {m.created_at && (
-                <time className="tx-time" dateTime={m.created_at}>
-                  {when(m.created_at)}
-                </time>
-              )}
+              {m.created_at && (Number.isFinite(Date.parse(m.created_at)) ? (
+                <time className="tx-time" dateTime={m.created_at}>{when(m.created_at)}</time>
+              ) : <span className="tx-time">{when(m.created_at)}</span>)}
             </div>
 
             {prose && <div className="tx-prose">{prose}</div>}

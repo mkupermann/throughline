@@ -40,3 +40,17 @@ describe("Transcript", () => {
    expect(screen.getByText("report.md").closest("details")).toBeNull();
    expect(screen.getByText(/:02:34/)).toBeTruthy();
  });
+
+it("retains structured tool output instead of silently discarding objects", () => {
+  render(<Transcript messages={[{id:999,role:"tool_result",content:null,content_blocks:[{type:"tool_result",content:{status:"passed",checks:12}}]}]} />);
+  expect(screen.getByText(/"status": "passed"/)).toBeTruthy();
+  expect(screen.getByText(/"checks": 12/)).toBeTruthy();
+});
+it("renders imported HTML as text and makes invalid source times explicit", () => {
+  const source='<img src=x onerror="alert(1)">';
+  render(<Transcript messages={[{id:1000,role:"assistant",content:source,created_at:"invalid-time"}]} />);
+  expect(screen.getByText(source)).toBeTruthy();
+  expect(document.querySelector('img[src="x"]')).toBeNull();
+  expect(screen.getByText("Invalid recorded time: invalid-time")).toBeTruthy();
+  expect(document.querySelector('time[datetime="invalid-time"]')).toBeNull();
+});

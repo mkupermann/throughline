@@ -121,6 +121,7 @@ function Story({ project }: { project: string }) {
           <span>{data?.coverage.sessions ?? "…"}{t(" sessions")}</span>
           <span>{data?.coverage.messages ?? "…"}{t(" imported messages")}</span>
           <span>{t("Times: ")}{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+          <Link to={`/conversations?${new URLSearchParams([...queryParams.entries(), ["project", project]])}`}>{t("Conversations")}</Link>
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>

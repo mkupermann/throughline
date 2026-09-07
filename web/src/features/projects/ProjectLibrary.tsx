@@ -8,7 +8,7 @@ import { carryProviders } from "@/lib/providerScope";
 import { projectsApi } from "@/lib/api";
 import "./story.css";
 
-export function ProjectLibrary({ conversations = false }: { conversations?: boolean }) {
+export function ProjectLibrary() {
   useLanguage();
   const [term, setTerm] = useState("");
   const [params] = useSearchParams();
@@ -28,9 +28,9 @@ export function ProjectLibrary({ conversations = false }: { conversations?: bool
         <p className="story-eyebrow">{t("YOUR CONTINUING WORK")}</p>
         <div className="story-heading">
           <div>
-            <h1>{conversations ? t("Conversations") : t("Projects")}</h1>
+            <h1>{t("Projects")}</h1>
             <p className="story-subtitle">
-              {conversations ? t("Conversations belong to projects. Choose a project to follow its prompts, answers and results.") : t("Your projects’ goals, current state and conversations in one place.")}
+              {t("Your projects’ goals, current state and conversations in one place.")}
             </p>
           </div>
           <FolderOpen size={32} />

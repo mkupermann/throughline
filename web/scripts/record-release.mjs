@@ -23,8 +23,8 @@ const scenarios = [
    await p.getByRole('textbox',{name:'Find a project'}).fill('Atlas');
    await p.getByRole('link',{name:/Atlas \(demo\)/}).click();
  }, 'Goal, current position, blocker and next step each link to a source.'],
- ['conversations','/conversations','Conversations are organised by project.',async p=>{
-   await p.getByRole('link',{name:/Atlas \(demo\)/}).click();
+ ['conversations','/conversations','Choose a project, then read one conversation at a time.',async p=>{
+   await p.getByRole('combobox',{name:'Project',exact:true}).selectOption('Atlas (demo)');
    await p.getByRole('button',{name:/Counterexample: long documents/}).click();
    await p.getByText('evaluation.md',{exact:false}).last().scrollIntoViewIfNeeded();
  },'Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.'],

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Conversation navigation
+
+Conversations now has its own project selector, compact conversation list and single-conversation reader. Prompt, answer, recorded output and exact times stay visible in context; the conversation list remains available while reading. The EN/DE interface and recorded demo walkthrough have been updated.
+
 ### Upgrading
 
 **The default database is now `throughline`, was `claude_memory`.** Only the

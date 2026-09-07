@@ -116,6 +116,7 @@
 }
 
 .sidebar-foot {
+  flex-wrap: wrap;
   margin-top: auto;
   display: flex;
   align-items: center;
@@ -488,7 +489,7 @@
   .nav-link span { display: block; font-size: 11px; text-align: center; overflow-wrap: anywhere; }
 }
 
-.language-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.language-toggle { flex-shrink: 0; display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .language-toggle button { font: inherit; font-size: 11px; cursor: pointer; border: 0; background: transparent; color: inherit; padding: 5px 7px; }
 .language-toggle button[aria-pressed="true"] { background: var(--accent, #0668d8); color: white; font-weight: 750; }
 .language-toggle button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }

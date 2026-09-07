@@ -13,13 +13,6 @@
       "durationSeconds": 11.48
     },
     {
-      "name": "conversations",
-      "route": "/conversations",
-      "intro": "Conversations are organised by project.",
-      "outro": "Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.",
-      "durationSeconds": 11.64
-    },
-    {
       "name": "find",
       "route": "/find?q=boundary",
       "intro": "Search across imported records.",
@@ -88,6 +81,13 @@
       "intro": "Connect project history with optional AI-team operations.",
       "outro": "Fictional tasks show passed, budget-exhausted and stopped states. No agent is launched.",
       "durationSeconds": 11.64
+    },
+    {
+      "name": "conversations",
+      "route": "/conversations",
+      "intro": "Choose a project, then read one conversation at a time.",
+      "outro": "Prompt, answer and recorded output stay inside their conversation. Times include seconds and timezone.",
+      "durationSeconds": 12.56
     }
   ]
 }

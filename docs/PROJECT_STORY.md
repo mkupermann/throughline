@@ -81,3 +81,11 @@ Conversations has its own sidebar entry, grouped by project. Narrow panels retai
 A collapsed conversation exposes labelled excerpts of its first prompt, last recorded answer and latest tool output or explicit file-reference count. These are not a synthetic prompt/answer pair. Expanded transcripts show original content, structured file references and source timestamps with seconds and timezone. Missing timestamps or outputs remain explicitly missing; file existence and successful creation are not inferred from a reference.
 
 AI-team operations lives in the System group and links its associated project names back to conversation history. The two project record types remain distinct in storage. The interface explains this relationship; it does not implement persistent reassignment or a guided team-setup wizard.
+
+## Conversation reading workspace
+
+`/conversations` is a dedicated reader. Select a project, scan its compact conversation list, and read one selected conversation alongside it. Project state cards remain in Project history. The URL records project, conversation and filter scope; changing projects or filters resets the selected conversation.
+
+The selected reader distinguishes first-prompt and last-answer excerpts from the original chronological transcript. Recorded output and file references remain inside that conversation. Large tool output scrolls within a bounded area. Extracted notes are disclosed in the same reader; search matches link to their original message context. Timestamps include seconds and timezone, with explicit fallback text for absent or invalid values.
+
+Verification covers project and conversation switching without stale transcript content, provider scope in deep links, exact timestamp markup and malformed source times. The existing story APIs and database schema are unchanged.

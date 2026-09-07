@@ -8,6 +8,7 @@ import { FindPage } from "@/features/find/FindPage";
 import { TimelinePage } from "@/features/timeline/TimelinePage";
 import { DETAIL_KINDS, DetailPage } from "@/features/detail/DetailPage";
 import { CuratePage } from "@/features/curate/CuratePage";
+import { ConversationsPage } from "@/features/projects/ConversationsPage";
 import { ProjectLibrary } from "@/features/projects/ProjectLibrary";
 import { ProjectPage } from "@/features/projects/ProjectPage";
 import { OperatePage } from "@/features/operate/OperatePage";
@@ -44,7 +45,7 @@ const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { index: true, element: <ProjectLibrary /> },
-      { path: "conversations", element: <ProjectLibrary conversations /> },
+      { path: "conversations", element: <ConversationsPage /> },
       { path: "system-overview", element: <OverviewPage /> },
       { path: "find", element: <FindPage /> },
       { path: "timeline", element: <TimelinePage /> },
