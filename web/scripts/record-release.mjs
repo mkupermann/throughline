@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const out = path.join(root, 'docs/videos');
 const base = process.env.THROUGHLINE_DEMO_URL || 'http://127.0.0.1:8794';
-if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname)) throw Error('Use a loopback demo server.');
+if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(base).hostname)) throw Error('Use a loopback demo server.');
 const frontendSha256=createHash('sha256').update(await fetch(base).then(r=>r.text())).digest('hex');
 const history = await fetch(`${base}/api/story/Atlas%20(demo)/history`).then(r=>r.json());
 if (history.total !== 4 || !history.sessions.some(s=>s.title?.startsWith('Counterexample:')) || !history.paths.every(p=>p.path==='/fictional/Atlas (demo)')) throw Error('The server is not the fictional project-story fixture.');
