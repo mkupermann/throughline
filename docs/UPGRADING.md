@@ -12,6 +12,8 @@ Keep your existing database and source mounts. Do not run the demo seeder agains
 
 Earlier releases include migrations `009_project_story.sql` (project checkpoints), `010_project_names.sql` (persistent labels), `011_generated_project_names.sql` (label origin and source IDs) and `012_ai_purposes.sql` (purpose-specific AI bindings). They do not rewrite original conversation messages. Reverting the application image does not revert migrations. If a future migration changes existing data, follow that migration’s recovery instructions and use the verified backup when necessary.
 
+The supplied numeric UID/GID mapping targets a standard Docker daemon. Rootless Docker remaps container users: matching the host UID alone does not grant access to a private `0600` bind-mounted transcript. Verify source-file readability in the actual container before switching daemons; do not make private transcripts world-readable to work around a mapping problem.
+
 The global language selector retains an existing `pm-lang` browser preference. A fresh browser defaults to English. Use **EN / DE** in the sidebar to change it.
 
 After upgrading, open **AI settings**, save the desired provider/model for every purpose and run the synthetic connection tests. Existing installations retain their older configuration for any purpose not yet saved. A saved binding takes precedence over those defaults. Containers using host CLIs also need a reachable host bridge and matching token; preserve that environment when updating a launcher or image.

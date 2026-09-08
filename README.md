@@ -260,7 +260,7 @@ Full setup details are in [Installation](docs/INSTALLATION.md).
 
 The system area can configure projects, roles, members, pipelines, providers and token budgets, and inspect supported local agent runs. Its project records are separate from imported-history projects and are connected through explicit links. A linked project name opens its conversation history.
 
-This remains an advanced setup workflow. A guided path from project goal to team to first task, persistent project reassignment, multi-user permissions and broader user validation remain open. See [the roadmap](docs/ROADMAP.md).
+This remains an advanced setup workflow. A guided path from project goal to team to first task, project-level confidentiality, SSO/MFA and broader organizational user validation remain open. Conversation assignment and shared-workspace account roles are available now. See [the roadmap](docs/ROADMAP.md).
 
 ## Development
 
