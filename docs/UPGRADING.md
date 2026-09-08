@@ -10,6 +10,10 @@ Keep your existing database and source mounts. Do not run the demo seeder agains
 6. Check `/api/health`, open Projects, open an existing conversation, and verify original message counts. Reload the browser so it loads the new asset bundle.
 7. Update any launcher, pinned image ID or offline image archive to the same version. Otherwise the next restart may load the previous application again. Keep the old image and configuration for rollback.
 
-The project-history release adds migration `009_project_story.sql`. It creates the project-checkpoint table and indexes; it does not rewrite existing conversations. Reverting the application image does not revert migrations. If a future migration changes existing data, follow that migration’s recovery instructions and use the verified backup when necessary.
+The current release includes migrations `009_project_story.sql` (project checkpoints), `010_project_names.sql` (persistent labels), `011_generated_project_names.sql` (label origin and source IDs) and `012_ai_purposes.sql` (purpose-specific AI bindings). They do not rewrite original conversation messages. Reverting the application image does not revert migrations. If a future migration changes existing data, follow that migration’s recovery instructions and use the verified backup when necessary.
 
 The global language selector retains an existing `pm-lang` browser preference. A fresh browser defaults to English. Use **EN / DE** in the sidebar to change it.
+
+After upgrading, open **AI settings**, save the desired provider/model for every purpose and run the synthetic connection tests. Existing installations retain their older configuration for any purpose not yet saved. A saved binding takes precedence over those defaults. Containers using host CLIs also need a reachable host bridge and matching token; preserve that environment when updating a launcher or image.
+
+Stop active processing before restarting the application. Job progress is held in memory and does not survive a server restart. After restart, use **Process everything** to attempt remaining records; previously committed work remains.

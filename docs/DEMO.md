@@ -1,6 +1,6 @@
 # Reproduce the demo
 
-The media uses `scripts/seed_demo_data.py`, never an export of personal conversations. It creates 44 conversations, 249 messages, seven project records, extracted memories, review cases, four fictional agent tasks and two reusable teams. IDs and timestamps are not intended as stable benchmark inputs; some fixture dates are relative to the seed time.
+The media uses `scripts/seed_demo_data.py`, never an export of personal conversations. It creates 44 conversations, 249 messages, seven project records, extracted memories, review cases, four fictional agent tasks, two reusable teams and six purpose-specific AI bindings and readable project labels. Provider entries contain no API keys and their demo endpoints do not run models. IDs and timestamps are not intended as stable benchmark inputs; some fixture dates are relative to the seed time.
 
 Atlas (demo) tells one complete story: define a retrieval experiment, record a provisional result, discover a counterexample in long documents, then resume with the next step. Its [evaluation file](demo/atlas/evaluation.md) is an invented result, not a measured benchmark. Other projects populate search, review queues and team operations.
 
@@ -19,12 +19,12 @@ Open <http://127.0.0.1:8794>. Choose **Conversations → Atlas (demo)**. Open th
 
 ## Record each area
 
-Requires Node, pnpm, Playwright Chromium, `ffmpeg` with the `libx264` encoder, and `ffprobe` on PATH. From the repository root:
+Requires Node 22, npm, Playwright Chromium, `ffmpeg` with the `libx264` encoder, and `ffprobe` on PATH. From the repository root:
 
 ```bash
-pnpm --dir web install
-pnpm --dir web exec playwright install chromium
-pnpm --dir web run build
+npm --prefix web ci
+(cd web && npx playwright install chromium)
+npm --prefix web run build
 node web/scripts/record-release.mjs
 ```
 
@@ -35,3 +35,7 @@ The recordings drive the real UI and save MP4s, representative PNGs, WebVTT capt
 Inspect every resulting clip before publication. Regenerate the gallery after substantial navigation changes. Old recordings in `docs/assets/` document the earlier interface and are not the current walkthrough set.
 
 The recorder explicitly selects English without changing your normal browser preference. It also builds 800-pixel animated GIF previews for GitHub from the MP4 recordings.
+
+The processing clip opens the eleven-step list without starting the pass. The AI settings clip shows per-purpose provider choices and the separate embedding requirements; edits shown in a form are not saved. CLI availability is detected from the optional real host bridge. Without a bridge, those options remain visibly unavailable. No test connection or model request is executed in these clips.
+
+Set `THROUGHLINE_DEMO_CLIPS=processing,ai-settings` to regenerate selected clips; omit it to record every area. The gallery, captions and manifest must agree on the clip set.

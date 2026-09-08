@@ -1,7 +1,7 @@
 WEBVTT
 
-00:00.000 --> 00:04.000
+00:00:00.000 --> 00:00:04.261
 Fictional demo. Inspect the fictional corpus with read-only SQL.
 
-00:04.000 --> 00:11.480
-The query counts conversations by source tool. PostgreSQL enforces read-only execution.
+00:00:04.261 --> 00:00:12.440
+Fictional demo. The query counts conversations by source tool. PostgreSQL enforces read-only execution.

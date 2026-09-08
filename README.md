@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-151b1e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-151b1e.svg)](pyproject.toml)
 [![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-151b1e.svg)](sql/schema.sql)
+[![CI](https://github.com/mkupermann/throughline/actions/workflows/ci.yml/badge.svg)](https://github.com/mkupermann/throughline/actions/workflows/ci.yml)
 [![Status: beta](https://img.shields.io/badge/status-beta-c55234.svg)](CHANGELOG.md)
 
 **Open a project after four weeks. Understand what you investigated, why the decisions changed, which results still hold, and what comes next.**
@@ -15,9 +16,17 @@ The core workflow works without a connected AI model. Optional models add semant
 
 ## One complete processing pass
 
-Use **Process everything** in Projects, Timeline or Operate to import and process all pending work in sequence, with visible step results. **AI settings** selects local models, API services or installed host CLIs separately for each purpose. Project names are derived from source excerpts and marked as suggestions until you save your own label.
+Use **Process everything** in Projects, Timeline or Operate. One click starts a complete pass through configured sources and pending records:
 
-See [complete processing and AI settings](docs/AI_PROCESSING.md) for the steps, supported services, host CLI setup and limits.
+**Import → skills → prompts → project names → conversation titles → knowledge → entities → reflection → embeddings → extraction audit → diagnostics.**
+
+The button shows progress and provides **Stop**. The pass removes the individual buttons' small batch limits, attempts later steps after a failure and reports an incomplete result if anything fails or is blocked. Reflection creates review suggestions; it does not automatically confirm or merge knowledge. Export remains separate because it needs a destination.
+
+Closing the browser leaves processing running. Restarting the server or reaching the 24-hour limit stops the pass; committed work remains. Start another pass to attempt the remaining records. This is not a durable scheduler.
+
+Open **AI settings** to choose a provider and model for each purpose. Saved selections never silently switch providers. Source-derived project names are marked as AI suggestions and link to their conversations; user-saved labels take precedence.
+
+[Processing and AI settings guide](docs/AI_PROCESSING.md) · [Processing video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [AI settings video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4)
 
 ## Follow the work
 
@@ -35,7 +44,7 @@ The collapsed conversation card previews the **first prompt**, **last recorded a
 
 Conversations belong in projects. Messages and extracted memories belong in their conversations. A message may be a search hit or a direct source link, but it is not an independent event on the Timeline.
 
-Project grouping currently derives from source working-folder names. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Persistently correcting that grouping is still planned.
+Project grouping currently derives from source working-folder names. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Display labels are separate: a user-saved label takes precedence, followed by a generated suggestion, then a source excerpt while naming is pending. Changing a label does not reassign conversations. Persistently correcting the underlying grouping is still planned.
 
 Time order describes chronology, not causality. Throughline displays supported explicit source relationships where recorded; it does not infer a dependency because two sessions happened close together. See the [relationship and provenance audit](docs/PROJECT_STORY.md).
 
@@ -50,9 +59,11 @@ The animated previews below play directly in this README. Click a preview or **F
 | **Projects**<br>Find Atlas and recover its source-linked state.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) · [Captions](docs/videos/projects.vtt) | [![Projects walkthrough — fictional demo](docs/videos/projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) |
 | **Conversations**<br>Choose a project, open a conversation and inspect its output reference.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) · [Captions](docs/videos/conversations.vtt) | [![Conversations walkthrough — fictional demo](docs/videos/conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) |
 | **Find**<br>Search imported records with their source context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) · [Captions](docs/videos/find.vtt) | [![Find walkthrough — fictional demo](docs/videos/find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) |
-| **Timeline**<br>Compare activity across tools and open a dated bucket.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](docs/videos/timeline.vtt) | [![Timeline walkthrough — fictional demo](docs/videos/timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) |
+| **Timeline**<br>Open a dated bucket, then expand conversations within their project context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](docs/videos/timeline.vtt) | [![Timeline walkthrough — fictional demo](docs/videos/timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) |
 | **Review**<br>Inspect contradictory and superseded knowledge.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) · [Captions](docs/videos/review.vtt) | [![Review walkthrough — fictional demo](docs/videos/review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) |
 | **Operate**<br>Understand import, extraction and embedding stages.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) · [Captions](docs/videos/operate.vtt) | [![Operate walkthrough — fictional demo](docs/videos/operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) |
+| **Complete processing**<br>Inspect all eleven steps, the start button and restart limits.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [Captions](docs/videos/processing.vtt) | [![Complete processing walkthrough — fictional demo](docs/videos/processing.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) |
+| **AI settings**<br>Choose local models, hosted APIs or installed CLIs per purpose.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) · [Captions](docs/videos/ai-settings.vtt) | [![AI settings walkthrough — fictional demo](docs/videos/ai-settings.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) |
 | **Console**<br>Count conversations by source with read-only SQL.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) · [Captions](docs/videos/console.vtt) | [![Console walkthrough — fictional demo](docs/videos/console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) |
 | **AI team operations**<br>Inspect linked projects, task states and budgets.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) · [Captions](docs/videos/teams.vtt) | [![AI team operations walkthrough — fictional demo](docs/videos/teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) |
 | **Roles**<br>Separate analysis, execution, testing and review responsibilities.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) · [Captions](docs/videos/roles.vtt) | [![Roles walkthrough — fictional demo](docs/videos/roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) |
@@ -120,30 +131,35 @@ docker compose exec web throughline backup
 
 See [Deployment](docs/DEPLOYMENT.md) for upgrades, credential rotation, backups, and recovery.
 
-## Local models
+## Choose the AI for each purpose
 
-Embeddings enable semantic search. A generation model powers Ask, extraction, titles, and reflection. These are different jobs and need different models.
+In **AI settings**, choose a provider and model independently for:
+
+| Purpose | What the model receives |
+| --- | --- |
+| Answers | Retrieved source excerpts and your question |
+| Conversation titles | A bounded conversation preview |
+| Project names | Openings from up to eight recent conversations in the existing folder group |
+| Knowledge and entities | Conversation excerpts |
+| Reflection | Candidate knowledge records to compare |
+| Search embeddings | Text to convert into vectors |
+
+Generation supports **Ollama, OpenAI, Anthropic, Mistral, Gemini, OpenRouter and OpenAI-compatible APIs**, plus **Codex, Vibe and Claude Code** through the optional authenticated host CLI bridge. Models must support the requested operation and structured response format. The bridge uses the host's existing CLI login; Throughline does not supply subscriptions or model access. See [bridge setup](docs/AI_PROCESSING.md#host-cli-bridge).
+
+Embeddings need an embedding API and a matching **768- or 1536-dimensional** model. Chat CLIs cannot provide them. Supported adapters are Ollama, OpenAI, Mistral, OpenRouter and OpenAI-compatible APIs. Vectors are kept separate by model and endpoint.
+
+For a local setup:
 
 ```bash
 docker compose --profile embeddings up -d ollama
 docker exec throughline-ollama ollama pull nomic-embed-text
-docker exec throughline-ollama ollama pull qwen3.5:9b
-docker compose exec web throughline embed --backend ollama
 ```
 
-Use a smaller or larger generation model to match the machine. Throughline inspects the models Ollama actually has. `throughline doctor` reports what will run.
+Also install a generation model that fits your machine. Open **AI settings → Manage API providers**, add the Ollama endpoint reachable from the application (`http://ollama:11434` for the Compose profile), then select your generation model for the five text purposes and `nomic-embed-text` with 768 dimensions for embeddings. Save and use **Test connection** before **Process everything**. Generation tests request structured JSON using synthetic content; embedding tests validate vector dimensions.
 
-Provider keys entered in AI-team operations are currently stored in the local database as plaintext. Database access and backups must therefore be treated as credential access. Environment-based model keys and team-provider keys are separate configuration paths; see [Security](SECURITY.md).
+A local CLI can still call a hosted service. Check the destination for every purpose before processing private material. Provider API keys are stored as plaintext in the local database and are omitted from provider/settings API responses. Database access, backups and the read-only SQL Console can still expose stored credentials. See [Security](SECURITY.md).
 
-Model use is an explicit privacy boundary:
-
-| Operation | Local when |
-|---|---|
-| Embeddings | `--backend ollama` is selected, or `auto` runs without `OPENAI_API_KEY` |
-| Ask | the resolved generation backend is local |
-| Extraction, titles, and reflection | the resolved generation backend is local |
-
-Embedding `auto` uses hosted OpenAI when `OPENAI_API_KEY` is present. Generation `auto` prefers a reachable local Ollama model, then a configured OpenAI-compatible endpoint, then hosted OpenAI. Set the backend explicitly when content must stay on the machine.
+A saved purpose selection takes precedence over legacy environment defaults and the embedding command's `--backend` option. Without a saved selection, the older configuration path remains: embedding `auto` uses OpenAI when `OPENAI_API_KEY` is set, while generation `auto` prefers local Ollama before configured hosted routes. To require local processing, explicitly save local providers for every purpose. Selected-provider failures remain errors; they never trigger a silent fallback.
 
 ## Supported sources
 

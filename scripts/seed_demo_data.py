@@ -87,6 +87,8 @@ SEEDED_TABLES = [
     "pm_members",
     "pm_roles",
     "pm_ai_providers",
+    "ai_purposes",
+    "project_names",
     "entity_mentions",
     "relationships",
     "entities",
@@ -763,6 +765,8 @@ def seed_projects(cur) -> dict[str, int]:
             (name, description, status, NOW - dt.timedelta(days=70), NOW),
         )
         ids[name] = cur.fetchone()[0]
+        label = name.replace("-", " ").title().replace(" Cli", " CLI")
+        cur.execute("INSERT INTO project_names(project_key,display_name) VALUES (%s,%s)", (name, label))
     return ids
 
 
@@ -1247,17 +1251,28 @@ def seed_pm(cur, project_ids: dict[str, int], workspace: Path) -> list[int]:
     cur.execute(
         """
         INSERT INTO pm_ai_providers (name, provider_type, base_url, api_key, custom_models, enabled)
-        VALUES ('OpenAI (Team key)', 'openai', NULL, NULL, %s, true)
+        VALUES ('Hosted API (offline demo)', 'openai', 'http://127.0.0.1:9/v1', NULL, %s, true)
         """,
-        (Json(["gpt-4o", "o3-mini"]),),
+        (Json(["example-hosted-model"]),),
     )
     cur.execute(
         """
         INSERT INTO pm_ai_providers (name, provider_type, base_url, api_key, custom_models, enabled)
-        VALUES ('Local Ollama', 'ollama', 'http://127.0.0.1:11434', NULL, %s, true)
+        VALUES ('Local Ollama (offline demo)', 'ollama', 'http://127.0.0.1:9', NULL, %s, true) RETURNING id
         """,
-        (Json([]),),
+        (Json(["example-chat-model", "example-embedding-model"]),),
     )
+    local_id = cur.fetchone()[0]
+    for purpose in ("answer", "titles", "project_names", "extraction", "reflection", "embeddings"):
+        cur.execute(
+            "INSERT INTO ai_purposes(purpose,provider_id,model,embedding_dim) VALUES (%s,%s,%s,%s)",
+            (
+                purpose,
+                local_id,
+                "example-embedding-model" if purpose == "embeddings" else "example-chat-model",
+                768 if purpose == "embeddings" else None,
+            ),
+        )
 
     # Skill ids for the Executor role's skill_refs ---------------------------
     cur.execute("SELECT id FROM skills WHERE name IN ('db-migration-safety', 'pricing-money-math') ORDER BY name")

@@ -1,127 +1,117 @@
 # Throughline video walkthroughs
 
-Real interface recordings with fictional conversations, people, outcomes and agent runs. No audio narration; captions are burned into every clip and supplied separately. [Reproduce the corpus and recording](../DEMO.md).
+Actual English interface recordings using only fictional conversations, people, outcomes and agent runs. These clips demonstrate navigation and configuration inspection: no import, generation, connection test or agent execution is launched. Provider entries have no keys and use offline demo endpoints. No audio narration; English captions are burned in and supplied as WebVTT.
+
+Animated previews play in GitHub. Select **Full video** for the MP4. [Reproduce the corpus and recordings](../DEMO.md) · [Processing and AI settings](../AI_PROCESSING.md).
 
 ## Projects
 
-[![Projects walkthrough](projects.png)](projects.mp4)
+Recover the source-linked state of Atlas.
 
-[Play MP4](projects.mp4) · [WebVTT captions](projects.vtt)
+[![Projects — fictional demo](projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) · [Captions](projects.vtt) · [Still image](projects.png)
 
 ## Conversations
 
-[![Conversations walkthrough](conversations.png)](conversations.mp4)
+Read one conversation and expand its output.
 
-[Play MP4](conversations.mp4) · [WebVTT captions](conversations.vtt)
+[![Conversations — fictional demo](conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) · [Captions](conversations.vtt) · [Still image](conversations.png)
 
 ## Find
 
-[![Find walkthrough](find.png)](find.mp4)
+Search with links back to the surrounding conversation.
 
-[Play MP4](find.mp4) · [WebVTT captions](find.vtt)
+[![Find — fictional demo](find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) · [Captions](find.vtt) · [Still image](find.png)
 
 ## Timeline
 
-[![Timeline walkthrough](timeline.png)](timeline.mp4)
+Expand conversations within a dated project context.
 
-[Play MP4](timeline.mp4) · [WebVTT captions](timeline.vtt)
+[![Timeline — fictional demo](timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](timeline.vtt) · [Still image](timeline.png)
+
+## Complete processing
+
+Inspect the complete eleven-step pass before starting it.
+
+[![Complete processing — fictional demo](processing.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [Captions](processing.vtt) · [Still image](processing.png)
+
+## AI settings
+
+Choose generation providers per purpose and inspect embedding settings.
+
+[![AI settings — fictional demo](ai-settings.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) · [Captions](ai-settings.vtt) · [Still image](ai-settings.png)
 
 ## Review
 
-[![Review walkthrough](review.png)](review.mp4)
+Inspect contradictions and superseded statements.
 
-[Play MP4](review.mp4) · [WebVTT captions](review.vtt)
+[![Review — fictional demo](review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) · [Captions](review.vtt) · [Still image](review.png)
 
 ## Operate
 
-[![Operate walkthrough](operate.png)](operate.mp4)
+Inspect processing capabilities and pending work.
 
-[Play MP4](operate.mp4) · [WebVTT captions](operate.vtt)
+[![Operate — fictional demo](operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) · [Captions](operate.vtt) · [Still image](operate.png)
 
 ## Console
 
-[![Console walkthrough](console.png)](console.mp4)
+Run a read-only query on the fictional corpus.
 
-[Play MP4](console.mp4) · [WebVTT captions](console.vtt)
+[![Console — fictional demo](console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4)
 
-## Teams
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) · [Captions](console.vtt) · [Still image](console.png)
 
-[![Teams walkthrough](teams.png)](teams.mp4)
+## AI team operations
 
-[Play MP4](teams.mp4) · [WebVTT captions](teams.vtt)
+Inspect fictional tasks and linked projects.
+
+[![AI team operations — fictional demo](teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) · [Captions](teams.vtt) · [Still image](teams.png)
 
 ## Roles
 
-[![Roles walkthrough](roles.png)](roles.mp4)
+Separate analysis, execution, testing and review.
 
-[Play MP4](roles.mp4) · [WebVTT captions](roles.vtt)
+[![Roles — fictional demo](roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) · [Captions](roles.vtt) · [Still image](roles.png)
 
 ## Members
 
-[![Members walkthrough](members.png)](members.mp4)
+Inspect fictional people and agents.
 
-[Play MP4](members.mp4) · [WebVTT captions](members.vtt)
+[![Members — fictional demo](members.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4)
 
-## Pipelines
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4) · [Captions](members.vtt) · [Still image](members.png)
 
-[![Pipelines walkthrough](pipelines.png)](pipelines.mp4)
+## Team pipelines
 
-[Play MP4](pipelines.mp4) · [WebVTT captions](pipelines.vtt)
+Inspect reusable team configuration.
 
-## Models
+[![Team pipelines — fictional demo](pipelines.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4)
 
-[![Models walkthrough](models.png)](models.mp4)
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4) · [Captions](pipelines.vtt) · [Still image](pipelines.png)
 
-[Play MP4](models.mp4) · [WebVTT captions](models.vtt)
+## API model providers
 
-## Inline previews
+Inspect example endpoints and model lists.
 
-The GIFs play in GitHub Markdown. Open the MP4 for the full-size recording. All recordings use the English interface and English captions.
+[![API model providers — fictional demo](models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4)
 
-### Projects
-
-[![Projects](./projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4)
-
-### Conversations
-
-[![Conversations](./conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4)
-
-### Find
-
-[![Find](./find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4)
-
-### Timeline
-
-[![Timeline](./timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4)
-
-### Review
-
-[![Review](./review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4)
-
-### Operate
-
-[![Operate](./operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4)
-
-### Console
-
-[![Console](./console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4)
-
-### AI team operations
-
-[![AI team operations](./teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4)
-
-### Roles
-
-[![Roles](./roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4)
-
-### Members
-
-[![Members](./members.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4)
-
-### Team pipelines
-
-[![Team pipelines](./pipelines.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4)
-
-### Model providers
-
-[![Model providers](./models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4)
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) · [Captions](models.vtt) · [Still image](models.png)

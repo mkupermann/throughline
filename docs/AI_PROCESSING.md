@@ -8,9 +8,9 @@ Progress shows each step as pending, running, finished, blocked or failed. A fai
 
 ## Readable names with evidence
 
-Imported folder identifiers are preserved as source metadata, not presented as meaningful project names. Until a name is available, the interface uses a recorded conversation excerpt. If no readable excerpt exists, it says so.
+Current conversation groups derive from source working-folder names. Those identifiers remain source metadata. A display label names an existing group without changing its membership. Until a label is available, the interface uses a recorded conversation excerpt. If no readable excerpt exists, it says so.
 
-Suggested project labels use excerpts from up to eight recent conversations in the existing folder group. They retain their source conversation IDs, are visibly marked as AI suggestions and do not assert that all conversations belong to one real project. User-saved names take precedence and are never overwritten. Editing a suggested name records it as a user label. Renaming does not merge folders or reassign conversations.
+Suggested display labels use excerpts from up to eight recent conversations in the existing folder group. They retain their source conversation IDs, are visibly marked as AI suggestions and do not assert that all conversations belong to one real project. User-saved names take precedence and are never overwritten. Editing a suggested name records it as a user label. Renaming does not merge folders or reassign conversations.
 
 Conversation title generation requests a structured final title. Known context envelopes, tool wrappers and thinking-only output are excluded. Previously stored `Thinking Process:` titles are eligible for repair.
 

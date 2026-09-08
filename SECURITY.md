@@ -14,7 +14,7 @@ security model.
   writing its own database and configuration
 - web UI on `http://127.0.0.1:8790` (native) or `:8788` (Docker)
 - launchd or systemd user jobs that run as the local user
-- API keys (optional) for OpenAI or Anthropic, stored in environment variables
+- Optional provider API keys in the local database or environment variables, and host CLI credentials
 
 ### Out of scope
 
@@ -28,27 +28,17 @@ security model.
 
 ### Where stored content can leave the machine
 
-Three places, all of them a model call:
+The selected model or service receives data for these optional operations:
 
-1. **Answering a question.** `throughline ask`, and the Ask panel in the UI,
-   send the retrieved excerpts to whichever model answers. With a local backend
-   (Ollama, LM Studio, llama.cpp, vLLM) the prompt never leaves the machine.
-   The selected backend can be a configured remote endpoint or hosted
-   OpenAI — but only one you named: generation probes Ollama first and has no
-   other automatic route off the machine.
-   `throughline doctor` prints which model will answer and whether it is local;
-   the UI states it with every answer. `THROUGHLINE_REDACT_PROMPTS=1` runs the
-   excerpts through [`throughline/pii.py`](throughline/pii.py) first — off by
-   default, because this is your own history on your own machine.
-2. **Memory extraction, title generation and reflection.** These send
-   transcripts or chunk pairs to their configured model backend; they can
-   therefore leave the machine when it resolves to a hosted provider.
-   Redaction is **on** by default for extraction;
-   `THROUGHLINE_REDACT_PII=0` disables it. All three are optional — skip them
-   and the rest of the tool still works.
-3. **Embeddings.** `throughline embed --backend auto` selects hosted OpenAI
-   when `OPENAI_API_KEY` is set; otherwise it uses Ollama. Select
-   `--backend ollama` explicitly when embedding content must remain local.
+1. **Answers** send retrieved excerpts and the question.
+2. **Project names, conversation titles, knowledge, entities and reflection** send source previews or candidate knowledge records. Extraction redaction is on by default; `THROUGHLINE_REDACT_PII=0` disables it. This does not imply that every other purpose uses the same redaction path.
+3. **Embeddings** send text to the chosen embedding API.
+
+Saved **AI settings** bindings take precedence over legacy environment defaults and the embedding CLI's `--backend` flag. They never silently fall back to another provider. For local-only processing, save local endpoints for every purpose. Without a saved binding, embedding `auto` uses hosted OpenAI when `OPENAI_API_KEY` is set; generation uses its existing auto-detection path. A loopback client or a locally installed CLI does not make a hosted model local.
+
+The optional host bridge executes only its registered Codex, Vibe and Claude adapters, in temporary directories with bounded concurrency and a timeout. It requires a bearer token. CLI authentication stays on the host. Requests can still be sent remotely through the CLI's configured service. Keep the bridge on a trusted host/container network; never publish its token. A local Stop cannot retract an already submitted provider request. See [AI processing](docs/AI_PROCESSING.md).
+
+Connection tests send synthetic content, not source conversations. Provider/settings API responses omit API keys, but the local database stores provider keys as plaintext; the read-only SQL Console and database backups can expose them. Treat access to the local app as access to those credentials.
 
 Retrieval, ranking, indexing, embeddings against a local backend, and every
 listing in the UI are entirely local. There is no telemetry and no account.
@@ -145,7 +135,7 @@ committed. `.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 
 Provider keys entered through AI-team operations are stored as plaintext in
-`pm_ai_providers.api_key`. Application responses mask them, but database access
+`pm_ai_providers.api_key`. Provider/settings responses omit them, but the read-only SQL Console, database access
 and backups can expose the underlying values. Protect the database and backup
 files as credentials. Encrypted or external secret storage is not implemented.
 
