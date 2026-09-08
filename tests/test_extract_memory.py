@@ -26,10 +26,12 @@ class TestJSONResponseParsing:
         assert em.parse_json_response("[]") == []
 
     def test_malformed_json_returns_empty(self):
-        assert em.parse_json_response("{broken") == []
+        with pytest.raises(ValueError):
+            em.parse_json_response("{broken")
 
     def test_no_array_returns_empty(self):
-        assert em.parse_json_response("just prose, no JSON") == []
+        with pytest.raises(ValueError):
+            em.parse_json_response("just prose, no JSON")
 
     def test_finds_array_in_surrounding_text(self):
         text = 'Sure, here are the chunks: [{"content": "c", "category": "insight"}] — done.'
@@ -160,7 +162,8 @@ class TestBackendIsNotOneVendor:
             "complete",
             lambda *a, **k: (None, "ollama timed out after 300s"),
         )
-        assert em.call_model("anything") == ""
+        with pytest.raises(RuntimeError, match="timed out"):
+            em.call_model("anything")
 
     def test_the_call_runs_outside_the_users_project(self, monkeypatch):
         """Claude Code files a transcript under the process CWD. Inheriting the
@@ -268,3 +271,45 @@ def test_the_schema_constraint_can_be_switched_off(monkeypatch):
     monkeypatch.setenv("THROUGHLINE_EXTRACT_SCHEMA", "0")
     em.call_model("x")
     assert sent["schema"] is None
+
+
+def test_batches_retain_both_ends_and_remove_known_context():
+    text = "Start marker " + "x" * 20000 + " End marker"
+    batches = em.extraction_batches(
+        [
+            ("user", "<recommended_plugins>noise</recommended_plugins>"),
+            ("assistant", "[Tool: exec] noisy"),
+            ("user", text),
+        ]
+    )
+    assert len(batches) > 1
+    assert all(len(b) <= 8000 for b in batches)
+    assert "Start marker" in batches[0] and "End marker" in batches[-1]
+    assert "noise" not in "".join(batches)
+
+
+def test_invalid_output_is_not_a_successful_empty_result():
+    with pytest.raises(ValueError):
+        em.parse_json_response('[{"content":"unfinished", "tags": ["a"]')
+    assert em.parse_json_response("[]") == []
+
+
+def test_late_batch_failure_writes_no_partial_memory(monkeypatch):
+    from unittest.mock import Mock
+
+    cursor = Mock()
+    cursor.fetchall.return_value = [("user", "Recorded decision: use PostgreSQL. " * 400)]
+    replies = iter(['[{"content":"Use PostgreSQL", "category":"decision"}]', "{broken"])
+    monkeypatch.setattr(em, "call_model", lambda _: next(replies))
+    with pytest.raises(ValueError):
+        em.extract_for_conversation(cursor, 42)
+    assert not any("INSERT" in str(call) for call in cursor.execute.call_args_list)
+
+
+def test_batch_size_rejects_invalid_values_and_labels_fragments():
+    with pytest.raises(ValueError):
+        em.extraction_batches([("user", "important")], size=5)
+    batches = em.extraction_batches([("user", "a" * 300)], size=200)
+    assert all(len(b) <= 200 for b in batches)
+    assert "message 1, fragment 1/3" in batches[0]
+    assert "message 1, fragment 3/3" in batches[-1]

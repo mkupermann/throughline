@@ -250,7 +250,11 @@ def complete(
                 # a single error to explain it.
                 body["think"] = False
             data = _http_json(f"{_OLLAMA_URL}/api/generate", body, timeout=timeout)
-            # Belt and braces for a model that ignores think=false.
+            if data.get("done_reason") == "length":
+                return None, "Model output reached its token limit; incomplete output was rejected."
+            if schema and not (data.get("response") or "").strip():
+                return None, "Model returned no final structured response; reasoning was not accepted as data."
+            # Unstructured callers retain compatibility with thinking-only models.
             answer = (data.get("response") or "").strip() or (data.get("thinking") or "").strip()
             return answer, None
 
@@ -274,7 +278,10 @@ def complete(
                 timeout=timeout,
                 headers=headers,
             )
-            return (data["choices"][0]["message"]["content"] or "").strip(), None
+            choice = data["choices"][0]
+            if choice.get("finish_reason") == "length":
+                return None, "Model output reached its token limit; incomplete output was rejected."
+            return (choice["message"]["content"] or "").strip(), None
 
         return None, f"Unknown backend {info.backend!r}"
 

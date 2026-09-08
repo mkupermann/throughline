@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Reliable extraction failures
+
+Invalid or token-truncated model output now fails the conversation instead of appearing as a successful empty extraction. Long conversations are processed in bounded batches without discarding their opening messages; known context envelopes and tool-call wrappers are excluded. All responses must parse before any memory is inserted. Empty valid results remain pending and are labeled explicitly.
+
 ### Durable project names
 
 Projects can now be named explicitly. Labels are stored separately from imported folder keys and survive refreshes. New and existing unnamed groups are visibly marked as folder-derived and unconfirmed. Search and navigation use saved labels while source URLs remain stable. Naming never merges or reassigns conversations. Migration 010 adds the label table.

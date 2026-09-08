@@ -36,7 +36,8 @@ import psycopg2
 
 from throughline import llm as _llm
 from throughline import prompts as _prompts
-from throughline.pii import count_redactions, redact
+from throughline.pii import redact
+from throughline.queries.presentation import narrative
 from throughline.self_referential import agent_call_cwd
 
 DB_CONFIG: dict[str, Any] = {
@@ -75,6 +76,8 @@ def _require_model() -> str:
     if not info.available:
         sys.stderr.write(f"ERROR: no model available for extraction.\n  {info.detail}\n")
         raise SystemExit(2)
+    if MODEL:
+        return f"{info.backend}/{MODEL} ({'local' if info.local else 'remote'})"
     return str(info)
 
 
@@ -97,7 +100,8 @@ MAX_MESSAGE_CHARS = 8000
 # plan (e.g. 4 axes × 5 bullets, plus an 8-PR sequence) needs more than 10
 # slots if the structure is to be preserved instead of collapsed into a
 # generic "project_context" blurb.
-MAX_CHUNKS_PER_CONVERSATION = 25
+MAX_CHUNKS_PER_CONVERSATION = 25  # Legacy public constant; extraction now budgets each input batch.
+MAX_CHUNKS_PER_BATCH = 5
 SLEEP_BETWEEN_CALLS = 2.0
 # Raised from 120 → 300 s. With MAX_MESSAGE_CHARS at 8,000 the transcript
 # can carry richer multi-paragraph assistant turns, which gives the model
@@ -162,6 +166,32 @@ def build_transcript(messages: list[tuple[str, str | None]]) -> str:
     return transcript
 
 
+def extraction_batches(messages, size=8000):
+    """Bound model requests without dropping the beginning of long conversations."""
+    if size < 128:
+        raise ValueError("Extraction batch size must be at least 128 characters.")
+    batches, current = [], ""
+    for message_index, (role, raw) in enumerate(messages, 1):
+        if role not in ("user", "assistant"):
+            continue
+        text = narrative(raw)
+        if not text or text.startswith("[Tool:"):
+            continue
+        # Reserve space for provenance labels; fragments are not separate turns.
+        step = size - 100
+        parts = (len(text) + step - 1) // step
+        for fragment, start in enumerate(range(0, len(text), step), 1):
+            header = f"[{role.upper()} message {message_index}, fragment {fragment}/{parts}]\n"
+            part = header + text[start : start + step] + "\n"
+            if current and len(current) + len(part) > size:
+                batches.append(current)
+                current = ""
+            current += part
+    if current:
+        batches.append(current)
+    return batches
+
+
 def usable_chunks(chunks: Any) -> tuple[list[dict[str, Any]], int]:
     """Split a parsed model response into usable objects and rejected junk.
 
@@ -190,12 +220,14 @@ def parse_json_response(text: str) -> list[dict[str, Any]]:
     start = text.find("[")
     end = text.rfind("]")
     if start == -1 or end == -1:
-        return []
+        raise ValueError("Extraction returned no complete JSON array; conversation remains pending.")
     try:
-        return json.loads(text[start : end + 1])
+        result = json.loads(text[start : end + 1])
+        if not isinstance(result, list):
+            raise ValueError("Extraction must return a JSON array.")
+        return result
     except json.JSONDecodeError as e:
-        print(f"    JSON parse error: {e}")
-        return []
+        raise ValueError(f"Invalid extraction JSON ({e.msg}); conversation remains pending.") from e
 
 
 #: The categories the insert accepts. Single source of truth: the schema the
@@ -217,10 +249,11 @@ CATEGORIES = (
 #: which is what a 3B model did for nineteen conversations out of twenty.
 CHUNK_SCHEMA: dict = {
     "type": "array",
+    "maxItems": MAX_CHUNKS_PER_BATCH,
     "items": {
         "type": "object",
         "properties": {
-            "content": {"type": "string"},
+            "content": {"type": "string", "minLength": 1, "maxLength": 1200},
             "category": {"type": "string", "enum": list(CATEGORIES)},
             "tags": {"type": "array", "items": {"type": "string"}},
             "confidence": {"type": "number"},
@@ -234,7 +267,7 @@ CHUNK_SCHEMA: dict = {
 def _schema_enabled() -> bool:
     """Whether to constrain generation to CHUNK_SCHEMA.
 
-    On by default: it makes malformed output impossible. Off is a real
+    On by default: constrains syntax, but output limits can still truncate JSON. Off is a real
     choice, not a debug flag — constrained decoding also lets a model answer
     with the shortest document the schema permits, and for an array that is
     ``[]``. Which trade wins depends on the model, so measure before changing
@@ -244,12 +277,7 @@ def _schema_enabled() -> bool:
 
 
 def call_model(prompt: str) -> str:
-    """Send the prompt to whichever backend the probe found. Never raises.
-
-    An empty string means "this conversation yielded nothing" and the caller
-    already handles that, so a failed call degrades to skipping one
-    conversation rather than aborting a 20-conversation run.
-    """
+    """Raise on transport/model failure so the caller rolls back this conversation."""
     text, err = _llm.complete(
         prompt,
         timeout=TIMEOUT_PER_CALL,
@@ -262,8 +290,7 @@ def call_model(prompt: str) -> str:
         cwd=str(agent_call_cwd()),
     )
     if text is None:
-        print(f"    extraction call failed: {err}")
-        return ""
+        raise RuntimeError(f"Extraction call failed: {err}")
     return text
 
 
@@ -286,33 +313,33 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
     if not rows:
         return 0
 
-    transcript = build_transcript(rows)
-    if len(transcript) < 200:
-        return 0
-
-    if REDACT_PII:
-        redacted = redact(transcript)
-        n = count_redactions(transcript, redacted)
-        if n:
-            print(f"    redacted {n} secret/PII match(es) before extraction")
-        transcript = redacted
-
-    prompt = (
-        PROMPT_TEMPLATE.replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_CONVERSATION))
-        .replace("{LANG}", _prompts.output_language())
-        .replace("{TRANSCRIPT}", transcript)
-    )
-    response = call_model(prompt)
-    if not response:
-        return 0
-
-    chunks, malformed = usable_chunks(parse_json_response(response))
-    if malformed:
-        print(f"    Modell lieferte {malformed} Eintrag/Einträge in der falschen Form (kein Objekt) — verworfen")
-    # Cap defensively in case the model ignores the prompt — extra chunks are
-    # truncated rather than rejected, so we never silently drop a session.
-    if len(chunks) > MAX_CHUNKS_PER_CONVERSATION:
-        chunks = chunks[:MAX_CHUNKS_PER_CONVERSATION]
+    batches = extraction_batches(rows)
+    chunks = []
+    seen = set()
+    for index, transcript in enumerate(batches, 1):
+        if REDACT_PII:
+            transcript = redact(transcript)
+        prompt = (
+            PROMPT_TEMPLATE.replace("{MAX_CHUNKS}", str(MAX_CHUNKS_PER_BATCH))
+            .replace("{LANG}", _prompts.output_language())
+            .replace("{TRANSCRIPT}", transcript)
+        )
+        response = call_model(prompt)
+        if not response:
+            raise RuntimeError("Empty extraction response; conversation remains pending.")
+        batch, malformed = usable_chunks(parse_json_response(response))
+        if malformed:
+            raise ValueError("Extraction contained non-object entries; conversation remains pending.")
+        print(f"[part {index}/{len(batches)}: {len(batch)} candidates]", end=" ", flush=True)
+        for chunk in batch:
+            content = chunk.get("content")
+            if not isinstance(content, str) or not content.strip() or chunk.get("category") not in CATEGORIES:
+                raise ValueError("Invalid extraction entry; conversation remains pending.")
+            key = (content.strip(), chunk["category"])
+            if key not in seen:
+                seen.add(key)
+                chunks.append(chunk)
+    # All parts must parse before any inserts. Do not silently discard later parts.
     inserted = 0
     for chunk in chunks:
         try:
@@ -321,8 +348,6 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
             tags = chunk.get("tags", [])
             confidence = float(chunk.get("confidence", 0.8))
             project = chunk.get("project") or None
-            if not content or category not in CATEGORIES:
-                continue
             cursor.execute(
                 """
                 INSERT INTO memory_chunks (source_type, source_id, content, category, tags, confidence, project_name)
@@ -332,8 +357,7 @@ def extract_for_conversation(cursor: Any, conv_id: int) -> int:
             )
             inserted += 1
         except Exception as e:
-            print(f"    Insert-Fehler: {e}")
-            continue
+            raise RuntimeError(f"Extraction insert failed: {e}") from e
 
     return inserted
 
@@ -373,7 +397,7 @@ def _force_reextract(cursor, conv_ids: list[int]) -> tuple[int, int, int]:
         try:
             n = extract_for_conversation(cursor, cid)
             inserted_total += n
-            print(f"→ {n} Chunks")
+            print(f"→ {n} Chunks" if n else "→ No knowledge returned; conversation remains pending")
         except Exception as e:
             errors += 1
             print(f"✗ {e}")
@@ -518,7 +542,7 @@ def main() -> None:
             n = extract_for_conversation(cursor, conv_id)
             conn.commit()
             total_chunks += n
-            print(f"→ {n} Chunks")
+            print(f"→ {n} Chunks" if n else "→ No knowledge returned; conversation remains pending")
         except Exception as e:
             conn.rollback()
             errors += 1
@@ -531,6 +555,8 @@ def main() -> None:
 
     cursor.close()
     conn.close()
+    if errors:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

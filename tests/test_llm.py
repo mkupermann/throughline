@@ -324,15 +324,15 @@ def test_thinking_is_left_alone_without_a_schema(monkeypatch):
     assert "think" not in sent["body"]
 
 
-def test_an_answer_that_arrived_in_the_thinking_field_is_still_returned(monkeypatch):
-    # Belt and braces: a model that ignores think=false must not read as empty.
+def test_structured_output_never_falls_back_to_reasoning(monkeypatch):
+    # Internal reasoning is not a final extraction result.
     monkeypatch.setattr(llm, "_http_json", lambda url, body, **kw: {"response": "", "thinking": '{"a": 1}'})
     stub(monkeypatch, ollama=["qwen3.5:9b"])
 
     text, error = llm.complete("x", schema={"type": "object"})
 
-    assert error is None
-    assert text == '{"a": 1}'
+    assert text is None
+    assert "reasoning" in error
 
 
 # --------------------------------------------------------------------------- #
@@ -367,3 +367,20 @@ def test_a_tag_suffix_does_not_hide_the_default(monkeypatch):
     default = llm._DEFAULT_MODEL["ollama"]
     stub(monkeypatch, ollama=["mistral:7b", f"{default}-q4_K_M"])
     assert llm.backend_info().model == f"{default}-q4_K_M"
+
+
+def test_truncated_ollama_output_is_an_error(monkeypatch):
+    stub(monkeypatch, ollama=["qwen2.5:7b"])
+    monkeypatch.setattr(llm, "_http_json", lambda *a, **k: {"response": "[]", "done_reason": "length"})
+    text, error = llm.complete("extract", schema={"type": "array"})
+    assert text is None
+    assert "token limit" in error
+
+
+def test_truncated_compatible_output_is_an_error(monkeypatch):
+    monkeypatch.setattr(llm, "backend_info", lambda: llm.LLMInfo(True, "openai", "local", local=True))
+    monkeypatch.setattr(
+        llm, "_http_json", lambda *a, **k: {"choices": [{"message": {"content": "[]"}, "finish_reason": "length"}]}
+    )
+    text, error = llm.complete("extract")
+    assert text is None and "token limit" in error
