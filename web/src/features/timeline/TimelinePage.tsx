@@ -1,3 +1,4 @@
+import {ProcessAll} from "@/features/operate/ProcessAll";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { useQuery } from "@tanstack/react-query";
@@ -277,6 +278,7 @@ export function TimelinePage() {
         </p>
       </header>
 
+      <ProcessAll />
       <RangeControl value={range} onChange={handleRangeChange} />
 
       {isLoading && <p className="muted">{t("Loading…")}</p>}

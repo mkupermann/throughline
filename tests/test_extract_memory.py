@@ -145,13 +145,14 @@ class TestBackendIsNotOneVendor:
 
         seen = {}
 
-        def fake_complete(prompt, *, timeout, model=None, cwd=None, schema=None):
-            seen.update(prompt=prompt, timeout=timeout, model=model, cwd=cwd, schema=schema)
+        def fake_complete(prompt, *, timeout, model=None, cwd=None, schema=None, purpose=None):
+            seen.update(prompt=prompt, timeout=timeout, model=model, cwd=cwd, schema=schema, purpose=purpose)
             return "[]", None
 
         monkeypatch.setattr(em._llm, "complete", fake_complete)
         assert em.call_model("extract this") == "[]"
         assert seen["prompt"] == "extract this"
+        assert seen["purpose"] == "extraction"
         assert seen["timeout"] == em.TIMEOUT_PER_CALL
 
     def test_a_failed_call_skips_one_conversation_rather_than_the_run(self, monkeypatch):

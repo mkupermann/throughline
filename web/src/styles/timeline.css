@@ -305,3 +305,21 @@
 .timeline-project summary { cursor: pointer; padding-block: var(--space-2); }
 .timeline-project summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 @media (max-width: 640px) { .timeline-project .timeline-detail-row { flex-wrap: wrap; } }
+
+.process-all,.ai-purpose { padding: var(--space-3); margin-block:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-sm); }
+.process-all-head,.ai-purpose-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:center; }
+.ai-purpose-fields label { display:flex; flex-direction:column; gap:var(--space-1); min-width:0; }
+.ai-purpose input,.ai-purpose select { max-width:100%; padding:var(--space-2); }
+.process-all pre { max-height:20rem; overflow:auto; }
+.ai-settings { max-width: 1100px; }
+.ai-settings .page-header h1 { font-size: 1.6rem; font-weight: 650; margin-bottom: var(--space-2); }
+.ai-settings > p { margin-block: var(--space-3); color: var(--text-secondary); }
+.ai-settings > p a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.ai-purpose { padding: var(--space-5, 20px); }
+.ai-purpose h2 { font-size: 1.05rem; font-weight: 650; margin-bottom: var(--space-3); }
+.ai-purpose-fields { align-items: end; }
+.ai-purpose input,.ai-purpose select { border: 1px solid var(--border); border-radius: var(--radius-sm); min-height: 40px; }
+.ai-purpose p { margin-top: var(--space-3); font-size: .875rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.process-all p { margin-top: var(--space-2); }
+.process-all ol { padding-left: 1.4rem; }
+@media (max-width:640px) { .ai-purpose-fields label { width:100%; } }

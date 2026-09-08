@@ -33,6 +33,7 @@ export const NAV: NavItem[] = [
   { to: "/find", label: "Find", icon: Search, group: "Work", chord: "f", description: "Search everything" },
   { to: "/timeline", label: "Timeline", icon: CalendarRange, group: "Work", chord: "t", description: "Activity over time" },
   { to: "/curate", label: "Review", icon: ClipboardCheck, group: "Trust", chord: "c", description: "Keep memory trustworthy" },
+  { to: "/settings/ai", label: "AI settings", icon: Cog, group: "System", chord: "a", description: "Models and services by purpose" },
   { to: "/operate", label: "Operate", icon: Cog, group: "System", chord: "p", description: "Pipeline and jobs" },
   { to: "/console", label: "Console", icon: Terminal, group: "System", chord: "s", description: "SQL console" },
   { to: "/pm", label: "AI team operations", icon: Users, group: "System", chord: "m", description: "Virtual team ops" },

@@ -111,8 +111,9 @@ export function TimelineDetail({
             {[...groups].map(([project, conversations]) => (
               <section className="timeline-project" key={project}>
                 <h3><Link to={`/project/${encodeURIComponent(project)}`}>
-                  {project === "(no project)" ? t("Assignment missing") : projectLabel({project, display_name: conversations[0].display_name})}
+                  {project === "(no project)" ? t("Assignment missing") : projectLabel({project, display_name: conversations[0].display_name, context_label:conversations[0].context_label})}
                 </Link></h3>
+                {conversations[0].name_origin === "model" && <p>{t("AI-suggested name · source conversations inside")}</p>}
                 <p className="muted">{t(project === "(no project)"
                   ? "No project context is recorded. Review these conversations before assigning them."
                   : "Grouped by imported folder context. This does not establish a dependency between conversations.")}</p>

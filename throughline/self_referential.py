@@ -110,6 +110,7 @@ def is_agent_call_transcript(path: Path) -> bool:
 #: be short in the first place — the first version of it matched only the
 #: current wording and missed two thirds of what it was written to catch.
 _MARKERS: tuple[tuple[str, str], ...] = (
+    ("throughline data processing:", "cli_bridge"),
     # reflect_memory — contradiction check and merge prompts
     ("du bekommst zwei memory-chunks", "reflect_memory"),
     # extract_entities
@@ -178,6 +179,7 @@ AGENT_BRIEF_TAG = "[agent-brief]"
 #: would be both useless to anyone else and a personal detail hardcoded into a
 #: public repository.
 _AUTOMATION_MARKERS: tuple[tuple[str, str], ...] = (
+    ("throughline data processing:", "cli_bridge"),
     ("/daily-mail-drafter", "daily-mail-drafter"),
     ("mail-analyst", "mail-analyst"),
     # One assistant consulting another on the user's behalf. These arrive

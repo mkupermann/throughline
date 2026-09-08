@@ -1,0 +1,21 @@
+import {render,screen,waitFor} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import {MemoryRouter} from "react-router-dom";
+import {QueryClient,QueryClientProvider} from "@tanstack/react-query";
+import {it,expect,vi} from "vitest";
+import {ProcessAll} from "./ProcessAll";
+const mocks=vi.hoisted(()=>({request:vi.fn(),run:vi.fn(),stop:vi.fn()}));
+vi.mock("@/lib/api",()=>({request:mocks.request,operateApi:{run:mocks.run,stop:mocks.stop}}));
+it("starts one complete pass only after a click and shows durable stage state",async()=>{
+ mocks.request.mockResolvedValue({job:null,steps:[{name:"titles",title:"Generate titles"}]});
+ mocks.run.mockImplementation(async()=>{mocks.request.mockResolvedValue({job:{id:"all",running:true,returncode:null,lines:[],stages:{titles:{state:"running",detail:""}}},steps:[{name:"titles",title:"Generate titles"}]});return {job_id:"all",name:"process-all",running:true};});
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><ProcessAll/></MemoryRouter></QueryClientProvider>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Process everything"}).hasAttribute("disabled")).toBe(false));
+ expect(mocks.run).not.toHaveBeenCalled();
+ await userEvent.click(screen.getByRole("button",{name:"Process everything"}));
+ expect(mocks.run).toHaveBeenCalledExactlyOnceWith("process-all");
+ expect(await screen.findByText("Generate titles — running")).toBeTruthy();
+ expect(screen.getByRole("link",{name:"AI settings"}).getAttribute("href")).toBe("/settings/ai");
+ await userEvent.click(screen.getByRole("button",{name:"Stop"}));
+ expect(mocks.stop).toHaveBeenCalledWith("all");
+});

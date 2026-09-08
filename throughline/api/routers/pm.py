@@ -414,6 +414,10 @@ def create_ai_provider(body: ProviderIn, settings: Settings = Depends(get_settin
 def patch_ai_provider(
     provider_id: int, body: ProviderPatch, settings: Settings = Depends(get_settings)
 ) -> dict[str, Any]:
+    from ..jobs import runner
+
+    if runner.current("process-all"):
+        raise HTTPException(409, "Stop the complete pass before changing AI providers.")
     fields = body.model_dump(exclude_unset=True)
     # api_key is only overwritten when the caller sends a non-empty string;
     # an explicit `null` still clears it (falls through to _update_row,
@@ -442,6 +446,13 @@ def patch_ai_provider(
 @router.delete("/pm/ai-providers/{provider_id}")
 def delete_ai_provider(provider_id: int, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
+        from throughline.queries._exec import one
+
+        if one(conn, "SELECT purpose FROM ai_purposes WHERE provider_id=%s LIMIT 1", (provider_id,)):
+            raise HTTPException(
+                status_code=409,
+                detail="This provider is selected in AI settings. Reassign those purposes before deleting it.",
+            )
         deleted = Q.delete_ai_provider(conn, provider_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"no provider with id {provider_id}")

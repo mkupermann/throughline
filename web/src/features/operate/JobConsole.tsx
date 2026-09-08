@@ -43,7 +43,7 @@ export function JobConsole({
     setDone(null);
     pinned.current = true;
     const es = new EventSource(`/api/operate/job/${jobId}/stream`);
-    es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data]));
+    es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data].slice(-500)));
     es.addEventListener("done", (e) => {
       const summary = String((e as MessageEvent).data);
       setDone(summary);

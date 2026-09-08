@@ -502,7 +502,7 @@ def _no_model(monkeypatch, detail="No model available. Start Ollama or set OPENA
     monkeypatch.setattr(
         llm,
         "backend_info",
-        lambda: llm.LLMInfo(available=False, detail=detail),
+        lambda purpose=None: llm.LLMInfo(available=False, detail=detail),
     )
     return detail
 
@@ -523,7 +523,7 @@ def test_available_job_reports_no_obstacle(client, monkeypatch):
     monkeypatch.setattr(
         llm,
         "backend_info",
-        lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
+        lambda purpose=None: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
     )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
     assert jobs["extract"]["unavailable"] is None
@@ -541,7 +541,7 @@ def test_a_local_model_makes_the_container_jobs_runnable(client, monkeypatch):
     monkeypatch.setattr(
         llm,
         "backend_info",
-        lambda: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
+        lambda purpose=None: llm.LLMInfo(available=True, backend="ollama", model="qwen2.5:7b", local=True),
     )
     jobs = {j["name"]: j for j in client.get("/api/operate/status").json()["jobs"]}
     for name in ("extract", "titles", "reflect"):

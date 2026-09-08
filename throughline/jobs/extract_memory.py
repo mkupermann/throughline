@@ -72,11 +72,13 @@ def _require_model() -> str:
     it probed and why each was rejected. Reproducing the check here would give
     the user a second, worse explanation of the same failure.
     """
-    info = _llm.backend_info()
+    info = _llm.backend_info(purpose="extraction")
     if not info.available:
         sys.stderr.write(f"ERROR: no model available for extraction.\n  {info.detail}\n")
         raise SystemExit(2)
-    if MODEL:
+    from throughline.ai_runtime import route
+
+    if MODEL and route("extraction") is None:
         return f"{info.backend}/{MODEL} ({'local' if info.local else 'remote'})"
     return str(info)
 
@@ -283,6 +285,7 @@ def call_model(prompt: str) -> str:
         timeout=TIMEOUT_PER_CALL,
         model=MODEL,
         schema=CHUNK_SCHEMA if _schema_enabled() else None,
+        purpose="extraction",
         # Only the claude CLI cares: Claude Code names the project folder after
         # the process CWD, so inheriting the repo's would file this call inside
         # the user's real project history, and the next ingest would read it

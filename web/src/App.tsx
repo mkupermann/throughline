@@ -1,3 +1,4 @@
+import {AiSettings} from "@/features/settings/AiSettings";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
 
@@ -53,6 +54,8 @@ const router = createBrowserRouter([
       // `*` so a project name with a slash-free but otherwise awkward shape
       // ("The FireScore Website") survives the round trip.
       { path: "project/:name", element: <ProjectPage /> },
+      { path: "settings/providers", element: <ModelsPage /> },
+      { path: "settings/ai", element: <AiSettings /> },
       { path: "operate", element: <OperatePage /> },
       ...Object.entries(DETAIL_KINDS).map(([prefix, kind]) => ({
         path: `${prefix}/:id`,

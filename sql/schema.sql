@@ -1227,3 +1227,18 @@ CREATE TABLE IF NOT EXISTS public.project_names (
     display_name text NOT NULL CHECK (length(btrim(display_name)) BETWEEN 1 AND 120),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Generated display names retain their origin and sampled source conversations.
+ALTER TABLE public.project_names ADD COLUMN IF NOT EXISTS name_origin text NOT NULL DEFAULT 'user'
+    CHECK (name_origin IN ('user', 'model'));
+ALTER TABLE public.project_names ADD COLUMN IF NOT EXISTS source_conversation_ids bigint[] NOT NULL DEFAULT '{}';
+-- Explicit purpose routing reuses the existing provider credential store.
+CREATE TABLE IF NOT EXISTS public.ai_purposes (
+    purpose text PRIMARY KEY CHECK (purpose IN ('answer','titles','project_names','extraction','reflection','embeddings')),
+    provider_id bigint REFERENCES public.pm_ai_providers(id) ON DELETE RESTRICT,
+    cli text CHECK (cli IN ('codex','vibe','claude')),
+    model text NOT NULL DEFAULT '',
+    embedding_dim integer CHECK (embedding_dim IN (768,1536)),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK ((provider_id IS NOT NULL)::int + (cli IS NOT NULL)::int = 1),
+    CHECK (purpose <> 'embeddings' OR (cli IS NULL AND embedding_dim IS NOT NULL))
+);

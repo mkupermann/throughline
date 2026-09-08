@@ -22,6 +22,7 @@ from throughline.jobs.pm_watch import poll_all_running
 from . import deps
 from .deps import DatabaseUnavailable, close_pool, init_pool
 from .routers import (
+    ai_settings,
     ask,
     console,
     curate,
@@ -113,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    app.include_router(ai_settings.router, prefix="/api")
     app.include_router(overview.router, prefix="/api")
     app.include_router(find.router, prefix="/api")
     app.include_router(curate.router, prefix="/api")

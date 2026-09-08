@@ -381,6 +381,7 @@ def _call_model(prompt: str, *, model: str | None) -> tuple[str | None, str | No
         prompt,
         timeout=_TIMEOUT_S,
         model=model,
+        purpose="answer",
         # Only the claude CLI cares: Claude Code files transcripts by working
         # directory, and without this the tool's own questions land in the
         # user's project history and get ingested as their work.
@@ -429,7 +430,7 @@ def answer(
             ),
         )
 
-    info = _llm.backend_info()
+    info = _llm.backend_info(purpose="answer")
     # What the answer says it used has to be what it used: a `--model`
     # override changes the model but not the backend, so report both.
     if model:

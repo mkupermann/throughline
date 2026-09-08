@@ -21,8 +21,10 @@ Design constraints that shaped this:
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -53,7 +55,9 @@ MAX_RUNTIME_SECONDS = 60 * 60
 #: no extraction, no titles and no reflection at all, because the CLI carries
 #: host credentials and is deliberately not in the image. Those jobs go through
 #: the shared backend now, so the requirement is gone with them.
-Requirement = Literal["model", "embedding"]
+Requirement = Literal[
+    "model", "embedding", "model:titles", "model:project_names", "model:extraction", "model:reflection"
+]
 
 
 @dataclass(frozen=True)
@@ -76,10 +80,10 @@ def check_requirement(req: Requirement | None) -> str | None:
     """
     if req is None:
         return None
-    if req == "model":
+    if req.startswith("model"):
         from throughline import llm
 
-        info = llm.backend_info()
+        info = llm.backend_info(purpose=req.split(":", 1)[1]) if ":" in req else llm.backend_info()
         return None if info.available else info.detail
     if req == "embedding":
         from throughline import embedding
@@ -104,6 +108,26 @@ def _job_module(module: str, *args: str) -> list[str]:
 
 
 JOBS: dict[str, JobSpec] = {
+    "process-all": JobSpec(
+        "process-all",
+        "Process everything",
+        "Import, scan catalogues, name projects and conversations, extract knowledge and entities, reflect, embed, audit and diagnose — one complete pass.",
+        _job_module("throughline.jobs.process_all"),
+    ),
+    "project-names": JobSpec(
+        "project-names",
+        "Name projects",
+        "Suggest readable names from source conversations, preserving your own names.",
+        _job_module("throughline.jobs.name_projects"),
+        requires="model:project_names",
+    ),
+    "entities": JobSpec(
+        "entities",
+        "Extract entities",
+        "Extract people, technologies and other entities from conversations.",
+        _job_module("throughline.jobs.extract_entities"),
+        requires="model:extraction",
+    ),
     "ingest": JobSpec(
         "ingest",
         "Ingest sessions",
@@ -127,7 +151,7 @@ JOBS: dict[str, JobSpec] = {
         "Extract memory",
         "Run the LLM extraction pass over conversations with no memory yet.",
         _cli("extract-memory"),
-        requires="model",
+        requires="model:extraction",
     ),
     "embed": JobSpec(
         "embed",
@@ -141,14 +165,14 @@ JOBS: dict[str, JobSpec] = {
         "Generate titles",
         "Summarise conversations that have no title.",
         _cli("generate-titles"),
-        requires="model",
+        requires="model:titles",
     ),
     "reflect": JobSpec(
         "reflect",
         "Run reflection",
         "Deduplicate, find contradictions, mark stale memory.",
         _cli("reflect"),
-        requires="model",
+        requires="model:reflection",
     ),
     "audit-extraction": JobSpec(
         "audit-extraction",
@@ -208,6 +232,8 @@ class Job:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _event: threading.Event = field(default_factory=threading.Event)
     _dropped: int = 0
+    stages: dict[str, dict] = field(default_factory=dict)
+    _cancel: threading.Event = field(default_factory=threading.Event)
 
     @property
     def running(self) -> bool:
@@ -226,6 +252,7 @@ class Job:
                 "lines": list(self.lines),
                 "dropped_lines": self._dropped,
                 "error": self.error,
+                "stages": dict(self.stages),
             }
 
     def append(self, line: str) -> None:
@@ -233,6 +260,12 @@ class Job:
             if len(self.lines) == self.lines.maxlen:
                 self._dropped += 1
             self.lines.append(line)
+            if line.startswith("::stage "):
+                try:
+                    stage = json.loads(line[len("::stage ") :])
+                    self.stages[stage["name"]] = stage
+                except (ValueError, KeyError, TypeError):
+                    pass
         self._event.set()
 
     def finish(self, returncode: int | None, error: str | None = None) -> None:
@@ -267,6 +300,12 @@ class JobRunner:
             raise JobUnavailable(unmet)
 
         with self._lock:
+            all_id = self._current.get("process-all")
+            if name != "process-all" and all_id and self._by_id[all_id].running:
+                raise JobUnavailable(
+                    "The complete processing pass is already running. Open its progress or stop it first."
+                )
+            predecessors = [j for j in self._by_id.values() if j.running] if name == "process-all" else []
             running_id = self._current.get(name)
             if running_id:
                 existing = self._by_id.get(running_id)
@@ -278,6 +317,19 @@ class JobRunner:
             self._current[name] = job.id
             self._history.appendleft(job.id)
 
+        threading.Thread(target=self._launch, args=(job, spec, extra_env, predecessors), daemon=True).start()
+        return job
+
+    def _launch(self, job, spec, extra_env, predecessors):
+        if predecessors:
+            job.append("Waiting for previously started jobs to finish before the complete pass.")
+        while any(other.running for other in predecessors):
+            if job._cancel.wait(0.25):
+                job.finish(-15, "Stopped while waiting")
+                return
+        if job._cancel.is_set():
+            job.finish(-15, "Stopped before launch")
+            return
         env = {**os.environ, "PYTHONUNBUFFERED": "1", **(extra_env or {})}
         job.append(f"$ {shlex.join(spec.args)}")
         try:
@@ -289,6 +341,7 @@ class JobRunner:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
             )
         except Exception as exc:
             job.append(f"failed to start: {exc}")
@@ -296,30 +349,40 @@ class JobRunner:
             return job
 
         job._proc = proc
-        threading.Thread(target=self._pump, args=(job, proc), daemon=True).start()
-        return job
+        if job._cancel.is_set():
+            self.stop(job.id)
+        self._pump(job, proc)
 
     def _pump(self, job: Job, proc: subprocess.Popen) -> None:
-        deadline = time.time() + MAX_RUNTIME_SECONDS
+        max_runtime = 24 * 60 * 60 if job.name == "process-all" else MAX_RUNTIME_SECONDS
+
+        def expire():
+            if proc.poll() is None:
+                job.append(f"Time limit reached ({max_runtime}s); unfinished work remains pending.")
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        timer = threading.Timer(max_runtime, expire)
+        timer.daemon = True
+        timer.start()
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
                 job.append(line.rstrip("\n"))
-                if time.time() > deadline:
-                    proc.kill()
-                    job.append(f"killed after {MAX_RUNTIME_SECONDS}s")
-                    break
             proc.wait(timeout=30)
             job.finish(proc.returncode)
         except Exception as exc:
             job.finish(None, error=str(exc))
         finally:
+            timer.cancel()
             # Coverage caches the filesystem side for up to CACHE_TTL_SECONDS
             # (throughline/queries/providers.py) — without this an ingest that
             # just succeeded keeps reporting pre-ingest counts, which reads as
             # "the ingest did nothing". Unconditional: even a failed or
             # partial ingest may have changed what's on disk or in the log.
-            if job.name.startswith("ingest"):
+            if job.name.startswith("ingest") or job.name == "process-all":
                 from throughline.queries import providers as PQ
 
                 PQ.invalidate_scan_cache()
@@ -333,13 +396,30 @@ class JobRunner:
     def current(self, name: str) -> Job | None:
         with self._lock:
             jid = self._current.get(name)
-        return self._by_id.get(jid) if jid else None
+        job = self._by_id.get(jid) if jid else None
+        return job if job and job.running else None
 
     def stop(self, job_id: str) -> bool:
         job = self._by_id.get(job_id)
-        if job is None or not job.running or job._proc is None:
+        if job is None or not job.running:
             return False
-        job._proc.terminate()
+        job._cancel.set()
+        if job._proc is not None:
+            try:
+                os.killpg(job._proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+        def force_stop():
+            if job._proc is not None and job._proc.poll() is None:
+                try:
+                    os.killpg(job._proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        timer = threading.Timer(5, force_stop)
+        timer.daemon = True
+        timer.start()
         job.append("stop requested")
         return True
 
@@ -360,10 +440,11 @@ class JobRunner:
         sent = 0
         while True:
             snap = job.snapshot()
-            new = snap["lines"][sent:]
+            start = max(0, sent - snap["dropped_lines"])
+            new = snap["lines"][start:]
             for line in new:
                 yield _sse("line", line)
-            sent = len(snap["lines"])
+            sent = snap["dropped_lines"] + len(snap["lines"])
 
             if not snap["running"]:
                 yield _sse(

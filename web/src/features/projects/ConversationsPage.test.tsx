@@ -16,7 +16,7 @@ beforeEach(()=>{
 });
 it("starts with project choice and reads only the selected conversation",async()=>{
  mount();expect(screen.getByText("Start with a project")).toBeTruthy();expect(mocks.history).not.toHaveBeenCalled();
- await screen.findByRole("option",{name:"Folder group: Atlas (2)"});
+ await screen.findByRole("option",{name:"Name pending — no readable source excerpt (2)"});
  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Project"}),"Atlas");
  expect(await screen.findByText("Original transcript 1")).toBeTruthy();
  expect(screen.queryByText("Original transcript 2")).toBeNull();

@@ -278,7 +278,10 @@ def main() -> None:
     ap.add_argument("--only", choices=["memory_chunk", "message", "both"], default="both")
     args = ap.parse_args()
 
-    backend = pick_backend(args.backend)
+    from throughline.ai_runtime import embedding_backend, route
+
+    selected = route("embeddings")
+    backend = embedding_backend(selected) if selected else pick_backend(args.backend)
     print(f"Backend: {backend.name} / {backend.model} ({backend.dim} dim)")
 
     conn = _connect()
@@ -331,6 +334,7 @@ def main() -> None:
             continue
 
         if len(vectors) != len(meta):
+            errors += 1
             print(f"  WARN: vectors={len(vectors)} vs meta={len(meta)} – skip")
             continue
 
@@ -340,6 +344,7 @@ def main() -> None:
             )
             for (stype, sid), vec in zip(meta, vectors, strict=True):
                 if len(vec) != backend.dim:
+                    errors += 1
                     print(f"  WARN: dim mismatch {len(vec)} != {backend.dim} bei {stype}#{sid}")
                     continue
                 if stype == "message" and sid not in current_message_ids:
@@ -359,6 +364,8 @@ def main() -> None:
     print(f"\nDone. embedded={done} errors={errors}")
     cursor.close()
     conn.close()
+    if errors:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

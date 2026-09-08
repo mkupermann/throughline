@@ -6,7 +6,7 @@ import {ProjectName,projectLabel} from "./ProjectName";
 const rename=vi.hoisted(()=>vi.fn());
 vi.mock("@/lib/api",()=>({projectsApi:{rename}}));
 it("marks future folder imports unconfirmed instead of inventing a project name",()=>{
- expect(projectLabel({project:"si"})).toBe("Folder group: si");
+ expect(projectLabel({project:"si"})).toBe("Name pending — no readable source excerpt");
  expect(projectLabel({project:"er",display_name:"Nebula journey"})).toBe("Nebula journey");
 });
 it("saves the display name against the original stable key",async()=>{

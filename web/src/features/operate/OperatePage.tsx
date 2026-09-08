@@ -1,3 +1,4 @@
+import {ProcessAll} from "@/features/operate/ProcessAll";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { useCallback, useState } from "react";
@@ -284,7 +285,7 @@ export function OperatePage() {
   const advancedJobs = hasPipeline
     ? data.jobs.filter(
         (job) =>
-          !pipelineJobNames.has(job.name) &&
+          job.name !== "process-all" && !pipelineJobNames.has(job.name) &&
           !(hasIngestStage && (job.name === "ingest" || job.name.startsWith("ingest_"))),
       )
     : data.jobs;
@@ -306,6 +307,7 @@ export function OperatePage() {
         </div>
       )}
 
+      <ProcessAll />
       <Pipeline
         stages={pipelineStages}
         activeJob={activeJob}

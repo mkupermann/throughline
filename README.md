@@ -13,6 +13,12 @@ The core workflow works without a connected AI model. Optional models add semant
 
 [Start locally](#quick-start-with-docker) · [Upgrade an existing installation](docs/UPGRADING.md) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
 
+## One complete processing pass
+
+Use **Process everything** in Projects, Timeline or Operate to import and process all pending work in sequence, with visible step results. **AI settings** selects local models, API services or installed host CLIs separately for each purpose. Project names are derived from source excerpts and marked as suggestions until you save your own label.
+
+See [complete processing and AI settings](docs/AI_PROCESSING.md) for the steps, supported services, host CLI setup and limits.
+
 ## Follow the work
 
 1. **Choose a project.** See its recorded goal, current position, blocker and next step, with links to the messages supporting them.

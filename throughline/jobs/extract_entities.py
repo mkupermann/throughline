@@ -206,7 +206,7 @@ def call_model(prompt: str) -> str:
     next ingest would read it back as their work. See
     throughline.self_referential.
     """
-    text, error = llm.complete(prompt, timeout=TIMEOUT_PER_CALL, cwd=str(agent_call_cwd()))
+    text, error = llm.complete(prompt, purpose="extraction", timeout=TIMEOUT_PER_CALL, cwd=str(agent_call_cwd()))
     if error:
         print(f"    Model error: {error}")
         return ""
@@ -406,7 +406,7 @@ def main() -> None:
     print("Claude Memory DB — Entity Extraction (Knowledge Graph)")
     print("=" * 60)
 
-    backend = llm.backend_info()
+    backend = llm.backend_info(purpose="extraction")
     if not backend.available:
         sys.stderr.write(f"ERROR: no model available for entity extraction.\n  {backend.detail}\n")
         raise SystemExit(2)
@@ -521,6 +521,8 @@ def main() -> None:
 
     cursor.close()
     conn.close()
+    if errors:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

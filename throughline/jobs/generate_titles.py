@@ -4,7 +4,9 @@ Writes a short title for every conversation that has none.
 Uses whatever model `throughline.llm` finds — local first.
 """
 
+import json
 import os
+import re
 import sys
 import time
 from typing import Any
@@ -13,6 +15,7 @@ import psycopg2
 
 from throughline import llm as _llm
 from throughline import prompts as _prompts
+from throughline.queries.presentation import narrative
 from throughline.self_referential import agent_call_cwd
 
 DB: dict[str, Any] = {
@@ -38,9 +41,9 @@ def _connect() -> "psycopg2.extensions.connection":
         raise SystemExit(2) from e
 
 
-def _require_model() -> str:
+def _require_model(purpose="titles") -> str:
     """Confirm a model is reachable. `throughline.llm` composes the message."""
-    info = _llm.backend_info()
+    info = _llm.backend_info(purpose=purpose)
     if not info.available:
         sys.stderr.write(f"ERROR: no model available for titling.\n  {info.detail}\n")
         raise SystemExit(2)
@@ -50,7 +53,7 @@ def _require_model() -> str:
 #: Empty means "whatever the probe found" — the machine's configured model is
 #: a property of the machine, not of this script.
 MODEL = os.environ.get("THROUGHLINE_TITLE_MODEL", "").strip() or None
-MAX_PER_RUN = 50
+MAX_PER_RUN = int(os.environ.get("THROUGHLINE_TITLE_LIMIT", "50"))
 MAX_PREVIEW_CHARS = 4000
 SLEEP = 1.5
 TIMEOUT = 60
@@ -75,7 +78,7 @@ Session excerpt:
 
 {TRANSCRIPT}
 
-Return ONLY the title, nothing else. No quotation marks, no explanation."""
+Return a JSON object with exactly one field: "title". No explanation."""
 
 
 def build_preview(messages: list[tuple[str, str | None]]) -> str:
@@ -83,11 +86,14 @@ def build_preview(messages: list[tuple[str, str | None]]) -> str:
     parts = []
     total = 0
     for role, content in messages:
-        if role == "tool_result":
+        if role not in ("user", "assistant"):
             continue
         if not content:
             continue
-        text = content[:500] if len(content) > 500 else content
+        content = narrative(content)
+        if not content or content.startswith("[Tool:"):
+            continue
+        text = content[:500]
         parts.append(f"[{role}] {text}")
         total += len(text)
         if total > MAX_PREVIEW_CHARS:
@@ -95,13 +101,20 @@ def build_preview(messages: list[tuple[str, str | None]]) -> str:
     return "\n".join(parts)[:MAX_PREVIEW_CHARS]
 
 
-def call_model(prompt: str) -> str:
+def call_model(prompt: str, purpose: str = "titles") -> str:
     """Ask whichever backend the probe found for one title. Never raises."""
     try:
         text, err = _llm.complete(
             prompt,
             timeout=TIMEOUT,
             model=MODEL,
+            purpose=purpose,
+            schema={
+                "type": "object",
+                "properties": {"title": {"type": "string", "minLength": 8, "maxLength": 80}},
+                "required": ["title"],
+                "additionalProperties": False,
+            },
             # Run from a directory of our own: Claude Code names the project
             # folder after the process CWD, so inheriting the repo's would file
             # this call inside the user's real project history, and the next
@@ -111,22 +124,30 @@ def call_model(prompt: str) -> str:
         if text is None:
             print(f"  title call failed: {err}")
             return ""
-        # Strip the wrapping a chat model adds around a one-line answer.
-        title = text.strip()
-        title = title.strip('"').strip("'").strip("„").strip("«").strip("»").rstrip(".")
-        # First line only, in case the model explained itself.
-        title = title.split("\n")[0].strip()
-        if len(title) > 80:
-            title = title[:77] + "..."
+        title = json.loads(text).get("title", "")
+        if not isinstance(title, str) or not 8 <= len(title.strip()) <= 80 or bad_title(title):
+            print("  title call failed: invalid or non-final title")
+            return ""
+        title = title.strip()
         return title
     except Exception as e:
         print(f"  error: {e}")
         return ""
 
 
+def bad_title(title: str | None) -> bool:
+    return not title or bool(
+        re.search(
+            r"^(thinking process|analysis|<think>|<recommended_plugins|<environment_context|\[Tool:)",
+            title.strip(),
+            re.I,
+        )
+    )
+
+
 def main() -> None:
     print("=" * 60)
-    print("Claude Memory — Titel-Generierung")
+    print("Throughline — title generation")
     print("=" * 60)
 
     print(f"Model: {_require_model()}")
@@ -136,10 +157,11 @@ def main() -> None:
     cursor.execute(f"""
         SELECT id, project_name, message_count
         FROM conversations
-        WHERE (summary IS NULL OR summary = '')
+        WHERE (summary IS NULL OR summary = '' OR summary ~* '^(Thinking Process|Analysis:|<think>|<recommended_plugins|<environment_context|\\[Tool:)')
+          AND generated_by IS NULL
           AND message_count >= 2
         ORDER BY started_at DESC
-        LIMIT {MAX_PER_RUN}
+        LIMIT {MAX_PER_RUN if MAX_PER_RUN > 0 else "ALL"}
     """)
     convs = cursor.fetchall()
 
@@ -189,6 +211,8 @@ def main() -> None:
 
     cursor.close()
     conn.close()
+    if errors:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

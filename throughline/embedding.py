@@ -81,6 +81,13 @@ def get_backend(preferred: str = "auto", refresh: bool = False):
         _resolved = True
         _backend = None
         try:
+            from throughline.ai_runtime import embedding_backend, route
+
+            selected = route("embeddings")
+            if selected is not None:
+                _backend = embedding_backend(selected)
+                _reason = ""
+                return _backend
             reason = _probe(preferred)
             if reason:
                 _reason = reason

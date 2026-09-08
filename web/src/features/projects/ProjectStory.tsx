@@ -108,7 +108,7 @@ function Story({ project }: { project: string }) {
         <div className="story-heading">
           <div>
             <p className="story-eyebrow">{t("PROJECT WORKSPACE")}</p>
-            <h1>{projectLabel({project, display_name:data?.identity?.display_name})}</h1>
+            <h1>{projectLabel({project, display_name:data?.identity?.display_name, context_label:data?.identity?.context_label})}</h1>
             <p className="story-subtitle">{t("The work, the evidence, and where to go next.")}</p>
           </div>
           <button
@@ -127,7 +127,7 @@ function Story({ project }: { project: string }) {
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
-      {data && <ProjectName project={project} name={data.identity?.display_name} folders={data.paths.length} />}
+      {data && <ProjectName project={project} name={data.identity?.display_name} origin={data.identity?.name_origin} sources={data.identity?.source_conversation_ids} folders={data.paths.length} />}
       {history.isPending && <p role="status">{t("Loading project history…")}</p>}
       {history.error && (
         <div role="alert" className="story-notice">

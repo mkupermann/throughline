@@ -469,3 +469,17 @@ def stream(job_id: str) -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/operate/all")
+def all_progress():
+    current = runner.current("process-all")
+    if current is None:
+        recent = next((j for j in runner.history() if j["name"] == "process-all"), None)
+        current = runner.get(recent["id"]) if recent else None
+    from throughline.jobs.process_all import STEPS
+
+    return {
+        "job": current.snapshot() if current else None,
+        "steps": [{"name": name, "title": JOBS[name].title} for name in STEPS],
+    }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add a full processing pass with per-step progress, explicit failures and stop support.
+- Add persistent AI routing by purpose, API provider selection and an authenticated bridge for installed Codex, Vibe and Claude Code CLIs.
+- Generate source-linked project name suggestions, retain user names and repair thinking-only conversation titles.
+
 - Group timeline conversations under their recorded project context, collapsed by default, with saved project names and an explicit missing-assignment group. Preserve direct source links and exact timestamps.
 
 ### Reliable extraction failures

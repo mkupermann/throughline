@@ -68,7 +68,7 @@ def _connect() -> psycopg2.extensions.connection:
 
 def _require_model() -> str:
     """Confirm a model is reachable. `throughline.llm` composes the message."""
-    info = _llm.backend_info()
+    info = _llm.backend_info(purpose="reflection")
     if not info.available:
         sys.stderr.write(f"ERROR: no model available for reflection.\n  {info.detail}\n")
         raise SystemExit(2)
@@ -116,16 +116,21 @@ DATE_PATTERN = re.compile(
 # ---- Utility ----------------------------------------------------------------
 
 
+_CALL_ERRORS = 0
+
+
 def call_model(prompt: str) -> str:
     """Ask whichever backend the probe found. Returns "" on any failure.
 
     A reflection pass compares many pairs; one failed call must cost one
     comparison, not the run.
     """
+    global _CALL_ERRORS
     text, err = _llm.complete(
         prompt,
         timeout=TIMEOUT_PER_CALL,
         model=MODEL,
+        purpose="reflection",
         # Run from a directory of our own: Claude Code names the project folder
         # after the process CWD, so inheriting the repo's would file this call
         # inside the user's real project history, and the next ingest would
@@ -133,6 +138,7 @@ def call_model(prompt: str) -> str:
         cwd=str(agent_call_cwd()),
     )
     if text is None:
+        _CALL_ERRORS += 1
         print(f"    reflection call failed: {err}")
         return ""
     return text
@@ -688,6 +694,8 @@ def main() -> None:
     )
     p.add_argument("--dry-run", action="store_true", help="Keine Writes, nur Analyse + Log")
     args = p.parse_args()
+    global _CALL_ERRORS
+    _CALL_ERRORS = 0
 
     print(f"Model: {_require_model()}")
     conn = _connect()
@@ -713,6 +721,8 @@ def main() -> None:
 
     cur.close()
     conn.close()
+    if _CALL_ERRORS or any(stats.get("errors", 0) for stats in stats_by_mode.values()):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

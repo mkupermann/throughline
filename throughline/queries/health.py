@@ -70,7 +70,7 @@ def missing_titles(conn, min_messages: int = 2) -> int:
             -- tool's own sessions here would have it generating titles for
             -- its own title-generation calls.
             WHERE generated_by IS NULL
-              AND (summary IS NULL OR summary = '') AND message_count >= %s
+              AND (summary IS NULL OR summary = '' OR summary ~* '^(Thinking Process|Analysis:|<think>)') AND message_count >= %s
             """,
             (min_messages,),
             0,

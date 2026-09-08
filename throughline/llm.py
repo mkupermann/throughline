@@ -124,8 +124,17 @@ def _openai_compat_base() -> str | None:
     return base.rstrip("/") if base else None
 
 
-def backend_info() -> LLMInfo:
+def backend_info(purpose: str | None = None) -> LLMInfo:
     """Which model will answer, and whether it runs on this machine."""
+    if purpose:
+        try:
+            from throughline.ai_runtime import info
+
+            selected = info(purpose)
+            if selected is not None:
+                return selected
+        except Exception as exc:
+            return LLMInfo(False, detail=f"AI settings unavailable: {type(exc).__name__}")
     preferred = os.environ.get("THROUGHLINE_ANSWER_BACKEND", "auto").strip().lower() or "auto"
     model = os.environ.get("THROUGHLINE_ANSWER_MODEL", "").strip()
     base = _openai_compat_base()
@@ -214,6 +223,7 @@ def complete(
     cwd: str | None = None,
     model: str | None = None,
     schema: dict | None = None,
+    purpose: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Run *prompt* through the configured model. Returns (text, error).
 
@@ -225,6 +235,15 @@ def complete(
     Never raises: a question that cannot be answered has to degrade to "here
     are the records I found", which is still more than the user had before.
     """
+    if purpose:
+        try:
+            from throughline.ai_runtime import generate, route
+
+            selected = route(purpose)
+            if selected is not None:
+                return generate(selected, prompt, schema, timeout), None
+        except Exception as exc:
+            return None, f"Selected AI failed ({type(exc).__name__}). Check its configuration and login."
     info = backend_info()
     if not info.available:
         return None, info.detail

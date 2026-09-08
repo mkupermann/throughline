@@ -3,17 +3,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { projectsApi } from "@/lib/api";
 import { t } from "@/lib/ui";
 
-export function projectLabel(project: {project: string; display_name?: string | null}) {
-  return project.display_name || `${t("Folder group")}: ${project.project}`;
+export function projectLabel(project: {project: string; display_name?: string | null; context_label?: string | null}) {
+  return project.display_name || project.context_label || t("Name pending — no readable source excerpt");
 }
 
-export function ProjectName({project, name, folders}: {project: string; name?: string | null; folders: number}) {
+export function ProjectName({project, name, folders, origin, sources=[]}: {project: string; name?: string | null; folders: number; origin?: string; sources?: number[]}) {
   const client = useQueryClient();
   const [draft, setDraft] = useState(name ?? "");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   return <div className="project-naming">
+    {origin === "model" && <p>{t("AI-suggested name based on source excerpts. Review or edit it.")} {sources.map(id=><a key={id} href={`/c/${id}`}> #{id}</a>)}</p>}
     <p>{name ? t("Display name saved separately from imported folders.") : t("Name not set. This is an imported folder group, not a confirmed project assignment.")}</p>
     {name && <p>{t("Naming does not confirm that every conversation belongs to the same project.")}</p>}
     <p>{t("Source folder name")}: <code>{project}</code> · {folders} {t("source folders")}</p>

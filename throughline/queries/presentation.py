@@ -73,7 +73,12 @@ def previews(conn, sessions):
         s[prefix + "_id"] = m["id"]
     for s in sessions:
         title = s.get("title")
-        if not title or any(f"<{tag}" in title for tag in ENVELOPES) or title.startswith("[Tool:"):
+        if (
+            not title
+            or re.match(r"^(Thinking Process|Analysis:|<think>)", title, re.I)
+            or any(f"<{tag}" in title for tag in ENVELOPES)
+            or title.startswith("[Tool:")
+        ):
             s["title"] = (s["opening"] or "")[:120] or None
         s["awaiting_answer"] = bool(
             s["latest_request_id"]

@@ -1,3 +1,4 @@
+import {ProcessAll} from "@/features/operate/ProcessAll";
 import { projectLabel } from "./ProjectName";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
@@ -37,6 +38,7 @@ export function ProjectLibrary() {
           <FolderOpen size={32} />
         </div>
       </header>
+      <ProcessAll />
       <div className="story-controls">
         <label className="searchbar">
           <Search size={16} />
@@ -71,6 +73,7 @@ export function ProjectLibrary() {
           >
             <div>
               <h2>{projectLabel(p)}</h2>
+              {p.name_origin === "model" && <p className="story-muted">{t("AI-suggested name · source conversations inside")}</p>}
               {!p.display_name && <p className="story-muted">{t("Name and project assignment need review")}</p>}
               <p>
                 {p.sessions}{t(" Conversations · ")}{p.messages}{t(" messages")}</p>
