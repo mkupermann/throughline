@@ -90,7 +90,6 @@ The selected reader distinguishes first-prompt and last-answer excerpts from the
 
 Verification covers project and conversation switching without stale transcript content, provider scope in deep links, exact timestamp markup and malformed source times. The existing story APIs and database schema are unchanged.
 
-
 ### Meaningful source excerpts and files
 
 Known `recommended_plugins`, `environment_context` and `in-app-browser-context` envelopes are excluded from narrative previews. Original source messages remain available; the transcript discloses envelope content separately. Tool-call wrappers are excluded from text-answer previews and are not duplicated alongside structured tool calls. This is deterministic presentation, not model-generated interpretation.
@@ -98,7 +97,6 @@ Known `recommended_plugins`, `environment_context` and `in-app-browser-context` 
 The project recovery panel quotes the latest-started conversation's last user request and last text answer, with exact source-message links. It is independent of history search, pagination and display order, while preserving folder, provider and automation scope. These excerpts are explicitly not a confirmed project state or proof that an announced action succeeded. Existing confirmed checkpoints remain authoritative.
 
 The conversation reader lists up to 100 distinct explicit local file references from assistant messages, with the latest mentioning source and timestamp. Availability is checked on the application server, not on the user's browser computer. Containers may not have access to host files; such references remain visible as unavailable. Downloads require an existing file inside the recorded project directory, project/message ownership checks, and are served as attachments. Contents, freshness and successful execution are not verified by file existence. No source files are mounted or imported automatically.
-
 
 ### Project naming contract
 
