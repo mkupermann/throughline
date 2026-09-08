@@ -59,3 +59,33 @@ def test_cli_failure_classification_never_returns_raw_stderr():
     assert classify_failure("Unauthorized private-key") == "cli_auth"
     assert classify_failure("Unknown model private-key") == "cli_model"
     assert classify_failure("Unrecognized error private-key") == "cli_failed"
+
+
+@pytest.mark.parametrize("code", ["bridge_busy", "bridge_unreachable", "cli_auth", "cli_quota", "cli_output"])
+def test_processing_preserves_safe_connection_reason(monkeypatch, code):
+    from throughline import llm
+
+    monkeypatch.setattr(ai_runtime, "route", lambda purpose: {"cli": "claude"})
+
+    def fail(*args, **kwargs):
+        raise AIConnectionError(code)
+
+    monkeypatch.setattr(ai_runtime, "generate", fail)
+    text, error = llm.complete("synthetic", purpose="titles")
+    assert text is None
+    assert f"[{code}]" in error
+    assert str(AIConnectionError(code)) in error
+
+
+def test_processing_still_hides_unknown_provider_errors(monkeypatch):
+    from throughline import llm
+
+    monkeypatch.setattr(ai_runtime, "route", lambda purpose: {"cli": "claude"})
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("private-provider-key")
+
+    monkeypatch.setattr(ai_runtime, "generate", fail)
+    text, error = llm.complete("synthetic", purpose="titles")
+    assert text is None
+    assert "private-provider-key" not in error

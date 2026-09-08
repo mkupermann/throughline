@@ -43,6 +43,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 
+from throughline.ai_errors import AIConnectionError
+
 #: Where Ollama listens unless told otherwise.
 _OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 
@@ -242,6 +244,8 @@ def complete(
             selected = route(purpose)
             if selected is not None:
                 return generate(selected, prompt, schema, timeout), None
+        except AIConnectionError as exc:
+            return None, f"Selected AI failed [{exc.code}]: {exc}"
         except Exception as exc:
             return None, f"Selected AI failed ({type(exc).__name__}). Check its configuration and login."
     info = backend_info()
