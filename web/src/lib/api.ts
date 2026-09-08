@@ -538,6 +538,8 @@ export interface TimelineRange {
  * TypeScript could not check because JSON arrives as strings.
  */
 export interface TimelineDayItem {
+  project?: string | null;
+  display_name?: string | null;
   id: number;
   kind: TimelineKind;
   /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */

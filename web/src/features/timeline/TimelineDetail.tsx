@@ -1,10 +1,11 @@
 import { t } from "@/lib/ui";
-import { useLanguage } from "@/lib/language";
+import { getLang, useLanguage } from "@/lib/language";
 import { Link } from "react-router-dom";
 import { OctagonAlert } from "lucide-react";
 
 import { ApiError, type TimelineDayItem } from "@/lib/api";
-import { formatCount, formatTime } from "@/lib/format";
+import { formatCount } from "@/lib/format";
+import { projectLabel } from "../projects/ProjectName";
 
 /** Where a timeline row opens.
  *
@@ -64,6 +65,11 @@ export function TimelineDetail({
 }) {
   useLanguage();
   const items = data?.items ?? [];
+  const groups = new Map<string, TimelineDayItem[]>();
+  for (const item of items.filter(item => item.kind === "conversation")) {
+    const key = item.project || "(no project)";
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
   const truncated = total !== undefined && items.length < total;
 
   return (
@@ -101,35 +107,48 @@ export function TimelineDetail({
             <p className="timeline-detail-truncated muted">{t("Showing ")}{formatCount(items.length)} of {formatCount(total)}.
             </p>
           )}
-          {/* Each row links to the record it names. A timeline that shows you
-            * a day and then refuses to open what happened in it answers "when"
-            * and withholds "what" — which is the half worth having. */}
+          <div className="timeline-projects">
+            {[...groups].map(([project, conversations]) => (
+              <section className="timeline-project" key={project}>
+                <h3><Link to={`/project/${encodeURIComponent(project)}`}>
+                  {project === "(no project)" ? t("Assignment missing") : projectLabel({project, display_name: conversations[0].display_name})}
+                </Link></h3>
+                <p className="muted">{t(project === "(no project)"
+                  ? "No project context is recorded. Review these conversations before assigning them."
+                  : "Grouped by imported folder context. This does not establish a dependency between conversations.")}</p>
+                <details>
+                  <summary>{t("Conversations in this day selection")}: {formatCount(conversations.length)}</summary>
+                  <ul className="timeline-detail-list">{conversations.map(item => <TimelineRow key={item.id} item={item} />)}</ul>
+                </details>
+              </section>
+            ))}
+          </div>
           <ul className="timeline-detail-list">
-            {items.map((item) => {
-              const to = timelineRouteFor(item);
-              const body = (
-                <>
-                  <span className="timeline-detail-time tabular">{formatTime(item.ts)}</span>
-                  <span className={`kind kind-${item.kind}`}>{item.kind}</span>
-                  <span className="timeline-detail-title">{item.title}</span>
-                  <span className="timeline-detail-provider">{item.provider}</span>
-                </>
-              );
-              return (
-                <li key={`${item.kind}-${item.id}`}>
-                  {to ? (
-                    <Link to={to} className="timeline-detail-row timeline-detail-link">
-                      {body}
-                    </Link>
-                  ) : (
-                    <span className="timeline-detail-row">{body}</span>
-                  )}
-                </li>
-              );
-            })}
+            {items.filter(item => item.kind !== "conversation").map(item => <TimelineRow key={`${item.kind}-${item.id}`} item={item} />)}
           </ul>
         </>
       )}
     </div>
   );
+}
+
+function exactDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "en-US", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    second: "2-digit", timeZoneName: "longOffset", hour12: false,
+  }).format(date);
+}
+
+function TimelineRow({item}: {item: TimelineDayItem}) {
+  const to = timelineRouteFor(item);
+  const body = <>
+    <time dateTime={item.ts} className="timeline-detail-time tabular">{exactDateTime(item.ts)}</time>
+    {item.kind !== "conversation" && <span className={`kind kind-${item.kind}`}>{item.kind}</span>}
+    <span className="timeline-detail-title">{item.title}</span>
+    <span className="timeline-detail-provider">{item.provider}</span>
+  </>;
+  return <li>{to ? <Link to={to} className="timeline-detail-row timeline-detail-link">{body}</Link>
+    : <span className="timeline-detail-row">{body}</span>}</li>;
 }

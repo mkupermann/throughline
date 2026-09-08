@@ -404,5 +404,9 @@
   "Save name": "Namen speichern",
   "Could not save project name": "Projektname konnte nicht gespeichert werden",
   "Name and project assignment need review": "Name und Projektzuordnung noch ungeprüft",
-  "Naming does not confirm that every conversation belongs to the same project.": "Die Benennung bestätigt nicht, dass alle Gespräche zum selben Projekt gehören."
+  "Naming does not confirm that every conversation belongs to the same project.": "Die Benennung bestätigt nicht, dass alle Gespräche zum selben Projekt gehören.",
+  "Assignment missing": "Zuordnung fehlt",
+  "No project context is recorded. Review these conversations before assigning them.": "Es ist kein Projektkontext hinterlegt. Prüfe diese Conversations vor einer Zuordnung.",
+  "Grouped by imported folder context. This does not establish a dependency between conversations.": "Nach importiertem Ordnerkontext gruppiert. Daraus folgt keine Abhängigkeit zwischen Conversations.",
+  "Conversations in this day selection": "Conversations in dieser Tagesauswahl"
 }

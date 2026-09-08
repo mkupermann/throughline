@@ -321,6 +321,23 @@ describe("TimelinePage", () => {
     expect(await screen.findByText(/showing 2 of 12/i)).toBeTruthy();
   });
 
+  it("keeps conversations collapsed under their recorded project context", async () => {
+    day.mockResolvedValue({ day: "2026-01-05", items: [
+      {id: 71, kind: "conversation", provider: "claude_code", ts: "2026-01-05T10:00:01Z", title: "Investigate latency", conversation_id: 71, project: "atlas", display_name: "Atlas research"},
+      {id: 72, kind: "conversation", provider: "hermes", ts: "2026-01-05T09:00:02Z", title: "Compare results", conversation_id: 72, project: "atlas", display_name: "Atlas research"},
+      {id: 73, kind: "conversation", provider: "hermes", ts: "2026-01-05T08:00:03Z", title: "Unplaced work", conversation_id: 73, project: "(no project)"},
+    ]});
+    renderAt();
+    const project = await screen.findByRole("link", {name: "Atlas research"});
+    expect(project.getAttribute("href")).toBe("/project/atlas");
+    const group = project.closest("section")!;
+    expect(group.querySelector("details")?.open).toBe(false);
+    expect(screen.getByRole("link", {name: "Assignment missing"}).getAttribute("href")).toBe("/project/(no%20project)");
+    await userEvent.click(within(group).getByText("Conversations in this day selection: 2"));
+    expect(within(group).getByRole("link", {name: /Investigate latency/}).getAttribute("href")).toBe("/c/71");
+    expect(group.querySelector("time")?.dateTime).toBe("2026-01-05T10:00:01Z");
+  });
+
   // ── The page answers on arrival ─────────────────────────────────────────
   // The grid filled the top third and left the rest blank behind an
   // instruction to click something. "What happened, and when" has an obvious

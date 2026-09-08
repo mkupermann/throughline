@@ -455,3 +455,20 @@ def test_memory_extraction_adds_no_timeline_events(db_connection):
     assert all(item["kind"] != "memory" for item in T.day_detail(db_connection, day, kinds=[], providers=[]))
     assert T.aggregate(db_connection, day, day, "day", kinds=["memory"], providers=[]) == []
     assert T.day_detail(db_connection, day, kinds=["memory"], providers=[]) == []
+
+
+def test_day_detail_uses_canonical_context_and_saved_name(db_connection):
+    with db_connection.cursor() as cur:
+        for path in ["/research/atlas", "/tmp", None]:
+            cur.execute(
+                "INSERT INTO conversations(session_id, project_path, source_tool, started_at) "
+                "VALUES (gen_random_uuid(), %s, 'hermes', '2026-01-05T10:00:01Z')",
+                (path,),
+            )
+        cur.execute("INSERT INTO project_names(project_key, display_name) VALUES ('atlas', 'Atlas research')")
+    items = T.day_detail(db_connection, date(2026, 1, 5), ["conversation"], [])
+    assert len(items) == 3
+    assert sorted(item["project"] for item in items) == ["(no project)", "(no project)", "atlas"]
+    atlas = next(item for item in items if item["project"] == "atlas")
+    assert atlas["display_name"] == "Atlas research"
+    assert atlas["conversation_id"] == atlas["id"]

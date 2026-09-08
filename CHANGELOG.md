@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Group timeline conversations under their recorded project context, collapsed by default, with saved project names and an explicit missing-assignment group. Preserve direct source links and exact timestamps.
+
 ### Reliable extraction failures
 
 Invalid or token-truncated model output now fails the conversation instead of appearing as a successful empty extraction. Long conversations are processed in bounded batches without discarding their opening messages; known context envelopes and tool-call wrappers are excluded. All responses must parse before any memory is inserted. Empty valid results remain pending and are labeled explicitly.

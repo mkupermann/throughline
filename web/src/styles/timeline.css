@@ -299,3 +299,9 @@
 .timeline-key-hint {
   color: var(--text-secondary);
 }
+
+.timeline-project { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-block: var(--space-3); }
+.timeline-project h3 { margin: 0; }
+.timeline-project summary { cursor: pointer; padding-block: var(--space-2); }
+.timeline-project summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+@media (max-width: 640px) { .timeline-project .timeline-detail-row { flex-wrap: wrap; } }

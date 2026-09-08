@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from datetime import date
 
+from . import project_names
 from ._exec import rows
+from .projects import project_filter_params, project_name_sql
 
 #: Skills, projects, prompts, entities, reflections and ingestion runs are not
 #: per-tool. They get their own lane rather than being forced into a provider
@@ -175,7 +177,7 @@ def day_detail(
     if not wanted:
         return []
 
-    params: dict = {"day": day, "limit": limit, "offset": offset}
+    params: dict = {"day": day, "limit": limit, "offset": offset, **project_filter_params("")}
     named_providers, include_null = _split_providers(providers)
     if named_providers:
         params["providers"] = named_providers
@@ -184,6 +186,7 @@ def day_detail(
     for kind in wanted:
         frm, ts, provider_col = _SOURCES[kind]
         id_expr, title_expr, conv_expr = _detail_columns(kind)
+        project_expr = project_name_sql() if kind == "conversation" else "NULL::text"
         # Same rule as the grid above: a cell that counts N events must open to
         # the same N, or the number and the list disagree.
         human_filter = _HUMAN_FILTER.get(kind, "")
@@ -202,7 +205,8 @@ def day_detail(
                    {provider_expr} AS provider,
                    {ts} AS ts,
                    {title_expr} AS title,
-                   {conv_expr} AS conversation_id
+                   {conv_expr} AS conversation_id,
+                   {project_expr} AS project
             FROM {frm}
             WHERE {ts} >= %(day)s
               AND {ts} < (%(day)s::date + interval '1 day')
@@ -238,7 +242,9 @@ def day_detail(
                  u.ts DESC, u.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """
-    return rows(conn, sql, params)
+    items = rows(conn, sql, params)
+    project_names.attach(conn, [item for item in items if item["project"] is not None])
+    return items
 
 
 def _detail_columns(kind: str) -> tuple[str, str, str]:
