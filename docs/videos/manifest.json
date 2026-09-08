@@ -1,38 +1,66 @@
 {
   "fixture": "scripts/seed_demo_data.py",
-  "frontendSha256": "148f172db256e06a9b509ad86bbc3b344f6e807da5bc30761d4daa0f87d816f8",
-  "recordedAtUtc": "2026-09-08T10:01:53.841Z",
+  "frontendSha256": "06930e1b5c7439d4ec15600c5ed92536c15054a58f8d1ca6bd50d869aa0974cd",
+  "recordedAtUtc": "2026-09-08T12:28:38.906Z",
   "corpus": {
     "conversations": 44,
     "messages": 249
   },
   "clips": [
     {
+      "name": "projects",
+      "route": "/",
+      "intro": "Open a project and recover its current state.",
+      "outro": "Goal, current position, blocker and next step each link to a source.",
+      "mode": "local",
+      "durationSeconds": 11.56
+    },
+    {
+      "name": "conversations",
+      "route": "/conversations",
+      "intro": "Choose a project, then read one conversation at a time.",
+      "outro": "Output starts collapsed. Expand it when needed; file references and exact times remain visible.",
+      "mode": "local",
+      "durationSeconds": 12.72
+    },
+    {
       "name": "find",
       "route": "/find?q=boundary",
       "intro": "Search across imported records.",
       "outro": "Results retain source links. Search does not require a generation model.",
-      "durationSeconds": 11.44
+      "mode": "local",
+      "durationSeconds": 11.52
+    },
+    {
+      "name": "timeline",
+      "route": "/timeline",
+      "intro": "Compare conversation activity across tools and dates.",
+      "outro": "Conversations expand within their recorded project context. Messages and memories stay in the conversation.",
+      "mode": "local",
+      "durationSeconds": 12.56
     },
     {
       "name": "review",
       "route": "/curate",
       "intro": "Inspect knowledge that may need correction.",
       "outro": "The fixture includes contradictory and superseded statements. A suggestion is not a verified fact.",
-      "durationSeconds": 13.04
+      "mode": "local",
+      "durationSeconds": 13.16
     },
     {
       "name": "operate",
       "route": "/operate",
       "intro": "Understand the import and processing stages.",
       "outro": "Discovery, import, extraction and embeddings have separate states. No processing is started in this clip.",
-      "durationSeconds": 13.08
+      "mode": "local",
+      "durationSeconds": 11.48
     },
     {
       "name": "processing",
       "route": "/timeline",
       "intro": "One button starts a complete pass through all pending work.",
       "outro": "Eleven steps, visible failures and a Stop control while running. This clip does not start processing.",
+      "mode": "local",
       "durationSeconds": 12.48
     },
     {
@@ -40,34 +68,39 @@
       "route": "/settings/ai",
       "intro": "Choose a provider and model independently for each purpose.",
       "outro": "Embeddings need a vector API, not a chat CLI. Form edits are unsaved; no model or connection test runs.",
-      "durationSeconds": 14.76
+      "mode": "local",
+      "durationSeconds": 15.12
     },
     {
       "name": "console",
       "route": "/console",
       "intro": "Inspect the fictional corpus with read-only SQL.",
       "outro": "The query counts conversations by source tool. PostgreSQL enforces read-only execution.",
-      "durationSeconds": 12.44
+      "mode": "local",
+      "durationSeconds": 12.56
     },
     {
       "name": "teams",
       "route": "/pm",
       "intro": "Connect project history with optional AI-team operations.",
       "outro": "Fictional tasks show passed, budget-exhausted and stopped states. No agent is launched.",
-      "durationSeconds": 12.48
+      "mode": "local",
+      "durationSeconds": 12.44
     },
     {
       "name": "roles",
       "route": "/pm/roles",
       "intro": "Define the responsibility and tool for a role.",
       "outro": "The demo separates analysis, execution, testing and review.",
-      "durationSeconds": 12.56
+      "mode": "local",
+      "durationSeconds": 12.52
     },
     {
       "name": "members",
       "route": "/pm/members",
       "intro": "See the people and agents available to teams.",
       "outro": "These identities are invented fixtures, not real team members.",
+      "mode": "local",
       "durationSeconds": 12.52
     },
     {
@@ -75,35 +108,32 @@
       "route": "/pm/teams",
       "intro": "Inspect the roles and sequence in a team pipeline.",
       "outro": "Team configuration is reusable across linked projects.",
-      "durationSeconds": 12.44
+      "mode": "local",
+      "durationSeconds": 12.52
     },
     {
       "name": "models",
       "route": "/settings/providers",
       "intro": "Inspect provider configuration separately from project history.",
       "outro": "Provider entries are fictional. This recording performs no hosted generation.",
-      "durationSeconds": 12.52
+      "mode": "local",
+      "durationSeconds": 12.44
     },
     {
-      "name": "timeline",
-      "route": "/timeline",
-      "intro": "Compare conversation activity across tools and dates.",
-      "outro": "Conversations expand within their recorded project context. Messages and memories stay in the conversation.",
-      "durationSeconds": 12.84
+      "name": "workspace-access",
+      "route": "/settings/access",
+      "intro": "Personal accounts control access to one shared workspace.",
+      "outro": "Viewer, editor and administrator roles; changes retain actor and time. All members share the corpus.",
+      "mode": "team",
+      "durationSeconds": 13.64
     },
     {
-      "name": "projects",
+      "name": "project-assignment",
       "route": "/",
-      "intro": "Open a project and recover its current state.",
-      "outro": "Goal, current position, blocker and next step each link to a source.",
-      "durationSeconds": 11.6
-    },
-    {
-      "name": "conversations",
-      "route": "/conversations",
-      "intro": "Choose a project, then read one conversation at a time.",
-      "outro": "Output starts collapsed. Expand it when needed; file references and exact times remain visible.",
-      "durationSeconds": 13.28
+      "intro": "Create a named project and correct a conversation’s membership.",
+      "outro": "The original folder and correction history remain visible. Earlier project notes flag a moved source.",
+      "mode": "team",
+      "durationSeconds": 15.84
     }
   ]
 }

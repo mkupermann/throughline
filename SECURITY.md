@@ -38,27 +38,22 @@ Saved **AI settings** bindings take precedence over legacy environment defaults 
 
 The optional host bridge executes only its registered Codex, Vibe and Claude adapters, in temporary directories with bounded concurrency and a timeout. It requires a bearer token. CLI authentication stays on the host. Requests can still be sent remotely through the CLI's configured service. Keep the bridge on a trusted host/container network; never publish its token. A local Stop cannot retract an already submitted provider request. See [AI processing](docs/AI_PROCESSING.md).
 
-Connection tests send synthetic content, not source conversations. Provider/settings API responses omit API keys, but the local database stores provider keys as plaintext; the read-only SQL Console and database backups can expose them. Treat access to the local app as access to those credentials.
+Connection tests send synthetic content, not source conversations. Provider/settings API responses omit API keys, but the local database stores provider keys as plaintext; the read-only SQL Console and database backups can expose them. In local mode, treat access to the app as access to those credentials. Team mode restricts these surfaces to administrators.
 
 Retrieval, ranking, indexing, embeddings against a local backend, and every
-listing in the UI are entirely local. There is no telemetry and no account.
+listing in the UI are entirely local. There is no telemetry. Optional team accounts are stored locally.
 
-### The API has no authentication
+### Local mode and authenticated team mode
 
-`throughline serve` binds to loopback and Compose publishes PostgreSQL, the web
-UI, and optional Ollama on loopback only. There is no login. Anything that can
-reach the web port can read the stored corpus, and the Console endpoint accepts
-arbitrary read-only SQL. Do not expose these ports, tunnel them, or use the
-remote-bind bypass unless you operate suitable authentication and TLS in front
-of them. Treat shell access to the machine as full access to the database.
+Local mode has no authentication. Anything that can reach its web port can read the corpus and use administrative operations. Keep it on loopback. Compose publishes the backend and database on loopback by default.
 
-Compose deliberately lets the web container bind internally so Docker can
-publish its port. The host mapping remains `127.0.0.1`, and only that controlled
-service receives `THROUGHLINE_ALLOW_REMOTE=1`.
+For a controlled internal shared corpus, enable `THROUGHLINE_AUTH_MODE=team`, set the exact HTTPS `THROUGHLINE_PUBLIC_URL`, create the first administrator from the operator shell and use a TLS reverse proxy. The API enforces viewer/editor/admin roles, expiring hashed sessions, origin/CSRF checks, database-backed login throttling and revocation. The frontend hides administrative operations from other roles. See [deployment and recovery](docs/TEAM_DEPLOYMENT.md).
+
+All members can read the shared corpus. Project-level ACLs, tenant isolation, SSO and MFA are not implemented. The server operator and database owner are trusted administrators. These controls are tested in a local multi-account fixture; they are not an independent penetration test or organizational acceptance.
 
 ### The Markdown export is the one endpoint that writes files
 
-Every other endpoint reads, or runs a job whose command line is fixed. The
+Administrative processing and AI-team operations also execute registered jobs and may write generated results. The
 Markdown export takes a destination from the caller, which on an
 unauthenticated API is a different kind of capability — so it is bounded on
 both sides:
@@ -163,7 +158,7 @@ trust the scripts — they are all visible in `scripts/` and `skill/scripts/`.
 ## Reporting a Vulnerability
 
 If you discover a vulnerability — something that lets an attacker read,
-modify, or delete data outside of the intended single-user local scope —
+modify, or delete data outside the documented local or shared-workspace access boundary —
 please report it responsibly.
 
 1. Open a **private security advisory** on GitHub:

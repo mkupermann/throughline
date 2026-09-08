@@ -1,3 +1,4 @@
+import {useAccess} from "@/features/access/AccessGate";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -61,6 +62,7 @@ function QueueTab({
 }
 
 export function CuratePage() {
+  const {canEdit,admin}=useAccess();
   useLanguage();
   const [sp, setSp] = useSearchParams();
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -401,7 +403,7 @@ export function CuratePage() {
           className="button audit-run"
           onClick={() => runAudit.mutate()}
           disabled={
-            !audit?.job ||
+            !admin || !audit?.job ||
             Boolean(audit.job.unavailable) ||
             audit.job.running ||
             runAudit.isPending ||
@@ -473,7 +475,7 @@ export function CuratePage() {
                     key={a}
                     type="button"
                     className={`button${a === "forget" ? " is-danger" : ""}`}
-                    disabled={!selected.size || act.isPending}
+                    disabled={!canEdit || !selected.size || act.isPending}
                     onClick={(event) => run(a, event.currentTarget)}
                   >
                     {ACTION_LABEL[a] ?? a}

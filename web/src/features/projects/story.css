@@ -463,3 +463,9 @@
 
 .story-recovery {padding: 16px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px;}
 .conversation-artifacts article {padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere;}
+
+.project-assignment {padding:.75rem; margin:.5rem 0; border:1px solid var(--border,#d6dce3); border-radius:6px;}
+.project-assignment summary {cursor:pointer;font-weight:600;}
+.project-assignment form {display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;}
+.project-assignment form p,.project-assignment form a {flex-basis:100%;}
+.project-assignment select {max-width:100%;min-height:38px;}

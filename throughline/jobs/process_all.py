@@ -32,11 +32,29 @@ def command(name):
 
 
 def status(name, state, detail=""):
+    run_id = os.environ.get("THROUGHLINE_PROCESSING_RUN_ID")
+    if run_id:
+        from psycopg2.extras import Json
+
+        from throughline.api.durable_jobs import database
+        from throughline.queries._exec import one
+
+        # Persist trusted control state directly. Child stdout is never a checkpoint protocol.
+        with database() as conn:
+            result = one(
+                conn,
+                """UPDATE processing_runs SET stages=jsonb_set(stages,%s,%s,true)
+                WHERE id=%s AND name='process-all' AND state='running' RETURNING id""",
+                ([name], Json({"name": name, "state": state, "detail": detail}), run_id),
+            )
+            if not result:
+                raise RuntimeError("Processing run no longer owns an active checkpoint.")
     print("::stage " + json.dumps({"name": name, "state": state, "detail": detail}), flush=True)
 
 
 def main():
     failures = []
+    completed = set(json.loads(os.environ.get("THROUGHLINE_RESUME_STAGES", "[]")))
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "THROUGHLINE_TITLE_LIMIT": "0"}
     print(
         "Complete processing pass. Each pending item is attempted once; errors and valid empty extractions remain visible.",
@@ -44,6 +62,10 @@ def main():
     )
     for index, name in enumerate(STEPS, 1):
         spec = JOBS[name]
+        if name in completed:
+            status(name, "finished", "Retained from the previous worker attempt")
+            print(f"RETAINED: {spec.title}", flush=True)
+            continue
         status(name, "running")
         print(f"\n[{index}/{len(STEPS)}] {spec.title}", flush=True)
         reason = check_requirement(spec.requires)

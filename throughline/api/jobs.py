@@ -466,4 +466,6 @@ def _sse(event: str, data: str) -> str:
     return f"event: {event}\n{body}\n\n"
 
 
-runner = JobRunner()
+from .durable_jobs import DurableJobRunner  # noqa: E402
+
+runner = DurableJobRunner()

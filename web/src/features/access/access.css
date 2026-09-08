@@ -1,0 +1,86 @@
+.access-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: var(--surface-base);
+}
+.access-card {
+  border: 1px solid var(--border, #d6dce3);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+  background: var(--surface-raised);
+}
+.access-gate .access-card {
+  width: min(100%, 440px);
+}
+.access-card form {
+  display: grid;
+  gap: 1rem;
+  max-width: 480px;
+  margin-top: 1rem;
+}
+.access-card label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 500;
+}
+.access-card input,
+.access-card select {
+  min-height: 40px;
+  padding: 0.5rem;
+  border: 1px solid var(--border, #ccd3dd);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: inherit;
+}
+.access-card button,
+.access-gate button {
+  min-height: 36px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+.access-page {
+  max-width: 1150px;
+  padding: 1.5rem;
+}
+.access-table {
+  overflow: auto;
+}
+.access-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.access-table th,
+.access-table td {
+  text-align: left;
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--border, #d6dce3);
+}
+.access-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.access-card [role="alert"],
+.access-page [role="alert"] {
+  color: var(--status-danger, #d1242f);
+}
+.workspace-user {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.access-page h1, .access-gate h1 {font-size:var(--text-2xl);font-weight:650;letter-spacing:-.025em;margin:0 0 1rem;}
+.access-page h2, .access-gate h2 {font-size:var(--text-xl);font-weight:600;margin:0 0 1rem;}
+.access-page p, .access-gate p {margin:.75rem 0;color:var(--text-secondary);line-height:1.6;}
+.access-card button, .access-page > button, .workspace-user button {background:var(--surface-overlay);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);}
+.access-card button:hover:not(:disabled) {background:var(--surface-hover);}
+.access-card button:disabled {opacity:.55;cursor:not-allowed;}
+.access-card th {color:var(--text-secondary);font-weight:600;}
+.access-table td {vertical-align:top;}
+.access-card input:focus-visible,.access-card select:focus-visible,.access-card button:focus-visible,.access-card summary:focus-visible {outline:2px solid var(--accent);outline-offset:3px;}
+.access-page {padding:0;}
+@media(max-width:600px) {.access-card{padding:1rem}.access-gate{padding:1rem}}

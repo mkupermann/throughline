@@ -9,7 +9,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client(db_connection, monkeypatch):
+def client(db_env, db_connection, monkeypatch):
     import contextlib
 
     @contextlib.contextmanager

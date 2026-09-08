@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from .settings import Settings, check_bind_allowed
 
@@ -23,14 +24,7 @@ def serve(
         return 1
 
     base = Settings.from_env()
-    settings = Settings(
-        host=host or base.host,
-        port=port or base.port,
-        web_dist=base.web_dist,
-        pool_min=base.pool_min,
-        pool_max=base.pool_max,
-        redact=base.redact,
-    )
+    settings = replace(base, host=host or base.host, port=port or base.port)
 
     check_bind_allowed(settings.host)
     logging.basicConfig(level=log_level.upper())

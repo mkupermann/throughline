@@ -39,3 +39,15 @@ The recorder explicitly selects English without changing your normal browser pre
 The processing clip opens the eleven-step list without starting the pass. The AI settings clip shows per-purpose provider choices and the separate embedding requirements; edits shown in a form are not saved. CLI availability is detected from the optional real host bridge. Without a bridge, those options remain visibly unavailable. No test connection or model request is executed in these clips.
 
 Set `THROUGHLINE_DEMO_CLIPS=processing,ai-settings` to regenerate selected clips; omit it to record every area. The gallery, captions and manifest must agree on the clip set.
+
+## Shared-workspace recordings
+
+Create a second loopback-only fixture with `python scripts/seed_demo_data.py --dbname throughline_team_demo --reset --team`. The optional flag creates **admin**, **editor** and **viewer** accounts with the deliberately public password **fictional walkthrough password**. These are disposable demo accounts, not installation defaults. Never enable them on a real or network-accessible workspace.
+
+Serve it with `PGDATABASE=throughline_team_demo THROUGHLINE_AUTH_MODE=team THROUGHLINE_PUBLIC_URL=http://127.0.0.1:8795 throughline serve --host 127.0.0.1 --port 8795`. After recording the regular clips, run:
+
+```bash
+THROUGHLINE_DEMO_TEAM=1 THROUGHLINE_DEMO_URL=http://127.0.0.1:8795 node web/scripts/record-release.mjs
+```
+
+This adds two recordings to the existing manifest: **Workspace access** signs into the fictional administrator account and inspects roles/audit; **Project assignment** signs in as the fictional editor, creates a demo project and moves one conversation through the actual UI. The latter deliberately changes the disposable fixture and shows the retained folder/history. Reseed that demo before repeating the recording. Neither clip launches AI or processing.

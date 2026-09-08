@@ -64,7 +64,7 @@ def history(
         conn,
         f"""
         SELECT c.id, c.session_id, c.summary AS title, c.started_at, c.ended_at,
-               c.source_tool, c.model, c.git_branch, c.project_path, c.message_count,
+               c.source_tool, c.model, c.git_branch, c.project_path, c.source_project_name, c.assigned_project, c.message_count,
                c.generated_by,
                (SELECT left(m.content, 240) FROM messages m WHERE m.conversation_id = c.id
                 AND m.role = 'tool_result' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS result,
@@ -95,11 +95,12 @@ def history(
         params,
     )
     previews(conn, recovery)
-    checkpoint_sql = """
+    checkpoint_sql = f"""
         SELECT p.id, p.kind, p.content, p.created_at, p.recorded_by,
                p.source_conversation_id, p.source_message_id, p.source_session_id,
                left(p.source_excerpt, 4000) AS source_excerpt,
                c.id IS NOT NULL AS source_available,
+               ({project_filter_sql("c")} AND (p.project_path IS NULL OR c.project_path=p.project_path)) AS source_in_scope,
                m.id IS NOT NULL AS message_available,
                CASE WHEN p.source_message_id IS NOT NULL THEN m.content IS DISTINCT FROM p.source_excerpt
                     ELSE false END AS source_changed
@@ -198,7 +199,7 @@ def session_detail(
     )
 
 
-def checkpoint(conn, project, data):
+def checkpoint(conn, project, data, recorded_by="local user"):
     predicate, params = scope(project, data.path, True)
     params.update(id=data.conversation_id, message_id=data.message_id)
     source = one(
@@ -217,8 +218,8 @@ def checkpoint(conn, project, data):
         conn,
         """
         INSERT INTO project_checkpoints (project_name, project_path, kind, content,
-            source_conversation_id, source_message_id, source_session_id, source_message_uuid, source_excerpt)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+            source_conversation_id, source_message_id, source_session_id, source_message_uuid, source_excerpt, recorded_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
     """,
         (
             project,
@@ -230,6 +231,7 @@ def checkpoint(conn, project, data):
             source["session_id"],
             source["uuid"],
             source["content"] or "",
+            recorded_by,
         ),
     )
     conn.commit()

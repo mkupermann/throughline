@@ -115,3 +115,19 @@ Inspect example endpoints and model lists.
 [![API model providers — fictional demo](models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4)
 
 [Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) · [Captions](models.vtt) · [Still image](models.png)
+
+## Workspace access
+
+Sign in with a fictional account and inspect roles and the authenticated change history. One corpus is shared by all members.
+
+[![Workspace access — fictional demo](workspace-access.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4) · [Captions](workspace-access.vtt) · [Still image](workspace-access.png)
+
+## Project assignment
+
+Create a project and move a fictional conversation through the actual editor UI. The clip deliberately changes the disposable fixture and shows the original folder and correction history.
+
+[![Project assignment — fictional demo](project-assignment.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4)
+
+[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4) · [Captions](project-assignment.vtt) · [Still image](project-assignment.png)

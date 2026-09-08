@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 from throughline.queries import story as Q
@@ -85,9 +85,12 @@ def session(
 
 
 @router.post("/{project:path}/checkpoints", status_code=201)
-def checkpoint(project: str, body: Checkpoint, settings: Settings = Depends(get_settings)):
+def checkpoint(project: str, body: Checkpoint, request: Request, settings: Settings = Depends(get_settings)):
     with connection(settings) as conn:
-        result = Q.checkpoint(conn, project, body)
+        user = getattr(request.state, "user", None)
+        result = Q.checkpoint(
+            conn, project, body, recorded_by=f"{user['display_name']} (user:{user['id']})" if user else "local user"
+        )
     if result is None:
         raise HTTPException(422, "Choose an existing source in this project scope.")
     return result

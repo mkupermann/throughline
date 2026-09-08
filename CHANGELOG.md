@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Refresh the English README and all fourteen walkthroughs for current navigation, complete processing and per-purpose AI settings; update demo bindings, upgrade notes and credential-boundary documentation.
+- Replace opaque CLI connection-test errors with actionable, secret-safe diagnostics and serialize tests in the settings page.
+
+- Add opt-in shared-workspace login, viewer/editor/admin roles, session revocation, CSRF checks and authenticated change history. Existing provider secrets are retained; confidential projects are not isolated within a shared corpus.
+- Persist processing requests, stop state and finished step checkpoints in PostgreSQL; recover after worker/container interruption with at-least-once semantics, lifecycle audit and bounded diagnostics.
+- Add named project creation and explicit conversation assignment that survives re-import, with source-folder history and moved-source warnings on earlier project notes.
+- Preserve team authentication configuration through the real CLI server startup path and prevent validated input errors from echoing supplied credentials.
+
+- Refresh the English README and all sixteen walkthroughs for current navigation, complete processing and per-purpose AI settings; update demo bindings, upgrade notes and credential-boundary documentation.
 
 - Add a full processing pass with per-step progress, explicit failures and stop support.
 - Add persistent AI routing by purpose, API provider selection and an authenticated bridge for installed Codex, Vibe and Claude Code CLIs.

@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,8 +23,10 @@ from throughline.jobs.pm_watch import poll_all_running
 from . import deps
 from .deps import DatabaseUnavailable, close_pool, init_pool
 from .routers import (
+    access,
     ai_settings,
     ask,
+    assignments,
     console,
     curate,
     export,
@@ -74,6 +77,18 @@ async def _pm_watch_loop(settings: Settings) -> None:
         await asyncio.sleep(_PM_WATCH_INTERVAL_SECONDS)
 
 
+async def _processing_loop():
+    from .jobs import runner
+
+    while True:
+        try:
+            if hasattr(runner, "kick"):
+                await asyncio.to_thread(runner.kick)
+        except Exception:
+            log.exception("processing queue tick failed; persisted work will be retried")
+        await asyncio.sleep(5)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
 
@@ -81,10 +96,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         init_pool(settings)
         watch_task = asyncio.create_task(_pm_watch_loop(settings))
+        processing_task = asyncio.create_task(_processing_loop())
         app.state.pm_watch_task = watch_task
         try:
             yield
         finally:
+            processing_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await processing_task
             watch_task.cancel()
             with suppress(asyncio.CancelledError):
                 await watch_task
@@ -99,6 +118,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.settings = settings
+    from .access import AccessMiddleware
+
+    app.add_middleware(AccessMiddleware)
+    app.include_router(access.router, prefix="/api")
+
+    @app.exception_handler(RequestValidationError)
+    async def _invalid_request(request: Request, exc: RequestValidationError):
+        # Never echo a supplied password, API key or transcript in validation errors.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {"loc": list(error["loc"]), "type": error["type"], "msg": error["msg"]} for error in exc.errors()
+                ]
+            },
+        )
 
     @app.exception_handler(DatabaseUnavailable)
     async def _db_unavailable(request: Request, exc: DatabaseUnavailable):
@@ -114,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    app.include_router(assignments.router, prefix="/api")
     app.include_router(ai_settings.router, prefix="/api")
     app.include_router(overview.router, prefix="/api")
     app.include_router(find.router, prefix="/api")

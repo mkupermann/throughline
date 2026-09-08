@@ -1,3 +1,4 @@
+import {CreateProject} from "./ProjectAssignment";
 import {ProcessAll} from "@/features/operate/ProcessAll";
 import { projectLabel } from "./ProjectName";
 import { t } from "@/lib/ui";
@@ -39,6 +40,7 @@ export function ProjectLibrary() {
         </div>
       </header>
       <ProcessAll />
+      <CreateProject />
       <div className="story-controls">
         <label className="searchbar">
           <Search size={16} />
@@ -109,7 +111,7 @@ export function ProjectLibrary() {
           <Link to="/operate">{t("Open import settings")}</Link>
         </div>
       )}
-      <p className="story-footnote">{t("Projects are grouped from working-folder names. Each project lets you inspect and separate its source folders.")}{" "}
+      <p className="story-footnote">{t("Imported conversations start in source-folder groups. Create a project and assign its conversations to correct that grouping.")}{" "}
         <Link to="/system-overview">{t("System health")}</Link>
       </p>
     </div>

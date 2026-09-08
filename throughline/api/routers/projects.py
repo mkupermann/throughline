@@ -40,7 +40,27 @@ CONTEXT_PAGE = 500
 def all_projects(provider: list[str] = Query(default=[]), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """Every observed project, including projects inactive for years."""
     with connection(settings) as conn:
-        return {"projects": Names.attach(conn, Q.recent(conn, days=None, providers=provider))}
+        projects = Q.recent(conn, days=None, providers=provider)
+        if not provider:
+            from throughline.queries._exec import rows
+
+            known = {p["project"] for p in projects}
+            for row in rows(
+                conn, "SELECT project_key AS project FROM project_names WHERE is_curated ORDER BY updated_at DESC"
+            ):
+                if row["project"] not in known:
+                    projects.append(
+                        {
+                            **row,
+                            "sessions": 0,
+                            "messages": 0,
+                            "first_active": None,
+                            "last_active": None,
+                            "tools": 0,
+                            "tool_names": [],
+                        }
+                    )
+        return {"projects": Names.attach(conn, projects)}
 
 
 @router.get("/projects/recent")

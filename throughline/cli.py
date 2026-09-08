@@ -253,6 +253,12 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return _call_script_main("migrate", passthrough)
 
 
+def cmd_account(args: argparse.Namespace) -> int:
+    from throughline.jobs.accounts import manage
+
+    return manage(args)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Serve the web UI and its JSON API from one process on one port."""
     try:
@@ -476,6 +482,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="<command>",
         required=True,
     )
+
+    p = sub.add_parser("account", help="Create a workspace account or reset its password locally.")
+    p.add_argument("username")
+    p.add_argument("--display-name")
+    p.add_argument("--role", choices=("viewer", "editor", "admin"), default="admin")
+    p.add_argument("--password-file", help="Owner-only password file; otherwise prompt without echo.")
+    p.add_argument("--reset", action="store_true", help="Reset password and revoke sessions of an existing account.")
+    p.set_defaults(func=cmd_account)
 
     # ingest
     p = sub.add_parser(

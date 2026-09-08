@@ -1,12 +1,14 @@
 """Purpose-specific AI settings; credentials stay in the existing provider store."""
 
 import json
+import urllib.error
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from throughline import ai_runtime, embedding
+from throughline.ai_errors import AIConnectionError
 from throughline.queries._exec import one, rows
 
 from ..deps import connection
@@ -109,6 +111,19 @@ def test_binding(purpose: str):
             if json.loads(output).get("status") != "OK":
                 raise ValueError("Structured connection test failed")
         return {"ok": True, "destination": ai_runtime.destination(config)}
+    except AIConnectionError as exc:
+        return {"ok": False, "error": str(exc), "error_code": exc.code}
+    except urllib.error.HTTPError as exc:
+        code = {401: "provider_auth", 403: "provider_auth", 404: "provider_model", 429: "provider_quota"}.get(
+            exc.code, "provider_failed"
+        )
+        return {"ok": False, "error": str(AIConnectionError(code)), "error_code": code, "http_status": exc.code}
+    except (urllib.error.URLError, TimeoutError):
+        return {
+            "ok": False,
+            "error": str(AIConnectionError("provider_unreachable")),
+            "error_code": "provider_unreachable",
+        }
     except Exception as exc:
         return {
             "ok": False,

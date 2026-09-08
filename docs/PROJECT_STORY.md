@@ -30,12 +30,12 @@ The existing deployment's backup and rollout procedure still applies.
 Migration `009_project_story.sql` adds `project_checkpoints`; it does not rewrite existing conversations or claim that extracted notes are verified.
 The shared writer requires the partial unique message index established by migration 001, also represented in the current schema snapshot.
 
-The checkpoint API appends entries. Its `recorded_by` value describes the existing local-user deployment; it is not authenticated team identity.
+The checkpoint API appends entries. In team mode, `recorded_by` includes the authenticated account and the audit records carry its user ID; local mode records the local operator.
 Deleting a source does not erase the checkpoint's saved excerpt. Retention and deletion workflows must account for these independently stored notes.
 
 ## Meaning of scope and provenance
 
-Projects retain the existing folder-name grouping. A folder selector allows separation of same-name folders without changing the source path. This is a scope filter, not a permanent project reassignment or a new canonical project registry.
+Projects retain the existing folder-name grouping. A folder selector allows separation of same-name folders without changing the source path. This folder selector is a scope filter. Explicit assignments are separate: create a named project and use **Project assignment and history** within a conversation. They survive re-import and preserve source paths.
 Project-state entries belong to the selected project/folder scope. Tool and search filters affect the displayed sessions; the recorded project state remains project-wide within that folder scope.
 
 A session-level citation is weaker than a message-level citation and is labelled accordingly.
@@ -65,8 +65,8 @@ Browser checks cover the populated project, creating a state entry, source navig
 ## Remaining product work
 
 This is a local project-history implementation, not a team deployment certification.
-Authenticated authorship, access control and collaboration require a separate design.
-Permanent project reassignment, a full agent graph, complete subagent import, artifact versioning and structured experiment records are not implemented here.
+Optional shared-workspace accounts, roles and authenticated authorship are described in [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md).
+A full agent graph, complete subagent import, artifact versioning and structured experiment records remain future work.
 Existing import exclusions and source-time fallbacks remain visible limitations.
 The handoff includes selected context, not a full transcript or artifact bundle; its local URLs require access to the originating instance.
 
@@ -80,7 +80,7 @@ Conversations has its own sidebar entry, grouped by project. Narrow panels retai
 
 A collapsed conversation exposes labelled excerpts of its first prompt, last recorded answer and latest tool output or explicit file-reference count. These are not a synthetic prompt/answer pair. Expanded transcripts show original content, structured file references and source timestamps with seconds and timezone. Missing timestamps or outputs remain explicitly missing; file existence and successful creation are not inferred from a reference.
 
-AI-team operations lives in the System group and links its associated project names back to conversation history. The two project record types remain distinct in storage. The interface explains this relationship; it does not implement persistent reassignment or a guided team-setup wizard.
+AI-team operations lives in the System group and links its associated project names back to conversation history. The two project record types remain distinct in storage. The interface explains this relationship; explicit conversation reassignment is supported, while a guided AI-team setup wizard remains future work.
 
 ## Conversation reading workspace
 

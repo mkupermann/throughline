@@ -67,7 +67,7 @@ function FacetGroup({
                     checked={isOn}
                     onChange={() => onToggle(v.value)}
                   />
-                  <span className="facet-value-label">{labels?.[v.value] ?? v.value}</span>
+                  <span className="facet-value-label">{labels?.[v.value] ?? v.label ?? v.value}</span>
                   <span className="facet-value-count tabular">{formatCount(v.n)}</span>
                 </label>
               </li>

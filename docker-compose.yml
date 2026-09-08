@@ -133,6 +133,8 @@ services:
       # requires 0.0.0.0 in the container; the port mapping below is loopback.
       THROUGHLINE_HOST: "0.0.0.0"
       THROUGHLINE_ALLOW_REMOTE: "1"
+      THROUGHLINE_AUTH_MODE: "${THROUGHLINE_AUTH_MODE:-local}"
+      THROUGHLINE_PUBLIC_URL: "${THROUGHLINE_PUBLIC_URL:-}"
       # This path is a named volume initialized with 0700 ownership in the
       # image, so backups survive web-container replacement without becoming
       # readable by other container users.
@@ -162,8 +164,8 @@ services:
       # server report no embedding and no generation backend.
       OLLAMA_HOST: "${THROUGHLINE_OLLAMA_URL:-http://ollama:11434}"
     ports:
-      # Published on loopback only: the API has no authentication, so the
-      # container must not be reachable from the rest of the network.
+      # Loopback by default. Team deployments use a TLS proxy on this host;
+      # never publish the backend directly to an untrusted network.
       - "127.0.0.1:${THROUGHLINE_WEB_PORT:-8788}:8787"
     volumes:
       - ~/.claude:/home/throughline/.claude:ro

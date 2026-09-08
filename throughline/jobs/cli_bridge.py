@@ -15,6 +15,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from throughline.ai_errors import AIConnectionError
+
 LOCK = threading.Lock()
 CLIS = ("codex", "vibe", "claude")
 
@@ -32,6 +34,77 @@ def capabilities():
     }
 
 
+def classify_failure(stderr):
+    text = stderr.lower()
+    if any(marker in text for marker in ("rate limit", "rate_limit", "quota", "usage limit", "insufficient credits")):
+        return "cli_quota"
+    if any(
+        marker in text
+        for marker in (
+            "unauthorized",
+            "authentication",
+            "not logged in",
+            "please log in",
+            "please login",
+            "invalid api key",
+            "missing mistral_api_key",
+        )
+    ):
+        return "cli_auth"
+    if any(
+        marker in text
+        for marker in (
+            "model not found",
+            "unknown model",
+            "invalid model",
+            "model does not exist",
+            "model is not supported",
+        )
+    ):
+        return "cli_model"
+    return "cli_failed"
+
+
+def cli_environment(cli):
+    common = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LANGUAGE",
+        "TERM",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    }
+    prefixes = {
+        "codex": ("CODEX_", "OPENAI_"),
+        "vibe": ("VIBE_", "MISTRAL_"),
+        "claude": ("CLAUDE_", "ANTHROPIC_", "AWS_", "GOOGLE_"),
+    }[cli]
+    return {key: value for key, value in os.environ.items() if key in common or key.startswith(("LC_", *prefixes))}
+
+
 def complete(body):
     cli = body.get("cli")
     if cli not in CLIS or not shutil.which(cli):
@@ -44,6 +117,8 @@ def complete(body):
         raise ValueError("Invalid model")
     timeout = min(600, max(10, float(body.get("timeout", 180))))
     schema = body.get("schema")
+    if schema is not None and (not isinstance(schema, dict) or len(json.dumps(schema)) > 64000):
+        raise ValueError("Schema must be a JSON object of at most 64000 characters")
     if schema:
         prompt += "\nReturn only JSON matching this schema: " + json.dumps(schema)
     prompt = (
@@ -94,7 +169,7 @@ def complete(body):
                 args += ["--json-schema", json.dumps(schema)]
         else:
             args = [shutil.which(cli), "-p", "--disabled-tools", "*", "--max-turns", "1", "--output", "json"]
-        env = dict(os.environ)
+        env = cli_environment(cli)
         if cli == "vibe" and model:
             env["VIBE_ACTIVE_MODEL"] = model
         proc = subprocess.Popen(
@@ -112,15 +187,15 @@ def complete(body):
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.communicate()
-            raise RuntimeError("CLI timed out") from None
+            raise AIConnectionError("cli_timeout") from None
         if proc.returncode:
-            raise RuntimeError("CLI failed. Check its host login, model and availability.")
+            raise AIConnectionError(classify_failure(_stderr))
         if cli == "codex":
             text = final.read_text() if final.exists() else ""
         elif cli == "claude":
             result = json.loads(stdout)
             if result.get("is_error"):
-                raise RuntimeError("Claude returned an error")
+                raise AIConnectionError("cli_failed")
             text = (
                 json.dumps(result["structured_output"])
                 if result.get("structured_output") is not None
@@ -128,16 +203,19 @@ def complete(body):
             )
         else:
             messages = json.loads(stdout)
-            content = next((m.get("content") for m in reversed(messages) if m.get("role") == "assistant"), [])
+            content = next((m.get("content") for m in reversed(messages) if m.get("role") == "assistant"), []) or []
             text = (
                 content
                 if isinstance(content, str)
                 else "".join(p.get("text", "") for p in content if p.get("type") == "text")
             )
         if not text.strip():
-            raise RuntimeError("CLI returned no final answer")
+            raise AIConnectionError("cli_output")
         if schema:
-            json.loads(text)
+            try:
+                json.loads(text)
+            except ValueError:
+                raise AIConnectionError("cli_output") from None
         return {"text": text}
 
 
@@ -150,8 +228,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+        try:
+            self.end_headers()
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # The requester may have timed out; do not attempt a second response.
 
     def authorized(self):
         token = os.environ.get("THROUGHLINE_CLI_BRIDGE_TOKEN", "")
@@ -183,6 +264,8 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 LOCK.release()
             self.respond(200, result)
+        except AIConnectionError as exc:
+            self.respond(400, {"error": str(exc), "code": exc.code})
         except (ValueError, RuntimeError) as exc:
             self.respond(400, {"error": str(exc)})
         except Exception:

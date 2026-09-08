@@ -1,3 +1,5 @@
+import {ProjectAssignment} from "./ProjectAssignment";
+import {useAccess} from "@/features/access/AccessGate";
 import { ProjectName, projectLabel } from "./ProjectName";
 import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { t } from "@/lib/ui";
@@ -127,7 +129,7 @@ function Story({ project }: { project: string }) {
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
-      {data && <ProjectName project={project} name={data.identity?.display_name} origin={data.identity?.name_origin} sources={data.identity?.source_conversation_ids} folders={data.paths.length} />}
+      {data && <ProjectName curated={data.identity?.is_curated} project={project} name={data.identity?.display_name} origin={data.identity?.name_origin} sources={data.identity?.source_conversation_ids} folders={data.paths.length} />}
       {history.isPending && <p role="status">{t("Loading project history…")}</p>}
       {history.error && (
         <div role="alert" className="story-notice">
@@ -144,7 +146,7 @@ function Story({ project }: { project: string }) {
                 <p className="story-eyebrow">{t("PICK UP THE THREAD")}</p>
                 <h2 id="position-title">{t("Where we stand")}</h2>
               </div>
-              <span className="story-tag">{t(data.checkpoints.length ? "Recorded by you · sources attached" : "No confirmed project state recorded")}</span>
+              <span className="story-tag">{t(data.checkpoints.length ? "Recorded project state · sources attached" : "No confirmed project state recorded")}</span>
             </div>
             {data.recovery && <section className="story-recovery"><h3>{t("Resume from source messages")}</h3><p>{t("Excerpts from the latest conversation. These are not a confirmed project state.")}</p><div className="story-state-grid">{([
               ["Latest user request", data.recovery.latest_request, data.recovery.latest_request_id, data.recovery.latest_request_at],
@@ -334,6 +336,7 @@ function CheckpointSource({ item }: { item: StoryCheckpoint }) {
       ) : (
         <span>{t("Original source unavailable")}</span>
       )}
+      {item.source_in_scope === false && <strong>{t("Source belongs to a different project scope now. Review this project state.")}</strong>}
       {item.source_changed && (
         <strong>{t("Source has changed since this was recorded")}</strong>
       )}
@@ -364,6 +367,7 @@ function Session({
   onSelect: () => void;
 }) {
   useLanguage();
+  const {canEdit}=useAccess();
   const [open, setOpen] = useState(false);
   const detail = useInfiniteQuery({
     queryKey: ["story-session", project, s.id, params.toString()],
@@ -418,11 +422,13 @@ function Session({
       </dl>
       {open && (
         <div className="story-session-body" id={`session-body-${s.id}`}>
+          <ProjectAssignment conversation={s.id} current={project} sourcePath={s.project_path}/>
           <div className="story-session-actions">
             <Link to={sourceUrl(s.id)}>{t("Open full session ")}<ExternalLink size={13} />
             </Link>
             <button
               className="button"
+              disabled={!canEdit}
               onClick={() =>
                 onSource({
                   conversation: s.id,
@@ -519,6 +525,7 @@ function Session({
                     <Transcript messages={[m]} />
                     <button
                       className="linkbutton"
+                      disabled={!canEdit}
                       onClick={() =>
                         onSource({
                           conversation: s.id,

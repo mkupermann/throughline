@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
 import psycopg2
 
+from throughline.ai_errors import AIConnectionError
 from throughline.config import get_db_config
 from throughline.queries._exec import one
 from throughline.queries.pm import _PROVIDER_DEFAULT_BASE
@@ -49,13 +51,28 @@ def bridge(path, payload=None, timeout=180):
     base = os.environ.get("THROUGHLINE_CLI_BRIDGE_URL", "").rstrip("/")
     token = os.environ.get("THROUGHLINE_CLI_BRIDGE_TOKEN", "")
     if not base or not token:
-        raise RuntimeError("Host CLI bridge is not configured")
+        raise AIConnectionError("bridge_not_configured")
     headers = {"Authorization": f"Bearer {token}"}
-    if payload is not None:
-        return post(base + path, payload, headers, timeout)
-    req = urllib.request.Request(base + path, headers=headers)
-    with urllib.request.urlopen(req, timeout=3) as response:
-        return json.load(response)
+    try:
+        if payload is not None:
+            return post(base + path, payload, headers, timeout)
+        req = urllib.request.Request(base + path, headers=headers)
+        with urllib.request.urlopen(req, timeout=3) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        code = {401: "bridge_auth", 403: "bridge_auth", 409: "bridge_busy"}.get(exc.code, "cli_failed")
+        try:
+            data = json.loads(exc.read(4096))
+            known = {"cli_timeout", "cli_auth", "cli_model", "cli_quota", "cli_failed", "cli_output"}
+            if exc.code not in (401, 403, 409) and data.get("code") in known:
+                code = data["code"]
+            elif data.get("error") == "CLI timed out":
+                code = "cli_timeout"
+        except (ValueError, AttributeError):
+            pass
+        raise AIConnectionError(code) from None
+    except (urllib.error.URLError, TimeoutError):
+        raise AIConnectionError("bridge_unreachable") from None
 
 
 def destination(config):

@@ -82,6 +82,7 @@ def project_name_sql(alias: str = "c") -> str:
     """
     return f"""
         CASE
+          WHEN {alias}.assigned_project IS NOT NULL THEN {alias}.assigned_project
           WHEN {alias}.project_path IS NULL
             OR COALESCE(NULLIF(rtrim({alias}.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
           THEN %(unplaced_label)s
@@ -115,12 +116,7 @@ def recent(conn, days: int | None = 7, include_generated: bool = False, provider
     return rows(
         conn,
         f"""
-        SELECT CASE
-                 WHEN c.project_path IS NULL
-                   OR COALESCE(NULLIF(rtrim(c.project_path, '/'), ''), '/') = ANY(%(unplaced)s)
-                 THEN %(unplaced_label)s
-                 ELSE COALESCE(c.project_name, %(unplaced_label)s)
-               END                                  AS project,
+        SELECT {project_name_sql()} AS project,
                count(*)                             AS sessions,
                COALESCE(sum(c.message_count), 0)    AS messages,
                min(c.started_at)                    AS first_active,

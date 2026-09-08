@@ -1,7 +1,7 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:07.453
+00:00:00.000 --> 00:00:07.732
 Fictional demo. Choose a provider and model independently for each purpose.
 
-00:00:07.453 --> 00:00:14.760
+00:00:07.732 --> 00:00:15.120
 Fictional demo. Embeddings need a vector API, not a chat CLI. Form edits are unsaved; no model or connection test runs.

@@ -13,7 +13,7 @@ from pathlib import Path
 from throughline.config import repo_root
 
 #: Hosts that keep the server on this machine. Anything else exposes the
-#: database — and there is no authentication layer — to the network.
+#: database to the network; team mode does not change the bind safeguard.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 #: Opt-in escape hatch, so binding publicly is a deliberate act rather than
@@ -58,6 +58,16 @@ class Settings:
     pool_max: int = 8
     #: Redact secrets in serialized content by default, matching the GUI.
     redact: bool = True
+    auth_mode: str = "local"
+    public_url: str = ""
+
+    def __post_init__(self):
+        if self.auth_mode not in {"local", "team"}:
+            raise ValueError("THROUGHLINE_AUTH_MODE must be local or team.")
+        if self.auth_mode == "team":
+            from .access import validate_origin
+
+            object.__setattr__(self, "public_url", validate_origin(self.public_url))
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +78,8 @@ class Settings:
             web_dist = default_web_dist()
 
         return cls(
+            auth_mode=os.environ.get("THROUGHLINE_AUTH_MODE", "local"),
+            public_url=os.environ.get("THROUGHLINE_PUBLIC_URL", ""),
             host=os.environ.get("THROUGHLINE_HOST", "127.0.0.1"),
             port=int(os.environ.get("THROUGHLINE_PORT", "8790")),
             web_dist=web_dist,
@@ -80,9 +92,8 @@ class Settings:
 def check_bind_allowed(host: str) -> None:
     """Refuse to bind a non-loopback address unless explicitly permitted.
 
-    The API exposes the whole memory database and has no authentication —
-    that is the correct trade for a single-user local tool, but only while
-    it stays on loopback. Enforced here in code rather than in documentation,
+    Local mode exposes the corpus without authentication. Shared deployments
+    require team mode and a trusted TLS proxy. Enforced here in code rather than in documentation,
     because a README cannot stop ``--host 0.0.0.0``.
     """
     if host in LOOPBACK_HOSTS:
@@ -90,7 +101,7 @@ def check_bind_allowed(host: str) -> None:
     if os.environ.get(ALLOW_REMOTE_ENV, "").lower() in ("1", "true", "yes", "on"):
         return
     raise RemoteBindRefused(
-        f"Refusing to bind {host!r}: the Throughline API has no authentication "
-        f"and exposes your entire memory database. Bind 127.0.0.1, or set "
-        f"{ALLOW_REMOTE_ENV}=1 if you have put your own auth in front of it."
+        f"Refusing to bind {host!r}: local mode has no authentication; remote access exposes the shared corpus. "
+        f"Bind 127.0.0.1, or set {ALLOW_REMOTE_ENV}=1 for a controlled "
+        f"deployment with team authentication and a trusted TLS proxy."
     )

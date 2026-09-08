@@ -1242,3 +1242,156 @@ CREATE TABLE IF NOT EXISTS public.ai_purposes (
     CHECK ((provider_id IS NOT NULL)::int + (cli IS NOT NULL)::int = 1),
     CHECK (purpose <> 'embeddings' OR (cli IS NULL AND embedding_dim IS NOT NULL))
 );
+
+-- Existing provider credentials are deliberately preserved.
+CREATE TABLE IF NOT EXISTS public.access_users (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username text UNIQUE NOT NULL CHECK (username ~ '^[a-z0-9][a-z0-9._@-]{0,119}$'),
+    display_name text NOT NULL,
+    password_hash text NOT NULL,
+    role text NOT NULL CHECK (role IN ('viewer', 'editor', 'admin')),
+    enabled boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.access_sessions (
+    token_hash text PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES public.access_users(id) ON DELETE CASCADE,
+    csrf_token text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS access_sessions_user ON public.access_sessions (user_id);
+CREATE TABLE IF NOT EXISTS public.access_attempts (
+    key text PRIMARY KEY,
+    attempts integer NOT NULL,
+    window_start timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.access_audit (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    actor text NOT NULL,
+    request_id text,
+    action text NOT NULL,
+    entity_type text NOT NULL,
+    entity_id text,
+    changed_fields text[] NOT NULL DEFAULT '{}'
+);
+CREATE OR REPLACE FUNCTION public.record_access_change() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE before_row jsonb; after_row jsonb; fields text[];
+BEGIN
+    before_row := CASE WHEN TG_OP = 'INSERT' THEN '{}'::jsonb ELSE to_jsonb(OLD) END;
+    after_row := CASE WHEN TG_OP = 'DELETE' THEN '{}'::jsonb ELSE to_jsonb(NEW) END;
+    SELECT array_agg(k ORDER BY k) INTO fields FROM (
+        SELECT key AS k FROM jsonb_object_keys(before_row || after_row) AS key
+        WHERE before_row -> key IS DISTINCT FROM after_row -> key
+    ) changed;
+    INSERT INTO public.access_audit(actor, request_id, action, entity_type, entity_id, changed_fields)
+    VALUES (COALESCE(NULLIF(current_setting('throughline.actor', true), ''), 'operator'),
+        NULLIF(current_setting('throughline.request_id', true), ''), TG_OP, TG_TABLE_NAME,
+        COALESCE(after_row->>'id', before_row->>'id', after_row->>'purpose', before_row->>'purpose',
+                 after_row->>'project_key', before_row->>'project_key'), COALESCE(fields, '{}'));
+    RETURN COALESCE(NEW, OLD);
+END $$;
+DO $$ DECLARE tab text;
+BEGIN
+    FOREACH tab IN ARRAY ARRAY['access_users','project_checkpoints','project_names','ai_purposes',
+        'pm_ai_providers','pm_roles','pm_members','pm_teams','pm_projects'] LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS access_changes ON public.%I', tab);
+        EXECUTE format('CREATE TRIGGER access_changes AFTER INSERT OR UPDATE OR DELETE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.record_access_change()', tab);
+    END LOOP;
+END $$;
+CREATE OR REPLACE FUNCTION public.protect_access_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Audit records are append-only'; END $$;
+DROP TRIGGER IF EXISTS access_audit_immutable ON public.access_audit;
+CREATE TRIGGER access_audit_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON public.access_audit
+    FOR EACH STATEMENT EXECUTE FUNCTION public.protect_access_audit();
+
+CREATE TABLE IF NOT EXISTS public.processing_runs (
+    id text PRIMARY KEY,
+    name text NOT NULL,
+    state text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','running','finished','failed','stopped')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz,
+    finished_at timestamptz,
+    heartbeat_at timestamptz,
+    returncode integer,
+    error text,
+    requested_by text NOT NULL DEFAULT 'operator',
+    request_id text,
+    stop_requested boolean NOT NULL DEFAULT false,
+    recoveries integer NOT NULL DEFAULT 0,
+    stages jsonb NOT NULL DEFAULT '{}',
+    lines jsonb NOT NULL DEFAULT '[]',
+    dropped_lines bigint NOT NULL DEFAULT 0,
+    options jsonb NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS processing_one_active_name ON public.processing_runs(name)
+    WHERE state IN ('queued','running');
+CREATE INDEX IF NOT EXISTS processing_queue ON public.processing_runs(created_at,id)
+    WHERE state IN ('queued','running');
+
+
+CREATE OR REPLACE FUNCTION public.audit_processing_lifecycle() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP='INSERT' OR OLD.state IS DISTINCT FROM NEW.state OR OLD.stop_requested IS DISTINCT FROM NEW.stop_requested OR OLD.recoveries IS DISTINCT FROM NEW.recoveries THEN
+        INSERT INTO public.access_audit(actor,request_id,action,entity_type,entity_id,changed_fields)
+        VALUES(COALESCE(NULLIF(current_setting('throughline.actor',true),''),NEW.requested_by),COALESCE(NULLIF(current_setting('throughline.request_id',true),''),NEW.request_id),'PROCESSING_' || upper(NEW.state),'processing_runs',NEW.id,
+            CASE WHEN TG_OP='INSERT' THEN ARRAY['state'] ELSE ARRAY(SELECT key FROM jsonb_each(to_jsonb(NEW)) WHERE key IN ('state','stop_requested','recoveries') AND value IS DISTINCT FROM to_jsonb(OLD)->key) END);
+    END IF;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS processing_lifecycle_audit ON public.processing_runs;
+CREATE TRIGGER processing_lifecycle_audit AFTER INSERT OR UPDATE ON public.processing_runs
+    FOR EACH ROW EXECUTE FUNCTION public.audit_processing_lifecycle();
+
+-- Preserve imported paths and existing identities; only an explicit assignment overrides grouping.
+ALTER TABLE public.project_names ADD COLUMN IF NOT EXISTS is_curated boolean NOT NULL DEFAULT false;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS assigned_project text
+    REFERENCES public.project_names(project_key) ON DELETE RESTRICT;
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS source_project_name text GENERATED ALWAYS AS (
+    CASE WHEN project_path IS NULL THEN 'unknown'::text
+    ELSE split_part(replace(project_path, '\', '/'), '/', -1) END
+) STORED;
+-- PostgreSQL 16 preserves the column, data, views and indexes with DROP EXPRESSION.
+ALTER TABLE public.conversations ALTER COLUMN project_name DROP EXPRESSION IF EXISTS;
+CREATE TABLE IF NOT EXISTS public.conversation_project_changes (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id bigint NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
+    previous_project text,
+    assigned_project text,
+    source_path text,
+    actor text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION public.apply_conversation_project() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.project_name := COALESCE(NEW.assigned_project,
+        CASE WHEN NEW.project_path IS NULL THEN 'unknown'::text
+        ELSE split_part(replace(NEW.project_path, '\', '/'), '/', -1) END);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS conversation_project_identity ON public.conversations;
+CREATE TRIGGER conversation_project_identity BEFORE INSERT OR UPDATE ON public.conversations
+    FOR EACH ROW EXECUTE FUNCTION public.apply_conversation_project();
+CREATE OR REPLACE FUNCTION public.record_conversation_project() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.assigned_project IS DISTINCT FROM NEW.assigned_project THEN
+        INSERT INTO public.conversation_project_changes(conversation_id,previous_project,assigned_project,source_path,actor)
+            VALUES(NEW.id,OLD.assigned_project,NEW.assigned_project,NEW.project_path,
+                COALESCE(NULLIF(current_setting('throughline.actor',true),''),'operator'));
+        INSERT INTO public.access_audit(actor,request_id,action,entity_type,entity_id,changed_fields)
+            VALUES(COALESCE(NULLIF(current_setting('throughline.actor',true),''),'operator'),
+                NULLIF(current_setting('throughline.request_id',true),''),'ASSIGN','conversation',NEW.id::text,ARRAY['assigned_project']);
+    END IF;
+    IF OLD.project_name IS DISTINCT FROM NEW.project_name THEN
+        UPDATE public.memory_chunks SET project_name=NEW.project_name
+            WHERE source_type='conversation' AND source_id=NEW.id;
+    END IF;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS conversation_project_history ON public.conversations;
+CREATE TRIGGER conversation_project_history AFTER UPDATE ON public.conversations
+    FOR EACH ROW EXECUTE FUNCTION public.record_conversation_project();
+-- Also restores assignments when adopting an untracked schema that reapplied migration 006.
+UPDATE public.conversations SET assigned_project=assigned_project WHERE assigned_project IS NOT NULL;

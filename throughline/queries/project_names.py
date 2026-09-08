@@ -10,7 +10,7 @@ def attach(conn, projects):
         r["project_key"]: r
         for r in rows(
             conn,
-            "SELECT project_key, display_name, name_origin, source_conversation_ids FROM project_names WHERE project_key = ANY(%(keys)s)",
+            "SELECT project_key, display_name, name_origin, source_conversation_ids, is_curated FROM project_names WHERE project_key = ANY(%(keys)s)",
             {"keys": [p["project"] for p in projects]},
         )
     }
@@ -18,6 +18,7 @@ def attach(conn, projects):
     for project in projects:
         name = names.get(project["project"], {})
         project["display_name"] = name.get("display_name")
+        project["is_curated"] = name.get("is_curated", False)
         project["name_origin"] = name.get("name_origin", "folder")
         project["source_conversation_ids"] = name.get("source_conversation_ids", [])
         project["context_label"] = None
@@ -38,7 +39,9 @@ def save(conn, project, display_name):
     from .projects import project_filter_params, project_filter_sql
 
     params = {**project_filter_params(project), "display_name": display_name}
-    if not one(conn, f"SELECT id FROM conversations c WHERE {project_filter_sql()} LIMIT 1", params):
+    if not one(conn, f"SELECT id FROM conversations c WHERE {project_filter_sql()} LIMIT 1", params) and not one(
+        conn, "SELECT project_key FROM project_names WHERE project_key=%(project)s AND is_curated", params
+    ):
         return None
     return one(
         conn,
@@ -47,3 +50,14 @@ def save(conn, project, display_name):
         RETURNING project_key, display_name""",
         params,
     )
+
+
+def labels(conn, keys):
+    return {
+        row["project_key"]: row["display_name"]
+        for row in rows(
+            conn,
+            "SELECT project_key,display_name FROM project_names WHERE project_key=ANY(%s)",
+            (list({key for key in keys if key}),),
+        )
+    }

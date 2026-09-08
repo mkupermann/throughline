@@ -1,3 +1,5 @@
+import { useAccess, adminPage } from "@/features/access/AccessGate";
+import { useLocation } from "react-router-dom";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
@@ -15,6 +17,7 @@ import { ProviderBar } from "./ProviderBar";
 /** `g` followed by a nav chord jumps between surfaces, carrying provider scope. */
 function useGoChords(sp: URLSearchParams, enabled: boolean) {
   const navigate = useNavigate();
+  const {admin}=useAccess();
   const armed = useRef(false);
   const timer = useRef<number | null>(null);
 
@@ -40,7 +43,7 @@ function useGoChords(sp: URLSearchParams, enabled: boolean) {
 
       if (armed.current) {
         const item = NAV.find((n) => n.chord === e.key.toLowerCase());
-        if (item) {
+        if (item && (admin || !adminPage(item.to))) {
           e.preventDefault();
           navigate(carryProviders(item.to, sp));
         }
@@ -60,7 +63,7 @@ function useGoChords(sp: URLSearchParams, enabled: boolean) {
       document.removeEventListener("keydown", onKey);
       disarm();
     };
-  }, [enabled, navigate, sp]);
+  }, [enabled, navigate, sp, admin]);
 }
 
 function ThemeToggle() {
@@ -86,6 +89,7 @@ function ThemeToggle() {
 
 function KeyboardHelp({ onClose }: { onClose: () => void }) {
   useLanguage();
+  const {admin}=useAccess();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -133,7 +137,7 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
         </div>
         <dl>
           <div><dt><kbd>Cmd/Ctrl+K</kbd></dt><dd>{t("Open the command palette")}</dd></div>
-          {NAV.map((item) => (
+          {NAV.filter(item=>admin || !adminPage(item.to)).map((item) => (
             <div key={item.to}><dt><kbd>g {item.chord}</kbd></dt><dd>{t(item.label)}</dd></div>
           ))}
         </dl>
@@ -143,6 +147,10 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
 }
 
 export function Shell() {
+  const access = useAccess();
+  const location = useLocation();
+  const [signOutError,setSignOutError]=useState("");
+  const signOut = async () => {try {await access.signOut();} catch(e){setSignOutError((e as Error).message);}};
   const { lang, setLang } = useLanguage();
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
   const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl+K";
@@ -188,11 +196,11 @@ export function Shell() {
         </div>
 
         <div className="nav-groups">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.filter(group=>NAV.some(item=>item.group===group && (access.admin || !adminPage(item.to)))).map((group) => (
             <nav key={group} aria-label={t(group)}>
               <h2 className="nav-group-title">{t(group)}</h2>
               <ul className="nav-list">
-                {NAV.filter((item) => item.group === group).map((item) => (
+                {NAV.filter((item) => item.group === group && (access.admin || !adminPage(item.to))).map((item) => (
                   <li key={item.to}>
                     <NavLink
                       to={carryProviders(item.to, sp)}
@@ -211,6 +219,7 @@ export function Shell() {
           ))}
         </div>
 
+        {access.session.mode === "team" && <div className="workspace-user"><span>{access.session.user?.display_name} · {t(access.session.user?.role ?? "viewer")}</span><NavLink to="/settings/access">{t("Workspace access")}</NavLink><button onClick={()=>void signOut()}>{t("Sign out")}</button>{signOutError && <p role="alert">{signOutError}</p>}</div>}
         <div className="sidebar-foot">
           {!paletteHintSeen && (
             <div className="palette-nudge">
@@ -244,7 +253,7 @@ export function Shell() {
 
       <main id="main" className="main" tabIndex={-1}>
         <ProviderBar />
-        <Outlet />
+        {!access.admin && adminPage(location.pathname) ? <p role="alert">{t("This area requires an administrator.")}</p> : <Outlet />}
       </main>
 
       {/* Back must land where you left, not at the top. This works only

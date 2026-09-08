@@ -91,6 +91,15 @@ def connection(settings: Settings) -> Iterator[psycopg2.extensions.connection]:
 
     broken = False
     try:
+        from .access import actor_context
+
+        actor = actor_context.get()
+        if actor:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT set_config('throughline.actor', %s, true), set_config('throughline.request_id', %s, true)",
+                    actor,
+                )
         yield conn
     except psycopg2.Error as exc:
         broken = True

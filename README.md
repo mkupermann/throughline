@@ -10,9 +10,9 @@
 
 Throughline brings locally stored AI conversations into a source-linked project history. It imports sessions from nine supported tools into PostgreSQL, keeps prompts and answers in their conversations, and helps you resume work without assembling the story from separate archives.
 
-The core workflow works without a connected AI model. Optional models add semantic search, extraction and generated answers. Throughline is currently a local, single-user application; it is not an authenticated team service.
+The core workflow works without a connected AI model. Optional models add semantic search, extraction and generated answers. Run it locally for one person, or enable authenticated team mode for a controlled internal workspace with one shared corpus. Team mode adds viewer/editor/admin accounts and a change history; it does not isolate confidential projects from other members.
 
-[Start locally](#quick-start-with-docker) · [Upgrade an existing installation](docs/UPGRADING.md) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
+[Start locally](#quick-start-with-docker) · [Deploy a shared workspace](docs/TEAM_DEPLOYMENT.md) · [Upgrade an existing installation](docs/UPGRADING.md) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
 
 ## One complete processing pass
 
@@ -22,7 +22,7 @@ Use **Process everything** in Projects, Timeline or Operate. One click starts a 
 
 The button shows progress and provides **Stop**. The pass removes the individual buttons' small batch limits, attempts later steps after a failure and reports an incomplete result if anything fails or is blocked. Reflection creates review suggestions; it does not automatically confirm or merge knowledge. Export remains separate because it needs a destination.
 
-Closing the browser leaves processing running. Restarting the server or reaching the 24-hour limit stops the pass; committed work remains. Start another pass to attempt the remaining records. This is not a durable scheduler.
+Processing requests and completed steps are saved in PostgreSQL. Closing the browser or restarting the web process does not discard them. After a worker or container interruption, processing resumes and skips finished steps; the interrupted step may run again. This is at-least-once processing, so an already submitted remote request may be repeated. Each execution attempt has a 24-hour limit for a full pass, or one hour for an individual job.
 
 Open **AI settings** to choose a provider and model for each purpose. Saved selections never silently switch providers. Source-derived project names are marked as AI suggestions and link to their conversations; user-saved labels take precedence.
 
@@ -44,7 +44,7 @@ The collapsed conversation card previews the **first prompt**, **last recorded a
 
 Conversations belong in projects. Messages and extracted memories belong in their conversations. A message may be a search hit or a direct source link, but it is not an independent event on the Timeline.
 
-Project grouping currently derives from source working-folder names. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Display labels are separate: a user-saved label takes precedence, followed by a generated suggestion, then a source excerpt while naming is pending. Changing a label does not reassign conversations. Persistently correcting the underlying grouping is still planned.
+Imported conversations initially use source working-folder groups. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Use **Create a project**, then **Project assignment and history** inside a conversation to place it explicitly. Assignments survive re-import and retain the original source folder. Display labels are separate: a user-saved label takes precedence, followed by a generated suggestion, then a source excerpt while naming is pending. Changing a label does not reassign conversations. Assignment history records corrections. Earlier project notes stay where they were recorded and flag a source that has moved.
 
 Time order describes chronology, not causality. Throughline displays supported explicit source relationships where recorded; it does not infer a dependency because two sessions happened close together. See the [relationship and provenance audit](docs/PROJECT_STORY.md).
 
@@ -57,12 +57,14 @@ The animated previews below play directly in this README. Click a preview or **F
 | Area and walkthrough | Animated preview |
 |---|---|
 | **Projects**<br>Find Atlas and recover its source-linked state.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) · [Captions](docs/videos/projects.vtt) | [![Projects walkthrough — fictional demo](docs/videos/projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) |
+| **Workspace access**<br>Sign in and inspect shared-workspace accounts, roles and changes.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4) · [Captions](docs/videos/workspace-access.vtt) | [![Workspace access — fictional demo](docs/videos/workspace-access.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4) |
+| **Project assignment**<br>Create a project and correct a conversation’s membership with its source history intact.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4) · [Captions](docs/videos/project-assignment.vtt) | [![Project assignment — fictional demo](docs/videos/project-assignment.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4) |
 | **Conversations**<br>Choose a project, open a conversation and inspect its output reference.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) · [Captions](docs/videos/conversations.vtt) | [![Conversations walkthrough — fictional demo](docs/videos/conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) |
 | **Find**<br>Search imported records with their source context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) · [Captions](docs/videos/find.vtt) | [![Find walkthrough — fictional demo](docs/videos/find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) |
 | **Timeline**<br>Open a dated bucket, then expand conversations within their project context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](docs/videos/timeline.vtt) | [![Timeline walkthrough — fictional demo](docs/videos/timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) |
 | **Review**<br>Inspect contradictory and superseded knowledge.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) · [Captions](docs/videos/review.vtt) | [![Review walkthrough — fictional demo](docs/videos/review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) |
 | **Operate**<br>Understand import, extraction and embedding stages.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) · [Captions](docs/videos/operate.vtt) | [![Operate walkthrough — fictional demo](docs/videos/operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) |
-| **Complete processing**<br>Inspect all eleven steps, the start button and restart limits.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [Captions](docs/videos/processing.vtt) | [![Complete processing walkthrough — fictional demo](docs/videos/processing.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) |
+| **Complete processing**<br>Inspect all eleven steps, the start button and recovery behavior.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [Captions](docs/videos/processing.vtt) | [![Complete processing walkthrough — fictional demo](docs/videos/processing.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) |
 | **AI settings**<br>Choose local models, hosted APIs or installed CLIs per purpose.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) · [Captions](docs/videos/ai-settings.vtt) | [![AI settings walkthrough — fictional demo](docs/videos/ai-settings.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) |
 | **Console**<br>Count conversations by source with read-only SQL.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) · [Captions](docs/videos/console.vtt) | [![Console walkthrough — fictional demo](docs/videos/console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) |
 | **AI team operations**<br>Inspect linked projects, task states and budgets.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) · [Captions](docs/videos/teams.vtt) | [![AI team operations walkthrough — fictional demo](docs/videos/teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) |
@@ -108,7 +110,7 @@ Open [http://127.0.0.1:8788](http://127.0.0.1:8788).
 
 The initializer detects Cline’s task directory for macOS, Linux or Windows. For another editor profile, set `THROUGHLINE_CLINE_DIR` in `.env` after initialization to its task directory. Other source mounts are listed in `docker-compose.yml`.
 
-The setup script creates an ignored `.env` with a random database password. Source directories are mounted read-only. The web API binds to loopback because it has no authentication. The first ingestion is explicit.
+The setup script creates an ignored `.env` with a random database password. Source directories are mounted read-only. The default local mode has no login and binds to loopback. For colleagues, configure [team mode and a TLS proxy](docs/TEAM_DEPLOYMENT.md). The first ingestion is explicit.
 
 ### Keep the database safe
 

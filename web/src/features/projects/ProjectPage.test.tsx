@@ -205,8 +205,10 @@ describe("ProjectPage", () => {
     await waitFor(() => expect(context.mock.calls.some((call) => call[1]?.offset === 1)).toBe(true));
     await screen.findByText("Second message");
     const transcript = screen.getByRole("heading", { name: "Transcript" }).parentElement!;
-    const messages = within(transcript).getAllByText(/First message|Second message/);
-    expect(messages.map((message) => message.textContent)).toEqual(["Second message", "First message"]);
+    await waitFor(() => {
+      const messages = within(transcript).getAllByText(/First message|Second message/);
+      expect(messages.map((message) => message.textContent)).toEqual(["Second message", "First message"]);
+    });
     expect(context.mock.calls.every((call) => call[1]?.order === "oldest")).toBe(true);
   });
 

@@ -1,3 +1,5 @@
+import { AccessGate } from "@/features/access/AccessGate";
+import { AccessPage } from "@/features/access/AccessPage";
 import {AiSettings} from "@/features/settings/AiSettings";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
@@ -45,6 +47,7 @@ const router = createBrowserRouter([
     path: "/",
     element: <Shell />,
     children: [
+      { path: "settings/access", element: <AccessPage /> },
       { index: true, element: <ProjectLibrary /> },
       { path: "conversations", element: <ConversationsPage /> },
       { path: "system-overview", element: <OverviewPage /> },
@@ -78,7 +81,7 @@ export function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <RouterProvider router={router} />
+          <AccessGate><RouterProvider router={router} /></AccessGate>
         </ToastProvider>
       </QueryClientProvider>
     </ThemeProvider>

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from throughline import embedding
@@ -451,7 +451,7 @@ def job(job_id: str) -> dict[str, Any]:
 
 
 @router.get("/operate/job/{job_id}/stream")
-def stream(job_id: str) -> StreamingResponse:
+def stream(job_id: str, request: Request) -> StreamingResponse:
     """Live job output as server-sent events.
 
     A watcher that connects late still sees the whole run: the stream replays
@@ -460,8 +460,23 @@ def stream(job_id: str) -> StreamingResponse:
     j = runner.get(job_id)
     if j is None:
         raise HTTPException(status_code=404, detail="Unknown job id")
+
+    def events():
+        import time
+
+        from throughline.api.access import COOKIE, resolve_session
+
+        last_check = 0.0
+        for event in runner.stream(j):
+            if request.app.state.settings.auth_mode == "team" and time.monotonic() - last_check >= 2:
+                user = resolve_session(request.app.state.settings, request.cookies.get(COOKIE))
+                if not user or user["role"] != "admin":
+                    return
+                last_check = time.monotonic()
+            yield event
+
     return StreamingResponse(
-        runner.stream(j),
+        events(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

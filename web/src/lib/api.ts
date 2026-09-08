@@ -1,3 +1,4 @@
+import { sessionToken } from "./session";
 /** Typed client for the Throughline API.
  *
  * Hand-written for Phase 1 while the surface is one endpoint. Phase 2
@@ -51,7 +52,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // header of its own — which nothing did until /ask needed content-type.
     res = await fetch(`/api${path}`, {
       ...init,
-      headers: { Accept: "application/json", ...(init?.headers ?? {}) },
+      headers: { Accept: "application/json", "X-Throughline-Request":"1", ...(sessionToken()?{"X-CSRF-Token":sessionToken()}:{}), ...(init?.headers ?? {}) },
     });
   } catch (cause) {
     // Server not running at all — distinct from a server that answered.
@@ -63,6 +64,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  if (res.status === 401 && path !== "/auth/login") window.dispatchEvent(new Event("throughline-session-expired"));
   if (!res.ok) {
     let code = "http_error";
     let detail = res.statusText;
@@ -111,6 +113,7 @@ export const providersApi = {
 export type Kind = "conversation" | "message" | "memory" | "skill" | "project" | "prompt";
 
 export interface FindItem {
+  project_label?: string | null;
   kind: Kind;
   id: number;
   title: string | null;
@@ -137,6 +140,7 @@ export interface FindResponse {
 }
 
 export interface FacetValue {
+  label?: string | null;
   value: string;
   n: number;
 }
@@ -196,6 +200,7 @@ export interface AskResponse {
 }
 
 export interface ProjectSummary {
+  is_curated?: boolean;
   display_name?: string | null; context_label?: string | null; name_origin?: "user" | "folder" | "model";
   project: string;
   sessions: number;
@@ -984,6 +989,7 @@ export const pmApi = {
 };
 
 export interface StoryCheckpoint {
+  source_in_scope?: boolean;
   id: number; kind: "goal" | "status" | "blocker" | "next"; content: string;
   created_at: string; source_conversation_id: number | null; source_message_id: number | null;
   source_session_id: string; source_excerpt: string; source_available: boolean;
@@ -996,7 +1002,7 @@ export interface StorySession extends ProjectSession {
   opening: string | null; project_path: string | null; knowledge_count: number;
 }
 export interface StoryHistory {
-  identity?: {context_label?: string | null; project: string; display_name: string | null; name_origin: "user" | "folder" | "model"; source_conversation_ids?: number[]};
+  identity?: {is_curated?: boolean; context_label?: string | null; project: string; display_name: string | null; name_origin: "user" | "folder" | "model"; source_conversation_ids?: number[]};
   recovery?: StorySession | null;
   project: string; path: string | null; paths: { path: string | null; sessions: number }[];
   coverage: { sessions: number; messages: number; refreshed_at: string | null; unattributed: number };

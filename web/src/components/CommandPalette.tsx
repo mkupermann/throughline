@@ -1,3 +1,4 @@
+import {useAccess,adminPage} from "@/features/access/AccessGate";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { Command } from "cmdk";
@@ -49,6 +50,7 @@ const QUICK_JOBS: { name: string; label: string; hint: string }[] = [
  */
 export function CommandPalette() {
   useLanguage();
+  const {admin}=useAccess();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -112,6 +114,7 @@ export function CommandPalette() {
   const { data: opStatus } = useQuery({
     queryKey: ["operate", "status"],
     queryFn: operateApi.status,
+    enabled: admin,
     staleTime: 30_000,
   });
   const jobByName = new Map((opStatus?.jobs ?? []).map((j) => [j.name, j]));
@@ -143,9 +146,9 @@ export function CommandPalette() {
       <Command.List className="palette-list">
         <Command.Empty className="palette-empty">{t("No matches.")}</Command.Empty>
 
-        {NAV_GROUPS.map((group) => (
+        {NAV_GROUPS.filter(group=>NAV.some(item=>item.group===group && (admin || !adminPage(item.to)))).map((group) => (
           <Command.Group key={group} heading={t(group)} className="palette-group">
-            {NAV.filter((item) => item.group === group).map((item) => (
+            {NAV.filter((item) => item.group === group && (admin || !adminPage(item.to))).map((item) => (
               <Command.Item
                 key={item.to}
                 value={`${t(item.label)} ${item.description ?? ""}`}
@@ -178,14 +181,14 @@ export function CommandPalette() {
                 <span className="palette-item-label">{jumpHeading(item)}</span>
                 <span className="palette-hint">
                   {item.kind}
-                  {item.project ? ` · ${item.project}` : ""}
+                  {item.project ? ` · ${item.project_label||item.project}` : ""}
                 </span>
               </Command.Item>
             ))}
           </Command.Group>
         )}
 
-        <Command.Group heading="Actions" className="palette-group">
+        {admin && <Command.Group heading="Actions" className="palette-group">
           {QUICK_JOBS.map((spec) => {
             const job = jobByName.get(spec.name);
             const blocked = job?.running ? "Already running" : job?.unavailable ?? null;
@@ -224,7 +227,7 @@ export function CommandPalette() {
             <span>{t("Export as Markdown")}</span>
             <span className="palette-hint">{t("One folder per project, for Obsidian or any editor")}</span>
           </Command.Item>
-        </Command.Group>
+        </Command.Group>}
 
         <Command.Group heading="Theme" className="palette-group">
           <Command.Item value="theme light" onSelect={() => run(() => setTheme("light"))} className="palette-item">

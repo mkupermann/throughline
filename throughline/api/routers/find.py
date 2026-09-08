@@ -31,6 +31,7 @@ def _serialise(row: dict[str, Any]) -> dict[str, Any]:
         "title": row.get("title"),
         "snippet": row.get("snippet"),
         "project": row.get("project"),
+        **({"project_label": row["project_label"]} if row.get("project_label") else {}),
         "occurred_at": occurred.isoformat() if hasattr(occurred, "isoformat") else occurred,
         "category": row.get("category"),
         "status": row.get("status"),
@@ -104,6 +105,12 @@ def find(
                 column=column,
             )
 
+        from throughline.queries.project_names import labels
+
+        display = labels(conn, [row.get("project") for row in result.items])
+        for row in result.items:
+            row["project_label"] = display.get(row.get("project"))
+
     notes = list(result.notes)
     if semantic and backend and not backend.available and q.strip():
         notes.append(backend.reason)
@@ -150,7 +157,20 @@ def _iso_any(v: Any) -> Any:
 def facets(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     with connection(settings) as conn:
         data = Q.find.facets(conn)
-    return {k: [{"value": str(i["value"]), "n": int(i["n"])} for i in v] for k, v in data.items()}
+        from throughline.queries.project_names import labels
+
+        display = labels(conn, [row["value"] for row in data.get("projects", [])])
+    return {
+        k: [
+            {
+                "value": str(i["value"]),
+                "n": int(i["n"]),
+                **({"label": display.get(i["value"])} if k == "projects" and i["value"] in display else {}),
+            }
+            for i in v
+        ]
+        for k, v in data.items()
+    }
 
 
 # ── Detail routes ───────────────────────────────────────────────────────────

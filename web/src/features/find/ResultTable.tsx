@@ -22,7 +22,7 @@ const COLUMNS = [
 const template = COLUMNS.map((c) => c.width).join(" ");
 
 function cell(item: FindItem, key: (typeof COLUMNS)[number]["key"]): string {
-  const v = item[key as keyof FindItem];
+  const v = key === "project" ? (item.project_label || item.project) : item[key as keyof FindItem];
   if (v === null || v === undefined) return "";
   if (key === "occurred_at") {
     const d = new Date(String(v));

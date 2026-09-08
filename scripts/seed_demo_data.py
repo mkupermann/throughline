@@ -1784,6 +1784,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory for the fictional repos' .ai-pipeline run logs "
         "(default: <system temp>/throughline-demo-repos).",
     )
+    parser.add_argument(
+        "--team",
+        action="store_true",
+        help="Create fictional admin/editor/viewer accounts for a loopback team-mode demo.",
+    )
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -1824,6 +1829,20 @@ def main(argv: list[str] | None = None) -> int:
                 "INSERT INTO project_names(project_key, display_name) VALUES ('Atlas (demo)', 'Atlas (demo)') ON CONFLICT(project_key) DO NOTHING"
             )
         conn.commit()
+        if args.team:
+            from throughline.api.access import password_hash
+
+            encoded = password_hash("fictional walkthrough password")
+            with conn.cursor() as cur:
+                for role in ("admin", "editor", "viewer"):
+                    cur.execute(
+                        "INSERT INTO access_users(username,display_name,password_hash,role) VALUES (%s,%s,%s,%s) ON CONFLICT(username) DO NOTHING",
+                        (role, "Demo " + role, encoded, role),
+                    )
+            conn.commit()
+            print(
+                "Fictional demo accounts: admin/editor/viewer. Password: fictional walkthrough password. Never expose this demo publicly."
+            )
         summarize(conn)
         print(f"\nRun-log workspace: {workspace}")
         print(f"pm_tasks ids: {task_ids}")

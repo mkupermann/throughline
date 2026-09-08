@@ -178,7 +178,7 @@ export const ResultRow = forwardRef<
           {isMessage && item.title && (
             <span className="result-in">in {item.title}</span>
           )}
-          {item.project && <span>{item.project}</span>}
+          {item.project && <span>{item.project_label || item.project}</span>}
           {item.category && !isMessage && item.kind !== "memory" && <span>{item.category}</span>}
           {item.status && item.status !== "active" && (
             <span className="result-status">{item.status}</span>
