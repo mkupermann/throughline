@@ -720,7 +720,7 @@ a.pipeline-action {
 .status-pill.status-pending,
 .status-pill.status-not_ingested {
   color: var(--status-warning);
-  background: var(--status-warning-wash);
+  background: var(--surface-base);
 }
 .status-pill.status-no_data,
 .status-pill.status-unknown {

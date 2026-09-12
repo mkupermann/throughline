@@ -162,7 +162,7 @@
   color: var(--status-serious);
 }
 .pm-status-pending {
-  background: var(--status-warning-wash);
+  background: var(--surface-base);
   color: var(--status-warning);
 }
 .pm-status-paused,
