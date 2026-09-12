@@ -1517,3 +1517,11 @@ a.pm-catalog-link:hover {
 .pm-status-pass, .pm-status-completed, .pm-status-budget_exceeded {
   color: var(--text-primary);
 }
+
+/* Keep prerequisite guidance readable alongside the launch form. */
+.pm-runtime { display: grid; gap: 12px; padding: 20px; }
+.pm-runtime h3 { font-weight: 600; }
+.pm-runtime ul { display: grid; gap: 16px; margin-block: 12px; }
+.pm-runtime li p { margin-block: 6px; }
+.pm-runtime code { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
+.pm-runtime > button { justify-self: start; }

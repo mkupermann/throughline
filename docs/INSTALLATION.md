@@ -42,7 +42,7 @@ runs in the container:
 ```bash
 git clone https://github.com/mkupermann/throughline.git
 cd throughline
-python3 scripts/init_compose_env.py
+python3 scripts/init_compose_env.py --check-docker
 docker compose up -d
 docker compose exec web throughline ingest --all
 ```
@@ -50,7 +50,7 @@ docker compose exec web throughline ingest --all
 The bootstrap script creates or updates the ignored `.env`, generates a random
 database password, and writes your numeric UID/GID. Compose uses those values
 to run application containers as an unprivileged user while retaining access to
-0600 source files on Linux and Docker Desktop for macOS. PostgreSQL, the web
+0600 source files on rootful Linux Docker without user-namespace remapping and Docker Desktop for macOS. PostgreSQL, the web
 UI, and optional Ollama ports publish on loopback only. The migration service
 runs before web or MCP starts; check it with `docker compose ps` if startup
 does not complete.

@@ -12,7 +12,7 @@ import psycopg2
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from throughline.jobs.pm_launch import launch_task, stop_task
+from throughline.jobs.pm_launch import execution_readiness, launch_task, stop_task
 from throughline.jobs.pm_watch import parse_verdict, read_run_text
 from throughline.queries import pm as Q
 
@@ -616,8 +616,18 @@ def task_iteration_log(
     return {"iteration": iteration, "log_tail": log_tail, "verdict": verdict}
 
 
+@router.get("/pm/execution/readiness")
+def get_execution_readiness() -> dict[str, Any]:
+    return execution_readiness()
+
+
 @router.post("/pm/tasks/launch")
 def launch(body: LaunchIn, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    if not execution_readiness()["available"]:
+        raise HTTPException(
+            status_code=503,
+            detail="Execution runtime is unavailable. Check /pm/execution/readiness: install Bash and configure a readable AI_PIPELINE_SCRIPT_PATH, then restart Throughline.",
+        )
     with connection(settings) as conn:
         try:
             return launch_task(conn, **body.model_dump())

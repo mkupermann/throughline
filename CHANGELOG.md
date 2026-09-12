@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Check execution prerequisites before enabling task launch, with actionable server setup guidance.
+- Detect unsupported private-source Docker mount configurations before writing bootstrap settings.
+- Add real-server Chromium accessibility and mobile keyboard checks to CI against the installed wheel.
+- Patch the Vitest development dependency and correct release, contribution and security documentation.
+
 - Expand the starter library to 103 versioned templates across 14 domain categories plus General, with category filtering and domain-specific delivery/review criteria.
 - Introduce a continuous-line SVG identity and a rewritten README with current fictional-data screenshots, captioned product and template videos, and an animated preview.
 

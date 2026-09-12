@@ -67,7 +67,7 @@ Open **AI Team Operations → Templates** to search the library, filter by categ
 
 Projects create their linked teams and roles together. Instances retain a template snapshot; editing the library does not silently rewrite existing work. Assign models, providers and members through the resource editors after creation.
 
-**103 starter templates: 43 projects, 15 teams and 45 roles.** Fourteen professional categories each provide three project blueprints, one team and three specialist roles, alongside the five general product-improvement starters. [Browse the complete catalog, deliverables and usage guide](docs/TEMPLATES.md).
+**103 starter templates: 43 projects, 15 teams and 45 roles.** Fourteen professional categories each provide three project blueprints, one team and three specialist roles, alongside five general product-improvement starters: one project, one team and three roles. [Browse the complete catalog, deliverables and usage guide](docs/TEMPLATES.md).
 
 | Category | Example project templates |
 |---|---|
@@ -97,7 +97,7 @@ This redesigned workspace is currently a development preview on `feature/through
 ```bash
 git clone --branch feature/throughline-workspace-redesign https://github.com/mkupermann/throughline.git
 cd throughline
-python3 scripts/init_compose_env.py
+python3 scripts/init_compose_env.py --check-docker
 docker compose up -d
 docker compose exec web throughline ingest --all
 ```
@@ -191,7 +191,7 @@ Throughline is **beta software**. Read [Security](SECURITY.md) before a shared d
 
 ## Development and contributing
 
-Read [Contributing](CONTRIBUTING.md) for setup, branch conventions and commit requirements. Run the checks used by CI:
+Read [Contributing](CONTRIBUTING.md) for development setup, branch conventions and commit requirements. Maintainers use the [release validation checklist](docs/RELEASE_CHECKLIST.md) before publishing; the release workflow publishes container images, not GitHub Releases or PyPI packages. Run the checks used by CI:
 
 ```bash
 pip install -r requirements-dev.txt

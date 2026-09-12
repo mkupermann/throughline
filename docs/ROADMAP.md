@@ -4,7 +4,7 @@ These are proposed extensions based on the current implementation, not shipped f
 
 | Priority | Capability | Concrete acceptance criterion |
 |---|---|---|
-| 1 | Guided project setup | A first-time user starts with a goal, chooses whether agents are needed, and reaches the first useful action without understanding roles or token budgets. |
+| 1 | Guided execution readiness | After creating a project from a template, a first-time user assigns real resources, sees missing executor dependencies and reaches a verifiable first run without confusing saved configuration with execution. |
 | 1 | Artifact lineage | A recorded file version links to its producing message, tool result and commit or content hash; later changes do not silently replace the historical artifact. |
 | 2 | Provider budgets and retention | Set spending limits before remote processing; review estimates, repeated attempts and retention of diagnostics and audit history. |
 | 2 | Evidence-change alerts | When a source is edited, removed or contradicted, affected claims are flagged with the exact changed evidence; the system never silently rewrites accepted project state. |
@@ -23,6 +23,12 @@ These are proposed extensions based on the current implementation, not shipped f
 **Artifact lineage plus reproducible runs** would connect the conversation to the thing that was actually produced and tested. The current UI exposes explicit file references; it does not yet establish versioned artifact identity or successful execution.
 
 ## Already available foundations
+
+The Operations library includes 103 versioned templates (43 projects, 15 teams and
+45 roles), with category filters, previews and editable project/team/role creation.
+Instances retain their original template snapshots. See [the catalog](TEMPLATES.md).
+These plans do not create enforced execution stages, grant tools or replace the
+separate agent executor. An end-to-end guided launch remains open.
 
 Project history, source-linked state notes, prior state notes, explicit source relationships for supported imports, per-conversation memories, full transcripts, labelled output references and selected Markdown handoffs exist today. A complete processing pass, source-derived name suggestions and purpose-specific API/CLI selection are also available. Explicit project assignment, PostgreSQL-backed processing recovery and optional viewer/editor/admin accounts with audit history are now implemented for one shared corpus. They are foundations, not proof of tenant isolation or organizational acceptance.
 

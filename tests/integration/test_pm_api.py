@@ -93,7 +93,10 @@ def test_stop_unknown_task_is_404(client):
     assert resp.status_code == 404
 
 
-def test_launch_team_not_linked_is_404(client, tmp_path):
+def test_launch_team_not_linked_is_404(client, tmp_path, monkeypatch):
+    script = tmp_path / "pipeline.sh"
+    script.write_text(FAKE_PIPELINE, encoding="utf-8")
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", script)
     project = client.post("/api/pm/projects", json={"name": "LaunchApiP"}).json()
     team = client.post("/api/pm/teams", json={"name": "LaunchApiT"}).json()
     # deliberately NOT linked — pm_project_teams has no row for this pair
@@ -1077,3 +1080,18 @@ def test_ai_catalog_excludes_disabled_provider(client, monkeypatch, tmp_path):
     assert resp.status_code == 200
     tools = {t["tool"] for t in resp.json()["tools"]}
     assert f"provider:{provider['id']}" not in tools
+
+
+def test_runtime_preflight_blocks_launch_without_creating_artifacts(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", tmp_path / "absent-pipeline.sh")
+    readiness = client.get("/api/pm/execution/readiness")
+    assert readiness.status_code == 200
+    assert readiness.json()["available"] is False
+    before = list(tmp_path.rglob("*"))
+    response = client.post(
+        "/api/pm/tasks/launch",
+        json={"pm_project_id": 1, "team_id": 1, "title": "Blocked", "repo_path": str(tmp_path)},
+    )
+    assert response.status_code == 503
+    assert "AI_PIPELINE_SCRIPT_PATH" in response.json()["detail"]
+    assert list(tmp_path.rglob("*")) == before

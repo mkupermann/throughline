@@ -163,6 +163,64 @@ jobs:
             --junitxml=/tmp/integration-results.xml
           python -c "import xml.etree.ElementTree as E; r=E.parse('/tmp/integration-results.xml').getroot(); n=sum(int(x.get('skipped', 0)) for x in r.findall('.//testsuite')); assert n == 0, f'{n} integration tests skipped'"
 
+  browser-smoke:
+    name: Browser flows and accessibility
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: throughline_browser_demo
+      THROUGHLINE_DEMO_URL: http://127.0.0.1:8795
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install packaged application and browser
+        run: |
+          pip wheel --no-deps --wheel-dir /tmp/throughline-browser-wheel .
+          pip install /tmp/throughline-browser-wheel/*.whl
+          npm --prefix web ci
+          cd web && npx playwright install --with-deps chromium
+      - name: Seed fictional corpus and exercise shipped UI
+        run: |
+          python scripts/seed_demo_data.py --dbname throughline_browser_demo
+          (cd /tmp && exec throughline serve --host 127.0.0.1 --port 8795) > /tmp/throughline-browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$THROUGHLINE_DEMO_URL/api/health"; then break; fi
+            sleep 1
+          done
+          npm --prefix web run test:browser
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: |
+            /tmp/throughline-browser-results
+            /tmp/throughline-browser-server.log
+
   shell-syntax:
     name: Bash syntax check
     runs-on: ubuntu-latest

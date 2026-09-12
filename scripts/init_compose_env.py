@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 _PLACEHOLDER_PASSWORD = "replace-with-a-unique-local-secret"
@@ -97,10 +100,53 @@ def initialise(env_file: Path) -> bool:
     return changed
 
 
+def check_docker_source_access() -> str | None:
+    """Reject known incompatible source mounts without touching host permissions."""
+    try:
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{json .SecurityOptions}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode:
+            return "Docker is not reachable. Start Docker and select the intended context, then retry."
+        options = json.loads(result.stdout)
+        if not isinstance(options, list) or not all(isinstance(item, str) for item in options):
+            raise ValueError("Unexpected Docker security options")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return "Cannot inspect Docker security options. Check `docker info` before starting Compose."
+    if sys.platform.startswith("linux"):
+        names = {item.split(",", 1)[0] for item in options}
+        if names & {"name=rootless", "name=userns"}:
+            return (
+                "This Docker daemon uses rootless/user-namespace mapping. Matching container UID/GID "
+                "does not grant access to private host transcripts (0600). Use native Throughline "
+                "ingestion with PostgreSQL, or a separately configured rootful Docker context. "
+                "See docs/DEPLOYMENT.md#private-source-mount-compatibility."
+            )
+        if "name=selinux" in names:
+            return (
+                "This Docker daemon has SELinux label support enabled. The default source mounts do not "
+                "relabel private tool directories. Use native ingestion or an administrator-reviewed "
+                "mount policy. See docs/DEPLOYMENT.md#private-source-mount-compatibility."
+            )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--check-docker", action="store_true", help="Check private source mount compatibility before writing settings"
+    )
     args = parser.parse_args(argv)
+    if args.check_docker:
+        problem = check_docker_source_access()
+        if problem:
+            print(f"Compose preflight: {problem}", file=sys.stderr)
+            return 2
 
     changed = initialise(args.env_file)
     state = "created or updated" if changed else "already ready"

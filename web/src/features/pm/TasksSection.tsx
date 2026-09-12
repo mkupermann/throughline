@@ -83,9 +83,16 @@ export function TasksSection({
   teams: PmTeam[];
   tasks: UseQueryResult<{ tasks: PmTask[] }>;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
+  const de = lang === "de";
+  const runtime = useQuery({
+    queryKey: ["pm-execution-readiness"],
+    queryFn: pmApi.executionReadiness,
+    staleTime: 0,
+  });
+  const runtimeAvailable = runtime.data?.available === true && !runtime.isError && !runtime.isFetching;
 
   const [teamId, setTeamId] = useState<number | "">("");
   const [title, setTitle] = useState("");
@@ -151,11 +158,49 @@ export function TasksSection({
         {t.tasksSection.h2}
       </h2>
 
+      <section className="pm-launch pm-runtime" aria-labelledby="pm-runtime-h">
+        <h3 id="pm-runtime-h">{de ? "Ausführung vorbereiten" : "Execution setup"}</h3>
+        <p role="status">
+          {runtime.isFetching
+            ? (de ? "Abhängigkeiten werden geprüft…" : "Checking dependencies…")
+            : runtime.isError
+              ? (de ? "Abhängigkeiten konnten nicht geprüft werden. Start ist gesperrt." : "Could not check dependencies. Launch is blocked.")
+              : runtime.data?.available
+                ? (de ? "Bash und Pipeline sind verfügbar." : "Bash and pipeline are available.")
+                : (de ? "Die Ausführungsumgebung ist noch nicht bereit." : "The execution runtime is not ready yet.")}
+        </p>
+        <Disclosure
+          key={String(runtime.data?.available)}
+          defaultOpen={runtime.data?.available !== true}
+          summary={de ? "Abhängigkeiten und nächste Schritte" : "Dependencies and next steps"}
+        >
+          {runtime.data && <ul>
+            {runtime.data.checks.map(check => <li key={check.id}>
+              <strong>{check.id === "bash" ? "Bash" : "Pipeline"}</strong>: {check.available
+                ? (de ? "verfügbar" : "available")
+                : (de ? "fehlt oder ist nicht lesbar" : "missing or unreadable")}
+              {!check.available && <p>
+                {check.id === "bash"
+                  ? (de ? "Installiere Bash auf dem Throughline-Server (unter Windows: Git Bash) und starte Throughline neu." : "Install Bash on the Throughline server (Git Bash on Windows), then restart Throughline.")
+                  : (de ? "Stelle deine kompatible pipeline.sh auf dem Throughline-Server bereit. Setze AI_PIPELINE_SCRIPT_PATH auf die Datei und starte Throughline neu. In Docker muss die Datei im Container verfügbar sein." : "Provide your compatible pipeline.sh on the Throughline server. Set AI_PIPELINE_SCRIPT_PATH to that file and restart Throughline. In Docker, the file must be available inside the container.")}
+              </p>}
+              {check.path && <code style={{ overflowWrap: "anywhere" }}>{check.path}</code>}
+            </li>)}
+          </ul>}
+          <p>
+            {de ? "Diese Prüfung startet keine Agenten. Sie prüft keine CLI-Anmeldung oder Anbieter-Verbindung. Weise dem Team Mitglieder und Modelle zu und verwende einen Repository-Pfad, der auf dem Server verfügbar ist." : "This check does not start agents or verify CLI sign-in and provider connectivity. Assign team members and models, and use a repository path available on the server."}{" "}
+            <Link to="/pm/members">{t.dashboard.catalogMembers}</Link> · <Link to="/pm/models">{t.dashboard.catalogModels}</Link>
+          </p>
+        </Disclosure>
+        <button type="button" className="button pm-button-quiet" disabled={runtime.isFetching} onClick={() => runtime.refetch()}>
+          {de ? "Erneut prüfen" : "Check again"}
+        </button>
+      </section>
       <form
         className="pm-launch"
         onSubmit={(e) => {
           e.preventDefault();
-          if (formValid) launch.mutate();
+          if (formValid && runtimeAvailable && !launch.isPending) launch.mutate();
         }}
       >
         <div className="pm-launch-fields">
@@ -219,7 +264,7 @@ export function TasksSection({
             <span className="pm-label" aria-hidden>
               &nbsp;
             </span>
-            <button type="submit" className="button" disabled={!formValid || launch.isPending}>
+            <button type="submit" className="button" disabled={!formValid || !runtimeAvailable || launch.isPending}>
               <Play size={14} aria-hidden />
               {launch.isPending ? t.tasksSection.launching : t.tasksSection.launch}
             </button>
