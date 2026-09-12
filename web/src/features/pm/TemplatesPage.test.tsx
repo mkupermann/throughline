@@ -160,18 +160,54 @@ it("prevents context changes while saving and shows pinned reference versions", 
   await screen.findByRole("button", { name: "Edit template" });
 });
 it("filters domain templates and assigns the selected category to a new template", async () => {
-  mock.request.mockImplementation(async (path: string, init?: RequestInit) => {
-    if (!init) return { templates: [template, { ...template, id: 5, name: "Cash forecast", content: { category: "finance" } }, { ...template, id: 6, name: "Experiment", content: { category: "science" } }] };
+  mock.request.mockImplementation(async (_path: string, init?: RequestInit) => {
+    if (!init)
+      return {
+        templates: [
+          template,
+          {
+            ...template,
+            id: 5,
+            name: "Cash forecast",
+            content: { category: "finance" },
+          },
+          {
+            ...template,
+            id: 6,
+            name: "Experiment",
+            content: { category: "science" },
+          },
+        ],
+      };
     return { ...JSON.parse(init.body as string), id: 7, version: 1 };
   });
-  const user = userEvent.setup(); mount();
+  const user = userEvent.setup();
+  mount();
   await screen.findByRole("button", { name: /Cash forecast/ });
-  await user.selectOptions(screen.getByRole("combobox", {name: "Category", exact: true}), "finance");
-  expect(screen.queryByRole("button", {name:/Experiment/})).toBeNull();
-  expect(screen.queryByRole("button", {name:/UX review/})).toBeNull();
-  await user.click(screen.getByRole("button", { name: "Create template", exact: true }));
-  expect((screen.getByLabelText("Template category") as HTMLSelectElement).value).toBe("finance");
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Category" }),
+    "finance",
+  );
+  expect(screen.queryByRole("button", { name: /Experiment/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /UX review/ })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Create template" }));
+  expect(
+    (screen.getByLabelText("Template category") as HTMLSelectElement).value,
+  ).toBe("finance");
   await user.type(screen.getByLabelText("Template name"), "Forecast review");
-  await user.click(screen.getByRole("button", {name:"Save template", exact:true}));
-  await waitFor(() => expect(mock.request).toHaveBeenCalledWith("/pm/templates", expect.objectContaining({method:"POST",body:JSON.stringify({kind:"project",name:"Forecast review",description:"",content:{category:"finance"}})})));
+  await user.click(screen.getByRole("button", { name: "Save template" }));
+  await waitFor(() =>
+    expect(mock.request).toHaveBeenCalledWith(
+      "/pm/templates",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          kind: "project",
+          name: "Forecast review",
+          description: "",
+          content: { category: "finance" },
+        }),
+      }),
+    ),
+  );
 });
