@@ -73,8 +73,8 @@ scan: $(VPY)  ## Scan skills + prompts
 extract: $(VPY)  ## Extract memory chunks with the configured backend
 	$(VPY) -m throughline extract-memory
 
-init-compose:  ## Create/update private Compose credentials and host identity
-	"$(PYTHON)" scripts/init_compose_env.py --env-file "$(COMPOSE_ENV)"
+init-compose:  ## Check Docker and create/update private Compose settings
+	"$(PYTHON)" scripts/init_compose_env.py --check-docker --env-file "$(COMPOSE_ENV)"
 
 docker-up: init-compose  ## Start the Docker stack (Postgres + web UI)
 	$(COMPOSE) --env-file "$(COMPOSE_ENV)" up -d

@@ -192,3 +192,13 @@ def rename_project(name: str, body: ProjectName, settings: Settings = Depends(ge
             raise HTTPException(404, "Project folder group not found.")
         conn.commit()
     return result
+
+
+@router.get("/projects/{name:path}/continue")
+def continue_project(
+    name: str, max_chars: int = Query(12000, ge=2000, le=30000), settings: Settings = Depends(get_settings)
+):
+    from throughline.queries.continuation import build
+
+    with connection(settings) as conn:
+        return build(conn, name, max_chars)

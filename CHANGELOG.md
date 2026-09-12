@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Incremental processing and project continuation
+
+- Bounded project-specific processing with per-conversation source fingerprints, atomic checkpoints, measured progress and configurable API concurrency.
+- Source-linked continuation briefs in project workspaces and the existing MCP server, with explicit excerpt and character limits.
+- Operate data visibility for stored versus hidden conversations, separate project datasets, actual model routes and measured processing times.
+
+- Valid empty Operate extractions no longer repeat for unchanged source versions; malformed entity responses remain retryable.
+- Operate reports the selected extraction model and AI connection tests report synthetic-call elapsed time.
+- Improved contrast of failed/crashed Operations status badges.
+
+- Check execution prerequisites before enabling task launch, with actionable server setup guidance.
+- Detect unsupported private-source Docker mount configurations before writing bootstrap settings.
+- Add real-server Chromium accessibility and mobile keyboard checks to CI against the installed wheel.
+- Patch the Vitest development dependency and correct release, contribution and security documentation.
+
+- Expand the starter library to 103 versioned templates across 14 domain categories plus General, with category filtering and domain-specific delivery/review criteria.
+- Introduce a continuous-line SVG identity and a rewritten README with current fictional-data screenshots, captioned product and template videos, and an animated preview.
+
+- Add AI Team Operations templates for projects, teams and roles, with immutable versions, pinned references and atomic creation of real editable resources. Include starter workflows, template previews, bilingual navigation and editable project briefs.
+
+- Handle missing or empty agent log directories without crashing the task watcher; report unknown inactivity duration and stop stale tasks reliably.
+
+- Redesign project workspaces around recorded state, source evidence and resumable handoffs; preserve selection and keyboard focus across search and sort, with explicit clearing on source-scope changes.
+- Add full-width mobile navigation, accessible purpose-based AI settings, improved selected-state contrast and translated project search labels.
+
 - Replace opaque CLI connection-test errors with actionable, secret-safe diagnostics and serialize tests in the settings page.
 
 - Add opt-in shared-workspace login, viewer/editor/admin roles, session revocation, CSRF checks and authenticated change history. Existing provider secrets are retained; confidential projects are not isolated within a shared corpus.

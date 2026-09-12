@@ -906,6 +906,7 @@ export const pmApi = {
   projectTasks: (projectId: number) => request<{ tasks: PmTask[] }>(`/pm/projects/${projectId}/tasks`),
   getTask: (taskId: number) => request<PmTask>(`/pm/tasks/${taskId}`),
   taskEvents: (taskId: number) => request<{ events: PmTaskEvent[] }>(`/pm/tasks/${taskId}/events`),
+  executionReadiness: () => request<{ available: boolean; checks: { id: "bash" | "pipeline"; available: boolean; path: string | null }[] }>("/pm/execution/readiness"),
   launch: (body: { pm_project_id: number; team_id: number; title: string; repo_path: string }) =>
     request<PmTask>("/pm/tasks/launch", {
       method: "POST",

@@ -1,0 +1,20 @@
+import {render,screen,waitFor} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import {QueryClient,QueryClientProvider} from "@tanstack/react-query";
+import {MemoryRouter} from "react-router-dom";
+import {it,expect,vi} from "vitest";
+import {ProcessingWorkbench} from "./ProcessingWorkbench";
+const mocks=vi.hoisted(()=>({request:vi.fn(),run:vi.fn(),stop:vi.fn()}));
+vi.mock("@/lib/api",()=>({request:mocks.request,operateApi:{run:mocks.run,stop:mocks.stop}}));
+vi.mock("./JobConsole",()=>({JobConsole:()=>null}));
+it("submits an explicit project scope and bounded parallelism without changing AI routes",async()=>{
+ mocks.request.mockImplementation(async(path:string)=>path==="/projects/all"?{projects:[{project:"alpha"}]}:path==="/operate/process-recent"?{job_id:"run"}:{counts:{stored_conversations:10,visible_conversations:6,hidden_generated_conversations:4,stored_messages:50,stored_project_records:2,operations_projects:1},database:{database:"test"},timings:[],bindings:[],extraction_pending:5});
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><ProcessingWorkbench/></MemoryRouter></QueryClientProvider>);
+ await screen.findByText("alpha");
+ await userEvent.selectOptions(screen.getByLabelText("Project"),"alpha");
+ await userEvent.selectOptions(screen.getByLabelText("API workers"),"2");
+ await userEvent.click(screen.getByRole("button",{name:"Process recent conversations"}));
+ await waitFor(()=>expect(mocks.request).toHaveBeenCalledWith("/operate/process-recent",expect.objectContaining({body:JSON.stringify({project:"alpha",limit:25,workers:2})})));
+ expect(mocks.run).not.toHaveBeenCalled();
+ expect(screen.getByText("Generated conversations hidden by default")).toBeTruthy();
+});

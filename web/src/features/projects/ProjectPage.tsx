@@ -1,3 +1,4 @@
+import {ContinueProject} from "./ContinueProject";
 import { projectLabel } from "./ProjectName";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
@@ -361,6 +362,8 @@ export function LegacyProjectPage() {
         <h1 className="page-title">{projectLabel({project, display_name:contextData?.display_name})}</h1>
         <p className="page-subtitle">{pageSubtitle}</p>
       </header>
+
+      <ContinueProject key={project} project={project}/>
 
       <div className="project-view-tabs mode-switch" role="tablist" aria-label="Project view">
         <button

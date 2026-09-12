@@ -230,6 +230,31 @@ def _write_context_file(conn, tmp_dir: Path, step: str, resolved: dict[str, Any]
     return path
 
 
+def execution_readiness() -> dict[str, Any]:
+    """Inspect the configured runtime without starting processes or writing files.
+
+    This is a dependency check, not a claim that external CLI authentication,
+    provider availability or a particular team's assignments are valid.
+    """
+    bash_ready = bool(BASH_EXECUTABLE and shutil.which(BASH_EXECUTABLE))
+    pipeline_ready = PIPELINE_SCRIPT.is_file() and os.access(PIPELINE_SCRIPT, os.R_OK)
+    return {
+        "available": bash_ready and pipeline_ready,
+        "checks": [
+            {
+                "id": "bash",
+                "available": bash_ready,
+                "path": BASH_EXECUTABLE,
+            },
+            {
+                "id": "pipeline",
+                "available": pipeline_ready,
+                "path": str(PIPELINE_SCRIPT),
+            },
+        ],
+    }
+
+
 def launch_task(conn, *, pm_project_id: int, team_id: int, title: str, repo_path: str) -> dict[str, Any]:
     if BASH_EXECUTABLE is None:
         raise RuntimeError(

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -59,7 +59,7 @@ it("saves an explicit local embedding model and never offers a chat CLI for embe
     screen.getByRole("combobox", { name: "Model" }),
     "nomic-embed-text",
   );
-  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save Search embeddings" }));
   await waitFor(() =>
     expect(
       mocks.request.mock.calls.some(
@@ -112,7 +112,7 @@ it("serializes connection tests and shows an actionable bridge error", async () 
     </QueryClientProvider>,
   );
   const buttons = await screen.findAllByRole("button", {
-    name: "Test connection",
+    name: /Test connection for/,
   });
   await userEvent.click(buttons[0]);
   expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
@@ -120,8 +120,25 @@ it("serializes connection tests and shows an actionable bridge error", async () 
   const error =
     "The host CLI bridge is busy with another request. Wait for it to finish, then test again.";
   finish({ ok: false, error });
-  expect(await screen.findByText(error)).toBeTruthy();
+  expect(await screen.findByText(`Answers: ${error}`)).toBeTruthy();
   await waitFor(() =>
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(false),
   );
+});
+
+
+it("gives every purpose a named form and uniquely named actions", async () => {
+  const purposes = ["answer", "titles", "project_names", "extraction", "reflection", "embeddings"];
+  const names = ["Answers", "Conversation titles", "Project names", "Knowledge and entities", "Reflection", "Search embeddings"];
+  mocks.request.mockResolvedValue({ purposes, bindings: [], bridge: { clis: {} } });
+  mocks.providers.mockResolvedValue({ providers: [] });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter><AiSettings /></MemoryRouter></QueryClientProvider>);
+  for (const name of names) {
+    const form = await screen.findByRole("form", { name });
+    expect(within(form).getByRole("button", { name: `Save ${name}` })).toBeTruthy();
+    const test = within(form).getByRole("button", { name: `Test connection for ${name}` });
+    expect((test as HTMLButtonElement).disabled).toBe(true);
+    expect(test.getAttribute("aria-describedby")).toBeTruthy();
+    expect(within(form).getByRole("status")).toBeTruthy();
+  }
 });

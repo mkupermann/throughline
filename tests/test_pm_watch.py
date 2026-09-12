@@ -1,5 +1,10 @@
+import os
 from pathlib import Path
+from unittest.mock import Mock
 
+import pytest
+
+from throughline.jobs import pm_watch
 from throughline.jobs.pm_watch import (
     extract_aider_tokens,
     latest_iteration,
@@ -104,3 +109,45 @@ def test_extract_aider_tokens_sums_all_turns():
 
 def test_extract_aider_tokens_no_matches_is_zero():
     assert extract_aider_tokens("no token lines here") == 0
+
+
+@pytest.mark.parametrize("log_state", ["missing", "empty", "stale", "recent"])
+def test_poll_adopted_task_handles_unavailable_or_stale_logs(tmp_path: Path, monkeypatch, log_state):
+    log_dir = tmp_path / "run"
+    now = 2_000_000_000
+    monkeypatch.setattr(pm_watch.time, "time", lambda: now)
+    if log_state != "missing":
+        log_dir.mkdir()
+    if log_state in {"stale", "recent"}:
+        log_file = log_dir / "pipeline.log"
+        log_file.write_text("Starting pipeline")
+        age = 31 * 60 if log_state == "stale" else 60
+        os.utime(log_file, (now - age, now - age))
+
+    conn = object()
+    task = {"id": 42, "log_dir": str(log_dir), "pid": None}
+    queries = Mock()
+    queries.get_task.return_value = {"status": "running", "tokens_used": 0}
+    queries.budgets_for_task.return_value = {}
+    monkeypatch.setattr(pm_watch, "Q", queries)
+
+    pm_watch.poll_task(conn, task)
+
+    if log_state == "recent":
+        queries.add_task_event.assert_not_called()
+        queries.set_task_status.assert_not_called()
+        return
+
+    queries.set_task_status.assert_called_once_with(conn, 42, "stopped")
+    inactivity = (
+        "keine Aktivität seit 31 Minuten"
+        if log_state == "stale"
+        else "keine Logdateien verfügbar; Dauer der Inaktivität unbekannt"
+    )
+    queries.add_task_event.assert_called_once_with(
+        conn,
+        task_id=42,
+        step="executor",
+        event_type="error",
+        message=f"Lauf extern beendet — {inactivity}",
+    )

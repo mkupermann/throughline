@@ -491,5 +491,29 @@
 
 .language-toggle { flex-shrink: 0; display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .language-toggle button { font: inherit; font-size: 11px; cursor: pointer; border: 0; background: transparent; color: inherit; padding: 5px 7px; }
-.language-toggle button[aria-pressed="true"] { background: var(--accent, #0668d8); color: white; font-weight: 750; }
+.language-toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 750; }
 .language-toggle button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+
+/* Mobile navigation is an explicit drawer; reading keeps the full viewport. */
+.mobile-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--surface-raised); border-bottom: 1px solid var(--border-muted); }
+.mobile-brand { display: flex; align-items: center; gap: var(--space-2); color: var(--text-primary); }
+.mobile-brand svg { color: var(--accent); }
+.mobile-menu-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 44px; padding: var(--space-2) var(--space-3); background: var(--surface-base); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-md); font: inherit; cursor: pointer; }
+.mobile-menu-close { align-self: flex-end; }
+.mobile-nav-backdrop { position: fixed; inset: 0; z-index: var(--z-drawer); background: var(--scrim); }
+@media (max-width: 768px) {
+  .shell { display: block; }
+  .sidebar[hidden] { display: none; }
+  .sidebar.is-open { position: fixed; inset: 0 auto 0 0; z-index: var(--z-overlay); width: min(340px, calc(100vw - 24px)); height: 100dvh; overflow-y: auto; gap: var(--space-3); box-shadow: var(--elev-3); }
+  .sidebar .brand-text, .sidebar .nav-group-title { display: block; }
+  .sidebar .density-toggle { display: flex; }
+  .sidebar .nav-link { flex-direction: row; justify-content: flex-start; min-height: 44px; padding: var(--space-2); gap: var(--space-2); }
+  .sidebar .nav-link span { font-size: var(--text-base); text-align: left; }
+  .sidebar-foot { flex-direction: row; justify-content: flex-start; }
+  .sidebar-foot .icon-button { width: 44px; height: 44px; }
+  .sidebar-foot .language-toggle button, .sidebar-foot .density-toggle button { min-height: 44px; }
+  .main { padding: var(--space-4) var(--space-3) var(--space-6); }
+  .provider-bar { gap: var(--space-1); margin-bottom: var(--space-4); }
+  .provider-chip { min-height: 40px; }
+  .provider-bar-note { white-space: normal; }
+}

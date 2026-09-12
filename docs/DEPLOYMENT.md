@@ -8,7 +8,7 @@ beyond localhost.
 ## 1. Docker Compose (recommended)
 
 ```bash
-python3 scripts/init_compose_env.py
+python3 scripts/init_compose_env.py --check-docker
 docker compose config --quiet
 docker compose up -d
 ```
@@ -25,8 +25,8 @@ Starts:
 
 `scripts/init_compose_env.py` creates or updates the ignored `.env` with a
 random database password plus your numeric UID/GID. The image remains
-unprivileged, and that matching identity can read 0600 source files on Linux
-and Docker Desktop for macOS. Re-run it after moving the checkout to another
+unprivileged. Matching identities can read 0600 source files on rootful Linux
+Docker without user-namespace remapping and on Docker Desktop for macOS. Re-run it after moving the checkout to another
 user, then rebuild with `docker compose build`.
 
 Host tool directories (`~/.claude`, `~/.cursor`, `~/.codex`, …) are mounted
@@ -50,9 +50,34 @@ Running an ingest inside the stack:
 docker compose exec web throughline ingest --all
 ```
 
-Note for Linux hosts: the Cline mount in `docker-compose.yml` uses the macOS
-VS Code path (`~/Library/Application Support/Code/...`). On Linux, change it to
-`~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks`.
+### Private source mount compatibility
+
+The quick-start preflight (`--check-docker`) checks the selected Docker daemon
+before creating or changing `.env`. Rootless Docker and daemon user-namespace
+remapping do not preserve the host UID inside the container: setting the same
+numeric UID cannot make a private host file readable. SELinux-enabled daemons
+also require a reviewed label policy; the default mounts do not apply one.
+The preflight stops with an actionable message for these configurations.
+
+Use the native installation below to ingest as the owner of your transcripts.
+PostgreSQL may still run in Docker: initialize database settings without the
+source-mount check, then start only `postgres`:
+
+```bash
+python3 scripts/init_compose_env.py
+docker compose up -d postgres
+```
+
+Configure the native process with that database's `PG*` connection settings
+and run `throughline migrate` followed by `throughline ingest --all`.
+Alternatively, an administrator can configure an appropriate rootful Docker
+context and source mount policy. Do not make transcripts world-readable, run
+the application privileged, disable SELinux, or automatically relabel entire
+tool home directories to work around an access error.
+
+Cline's existing task directory is detected by the initializer. If Cline is
+absent, it creates an empty `.cline-tasks` placeholder. Override
+`THROUGHLINE_CLINE_DIR` in `.env` for an installation in another location.
 
 ## 2. Native installation
 

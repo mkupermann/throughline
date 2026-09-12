@@ -20,6 +20,7 @@ import { ToastProvider } from "@/components/Toaster";
 import { DashboardPage } from "@/features/pm/DashboardPage";
 import { CockpitPage } from "@/features/pm/CockpitPage";
 import { TaskPage } from "@/features/pm/TaskPage";
+import { TemplatesPage } from "@/features/pm/TemplatesPage";
 import { RolesPage } from "@/features/pm/RolesPage";
 import { MembersPage } from "@/features/pm/MembersPage";
 import { TeamsPage } from "@/features/pm/TeamsPage";
@@ -68,6 +69,7 @@ const router = createBrowserRouter([
       { path: "pm", element: <DashboardPage /> },
       { path: "pm/projects/:id", element: <CockpitPage /> },
       { path: "pm/tasks/:id", element: <TaskPage /> },
+      { path: "pm/templates", element: <TemplatesPage /> },
       { path: "pm/roles", element: <RolesPage /> },
       { path: "pm/members", element: <MembersPage /> },
       { path: "pm/teams", element: <TeamsPage /> },

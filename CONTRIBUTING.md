@@ -12,13 +12,22 @@ and moves fast — a little coordination up front saves everyone time.
 
 ## Getting set up
 
+Use Python 3.12 and Node 22 to match the current CI environment. Runtime metadata
+permits Python 3.10+, but CI currently exercises Python 3.12 only. PostgreSQL 16
+with pgvector is required for database-backed tests; it is not needed for the
+DB-free suite. The activation command below is for a POSIX shell.
+
 ```bash
-git clone https://github.com/mkupermann/Throughline.git
-cd Throughline
-make install
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+pip install -r requirements-dev.txt
+npm --prefix web ci
 ```
 
-If the installer does not work on your OS, see [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
+For platform-specific setup and PostgreSQL prerequisites, see [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
 for a manual walkthrough.
 
 ## Branch naming
@@ -31,7 +40,7 @@ Use a short prefix and a hyphenated description.
 | `fix/` | Bug fix | `fix/ingest-duplicate-sessions` |
 | `docs/` | Documentation only | `docs/installation-linux` |
 | `refactor/` | Internal cleanup, no behavior change | `refactor/split-app-py` |
-| `chore/` | Tooling, CI, dependencies | `chore/bump-throughline serve` |
+| `chore/` | Tooling, CI, dependencies | `chore/bump-dependencies` |
 | `test/` | Test additions or repairs | `test/reflect-memory-dedup` |
 
 Branch off `main`. Keep branches rebased, not merged.
@@ -129,6 +138,10 @@ files over 1 MiB). To run all hooks ad hoc:
 pre-commit run --all-files
 ```
 
+The hook formatter is Ruff; CI separately enforces Black. After hooks change
+Python files, run both the Ruff checks and Black check above before submission.
+Passing the hooks alone does not imply that all CI checks pass.
+
 Integration tests are **not** part of the pre-commit run — they require a live
 Postgres. Run them with:
 
@@ -157,7 +170,7 @@ npm --prefix web run build
 git diff --exit-code -- throughline/web
 
 # Shell syntax
-for file in scripts/*.sh; do bash -n "$file"; done
+while IFS= read -r file; do bash -n "$file"; done < <(git ls-files '*.sh')
 
 # Fresh schema snapshot (requires PostgreSQL and psql)
 createdb throughline_schema_check
@@ -173,25 +186,47 @@ markdownlint-cli2 '**/*.md'
 
 CI (`.github/workflows/ci.yml`) also builds and smoke-installs the wheel outside
 the checkout, verifies migration idempotence, runs all PostgreSQL-backed tests,
-validates the Compose configuration, and exercises the eval/status smoke paths.
+and exercises the eval/status smoke paths. Check Compose configuration separately with
+`docker compose config --quiet` after initializing the ignored environment file.
+CI runs for pushes to `main` and pull requests targeting `main`; a feature-branch
+push alone does not trigger it. Markdown CI checks formatting, not every link target.
 
 ## Tests
 
 The DB-free suite covers packaged runtime behavior; PostgreSQL-backed tests use
 fresh temporary databases and must run without skips in CI.
 
-End-to-end smoke test (requires a running Postgres with the schema loaded):
+### Real-server browser checks
+
+With a disposable PostgreSQL 16/pgvector service and standard `PG*` connection
+variables configured, run the same fixture and browser checks as CI:
 
 ```bash
-# Seed a fake session
-python3 tests/seed_fake_session.py
-
-# Ingest it
-python3 scripts/ingest_sessions.py
-
-# Verify
-psql -d throughline -c "SELECT count(*) FROM conversations WHERE project_name = 'test-fixture';"
+npm --prefix web ci
+(cd web && npx playwright install --with-deps chromium)
+npm --prefix web run build
+python scripts/seed_demo_data.py --dbname throughline_browser_demo
+PGDATABASE=throughline_browser_demo THROUGHLINE_AUTH_MODE=local \
+  throughline serve --host 127.0.0.1 --port 8795
 ```
+
+Keep that server running and use a second terminal:
+
+```bash
+THROUGHLINE_DEMO_URL=http://127.0.0.1:8795 npm --prefix web run test:browser
+```
+
+The script checks three actual pages in both themes with axe, plus mobile
+navigation focus and horizontal overflow. It writes screenshots and results under
+`/tmp/throughline-browser-results` by default. This is a bounded browser regression,
+not a full WCAG conformance audit. The `_demo` database is reseeded by the fixture;
+never substitute a production database.
+
+Use [the fictional demo guide](docs/DEMO.md) for browser smoke tests against an
+isolated database. Never point fixture seeders or integration tests at a real corpus.
+For UI changes, inspect desktop and mobile, both themes, keyboard focus, loading,
+empty and error states. Record the exact commit, commands and observed results in
+the PR; screenshots and model review do not replace behavior checks.
 
 ## Submitting a pull request
 
@@ -229,7 +264,7 @@ It is not a substitute for tests, review, or judgement, and it does not catch
 everything — a second model is simply one that cannot be persuaded by the
 reasoning that produced the work, because it never saw it. What it has caught
 so far was mostly not in the prose: three pipelines that still required one
-vendor's CLI inside a tool whose claim is that it does not, a privacy statement
+vendor's CLI inside a tool that claims not to require any one vendor's CLI, a privacy statement
 that contradicted itself two paragraphs later, and an absolute filesystem path
 rendered into a screenshot bound for a public repository.
 
@@ -239,23 +274,37 @@ it is reviewing, and one that cannot is a void review, not a passing one.
 
 ## Architecture decisions
 
-Non-trivial design choices are documented as ADRs under `docs/adr/`.
-If your PR introduces a new dependency, changes the schema, or alters a
-public interface, add a short ADR (use `docs/adr/0000-template.md` as a
-starting point) in the same PR.
+Document non-trivial choices in the relevant architecture or design document,
+including alternatives, consequences and migration implications. Start from
+[the architecture overview](docs/architecture.md) or [design blueprint](DESIGN.md).
+There is currently no ADR directory or ADR template in this repository.
 
 ## Release process
 
-Maintainer-only:
+Releases are maintainer actions, separate from merging a contribution. The current
+[release workflow](.github/workflows/release.yml) builds and publishes a Docker image
+to GHCR for matching version tags, targeting Linux amd64 and arm64. It does **not**
+create a GitHub Release, publish to PyPI, or wait for CI to pass. Manual dispatch
+also publishes an image; it is not a validation-only run.
 
-```bash
-# Bump version in pyproject.toml and CHANGELOG.md
-git commit -am "chore(release): vX.Y.Z"
-git tag vX.Y.Z
-git push --follow-tags
-```
+Before publishing:
 
-CI will create a GitHub release from the tag.
+1. Choose a reviewed commit on `main` and confirm its complete CI run is green.
+2. Update `pyproject.toml` and `CHANGELOG.md` consistently; review migration,
+   deployment and security notes for the release.
+3. Follow the [release validation checklist](docs/RELEASE_CHECKLIST.md), including
+   clean installation, upgrade rehearsal, shipped assets and claims review.
+4. Commit the version change through normal review and recheck CI for that commit.
+5. Create an annotated version tag on the intended commit and push that exact tag.
+   Avoid `--follow-tags`, which can publish unrelated local tags.
+6. Inspect the Release workflow result and verify the published image digest and
+   architectures. Create a GitHub Release with reviewed notes separately if desired.
+
+Do not use a release tag to test the pipeline: it publishes externally. The
+workflow requires an exact version tag at the checked-out commit and refuses
+untagged commits. Image tags derive from that resolved version; only a stable
+version receives `latest`. Use the published digest when verifying a release
+rather than assuming that a mutable tag still identifies it.
 
 ## Questions
 

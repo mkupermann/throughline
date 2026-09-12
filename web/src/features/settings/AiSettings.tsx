@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { pmApi, request, type PmAiProvider } from "@/lib/api";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
+import "./ai-settings.css";
 
 interface Binding {
   purpose: string;
@@ -24,6 +25,15 @@ const labels: Record<string, string> = {
   extraction: "Knowledge and entities",
   reflection: "Reflection",
   embeddings: "Search embeddings",
+};
+
+const descriptions: Record<string, string> = {
+  answer: "Answer questions using your saved context.",
+  titles: "Make conversations easier to recognize and revisit.",
+  project_names: "Keep related work organized under recognizable names.",
+  extraction: "Turn source material into reusable knowledge.",
+  reflection: "Review accumulated context for useful insights.",
+  embeddings: "Make related content discoverable through semantic search.",
 };
 
 function Purpose({
@@ -77,6 +87,8 @@ function Purpose({
   return (
     <form
       className="ai-purpose"
+      aria-labelledby={`purpose-${purpose}`}
+      aria-describedby={`purpose-description-${purpose}`}
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
@@ -98,7 +110,15 @@ function Purpose({
         }
       }}
     >
-      <h2>{t(labels[purpose] ?? purpose)}</h2>
+      <div className="ai-purpose-heading">
+        <div>
+          <h2 id={`purpose-${purpose}`}>{t(labels[purpose] ?? purpose)}</h2>
+          <p id={`purpose-description-${purpose}`}>{t(descriptions[purpose] ?? "")}</p>
+        </div>
+        <span className="ai-purpose-state">
+          {t(dirty ? "Unsaved changes" : binding ? "Selection saved" : "Installation default")}
+        </span>
+      </div>
       <div className="ai-purpose-fields">
         <label>
           {t("Provider or installed CLI")}
@@ -177,25 +197,27 @@ function Purpose({
             </select>
           </label>
         )}
-        <button className="button" disabled={busy || !choice}>
+        <button className="button" aria-label={t("Save {purpose}", { purpose: t(labels[purpose] ?? purpose) })} disabled={busy || !choice}>
           {t("Save")}
         </button>
         <button
           type="button"
           className="button"
+          aria-label={t("Test connection for {purpose}", { purpose: t(labels[purpose] ?? purpose) })}
+          aria-describedby={dirty || !binding ? `test-help-${purpose}` : undefined}
           disabled={busy || dirty || !binding || testing !== null}
           onClick={async () => {
             setBusy(true);
             setTesting(purpose);
             setMessage("");
             try {
-              const result = await request<{ ok: boolean; error?: string }>(
+              const result = await request<{ ok: boolean; error?: string; elapsed_seconds?: number }>(
                 `/ai/settings/${purpose}/test`,
                 { method: "POST" },
               );
               setMessage(
                 result.ok
-                  ? t("Connection verified")
+                  ? `${t("Connection verified")}${result.elapsed_seconds === undefined ? "" : ` · ${result.elapsed_seconds}s`}`
                   : t(result.error ?? "Connection failed"),
               );
             } catch (e) {
@@ -209,6 +231,7 @@ function Purpose({
           {t(testing === purpose ? "Testing connection…" : "Test connection")}
         </button>
       </div>
+      {(dirty || !binding) && <p id={`test-help-${purpose}`} className="ai-test-help">{t("Save your selection before testing the connection.")}</p>}
       <p>
         {provider
           ? `${t("Destination")}: ${provider.base_url || provider.provider_type}`
@@ -239,7 +262,7 @@ function Purpose({
           {t("Model list unavailable. You can enter a model ID and test it.")}
         </p>
       )}
-      {message && <p role="status">{message}</p>}
+      <p role="status" aria-live="polite" className="ai-purpose-feedback">{message ? `${t(labels[purpose] ?? purpose)}: ${message}` : ""}</p>
     </form>
   );
 }
@@ -264,16 +287,17 @@ export function AiSettings() {
           )}
         </p>
       </header>
-      <p>
-        <Link to="/settings/providers">
-          {t("Manage API providers, keys and model lists")}
-        </Link>
-      </p>
-      <p>
-        {t(
-          "Connection tests send only a synthetic test prompt. Processing sends the selected source excerpts to the configured service. CLI credentials remain on the host; API keys use the existing local provider store.",
-        )}
-      </p>
+      <div className="ai-settings-guide">
+        <div>
+          <h2>{t("Connect once. Choose by purpose.")}</h2>
+          <p>{t("Add a provider, choose a model for each purpose, then save and test the connection.")}</p>
+        </div>
+        <Link className="button" to="/settings/providers">{t("Manage providers")}</Link>
+      </div>
+      <details className="ai-settings-privacy">
+        <summary>{t("Where your data goes")}</summary>
+        <p>{t("Connection tests send only a synthetic test prompt. Processing sends the selected source excerpts to the configured service. CLI credentials remain on the host; API keys use the existing local provider store.")}</p>
+      </details>
       {(q.error || providers.error) && (
         <p role="alert">{(q.error || providers.error)?.message}</p>
       )}

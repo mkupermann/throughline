@@ -17,6 +17,7 @@ from throughline.queries._exec import one, rows
 
 SUBMIT_LOCK = 139401
 WORKER_LOCK = 139402
+PROCESS_OPTIONS = frozenset({"THROUGHLINE_PROCESS_PROJECT", "THROUGHLINE_PROCESS_LIMIT", "THROUGHLINE_PROCESS_WORKERS"})
 EXPORT_OPTIONS = frozenset(
     {
         "THROUGHLINE_EXPORT_OUT",
@@ -101,8 +102,10 @@ class DurableJobRunner:
         if name not in JOBS:
             raise KeyError(name)
         options = extra_env or {}
-        if options and (name != "export-markdown" or set(options) - EXPORT_OPTIONS):
-            raise ValueError("Only registered export options can be persisted.")
+        if options and set(options) - (
+            EXPORT_OPTIONS if name == "export-markdown" else PROCESS_OPTIONS if name == "process-recent" else set()
+        ):
+            raise ValueError("Only registered export or processing options can be persisted.")
         if any(not isinstance(value, str) or len(value) > 4096 for value in options.values()):
             raise ValueError("Invalid export options.")
         unmet = check_requirement(JOBS[name].requires)

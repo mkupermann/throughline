@@ -2,9 +2,9 @@
 
 ## Threat Model
 
-This tool is a **local-first, single-user** memory database. It is not designed
-to be exposed on a network or shared between users. That context shapes the
-security model.
+Throughline is a **local-first** memory workspace. It supports unauthenticated
+local use and an optional authenticated internal workspace with one shared corpus.
+These modes have different trust boundaries; neither provides tenant isolation.
 
 ### In scope
 
@@ -15,13 +15,16 @@ security model.
 - web UI on `http://127.0.0.1:8790` (native) or `:8788` (Docker)
 - launchd or systemd user jobs that run as the local user
 - Optional provider API keys in the local database or environment variables, and host CLI credentials
+- Authenticated internal team mode behind an operator-managed TLS proxy, including
+  account roles, session handling and access to the shared corpus
 
 ### Out of scope
 
-- Multi-user deployments
-- Network-exposed databases or UIs. A native `throughline serve` refuses a
-  non-loopback bind unless `THROUGHLINE_ALLOW_REMOTE=1` is set. That bypass is
-  only for an operator who has added their own authentication and TLS.
+- Public multi-tenant hosting and confidential projects within a shared corpus
+- Directly exposed databases or unauthenticated web interfaces. A native
+  `throughline serve` refuses a non-loopback bind unless `THROUGHLINE_ALLOW_REMOTE=1`
+  is set. This is a networking override, not authentication; internal shared
+  deployment requires team mode and a TLS reverse proxy.
 - Shared CI/CD infrastructure
 
 ## Known Considerations
@@ -51,7 +54,7 @@ For a controlled internal shared corpus, enable `THROUGHLINE_AUTH_MODE=team`, se
 
 All members can read the shared corpus. Project-level ACLs, tenant isolation, SSO and MFA are not implemented. The server operator and database owner are trusted administrators. These controls are tested in a local multi-account fixture; they are not an independent penetration test or organizational acceptance.
 
-### The Markdown export is the one endpoint that writes files
+### Markdown export and administrative writes
 
 Administrative processing and AI-team operations also execute registered jobs and may write generated results. The
 Markdown export takes a destination from the caller, which on an
@@ -118,8 +121,9 @@ Slack / Stripe API-key shapes, JWTs, `Authorization: Bearer` headers, explicit
 `password=` / `secret=` / `token=` assignments, private-key blocks, email
 addresses, and home-directory usernames in file paths.
 
-Conservative by design — we prefer leaking an uncommon secret shape to
-destroying legitimate memory content. Override with the environment variable
+The redactor recognizes a finite set of patterns and can miss uncommon secrets.
+It preserves content outside those patterns; it is not a data-loss-prevention
+boundary or a guarantee that a transcript is safe to send. Override with the environment variable
 `THROUGHLINE_REDACT_PII=0` if you are processing synthetic data and want the
 raw transcript to reach the model.
 
@@ -165,13 +169,16 @@ please report it responsibly.
    `Security → Advisories → Report a vulnerability`
 2. Include a minimal reproduction and your environment (OS, Python,
    PostgreSQL versions).
-3. Expect an acknowledgment within 7 days.
+3. Include affected commit or version, impact and a safe reproduction that omits
+   live credentials. Maintainer response time is not guaranteed.
 
 Do **not** file public issues for security bugs. Public disclosure before
 a fix puts every user at risk.
 
 ## Supported Versions
 
-Only the `main` branch receives security fixes. If a released version is
-marked in the CHANGELOG, the most recent tag is also supported for 90 days
-after release.
+Security fixes are developed against `main`. There is no automated backport
+process or guaranteed support window for older tags. A tag is an immutable
+release snapshot; consult release notes and `CHANGELOG.md` for an explicitly
+identified fixed version. Feature branches are development previews, not
+separate supported release lines.

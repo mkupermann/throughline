@@ -12,7 +12,7 @@ import psycopg2
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from throughline.jobs.pm_launch import launch_task, stop_task
+from throughline.jobs.pm_launch import execution_readiness, launch_task, stop_task
 from throughline.jobs.pm_watch import parse_verdict, read_run_text
 from throughline.queries import pm as Q
 
@@ -616,8 +616,18 @@ def task_iteration_log(
     return {"iteration": iteration, "log_tail": log_tail, "verdict": verdict}
 
 
+@router.get("/pm/execution/readiness")
+def get_execution_readiness() -> dict[str, Any]:
+    return execution_readiness()
+
+
 @router.post("/pm/tasks/launch")
 def launch(body: LaunchIn, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    if not execution_readiness()["available"]:
+        raise HTTPException(
+            status_code=503,
+            detail="Execution runtime is unavailable. Check /pm/execution/readiness: install Bash and configure a readable AI_PIPELINE_SCRIPT_PATH, then restart Throughline.",
+        )
     with connection(settings) as conn:
         try:
             return launch_task(conn, **body.model_dump())
@@ -661,3 +671,94 @@ def register(body: RegisterIn, settings: Settings = Depends(get_settings)) -> di
                 status_code=409,
                 detail="a task for this repo_path/run_id is already registered",
             ) from exc
+
+
+# Versioned templates remain distinct from configured projects, teams and roles.
+class TemplateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    kind: Literal["project", "team", "role"]
+    name: str
+    description: str = ""
+    content: dict[str, Any] = {}
+
+
+class TemplatePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str | None = None
+    description: str | None = None
+    content: dict[str, Any] | None = None
+    archived: bool | None = None
+    expected_version: int | None = None
+
+
+class TemplateInstanceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str
+    description: str | None = None
+    version: int | None = None
+
+
+def _validate_template_fields(fields):
+    if "name" in fields and (not fields["name"] or len(fields["name"]) > 200):
+        raise HTTPException(422, "Name must contain 1 to 200 characters")
+    for key in ("description", "content", "archived"):
+        if key in fields and fields[key] is None:
+            raise HTTPException(422, f"{key} cannot be null")
+    for key in ("version", "expected_version"):
+        if fields.get(key) is not None and fields[key] < 1:
+            raise HTTPException(422, f"{key} must be positive")
+    content = fields.get("content", {})
+    for key in ("instructions", "expected_output", "allowed_tools"):
+        if key in content and not isinstance(content[key], str):
+            raise HTTPException(422, f"{key} must be text")
+
+
+def _template_call(conn, operation, *args, **kwargs):
+    from throughline.queries.pm_templates import TemplateConflict
+
+    try:
+        return operation(conn, *args, **kwargs)
+    except TemplateConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/pm/templates")
+def list_templates(settings: Settings = Depends(get_settings)):
+    from throughline.queries import pm_templates as templates
+
+    with connection(settings) as conn:
+        return {"templates": templates.list_templates(conn)}
+
+
+@router.post("/pm/templates")
+def create_template(body: TemplateIn, settings: Settings = Depends(get_settings)):
+    from throughline.queries import pm_templates as templates
+
+    fields = body.model_dump()
+    _validate_template_fields(fields)
+    with connection(settings) as conn:
+        return _template_call(conn, templates.create_template, **fields)
+
+
+@router.patch("/pm/templates/{template_id}")
+def patch_template(template_id: int, body: TemplatePatch, settings: Settings = Depends(get_settings)):
+    from throughline.queries import pm_templates as templates
+
+    fields = body.model_dump(exclude_unset=True)
+    _validate_template_fields(fields)
+    with connection(settings) as conn:
+        return _template_call(conn, templates.update_template, template_id, fields)
+
+
+@router.post("/pm/templates/{template_id}/instantiate")
+def instantiate_template(template_id: int, body: TemplateInstanceIn, settings: Settings = Depends(get_settings)):
+    from throughline.queries import pm_templates as templates
+
+    fields = body.model_dump()
+    _validate_template_fields({key: value for key, value in fields.items() if value is not None})
+    with connection(settings) as conn:
+        return _template_call(conn, templates.instantiate_template, template_id, **fields)

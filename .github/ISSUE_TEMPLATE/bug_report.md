@@ -25,8 +25,10 @@ assignees: ''
 - OS: <!-- e.g. macOS 14.5 / Ubuntu 22.04 -->
 - PostgreSQL version: <!-- `psql --version` -->
 - Python version: <!-- `python3 --version` -->
-- the web UI version: <!-- `throughline serve --version` -->
-- Installed via: <!-- install.sh / manual -->
+- Throughline version or commit: <!-- `python -m pip show throughline` or `git rev-parse --short HEAD` -->
+- Installed via: <!-- Docker Compose / native installer / wheel -->
+- Docker mode, if applicable: <!-- rootful / rootless; SELinux enabled? -->
+- Browser and version, for UI issues:
 
 ## Logs / stack trace
 
@@ -34,7 +36,7 @@ assignees: ''
 <summary>Paste the full traceback or relevant log lines here</summary>
 
 ```text
-<!-- your logs -->
+<!-- Remove API keys, passwords, session content, personal paths and other confidential data before posting. -->
 ```
 
 </details>

@@ -52,3 +52,32 @@ def test_launch_explains_that_git_bash_is_required(monkeypatch):
             title="demo",
             repo_path="C:/work/demo",
         )
+
+
+def test_execution_readiness_missing_dependencies_is_read_only(tmp_path, monkeypatch):
+    script = tmp_path / "missing" / "pipeline.sh"
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", script)
+    monkeypatch.setattr(pm_launch, "BASH_EXECUTABLE", None)
+    before = list(tmp_path.rglob("*"))
+    result = pm_launch.execution_readiness()
+    assert result["available"] is False
+    assert all(not check["available"] for check in result["checks"])
+    assert list(tmp_path.rglob("*")) == before
+
+
+def test_execution_readiness_requires_readable_file_and_real_bash(tmp_path, monkeypatch):
+    script = tmp_path / "pipeline.sh"
+    script.write_text("#!/bin/bash\nexit 0\n")
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", script)
+    monkeypatch.setattr(pm_launch, "BASH_EXECUTABLE", "bash")
+    monkeypatch.setattr(pm_launch.shutil, "which", lambda _: "/bin/bash")
+    assert pm_launch.execution_readiness()["available"] is True
+    monkeypatch.setattr(pm_launch.os, "access", lambda *_: False)
+    assert pm_launch.execution_readiness()["available"] is False
+
+
+def test_execution_readiness_rejects_directory_as_pipeline(tmp_path, monkeypatch):
+    monkeypatch.setattr(pm_launch, "PIPELINE_SCRIPT", tmp_path)
+    monkeypatch.setattr(pm_launch, "BASH_EXECUTABLE", "bash")
+    monkeypatch.setattr(pm_launch.shutil, "which", lambda _: "/bin/bash")
+    assert pm_launch.execution_readiness()["available"] is False

@@ -104,3 +104,6 @@ build/
 
 # Placeholder for the Cline mount on machines without Cline installed.
 .cline-tasks/
+
+# Intermediate recordings; publish reviewed MP4/GIF assets instead.
+docs/media/*.webm

@@ -1,270 +1,216 @@
-<p align="center"><img src="docs/brand/wordmark.svg" alt="Throughline — Your AI work, in context" width="100%"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/throughline-wordmark-dark.svg">
+    <img src="docs/brand/throughline-wordmark.svg" alt="Throughline" width="420">
+  </picture>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-151b1e.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-151b1e.svg)](pyproject.toml)
-[![PostgreSQL 16 + pgvector](https://img.shields.io/badge/postgres-16%20%2B%20pgvector-151b1e.svg)](sql/schema.sql)
-[![CI](https://github.com/mkupermann/throughline/actions/workflows/ci.yml/badge.svg)](https://github.com/mkupermann/throughline/actions/workflows/ci.yml)
-[![Status: beta](https://img.shields.io/badge/status-beta-c55234.svg)](CHANGELOG.md)
+<p align="center"><strong>Recover the context. Organize the team. Continue the work.</strong></p>
 
-**Open a project after four weeks. Understand what you investigated, why the decisions changed, which results still hold, and what comes next.**
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1f2328.svg" alt="MIT license"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.10%2B-151b1e.svg" alt="Python 3.10 or newer"></a>
+  <a href="sql/schema.sql"><img src="https://img.shields.io/badge/postgres-16%20%2B%20pgvector-151b1e.svg" alt="PostgreSQL 16 with pgvector"></a>
+  <a href="https://github.com/mkupermann/throughline/actions/workflows/ci.yml"><img src="https://github.com/mkupermann/throughline/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/status-beta-0550ae.svg" alt="Beta"></a>
+</p>
 
-Throughline brings locally stored AI conversations into a source-linked project history. It imports sessions from nine supported tools into PostgreSQL, keeps prompts and answers in their conversations, and helps you resume work without assembling the story from separate archives.
+Throughline is a self-hosted workspace for AI-assisted projects. Bring conversations from nine tools into one source-linked history, recover the decisions behind your work, and configure AI teams with reusable project, team and role templates.
 
-The core workflow works without a connected AI model. Optional models add semantic search, extraction and generated answers. Run it locally for one person, or enable authenticated team mode for a controlled internal workspace with one shared corpus. Team mode adds viewer/editor/admin accounts and a change history; it does not isolate confidential projects from other members.
+**Return after a month and know what happened, what supports it, and what to do next.** Your conversations stay connected to their projects. Your teams start with a brief, defined responsibilities and review criteria.
 
-[Start locally](#quick-start-with-docker) · [Deploy a shared workspace](docs/TEAM_DEPLOYMENT.md) · [Upgrade an existing installation](docs/UPGRADING.md) · [Watch the walkthroughs](#see-every-area) · [Try fictional data](docs/DEMO.md) · [Data-model audit](docs/PROJECT_STORY.md) · [What is still missing](docs/ROADMAP.md)
+[Quick start](#quick-start) · [Product tour](#see-throughline) · [Template library](#a-template-library-for-real-work) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
 
-## One complete processing pass
+![Throughline project workspace showing recorded context, next steps and source conversations](docs/media/workspace.png)
 
-Use **Process everything** in Projects, Timeline or Operate. One click starts a complete pass through configured sources and pending records:
+## From scattered sessions to continued work
 
-**Import → skills → prompts → project names → conversation titles → knowledge → entities → reflection → embeddings → extraction audit → diagnostics.**
-
-The button shows progress and provides **Stop**. The pass removes the individual buttons' small batch limits, attempts later steps after a failure and reports an incomplete result if anything fails or is blocked. Reflection creates review suggestions; it does not automatically confirm or merge knowledge. Export remains separate because it needs a destination.
-
-Processing requests and completed steps are saved in PostgreSQL. Closing the browser or restarting the web process does not discard them. After a worker or container interruption, processing resumes and skips finished steps; the interrupted step may run again. This is at-least-once processing, so an already submitted remote request may be repeated. Each execution attempt has a 24-hour limit for a full pass, or one hour for an individual job.
-
-Open **AI settings** to choose a provider and model for each purpose. Saved selections never silently switch providers. Source-derived project names are marked as AI suggestions and link to their conversations; user-saved labels take precedence.
-
-[Processing and AI settings guide](docs/AI_PROCESSING.md) · [Processing video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [AI settings video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4)
-
-## Follow the work
-
-1. **Choose a project.** See its recorded goal, current position, blocker and next step, with links to the messages supporting them.
-2. **Follow its conversations.** Browse across tools and dates. Expand a conversation to read the full messages and their extracted notes.
-3. **Inspect the evidence.** Prompt, answer and recorded output have distinct labels. Timestamps include seconds and timezone when available. An absent timestamp or unrecorded file is shown as missing.
-4. **See what changed.** Earlier project notes remain available. A superseded memory points to its replacement and source conversation.
-5. **Prepare the next session.** Select conversations, inspect a compact Markdown handoff, then download it for another tool.
-
-![Atlas project: a source-linked goal, current position and next step](docs/videos/projects.png)
-
-The collapsed conversation card previews the **first prompt**, **last recorded answer**, and **latest recorded tool output or file-reference count**. These are explicitly labelled excerpts, not an inferred prompt/answer pairing. Open the conversation to inspect the sequence. A tool output is not automatically proof that a file was successfully created; explicit file blocks are shown as references, without claiming the file still exists.
-
-## A project is the context
-
-Conversations belong in projects. Messages and extracted memories belong in their conversations. A message may be a search hit or a direct source link, but it is not an independent event on the Timeline.
-
-Imported conversations initially use source working-folder groups. Matching names can include multiple folders; the project view exposes those folders and lets you filter them. Use **Create a project**, then **Project assignment and history** inside a conversation to place it explicitly. Assignments survive re-import and retain the original source folder. Display labels are separate: a user-saved label takes precedence, followed by a generated suggestion, then a source excerpt while naming is pending. Changing a label does not reassign conversations. Assignment history records corrections. Earlier project notes stay where they were recorded and flag a source that has moved.
-
-Time order describes chronology, not causality. Throughline displays supported explicit source relationships where recorded; it does not infer a dependency because two sessions happened close together. See the [relationship and provenance audit](docs/PROJECT_STORY.md).
-
-## See every area
-
-The demo seeder reseeds its target tables; use a separate database ending in `_demo`. Its optional `--reset` flag drops that demo database.
-
-The animated previews below play directly in this README. Click a preview or **Full video** to open its MP4. Every recording uses the actual English interface and the bundled fictional corpus. Videos have burned-in English captions and separate WebVTT tracks. They demonstrate navigation and inspection; no real model call or agent execution is presented as a demo result.
-
-| Area and walkthrough | Animated preview |
+| Recover project context | Prepare AI team operations |
 |---|---|
-| **Projects**<br>Find Atlas and recover its source-linked state.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) · [Captions](docs/videos/projects.vtt) | [![Projects walkthrough — fictional demo](docs/videos/projects.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/projects.mp4) |
-| **Workspace access**<br>Sign in and inspect shared-workspace accounts, roles and changes.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4) · [Captions](docs/videos/workspace-access.vtt) | [![Workspace access — fictional demo](docs/videos/workspace-access.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/workspace-access.mp4) |
-| **Project assignment**<br>Create a project and correct a conversation’s membership with its source history intact.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4) · [Captions](docs/videos/project-assignment.vtt) | [![Project assignment — fictional demo](docs/videos/project-assignment.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/project-assignment.mp4) |
-| **Conversations**<br>Choose a project, open a conversation and inspect its output reference.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) · [Captions](docs/videos/conversations.vtt) | [![Conversations walkthrough — fictional demo](docs/videos/conversations.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/conversations.mp4) |
-| **Find**<br>Search imported records with their source context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) · [Captions](docs/videos/find.vtt) | [![Find walkthrough — fictional demo](docs/videos/find.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/find.mp4) |
-| **Timeline**<br>Open a dated bucket, then expand conversations within their project context.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) · [Captions](docs/videos/timeline.vtt) | [![Timeline walkthrough — fictional demo](docs/videos/timeline.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/timeline.mp4) |
-| **Review**<br>Inspect contradictory and superseded knowledge.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) · [Captions](docs/videos/review.vtt) | [![Review walkthrough — fictional demo](docs/videos/review.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/review.mp4) |
-| **Operate**<br>Understand import, extraction and embedding stages.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) · [Captions](docs/videos/operate.vtt) | [![Operate walkthrough — fictional demo](docs/videos/operate.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/operate.mp4) |
-| **Complete processing**<br>Inspect all eleven steps, the start button and recovery behavior.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) · [Captions](docs/videos/processing.vtt) | [![Complete processing walkthrough — fictional demo](docs/videos/processing.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/processing.mp4) |
-| **AI settings**<br>Choose local models, hosted APIs or installed CLIs per purpose.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) · [Captions](docs/videos/ai-settings.vtt) | [![AI settings walkthrough — fictional demo](docs/videos/ai-settings.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/ai-settings.mp4) |
-| **Console**<br>Count conversations by source with read-only SQL.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) · [Captions](docs/videos/console.vtt) | [![Console walkthrough — fictional demo](docs/videos/console.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/console.mp4) |
-| **AI team operations**<br>Inspect linked projects, task states and budgets.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) · [Captions](docs/videos/teams.vtt) | [![AI team operations walkthrough — fictional demo](docs/videos/teams.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/teams.mp4) |
-| **Roles**<br>Separate analysis, execution, testing and review responsibilities.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) · [Captions](docs/videos/roles.vtt) | [![Roles walkthrough — fictional demo](docs/videos/roles.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/roles.mp4) |
-| **Members**<br>Inspect fictional people and agents.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4) · [Captions](docs/videos/members.vtt) | [![Members walkthrough — fictional demo](docs/videos/members.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/members.mp4) |
-| **Team pipelines**<br>Inspect reusable team configuration.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4) · [Captions](docs/videos/pipelines.vtt) | [![Team pipelines walkthrough — fictional demo](docs/videos/pipelines.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/pipelines.mp4) |
-| **Model providers**<br>Inspect provider configuration independently of project history.<br>[Full video](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) · [Captions](docs/videos/models.vtt) | [![Model providers walkthrough — fictional demo](docs/videos/models.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/videos/models.mp4) |
+| Import local sessions from Claude Code, Codex, Vibe and six other tools. | Start with a project template and its linked team and roles. |
+| Inspect recorded goals, blockers, next steps and supporting messages. | Customize objectives, deliverables and acceptance criteria. |
+| Search across tools without losing the original conversation. | Keep role responsibilities separate from model assignments. |
+| Select sessions and download a Markdown handoff for your next tool. | Save editable resources with their original template versions. |
 
-[Video gallery and captions](docs/videos/README.md) · [Reproduce the recordings](docs/DEMO.md)
+The core import, browsing and handoff workflow works without a connected model. Optional AI adds extraction, semantic search and generated answers. Light and dark themes, English and German navigation, and a mobile drawer keep the same workspace usable across devices.
 
-Use **EN / DE** in the sidebar to switch interface language; the choice is shared with AI team operations and saved in this browser. English is the default. Imported conversations, project notes, tool output and file names retain their original language. Technical identifiers and diagnostic output can remain English. This README and the walkthroughs are English.
+**Team templates configure work; they do not execute it by themselves.** Launching agent runs requires a separately installed compatible executor. Workflow instructions and review policies are guidance, not automatically enforced approval gates.
 
-The navigation keeps daily work separate from system operations. Labels remain visible in narrow panels. Use `Ctrl+K` / `Cmd+K` for the command palette; `g` then `v` opens Conversations. Project history is the default project view; **Full document** opens the alternative complete document layout.
+## Continue work without rebuilding context
 
-## Know what you can trust
+Open a project and choose **Continue this project** for a bounded Markdown brief of recorded knowledge and recent conversation excerpts, with links back to the evidence.
+It runs locally without an AI call and is also available as the MCP tool `continue_project(project, max_chars=12000)`.
+Excerpts are historical evidence, not verified instructions: the brief does not inspect current code, infer task completion, or invent missing decisions.
 
-| What you see | What it means |
+In **Operate**, use **Process recent conversations** to select one project or the newest conversations across projects, with a per-stage limit.
+Successful source versions—including valid empty results—are checkpointed atomically with their derived records.
+Unchanged versions are skipped on later runs; edited versions become eligible again.
+Existing history without checkpoints needs one initial pass.
+API processing supports one to four workers; CLI processing stays serial to avoid contention on the host bridge.
+Timings and approximate remaining time are measured during processing; no fixed speedup or automatic model switch is promised.
+Use **Embeddings first** to make existing knowledge searchable without waiting for the full enrichment pass.
+
+Expand **Where is my data?** to compare stored, visible, and generated conversations, historical project records and separate Operations projects.
+The same panel shows the connected database, pending extraction versions and actual model selections.
+Database health does not certify backups; restore verification remains an external deployment responsibility.
+See [processing and recovery](docs/AI_PROCESSING.md) for checkpoint, retry and concurrency details.
+
+## See Throughline
+
+[![Animated walkthrough of the current Throughline interface](docs/media/throughline-tour.gif)](docs/media/throughline-tour.mp4)
+
+[Watch the full video](docs/media/throughline-tour.mp4) · [English captions](docs/media/throughline-tour.vtt) · [Template walkthrough](docs/media/templates-tour.mp4) · [Template captions](docs/media/templates-tour.vtt) · [Earlier feature walkthroughs](docs/videos/README.md)
+
+The tour and screenshots show the actual application with fictional demonstration data. The full tour has burned-in English captions and a separate caption track; the GIF is a short preview. They demonstrate navigation and template inspection, not completed model calls or autonomous agent execution. To run your own demonstration, follow the [demo guide](docs/DEMO.md) using a separate database ending in `_demo`.
+
+| AI Team Operations | Template library |
 |---|---|
-| A project-state note | A user-recorded statement with a source; it is not independent verification |
-| Extracted memory | A model-derived note to inspect in its conversation |
-| A replacement or supersession | The earlier statement remains traceable; status alone does not establish truth |
-| A generated answer | A model response whose citations need checking |
-| A file reference | An explicit recorded output block; current file availability is not verified |
-| A missing relationship or timestamp | The imported data did not establish it |
+| ![Operations overview with project and team resources](docs/media/operations.png) | ![Searchable project, team and role template library](docs/media/templates.png) |
 
-Counts describe imported records, not every conversation that ever existed. Unsupported formats, missing files, source timestamps and excluded automation can limit coverage. The project view exposes its source folders, refresh time and automation filter. The latest state fields remain separate from the last 100 historical state notes.
+<details>
+<summary>See the mobile workspace</summary>
 
-## Quick start with Docker
+<p align="center"><img src="docs/media/mobile.png" alt="Throughline mobile workspace with full-width content and drawer navigation" width="300"></p>
 
-Docker Compose is the shortest supported path. It includes PostgreSQL 16 with pgvector and serves the app on loopback.
+</details>
+
+## A template library for real work
+
+Open **AI Team Operations → Templates** to search the library, filter by category, preview a template and create an editable resource.
+
+| Template type | What it provides |
+|---|---|
+| **Project** | Objective, required inputs, planned stages, deliverables, acceptance criteria and a linked team. |
+| **Team** | Role composition, collaboration order, handoff expectations and review policy. |
+| **Role** | Responsibilities, instructions, requested tools and expected output. |
+
+Projects create their linked teams and roles together. Instances retain a template snapshot; editing the library does not silently rewrite existing work. Assign models, providers and members through the resource editors after creation.
+
+**103 starter templates: 43 projects, 15 teams and 45 roles.** Fourteen professional categories each provide three project blueprints, one team and three specialist roles, alongside five general product-improvement starters: one project, one team and three roles. [Browse the complete catalog, deliverables and usage guide](docs/TEMPLATES.md).
+
+| Category | Example project templates |
+|---|---|
+| **Finance** | Rolling cash-flow forecast · Budget variance review · Unit economics assessment |
+| **Science** | Reproducible experiment · Structured literature review · Dataset quality assessment |
+| **Education** | Course module design · Assessment and feedback pack · Learning support intervention |
+| **Enterprise** | Application portfolio review · Enterprise AI pilot · Change readiness assessment |
+| **Mid-size business** | Sales-to-delivery handoff · ERP selection brief · Capacity and hiring plan |
+| **Startups** | Problem validation sprint · MVP scope and launch plan · Pricing experiment design |
+| **Engineering** | API integration delivery · Legacy refactoring plan · Incident analysis and prevention |
+| **Product and design** | Usability improvement sprint · Design system consolidation · Onboarding activation review |
+| **Marketing** | Campaign planning kit · Content refresh audit · Customer case study draft |
+| **Operations** | Standard operating procedure · Supplier performance review · Service capacity improvement |
+| **Security** | Threat modelling workshop · Access review preparation · Security incident tabletop |
+| **Legal and compliance** | Policy gap assessment · Contract review preparation · Audit evidence readiness |
+| **Healthcare** | Clinic administration workflow · Patient information readability · Healthcare service quality review |
+| **Nonprofit and public good** | Grant proposal preparation · Programme impact framework · Volunteer onboarding programme |
+
+Templates are starting points for a human-reviewed brief, not claims of professional accreditation or regulatory compliance.
+
+## Quick start
+
+Docker Compose includes PostgreSQL 16 with pgvector and serves the application on loopback. You need Git, Python 3 and Docker with Compose.
+
+The workspace, template library and incremental processing controls are included on `main`. Use a separate demo database to evaluate them before processing a private corpus.
 
 ```bash
-git clone https://github.com/mkupermann/throughline.git
+git clone --branch main https://github.com/mkupermann/throughline.git
 cd throughline
-python3 scripts/init_compose_env.py
+python3 scripts/init_compose_env.py --check-docker
 docker compose up -d
 docker compose exec web throughline ingest --all
 ```
 
-On Windows, use `py -3 scripts/init_compose_env.py` if `python3` is not available.
+Open **[http://127.0.0.1:8788](http://127.0.0.1:8788)**.
 
-Open [http://127.0.0.1:8788](http://127.0.0.1:8788).
+On Windows, use `py -3` if `python3` is unavailable. The initializer creates an ignored `.env` with a random database password and detects Cline's task directory. Source folders are mounted read-only; inspect [docker-compose.yml](docker-compose.yml) to adjust the imports. Ingestion is explicit.
 
-The initializer detects Cline’s task directory for macOS, Linux or Windows. For another editor profile, set `THROUGHLINE_CLINE_DIR` in `.env` after initialization to its task directory. Other source mounts are listed in `docker-compose.yml`.
+1. Open **Projects** and choose an imported project.
+2. Follow a recorded note to its source, then select conversations for a handoff.
+3. Open **AI Team Operations → Templates** to create a configured project.
+4. Add model connections in **AI settings** when you want optional AI processing.
 
-The setup script creates an ignored `.env` with a random database password. Source directories are mounted read-only. The default local mode has no login and binds to loopback. For colleagues, configure [team mode and a TLS proxy](docs/TEAM_DEPLOYMENT.md). The first ingestion is explicit.
+For a native installation with an existing PostgreSQL instance, see [Installation](docs/INSTALLATION.md). For a shared workspace, follow [Team deployment](docs/TEAM_DEPLOYMENT.md).
 
-### Keep the database safe
-
-The PostgreSQL named volume contains the corpus. Rebuilding or replacing the web container does not remove it.
-
-Do not run `docker compose down -v` unless you intend to destroy the database. Use the normal update path instead:
+### Update without losing your corpus
 
 ```bash
+docker compose exec web throughline backup
 git pull
 docker compose build web migrate
 docker compose up -d migrate web
 docker compose exec web throughline doctor
 ```
 
-Create a verified backup before a major update:
+The database lives in a persistent named volume. **`docker compose down -v` deletes it.** Keep verified backups and follow [Upgrading](docs/UPGRADING.md) and [Deployment](docs/DEPLOYMENT.md) for migration and recovery details.
 
-```bash
-docker compose exec web throughline backup
+## Connect your tools and models
+
+**Supported conversation sources:** Claude Code, Cline, Codex CLI, Continue, Cursor, Hermes, Vibe, Windsurf and Zed. Adapters normalize supported local formats into conversations and messages. Re-ingestion updates changed source files without duplicating conversations. See [Adapter development](docs/ADAPTER_DEVELOPMENT.md).
+
+Choose a provider independently for answers, conversation titles, project names, knowledge extraction, reflection and search embeddings. Generation supports Ollama, OpenAI, Anthropic, Mistral, Gemini, OpenRouter and OpenAI-compatible APIs. An optional authenticated host bridge connects Codex, Vibe and Claude Code using your existing CLI access.
+
+Embeddings require a compatible embedding API and a 768- or 1536-dimensional model; chat CLIs cannot supply them. Explicit saved selections never silently fall back to another provider. A local CLI may still contact a hosted service.
+
+**Process everything** runs ingestion and pending enrichment stages with progress and a Stop action. Requests and completed steps are persisted; interrupted steps may repeat after recovery. See [AI processing and provider setup](docs/AI_PROCESSING.md) for model requirements, data destinations and the host CLI bridge.
+
+## Evidence you can inspect
+
+Throughline preserves distinctions that matter when resuming work:
+
+- **Recorded project state** is a sourced statement, not independent verification.
+- **Extracted memories and generated answers** remain model output that needs review.
+- **Prompt and answer excerpts** are labelled separately; open the conversation for their sequence.
+- **File references** show what was recorded, without claiming that the file still exists.
+- **Missing timestamps and relationships** stay missing. Chronology does not establish causality.
+
+Projects expose source folders and assignment history. Renaming a display label does not move conversations. Explicit assignments survive re-import, while earlier notes retain their original context. See the [project history and provenance guide](docs/PROJECT_STORY.md).
+
+Markdown export carries your project history into other tools. The optional [MCP server](memory_mcp/) lets compatible clients search and maintain shared memory. See [Usage](docs/USAGE.md) for export, search, scheduling and CLI commands.
+
+## Architecture and deployment boundaries
+
+```mermaid
+flowchart LR
+    Sources[Local AI session files] --> Adapters[Source adapters]
+    Adapters --> DB[(PostgreSQL + pgvector)]
+    DB <--> API[Python / FastAPI]
+    API <--> UI[React / TypeScript workspace]
+    API <--> Models[Optional model providers]
+    API <--> CLI[CLI and MCP clients]
+    UI --> Templates[Project / Team / Role templates]
+    Templates --> Resources[Configured operational resources]
+    Resources -. separate setup .-> Executor[External agent executor]
 ```
 
-See [Deployment](docs/DEPLOYMENT.md) for upgrades, credential rotation, backups, and recovery.
+The built frontend ships inside the Python package; using Throughline does not require Node. Compose applies ordered database migrations before starting the web service.
 
-## Choose the AI for each purpose
-
-In **AI settings**, choose a provider and model independently for:
-
-| Purpose | What the model receives |
-| --- | --- |
-| Answers | Retrieved source excerpts and your question |
-| Conversation titles | A bounded conversation preview |
-| Project names | Openings from up to eight recent conversations in the existing folder group |
-| Knowledge and entities | Conversation excerpts |
-| Reflection | Candidate knowledge records to compare |
-| Search embeddings | Text to convert into vectors |
-
-Generation supports **Ollama, OpenAI, Anthropic, Mistral, Gemini, OpenRouter and OpenAI-compatible APIs**, plus **Codex, Vibe and Claude Code** through the optional authenticated host CLI bridge. Models must support the requested operation and structured response format. The bridge uses the host's existing CLI login; Throughline does not supply subscriptions or model access. See [bridge setup](docs/AI_PROCESSING.md#host-cli-bridge).
-
-Embeddings need an embedding API and a matching **768- or 1536-dimensional** model. Chat CLIs cannot provide them. Supported adapters are Ollama, OpenAI, Mistral, OpenRouter and OpenAI-compatible APIs. Vectors are kept separate by model and endpoint.
-
-For a local setup:
-
-```bash
-docker compose --profile embeddings up -d ollama
-docker exec throughline-ollama ollama pull nomic-embed-text
-```
-
-Also install a generation model that fits your machine. Open **AI settings → Manage API providers**, add the Ollama endpoint reachable from the application (`http://ollama:11434` for the Compose profile), then select your generation model for the five text purposes and `nomic-embed-text` with 768 dimensions for embeddings. Save and use **Test connection** before **Process everything**. Generation tests request structured JSON using synthetic content; embedding tests validate vector dimensions.
-
-A local CLI can still call a hosted service. Check the destination for every purpose before processing private material. Provider API keys are stored as plaintext in the local database and are omitted from provider/settings API responses. Database access, backups and the read-only SQL Console can still expose stored credentials. See [Security](SECURITY.md).
-
-A saved purpose selection takes precedence over legacy environment defaults and the embedding command's `--backend` option. Without a saved selection, the older configuration path remains: embedding `auto` uses OpenAI when `OPENAI_API_KEY` is set, while generation `auto` prefers local Ollama before configured hosted routes. To require local processing, explicitly save local providers for every purpose. Selected-provider failures remain errors; they never trigger a silent fallback.
-
-## Supported sources
-
-| Tool | Session location |
+| Boundary | Current behavior |
 |---|---|
-| Claude Code | `~/.claude/projects/` |
-| Cline | the editor's `globalStorage` task directory |
-| Codex CLI | `~/.codex/sessions/` |
-| Continue | `~/.continue/sessions/` |
-| Cursor | `~/.cursor/sessions/` |
-| Hermes | `~/.hermes/sessions/` |
-| Vibe | `~/.vibe/logs/session/` |
-| Windsurf | `~/.windsurf/plans/` |
-| Zed | `~/.zed/data/sessions/` |
+| **Local mode** | No login; loopback binding is the default. |
+| **Shared workspace** | Viewer, editor and administrator accounts with change history; one shared corpus. |
+| **Project confidentiality** | No project-level isolation between workspace members. SSO/MFA are not provided. |
+| **Model data** | Selected providers receive the content needed for their purpose; check each destination before processing private data. |
+| **Credentials** | Provider keys are stored as plaintext in the local database and omitted from normal provider/settings responses. Database access, backups and SQL Console access can expose them. |
+| **Agent execution** | Requires a separately configured external pipeline; template policies do not create enforced runtime permissions. |
 
-Adapters normalise each source into conversations and messages. Re-ingestion is idempotent. Changed source files refresh their stored conversation without creating duplicates. Third-party adapters can register through the `throughline.adapters` entry point. See [Adapter development](docs/ADAPTER_DEVELOPMENT.md).
+Throughline is **beta software**. Read [Security](SECURITY.md) before a shared deployment and [Roadmap](docs/ROADMAP.md) for remaining work. A template in a regulated category does not make the application a certified system for that industry.
 
-Codex rollouts from current app builds and older CLI builds are both supported. Parser upgrades reconsider files that an older parser could not read.
+## Documentation
 
-## The daily loop
+| Start and operate | Understand and extend |
+|---|---|
+| [Installation](docs/INSTALLATION.md) | [Project history and provenance](docs/PROJECT_STORY.md) |
+| [Team deployment](docs/TEAM_DEPLOYMENT.md) | [Design blueprint](DESIGN.md) |
+| [Upgrading](docs/UPGRADING.md) | [Architecture](docs/architecture.md) |
+| [Template catalog and usage](docs/TEMPLATES.md) | [Adapter development](docs/ADAPTER_DEVELOPMENT.md) |
+| [AI processing](docs/AI_PROCESSING.md) | [Current tour media](docs/media/README.md) |
+| [CLI usage](docs/USAGE.md) | [FAQ](docs/FAQ.md) |
+| [Fictional demo and recordings](docs/DEMO.md) | [Changelog](CHANGELOG.md) |
 
-Most days Throughline should update itself in the background.
+## Development and contributing
 
-| Platform | Scheduler | Setup |
-|---|---|---|
-| macOS | per-user launchd agents | [`launchd/`](launchd/) |
-| Linux | systemd user timers | [`systemd/`](systemd/) |
-| Windows | Task Scheduler | [`windows/`](windows/) |
-
-The scheduled jobs ingest hourly, extract daily, and back up daily. The Windows scripts detect a running Docker setup and use it directly. Native installations use the same commands with a local environment file.
-
-When you need something back:
-
-```bash
-throughline ask "why did we change the ingestion queue?"
-throughline search "pgvector index"
-throughline serve
-```
-
-When you need to inspect the system:
-
-```bash
-throughline status
-throughline doctor
-throughline conflicts
-throughline migrate --status
-```
-
-The complete command guide is in [Usage](docs/USAGE.md).
-
-## Take the knowledge with you
-
-Markdown export writes one folder per project. Sessions remain chronological and large projects split into manageable dated parts. Re-running updates files Throughline owns and leaves your own notes alone.
-
-```bash
-throughline export-markdown --out ~/Documents/Throughline
-throughline export-markdown --out ~/Documents/Throughline --project throughline
-throughline export-markdown --out ~/Documents/Throughline --redact
-```
-
-The redaction pass removes common key, token, email, and home-path shapes. It reduces exposure but cannot prove that arbitrary transcript content is safe. Review an export before placing it in a shared or cloud-synced folder.
-
-The MCP server in [`memory_mcp/`](memory_mcp/) lets compatible clients search, recall, write, supersede, and forget shared memory while they work. The optional Claude Code SessionStart hook can preload a short project-scoped context file.
-
-## Architecture
-
-- Python and FastAPI provide the CLI, API, jobs, and server.
-- React, TypeScript, Vite, and TanStack Query provide the web interface.
-- PostgreSQL 16 and pgvector store the corpus and vector index.
-- Ollama or an OpenAI-compatible endpoint can provide local generation.
-- The built frontend ships inside the Python package. Installing Throughline does not require Node.
-
-Schema changes use ordered migrations. Compose applies them before the web service starts. `throughline migrate --status` shows what is applied and what remains.
-
-## Native installation
-
-The native route is intended for a machine that already has PostgreSQL 16 and pgvector.
-
-```bash
-git clone https://github.com/mkupermann/throughline.git
-cd throughline
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-createdb throughline
-throughline migrate
-throughline ingest --all
-throughline serve
-```
-
-The application reads standard `PG*` variables and an ignored repository-root `.env`. The native server defaults to [http://127.0.0.1:8790](http://127.0.0.1:8790).
-
-Full setup details are in [Installation](docs/INSTALLATION.md).
-
-## Optional AI-team operations
-
-The system area can configure projects, roles, members, pipelines, providers and token budgets, and inspect supported local agent runs. Its project records are separate from imported-history projects and are connected through explicit links. A linked project name opens its conversation history.
-
-This remains an advanced setup workflow. A guided path from project goal to team to first task, project-level confidentiality, SSO/MFA and broader organizational user validation remain open. Conversation assignment and shared-workspace account roles are available now. See [the roadmap](docs/ROADMAP.md).
-
-## Development
-
-Install the development dependencies, then run the same checks as CI:
+Read [Contributing](CONTRIBUTING.md) for development setup, branch conventions and commit requirements. Maintainers use the [release validation checklist](docs/RELEASE_CHECKLIST.md) before publishing; the release workflow publishes container images, not GitHub Releases or PyPI packages. Run the checks used by CI:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -277,14 +223,8 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
-Integration tests require a disposable PostgreSQL 16 instance with pgvector. Current walkthroughs use [`scripts/seed_demo_data.py`](scripts/seed_demo_data.py). The older screenshot fixture remains in [`examples/demo_data.sql`](examples/demo_data.sql). See [demo reproduction](docs/DEMO.md) for the current media workflow.
-
-Contributions are welcome. Read [Contributing](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report bugs in [Issues](https://github.com/mkupermann/throughline/issues). Report security problems through the channel in [Security](SECURITY.md).
-
-## Status
-
-Throughline is beta software. Its schema is migration-tracked and its core paths run in CI against PostgreSQL. Back up a corpus you care about. Treat every model boundary as a data boundary.
+Integration tests require a disposable PostgreSQL 16 database with pgvector. Contributions follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report reproducible bugs through [GitHub Issues](https://github.com/mkupermann/throughline/issues), and security issues through [Security](SECURITY.md).
 
 ## License
 
-Throughline is released under the [MIT License](LICENSE).
+[MIT](LICENSE). Self-host it, inspect it and adapt it to your workflow.

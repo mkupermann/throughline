@@ -179,17 +179,15 @@ def parse_json_response(text: str) -> dict:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1:
-        return {"entities": [], "relationships": []}
-    try:
-        parsed = json.loads(text[start : end + 1])
-        if not isinstance(parsed, dict):
-            return {"entities": [], "relationships": []}
-        parsed.setdefault("entities", [])
-        parsed.setdefault("relationships", [])
-        return parsed
-    except json.JSONDecodeError as e:
-        print(f"    JSON parse error: {e}")
-        return {"entities": [], "relationships": []}
+        raise ValueError("Entity extraction returned no JSON object")
+    parsed = json.loads(text[start : end + 1])
+    if not isinstance(parsed, dict) or not all(
+        isinstance(parsed.get(key), list) for key in ("entities", "relationships")
+    ):
+        raise ValueError("Entity extraction requires entities and relationships arrays")
+    if any(not isinstance(item, dict) for key in ("entities", "relationships") for item in parsed[key]):
+        raise ValueError("Entity extraction contains malformed records")
+    return parsed
 
 
 def call_model(prompt: str) -> str:
@@ -319,7 +317,7 @@ def extract_for_conversation(cursor, conv_id: int, project_name: str | None) -> 
     prompt = PROMPT_TEMPLATE.replace("{TRANSCRIPT}", transcript)
     response = call_model(prompt)
     if not response:
-        return (0, 0)
+        raise RuntimeError("Empty entity response; source remains pending")
 
     parsed = parse_json_response(response)
     entities = parsed.get("entities", []) or []

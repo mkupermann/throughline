@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, Users, IdCard, Boxes, Cpu } from "lucide-react";
+import { Plus, Users, IdCard, Boxes, Cpu, ArrowRight, LayoutTemplate } from "lucide-react";
 
 import { pmApi, type PmOverviewProject, type PmProject, type PmRepoProject } from "@/lib/api";
 import { useLang } from "./i18n";
@@ -327,10 +327,6 @@ export function DashboardPage() {
 
   const header = (
     <header className="page-header">
-      {/* No breadcrumb eyebrow here — on the dashboard itself, a single
-          "Project Management" crumb would just repeat the H1 right below
-          it. Subpages keep PmHeaderBar's breadcrumb; it earns its place
-          there as an actual trail (Project Management › Roles, etc.). */}
       <div className="pm-headerbar pm-headerbar-end">
         <LangToggle />
       </div>
@@ -343,6 +339,11 @@ export function DashboardPage() {
           onCreated={() => queryClient.invalidateQueries({ queryKey: ["pm-overview"] })}
         />
       </div>
+      <nav className="pm-ops-nav" aria-label={t.dashboard.navigation}>
+        <Link to="/pm" aria-current="page">{t.dashboard.overview}</Link>
+        <Link to="/pm/templates">{t.dashboard.templates}</Link>
+        <a href="#resources">{t.dashboard.resources}</a>
+      </nav>
     </header>
   );
 
@@ -367,12 +368,56 @@ export function DashboardPage() {
   const { projects, counts } = data;
   const liveProjects = projects.filter((p) => p.status !== "archived");
   const archivedProjects = projects.filter((p) => p.status === "archived");
+  const issueCount = (p: PmOverviewProject) => p.tasks.fail + p.tasks.crashed + p.tasks.budget_exceeded;
+  const attentionProjects = liveProjects.filter((p) => issueCount(p) > 0);
+  const issues = liveProjects.reduce((total, p) => total + issueCount(p), 0);
+  const running = liveProjects.reduce((total, p) => total + p.tasks.running, 0);
 
   return (
     <section className="pm-page">
       {header}
 
-      <p className="page-subtitle">{t.dashboard.repoProjects.subtitle} <Link to="/conversations">Conversations →</Link></p>
+      <section className="pm-template-invitation" aria-labelledby="pm-template-intro">
+        <LayoutTemplate size={24} aria-hidden />
+        <div>
+          <h2 id="pm-template-intro">{t.dashboard.templateTitle}</h2>
+          <p>{t.dashboard.templateBody}</p>
+        </div>
+        <Link to="/pm/templates" className="button">{t.dashboard.browseTemplates}<ArrowRight size={16} aria-hidden /></Link>
+      </section>
+
+      <dl className="pm-ops-metrics">
+        <div><dt>{t.dashboard.projectCount}</dt><dd>{fmtInt(liveProjects.length)}</dd></div>
+        <div><dt>{t.dashboard.running}</dt><dd>{fmtInt(running)}</dd></div>
+        <div><dt>{t.dashboard.attention}</dt><dd>{fmtInt(issues)}</dd></div>
+      </dl>
+
+      {attentionProjects.length > 0 && (
+        <section className="pm-attention" aria-labelledby="pm-attention-h">
+          <h2 id="pm-attention-h">{t.dashboard.attention}</h2>
+          <p>{t.dashboard.attentionBody}</p>
+          <ul>{attentionProjects.map((p) => <li key={p.id}><Link to={`/pm/projects/${p.id}`}>{p.name}<ArrowRight size={14} aria-hidden /></Link></li>)}</ul>
+        </section>
+      )}
+      <h2 className="pm-ops-heading">{t.dashboard.liveProjects}</h2>
+
+      {projects.length === 0 ? (
+        <EmptyState title={t.dashboard.emptyTitle}>
+          <p>{t.dashboard.emptyBody}</p>
+        </EmptyState>
+      ) : liveProjects.length > 0 ? (
+        <ul className="pm-card-grid">
+          {liveProjects.map((p) => (
+            <ProjectCard key={p.id} p={p} />
+          ))}
+        </ul>
+      ) : null}
+
+      <ArchiveSection projects={archivedProjects} />
+
+      <section id="resources" className="pm-resources" aria-labelledby="pm-resources-h">
+        <h2 id="pm-resources-h" className="pm-ops-heading">{t.dashboard.resources}</h2>
+        <p>{t.dashboard.resourcesBody}</p>
       <div className="pm-catalog-links" role="group" aria-label={t.dashboard.catalogGroupLabel}>
         <Link to="/pm/roles" className="pm-catalog-link">
           <IdCard size={15} aria-hidden />
@@ -396,20 +441,8 @@ export function DashboardPage() {
         </Link>
       </div>
 
-      {projects.length === 0 ? (
-        <EmptyState title={t.dashboard.emptyTitle}>
-          <p>{t.dashboard.emptyBody}</p>
-        </EmptyState>
-      ) : liveProjects.length > 0 ? (
-        <ul className="pm-card-grid">
-          {liveProjects.map((p) => (
-            <ProjectCard key={p.id} p={p} />
-          ))}
-        </ul>
-      ) : null}
-
-      <ArchiveSection projects={archivedProjects} />
-
+      </section>
+      <p className="pm-ops-context">{t.dashboard.repoProjects.subtitle} <Link to="/conversations">Conversations →</Link></p>
       <RepoProjectsSection />
     </section>
   );

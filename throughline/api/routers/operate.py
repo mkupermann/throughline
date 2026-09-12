@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from throughline import embedding
 from throughline import queries as Q
@@ -26,7 +27,7 @@ router = APIRouter(tags=["operate"])
 #: Jobs this page must not offer as a bare Run button, because they need
 #: input the button cannot supply. The Markdown export needs a destination;
 #: it has its own panel and its own endpoint.
-HIDDEN_JOBS = frozenset({"export-markdown"})
+HIDDEN_JOBS = frozenset({"export-markdown", "process-recent"})
 
 
 def _iso(v: Any) -> Any:
@@ -44,7 +45,7 @@ def generation_panel() -> dict[str, Any]:
     """
     from throughline import llm
 
-    info = llm.backend_info()
+    info = llm.backend_info(purpose="extraction")
     return {
         "available": info.available,
         "backend": info.backend,
@@ -66,7 +67,7 @@ def _last_success(history: list[dict[str, Any]], matches: Callable[[str], bool])
         return None
     run = max(successful, key=_history_sort_key)
     finished = run.get("finished_at")
-    if isinstance(finished, (int, float)):
+    if isinstance(finished, int | float):
         return datetime.fromtimestamp(finished, timezone.utc).isoformat()
     return _iso(finished) if finished else None
 
@@ -81,7 +82,7 @@ def _latest_failure(history: list[dict[str, Any]], matches: Callable[[str], bool
 
 
 def _event_timestamp(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if isinstance(value, datetime):
         parsed = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -497,4 +498,66 @@ def all_progress():
     return {
         "job": current.snapshot() if current else None,
         "steps": [{"name": name, "title": JOBS[name].title} for name in STEPS],
+    }
+
+
+class ProcessingRequest(BaseModel):
+    project: str | None = Field(None, min_length=1, max_length=500)
+    limit: int = Field(50, ge=1, le=500)
+    workers: int = Field(1, ge=1, le=4)
+
+
+@router.post("/operate/process-recent")
+def process_recent(body: ProcessingRequest):
+    options = {"THROUGHLINE_PROCESS_LIMIT": str(body.limit), "THROUGHLINE_PROCESS_WORKERS": str(body.workers)}
+    if body.project:
+        options["THROUGHLINE_PROCESS_PROJECT"] = body.project
+    try:
+        job = runner.start("process-recent", extra_env=options)
+    except JobUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"job_id": job.id, "name": job.name, "running": job.snapshot()["running"]}
+
+
+@router.get("/operate/data")
+def data_visibility(settings: Settings = Depends(get_settings)):
+    from throughline.jobs.incremental import pending
+    from throughline.queries._exec import one, rows
+
+    with connection(settings) as conn:
+        counts = one(
+            conn,
+            """SELECT count(*) AS stored_conversations,
+            count(*) FILTER (WHERE generated_by IS NULL) AS visible_conversations,
+            count(*) FILTER (WHERE generated_by IS NOT NULL) AS hidden_generated_conversations,
+            (SELECT count(*) FROM messages) AS stored_messages,
+            (SELECT count(*) FROM projects) AS stored_project_records,
+            (SELECT count(*) FROM pm_projects) AS operations_projects FROM conversations""",
+        )
+        stats = rows(
+            conn,
+            """SELECT stage,model,count(*) AS completed,
+            round(avg(elapsed_seconds)::numeric,2) AS mean_seconds,
+            count(*) FILTER(WHERE output_count=0) AS empty_results,max(completed_at) AS last_completed
+            FROM processing_checkpoints GROUP BY stage,model ORDER BY stage,model""",
+        )
+        # Bounded preview: the UI explicitly labels a capped queue count.
+        waiting = len(pending(conn, "extract", limit=501))
+        checkpoints = one(conn, "SELECT count(*) AS n FROM processing_checkpoints")["n"]
+        bindings = rows(conn, "SELECT purpose,cli,model,provider_id FROM ai_purposes ORDER BY purpose")
+        identity = one(conn, "SELECT current_database() AS database,version() AS version")
+    return {
+        "counts": counts,
+        "active_job": next((j.id for name in ("process-recent", "embed") if (j := runner.current(name))), None),
+        "database": identity,
+        "extraction_pending": min(waiting, 500),
+        "pending_capped": waiting > 500,
+        "checkpoints": checkpoints,
+        "timings": stats,
+        "bindings": bindings,
+        "backup": {
+            "verified": None,
+            "detail": "Backup restore verification is managed outside this API; no verified backup is inferred from database health.",
+        },
+        "note": "Stored history includes generated sessions hidden from the default library. Operations projects are separate records.",
     }

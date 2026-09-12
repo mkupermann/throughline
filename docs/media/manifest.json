@@ -1,0 +1,54 @@
+{
+  "captured_at": "2026-09-12T00:10:20.452Z",
+  "fictional_data": true,
+  "model_calls": false,
+  "agent_launches": false,
+  "duration_seconds": 36.467,
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "captions": [
+    {
+      "at": 1.198,
+      "text": "Recover a project’s goal, current position and next step."
+    },
+    {
+      "at": 4.74,
+      "text": "Keep source conversations and exact evidence within reach."
+    },
+    {
+      "at": 8.439,
+      "text": "See real project activity and the work that needs attention."
+    },
+    {
+      "at": 12.678,
+      "text": "Browse reusable project, team and role templates by domain."
+    },
+    {
+      "at": 15.697,
+      "text": "Preview the brief, deliverables and acceptance criteria before use."
+    },
+    {
+      "at": 19.731,
+      "text": "Science workflows include reproducibility and independent review."
+    },
+    {
+      "at": 22.739,
+      "text": "Education workflows turn learning goals into practical deliverables."
+    },
+    {
+      "at": 25.76,
+      "text": "Teams connect specialized roles. Choose members and models separately."
+    },
+    {
+      "at": 28.816,
+      "text": "Role instructions define responsibilities and expected outputs."
+    },
+    {
+      "at": 32.962,
+      "text": "Templates save configuration. Actual execution needs a compatible executor."
+    }
+  ],
+  "page_errors": []
+}

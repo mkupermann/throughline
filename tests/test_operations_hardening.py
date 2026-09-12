@@ -425,13 +425,28 @@ def test_compose_source_mounts_follow_the_unprivileged_home(compose: dict) -> No
 
 @POSIX_SHELL_ONLY
 @pytest.mark.integration
-def test_configured_container_uid_reads_a_private_source_mount(tmp_path: Path) -> None:
-    """A 0600 transcript must remain readable after the image drops root."""
+def test_private_source_mount_reads_or_rejects_unsupported_daemon(tmp_path: Path) -> None:
+    """Read a 0600 transcript on supported Docker; reject incompatible mounts early."""
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is not installed")
     probe = subprocess.run(["docker", "info"], capture_output=True, text=True)
     if probe.returncode:
         pytest.skip("Docker daemon is not available to this test user")
+
+    from scripts.init_compose_env import check_docker_source_access
+
+    problem = check_docker_source_access()
+    if problem:
+        env_file = tmp_path / ".env"
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/init_compose_env.py"), "--check-docker", "--env-file", str(env_file)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+        assert "docs/DEPLOYMENT.md#private-source-mount-compatibility" in result.stderr
+        assert not env_file.exists()
+        return
 
     fixture_dir = tmp_path / ".claude"
     fixture_dir.mkdir()
@@ -736,3 +751,41 @@ def test_postgres_is_configured_for_logical_replication(compose: dict) -> None:
     # cap, a laptop that stays away for a fortnight fills the other machine's
     # disk — the slot has no idea anyone is on holiday.
     assert "max_slot_wal_keep_size" in command
+
+
+@pytest.mark.parametrize("options", ['["name=rootless"]', '["name=userns"]', '["name=selinux"]'])
+def test_compose_preflight_rejects_incompatible_private_mounts(tmp_path, monkeypatch, capsys, options):
+    from scripts import init_compose_env
+
+    monkeypatch.setattr(init_compose_env.sys, "platform", "linux")
+    monkeypatch.setattr(
+        init_compose_env.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, options, "")
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=existing-secret\n")
+    original = env_file.read_bytes()
+    assert init_compose_env.main(["--check-docker", "--env-file", str(env_file)]) == 2
+    assert env_file.read_bytes() == original
+    assert "private-source-mount-compatibility" in capsys.readouterr().err
+
+
+def test_compose_preflight_accepts_standard_rootful_docker(monkeypatch):
+    from scripts import init_compose_env
+
+    monkeypatch.setattr(init_compose_env.sys, "platform", "linux")
+    monkeypatch.setattr(
+        init_compose_env.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a, 0, '["name=seccomp,profile=builtin"]', ""),
+    )
+    assert init_compose_env.check_docker_source_access() is None
+
+
+@pytest.mark.parametrize("returncode,output", [(1, ""), (0, "not JSON"), (0, "null")])
+def test_compose_preflight_reports_unavailable_daemon(monkeypatch, returncode, output):
+    from scripts import init_compose_env
+
+    monkeypatch.setattr(
+        init_compose_env.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, returncode, output, "")
+    )
+    assert init_compose_env.check_docker_source_access() is not None

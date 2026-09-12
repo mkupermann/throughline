@@ -154,7 +154,7 @@
 }
 .pm-status-fail,
 .pm-status-crashed {
-  background: var(--status-critical-wash);
+  background: var(--surface-base);
   color: var(--status-critical);
 }
 .pm-status-budget_exceeded {
@@ -1426,3 +1426,112 @@ a.pm-catalog-link:hover {
   border-radius: var(--radius-sm);
   padding: 1px var(--space-1);
 }
+
+/* Operations: a quiet overview above the configured resource catalogs. */
+.pm-ops-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-muted);
+  margin-top: var(--space-5);
+}
+.pm-ops-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--space-2) 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.pm-ops-nav a[aria-current="page"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.pm-ops-nav a:hover { color: var(--accent); }
+.pm-template-invitation {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.pm-template-invitation > svg { color: var(--accent); flex-shrink: 0; }
+.pm-template-invitation > div { flex: 1; min-width: 0; }
+.pm-template-invitation h2, .pm-attention h2, .pm-ops-heading {
+  font-size: var(--text-xl);
+  line-height: var(--leading-tight);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+.pm-template-invitation p, .pm-attention p, .pm-resources > p, .pm-ops-context {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 76ch;
+}
+.pm-template-invitation .button { margin: 0; flex-shrink: 0; gap: var(--space-2); }
+.pm-ops-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--space-5) 0;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-muted);
+  gap: var(--space-4);
+}
+.pm-ops-metrics dt { font-size: var(--text-sm); color: var(--text-secondary); }
+.pm-ops-metrics dd { margin: var(--space-2) 0 0; font-size: var(--text-xl); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pm-attention { border-left: 3px solid var(--status-serious); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
+.pm-attention ul { list-style: none; padding: 0; margin: var(--space-2) 0 0; }
+.pm-attention li a { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; overflow-wrap: anywhere; }
+.pm-resources { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border-muted); scroll-margin-top: var(--space-4); }
+.pm-resources .pm-catalog-links { margin-top: var(--space-3); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pm-resources .pm-catalog-link { min-height: 52px; border-radius: var(--radius-md); padding: var(--space-3); flex-wrap: wrap; }
+.pm-resources .pm-catalog-count { margin-left: auto; }
+.pm-page .pm-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.pm-page .pm-card-name { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 768px) {
+  .pm-template-invitation { flex-wrap: wrap; padding: var(--space-4); }
+  .pm-template-invitation > svg { display: none; }
+  .pm-template-invitation > div { flex-basis: 100%; }
+  .pm-ops-metrics { gap: var(--space-2); }
+  .pm-resources .pm-catalog-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+.pm-project-brief { padding: var(--space-4); border: 1px solid var(--border-muted); border-radius: var(--radius-md); background: var(--surface-raised); }
+.pm-project-brief-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.pm-project-brief h2 { margin: 0; font-size: var(--text-xl); }
+.pm-project-brief .button { margin-top: 0; }
+.pm-project-brief summary { cursor: pointer; color: var(--text-secondary); min-height: 32px; }
+.pm-project-brief-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; max-width: 85ch; }
+.pm-project-brief textarea { width: 100%; resize: vertical; min-height: 180px; }
+.pm-project-brief .pm-header-actions { margin-top: var(--space-3); }
+.pm-project-brief-status { color: var(--text-secondary); font-size: var(--text-sm); }
+.pm-project-brief-status:empty { display: none; }
+/* Keep status washes while ensuring small labels remain legible on cards. */
+.pm-status-pass, .pm-status-completed, .pm-status-budget_exceeded {
+  color: var(--text-primary);
+}
+
+/* Keep prerequisite guidance readable alongside the launch form. */
+.pm-runtime { display: grid; gap: 12px; padding: 20px; }
+.pm-runtime h3 { font-weight: 600; }
+.pm-runtime ul { display: grid; gap: 16px; margin-block: 12px; }
+.pm-runtime li p { margin-block: 6px; }
+.pm-runtime code { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
+.pm-runtime > button { justify-self: start; }
+
+.continuation-panel, .processing-workbench { margin-block: var(--space-5, 20px); padding: var(--space-4, 16px); border: 1px solid var(--border); border-radius: 8px; }
+.continuation-panel p, .processing-workbench p { margin-block: 12px; }
+.continuation-text { width: 100%; max-width: 100%; margin-block: 12px; background: var(--surface-base); color: var(--text-primary); font-family: var(--font-mono); }
+.processing-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.processing-controls label { display: grid; gap: 6px; max-width: 100%; }
+.processing-controls select { max-width: 100%; }
+.processing-workbench details { margin-top: 16px; }
+.data-counts { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; margin-block: 12px; }
+@media (max-width: 600px) { .processing-controls { display: grid; } .processing-controls select { width: 100%; min-width: 0; } }

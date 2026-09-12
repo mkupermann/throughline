@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/lib/theme";
 import { Shell } from "./Shell";
@@ -13,8 +13,11 @@ vi.mock("react-router-dom", async () => {
 vi.mock("./ProviderBar", () => ({ ProviderBar: () => null }));
 vi.mock("./CommandPalette", () => ({ CommandPalette: () => null }));
 
+let mobileViewport = false;
+afterEach(() => { mobileViewport = false; });
+
 vi.stubGlobal("matchMedia", (query: string) => ({
-  matches: false,
+  matches: query === "(max-width: 768px)" && mobileViewport,
   media: query,
   addEventListener() {},
   removeEventListener() {},
@@ -155,4 +158,40 @@ it("shows the active interface language and switches navigation without leaving 
   await userEvent.click(screen.getByRole("button", { name: "Englisch verwenden" }));
   expect(screen.getByRole("button", { name: "Use English" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByTestId("location").textContent).toBe("/conversations");
+});
+
+
+describe("mobile navigation", () => {
+  it("keeps navigation hidden until opened, contains focus and restores it on Escape", async () => {
+    mobileViewport = true;
+    const user = userEvent.setup();
+    renderShell();
+    expect(screen.queryByRole("navigation", { name: "Work" })).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Menu" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Navigation" });
+    const close = within(dialog).getByRole("button", { name: "Close menu" });
+    expect(document.activeElement).toBe(close);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Compact density" }));
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("closes after navigation while carrying provider scope", async () => {
+    mobileViewport = true;
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Menu" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("link", { name: "Find" }));
+    expect(screen.getByTestId("location").textContent).toBe("/find?provider=hermes");
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });
