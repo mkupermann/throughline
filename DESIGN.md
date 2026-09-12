@@ -94,7 +94,6 @@ The Throughline mark is one continuous, turning path: work retains its context a
 
 Assets and use guidelines: [brand identity](docs/brand/README.md).
 
-
 ## Continuation and processing controls
 
 Project workspaces expose an on-demand continuation panel with a plain-text, source-linked preview and Markdown download.

@@ -31,16 +31,13 @@ def pending_extraction(conn, min_messages: int = 5) -> int:
     """Human source versions not yet checkpointed by the enrichment worker."""
     from throughline.jobs.incremental import FINGERPRINT
 
-    return int(
-        scalar(
-            conn,
-            f"""SELECT count(*) FROM conversations c
+    query = f"""
+        SELECT count(*) FROM conversations c
         LEFT JOIN processing_checkpoints p ON p.conversation_id=c.id AND p.stage='extract'
         WHERE c.generated_by IS NULL AND c.message_count >= %s
-        AND (p.fingerprint IS NULL OR p.fingerprint <> {FINGERPRINT})""",
-            (min_messages,),
-        )
-    )
+        AND (p.fingerprint IS NULL OR p.fingerprint <> {FINGERPRINT})
+    """
+    return int(scalar(conn, query, (min_messages,)))
 
 
 def missing_titles(conn, min_messages: int = 2) -> int:
@@ -81,7 +78,7 @@ def embedding_coverage(
 ) -> Row:
     """Share of active chunks usable by the selected embedding backend."""
     column_filter = _embedding_column_filter(column)
-    return one(
+    coverage = one(
         conn,
         f"""
         SELECT
@@ -99,7 +96,8 @@ def embedding_coverage(
         WHERE COALESCE(mc.status, 'active') = 'active'
         """,
         (model, model),
-    ) or {"total": 0, "embedded": 0}
+    )
+    return coverage or {"total": 0, "embedded": 0}
 
 
 def recent_ingestion(conn, limit: int = 50) -> list[Row]:

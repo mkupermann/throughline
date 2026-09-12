@@ -52,7 +52,6 @@ Automatic recovery is limited to three interruptions per queued run. A further i
 
 The host bridge forwards basic runtime/network settings and the local session-bus/runtime location needed by OS keyrings and only the selected CLI's credential/configuration environment family (`CODEX_`/`OPENAI_`, `VIBE_`/`MISTRAL_`, or `CLAUDE_`/`ANTHROPIC_`/`AWS_`/`GOOGLE_`). Database passwords, the bridge token and unrelated environment secrets are not forwarded. Existing credentials stay in their original files and environment. Installed CLIs are trusted software and still read their own host login/configuration files. The first-party processing worker inherits the application environment because it needs database access and the configured providers; that environment is not stored in the queue or sent as a model prompt.
 
-
 ## Incremental processing and speed
 
 **Process recent conversations** runs memory extraction followed by entity extraction, with a per-stage limit and an optional exact project scope.
