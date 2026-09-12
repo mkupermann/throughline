@@ -37,6 +37,7 @@ ALLOWED: frozenset[str] = frozenset(
         "CHANGELOG.md",
         "CODE_OF_CONDUCT.md",
         "CONTRIBUTING.md",
+        "DESIGN.md",
         "Dockerfile",
         "LICENSE",
         "Makefile",

@@ -13,6 +13,7 @@ and psutil for process-liveness checks.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from pathlib import Path
@@ -295,13 +296,17 @@ def poll_task(conn, task: dict) -> None:
         # pipeline.sh run has actually ended is its log_dir going quiet.
         stale_seconds = _log_dir_staleness_seconds(log_dir)
         if stale_seconds > _STALE_THRESHOLD_S:
-            minutes = int(stale_seconds // 60)
+            inactivity = (
+                f"keine Aktivität seit {int(stale_seconds // 60)} Minuten"
+                if math.isfinite(stale_seconds)
+                else "keine Logdateien verfügbar; Dauer der Inaktivität unbekannt"
+            )
             Q.add_task_event(
                 conn,
                 task_id=task_id,
                 step="executor",
                 event_type="error",
-                message=f"Lauf extern beendet — keine Aktivität seit {minutes} Minuten",
+                message=f"Lauf extern beendet — {inactivity}",
             )
             Q.set_task_status(conn, task_id, "stopped")
 

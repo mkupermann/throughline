@@ -39,7 +39,7 @@ export function ProjectLibrary() {
           <FolderOpen size={32} />
         </div>
       </header>
-      <ProcessAll />
+      <div className="story-library-toolbar">
       <CreateProject />
       <div className="story-controls">
         <label className="searchbar">
@@ -51,6 +51,7 @@ export function ProjectLibrary() {
             onChange={(e) => setTerm(e.target.value)}
           />
         </label>
+      </div>
       </div>
       {query.isPending && <p role="status">{t("Loading projects…")}</p>}
       {query.error && (
@@ -79,7 +80,7 @@ export function ProjectLibrary() {
               {!p.display_name && <p className="story-muted">{t("Name and project assignment need review")}</p>}
               <p>
                 {p.sessions}{t(" Conversations · ")}{p.messages}{t(" messages")}</p>
-              <p className="story-muted">
+              <p className="story-muted story-library-tools">
                 {p.tool_names?.join(" · ") || t("Tool not recorded")}
               </p>
             </div>
@@ -111,6 +112,7 @@ export function ProjectLibrary() {
           <Link to="/operate">{t("Open import settings")}</Link>
         </div>
       )}
+      <details className="story-maintenance"><summary>{t("Import and processing")}</summary><ProcessAll /></details>
       <p className="story-footnote">{t("Imported conversations start in source-folder groups. Create a project and assign its conversations to correct that grouping.")}{" "}
         <Link to="/system-overview">{t("System health")}</Link>
       </p>

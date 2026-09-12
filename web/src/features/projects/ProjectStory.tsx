@@ -4,7 +4,7 @@ import { ProjectName, projectLabel } from "./ProjectName";
 import { OutputDisclosure } from "@/features/detail/OutputDisclosure";
 import { t } from "@/lib/ui";
 import { getLang, useLanguage } from "@/lib/language";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -47,9 +47,8 @@ type Source = { conversation: number; message: number | null; excerpt: string };
 
 export function ProjectStory() {
   const { name = "" } = useParams();
-  const [params] = useSearchParams();
-  // Remount scoped state when navigating: selections and late requests cannot leak across projects.
-  return <Story key={`${name}:${params.toString()}`} project={name} />;
+  // A different project owns different selection and editing state.
+  return <Story key={name} project={name} />;
 }
 
 function Story({ project }: { project: string }) {
@@ -61,8 +60,21 @@ function Story({ project }: { project: string }) {
   const generated = params.get("generated") === "true";
   const [draft, setDraft] = useState(term);
   const [source, setSource] = useState<Source | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Map<number, StorySession>>(new Map());
   const [exporting, setExporting] = useState(false);
+  const [selectionNotice, setSelectionNotice] = useState("");
+  const scope = JSON.stringify([path, generated, [...params.getAll("provider")].sort()]);
+  const previousScope = useRef(scope);
+  useEffect(() => { setDraft(term); }, [term]);
+  useEffect(() => {
+    if (previousScope.current !== scope) {
+      previousScope.current = scope;
+      setSelected(new Map());
+      setSource(null);
+      setExporting(false);
+      setSelectionNotice(t("Selection cleared because the source scope changed."));
+    }
+  }, [scope]);
   const queryParams = new URLSearchParams({
     order,
     q: term,
@@ -73,6 +85,7 @@ function Story({ project }: { project: string }) {
     queryParams.append("provider", tool);
   const history = useInfiniteQuery({
     queryKey: ["story", project, queryParams.toString()],
+    placeholderData: keepPreviousData,
     initialPageParam: 0,
     queryFn: ({ pageParam }) => {
       const p = new URLSearchParams(queryParams);
@@ -113,13 +126,13 @@ function Story({ project }: { project: string }) {
             <h1>{projectLabel({project, display_name:data?.identity?.display_name, context_label:data?.identity?.context_label})}</h1>
             <p className="story-subtitle">{t("The work, the evidence, and where to go next.")}</p>
           </div>
-          <button
-            className="button"
-            disabled={!selected.size}
+          <div className="story-handoff-action"><button
+            className="button story-primary"
+            disabled={!selected.size || history.isPlaceholderData}
             onClick={() => setExporting(true)}
           >
             <Download size={16} />{t(" Prepare handoff")}{selected.size > 0 ? ` (${selected.size})` : ""}
-          </button>
+          </button><span className="story-muted">{t("Select conversations below to carry your context forward.")}</span></div>
         </div>
         <div className="story-meta">
           <span>{data?.coverage.sessions ?? "…"}{t(" sessions")}</span>
@@ -129,7 +142,9 @@ function Story({ project }: { project: string }) {
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
-      {data && <ProjectName curated={data.identity?.is_curated} project={project} name={data.identity?.display_name} origin={data.identity?.name_origin} sources={data.identity?.source_conversation_ids} folders={data.paths.length} />}
+      <nav className="story-jump" aria-label={t("Project sections")}>
+        <a href="#position-title">{t("Where we stand")}</a><a href="#history-title">{t("Project history")}</a><a href="#project-details">{t("Project details")}</a>
+      </nav>
       {history.isPending && <p role="status">{t("Loading project history…")}</p>}
       {history.error && (
         <div role="alert" className="story-notice">
@@ -140,7 +155,7 @@ function Story({ project }: { project: string }) {
       )}
       {data && (
         <>
-          <section className="story-position" aria-labelledby="position-title">
+          <section className="story-position" aria-labelledby="position-title" aria-busy={history.isPlaceholderData}>
             <div className="story-section-heading">
               <div>
                 <p className="story-eyebrow">{t("PICK UP THE THREAD")}</p>
@@ -148,13 +163,10 @@ function Story({ project }: { project: string }) {
               </div>
               <span className="story-tag">{t(data.checkpoints.length ? "Recorded project state · sources attached" : "No confirmed project state recorded")}</span>
             </div>
-            {data.recovery && <section className="story-recovery"><h3>{t("Resume from source messages")}</h3><p>{t("Excerpts from the latest conversation. These are not a confirmed project state.")}</p><div className="story-state-grid">{([
-              ["Latest user request", data.recovery.latest_request, data.recovery.latest_request_id, data.recovery.latest_request_at],
-              ["Latest text answer", data.recovery.answer, data.recovery.answer_id, data.recovery.answer_at],
-            ] as const).map(([label, text, message, at]) => <article key={label}><h4>{t(label)}</h4><p>{text || t("Not recorded")}</p>{message && <Link to={sourceUrl(data.recovery!.id, message)}>{t("Source")} · {date(at ?? null)}</Link>}</article>)}</div><p>{t(data.recovery.awaiting_answer ? "A newer user request has no later text answer in the imported data." : "Next step is unconfirmed. Review the latest request and answer before continuing.")}</p><Link to={`/conversations?${new URLSearchParams([...queryParams.entries()].filter(([key]) => key !== "q").concat([["project", project], ["conversation", String(data.recovery.id)]]))}`}>{t("Review this conversation")}</Link></section>}
-            <div className="story-state-grid">
+            {history.isPlaceholderData && <p role="status" className="story-notice">{t("Updating project context. The previous view is shown until the new scope is ready.")}</p>}
+            <div className="story-state-grid" inert={history.isPlaceholderData}>
               {kinds.map((kind) => (
-                <article key={kind}>
+                <article key={kind} className={kind === "next" ? "story-next-step" : undefined}>
                   <h3>{t(labels[kind])}</h3>
                   {latest[kind] ? (
                     <>
@@ -167,6 +179,10 @@ function Story({ project }: { project: string }) {
                 </article>
               ))}
             </div>
+            {data.recovery && <details className="story-recovery" open={data.latest_checkpoints.length === 0}><summary>{t("Latest conversation · unconfirmed excerpts")}</summary><p>{t("Excerpts from the latest conversation. These are not a confirmed project state.")}</p><div className="story-state-grid">{([
+              ["Latest user request", data.recovery.latest_request, data.recovery.latest_request_id, data.recovery.latest_request_at],
+              ["Latest text answer", data.recovery.answer, data.recovery.answer_id, data.recovery.answer_at],
+            ] as const).map(([label, text, message, at]) => <article key={label}><h4>{t(label)}</h4><p>{text || t("Not recorded")}</p>{message && <Link to={sourceUrl(data.recovery!.id, message)}>{t("Source")} · {date(at ?? null)}</Link>}</article>)}</div><p>{t(data.recovery.awaiting_answer ? "A newer user request has no later text answer in the imported data." : "Next step is unconfirmed. Review the latest request and answer before continuing.")}</p><Link to={`/conversations?${new URLSearchParams([...queryParams.entries()].filter(([key]) => key !== "q").concat([["project", project], ["conversation", String(data.recovery.id)]]))}`}>{t("Review this conversation")}</Link></details>}
             {data.checkpoints.length > 0 && (
               <details className="story-audit">
                 <summary>{t("Earlier project states (")}{data.checkpoints.length}{t(" most recent entries)")}</summary>
@@ -199,8 +215,8 @@ function Story({ project }: { project: string }) {
               >
                 <Search size={16} />
                 <input
-                  aria-label="Search project history"
-                  placeholder="Search every session and message…"
+                  aria-label={t("Search project history")}
+                  placeholder={t("Search every session and message…")}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                 />
@@ -239,8 +255,8 @@ function Story({ project }: { project: string }) {
               <p className="story-notice">{t("This name groups ")}{data.paths.length}{t(" working folders. Select a folder to separate unrelated work. Grouping is derived from folder names.")}</p>
             )}
             <div className="story-list-meta">
-              <span>
-                {sessions.length}{t(" of ")}{data.total}{t(" sessions")}{term ? ` ${t("matching")} “${term}”` : ""}
+              <span role="status" aria-live="polite" aria-atomic="true">
+                {history.isFetching ? t("Updating results…") : <>{sessions.length}{t(" of ")}{data.total}{t(" sessions")}{term ? ` ${t("matching")} “${term}”` : ""}</>}
               </span>
               <label>
                 <input
@@ -251,6 +267,9 @@ function Story({ project }: { project: string }) {
                   }
                 />{" "}{t("Include automation (")}{data.hidden_generated})
               </label>
+            </div>
+            <div className="story-selection" role="status" aria-live="polite">
+              {selected.size > 0 ? <><strong>{t("{count} conversations selected", {count: selected.size})}</strong><span>{t("Your selection stays with you while searching and sorting.")}</span><button className="linkbutton" onClick={() => setSelected(new Map())}>{t("Clear selection")}</button></> : selectionNotice}
             </div>
             {!sessions.length && (
               <div className="empty-state">
@@ -265,7 +284,7 @@ function Story({ project }: { project: string }) {
                 </p>
               </div>
             )}
-            <ol className="story-sessions">
+            <ol className="story-sessions" aria-busy={history.isFetching} inert={history.isPlaceholderData}>
               {sessions.map((session) => (
                 <Session
                   key={session.id}
@@ -276,9 +295,9 @@ function Story({ project }: { project: string }) {
                   selected={selected.has(session.id)}
                   onSelect={() =>
                     setSelected((old) => {
-                      const next = new Set(old);
+                      const next = new Map(old);
                       if (next.has(session.id)) next.delete(session.id);
-                      else next.add(session.id);
+                      else next.set(session.id, session);
                       return next;
                     })
                   }
@@ -297,10 +316,13 @@ function Story({ project }: { project: string }) {
               </button>
             )}
           </section>
+          <details id="project-details" className="story-project-details">
+            <summary>{t("Project details")}</summary>
+            <ProjectName curated={data.identity?.is_curated} project={project} name={data.identity?.display_name} origin={data.identity?.name_origin} sources={data.identity?.source_conversation_ids} folders={data.paths.length} />
           <footer className="story-footnote">{t("Latest session refresh: ")}{date(data.coverage.refreshed_at)}.{" "}
             {data.coverage.unattributed}{t(" sessions have no recorded tool.")}<br />{t("Counts describe imported data. Missing transcripts, excluded subagents, and estimated source times may limit this history.")}{" "}
             <Link to="/operate">{t("Import & system details")}</Link>
-          </footer>
+          </footer></details>
         </>
       )}
       {source && (
@@ -314,7 +336,7 @@ function Story({ project }: { project: string }) {
       {exporting && data && (
         <Handoff
           data={data}
-          sessions={sessions.filter((s) => selected.has(s.id))}
+          sessions={[...selected.values()]}
           close={() => setExporting(false)}
         />
       )}
@@ -415,11 +437,12 @@ function Session({
           <ChevronDown size={18} className={open ? "story-chevron-open" : ""} />
         </button>
       </div>
-      <dl className="story-exchange-preview">
+      {!open && <p className="story-session-excerpt"><span>{t(s.answer ? "Last recorded answer" : "First prompt · excerpt")}</span> {s.answer || s.opening || t("Open conversation to inspect the evidence.")}</p>}
+      {open && <dl className="story-exchange-preview">
         <div><dt>{t("Prompt ")}<small>{t("First prompt · excerpt")}</small></dt><dd>{s.opening || t("No prompt recorded")}</dd><dd><time dateTime={s.prompt_at ?? undefined}>{date(s.prompt_at ?? null)}</time></dd></div>
         <div><dt>{t("Answer ")}<small>{t("Last answer · excerpt")}</small></dt><dd>{s.answer || t("No text answer recorded")}</dd><dd><time dateTime={s.answer_at ?? undefined}>{date(s.answer_at ?? null)}</time></dd></div>
         <div><dt>{t("Result / file ")}<small>{t("Latest tool output · not proof of success")}</small></dt><dd>{s.result ? <OutputDisclosure key={s.id} body={s.result} /> : ((s.file_count ?? 0) > 0 ? `${s.file_count} ${t("file references recorded. Open the conversation for details.")}` : t("No separate result or produced file recorded. Files may be mentioned in the conversation."))}</dd><dd><time dateTime={s.result_at ?? s.file_at ?? undefined}>{s.result_at || s.file_at ? date(s.result_at ?? s.file_at ?? null) : t("No result timestamp recorded")}</time></dd></div>
-      </dl>
+      </dl>}
       {open && (
         <div className="story-session-body" id={`session-body-${s.id}`}>
           <ProjectAssignment conversation={s.id} current={project} sourcePath={s.project_path}/>
@@ -433,7 +456,7 @@ function Session({
                 onSource({
                   conversation: s.id,
                   message: null,
-                  excerpt: "Source: this entire session",
+                  excerpt: t("Source: this entire session"),
                 })
               }
             >

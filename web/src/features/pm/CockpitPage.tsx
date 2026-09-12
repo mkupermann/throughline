@@ -2,7 +2,7 @@
  *  team pipeline rows (the signature element; seats double as the
  *  assignment UI) and tasks. */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { X } from "lucide-react";
@@ -241,6 +241,55 @@ function StatusSelect({
   );
 }
 
+/** The instance brief is editable independently of its source template. */
+function ProjectBrief({ project }: { project: PmProject }) {
+  const { t, lang } = useLang();
+  const de = lang === "de";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(project.description ?? "");
+  const editButton = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: () => pmApi.patchProject(project.id, { description: draft }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ projects: PmProject[] }>(["pm-projects"], (old) =>
+        old ? { projects: old.projects.map(item => item.id === updated.id ? updated : item) } : old,
+      );
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+      setEditing(false);
+      requestAnimationFrame(() => editButton.current?.focus());
+    },
+  });
+  useEffect(() => { if (editing) input.current?.focus(); }, [editing]);
+  const title = de ? "Projektauftrag" : "Project brief";
+  const editLabel = de ? "Projektauftrag bearbeiten" : "Edit project brief";
+  return <section className="pm-project-brief" aria-labelledby="pm-brief-h">
+    <div className="pm-project-brief-header">
+      <h2 id="pm-brief-h">{title}</h2>
+      {!editing && <button ref={editButton} type="button" className="button pm-button-quiet"
+        onClick={() => { setDraft(project.description ?? ""); save.reset(); setEditing(true); }}>{editLabel}</button>}
+    </div>
+    {editing ? <form onSubmit={event => { event.preventDefault(); if (!save.isPending) save.mutate(); }}>
+      <label className="pm-field"><span className="pm-label">{title}</span>
+        <textarea aria-label={title} ref={input} className="pm-input" rows={12} value={draft} disabled={save.isPending}
+          onChange={event => setDraft(event.target.value)} />
+      </label>
+      <div className="pm-header-actions">
+        <button className="button" disabled={save.isPending}>{save.isPending ? t.common.saving : t.common.save}</button>
+        <button type="button" className="button pm-button-quiet" disabled={save.isPending}
+          onClick={() => { setEditing(false); requestAnimationFrame(() => editButton.current?.focus()); }}>{t.common.cancel}</button>
+      </div>
+      {save.isError && <p className="pm-field-error" role="alert">{t.forms.saveFailed(save.error.message)}</p>}
+    </form> : project.description ? <details open={project.description.length <= 600}>
+      <summary>{de ? "Auftrag und Abnahmekriterien anzeigen" : "View brief and acceptance criteria"}</summary>
+      <p className="pm-project-brief-text">{project.description}</p>
+    </details> : <p>{de ? "Halte Ziel, Ergebnisse und Abnahmekriterien für dein Team fest." : "Record the objective, deliverables and acceptance criteria for your team."}</p>}
+    <p role="status" className="pm-project-brief-status">{save.isSuccess && !editing ? (de ? "Projektauftrag gespeichert." : "Project brief saved.") : ""}</p>
+  </section>;
+}
+
 export function CockpitPage() {
   const { t } = useLang();
   const { id } = useParams<{ id: string }>();
@@ -399,6 +448,7 @@ export function CockpitPage() {
         )}
       </header>
 
+      <ProjectBrief key={project.id} project={project} />
       <RepoLinksSection projectId={projectId} />
 
       <TeamsSection

@@ -193,4 +193,39 @@ describe("Project story", () => {
       ),
     ).not.toContain("Excluded private note");
   });
+  it("preserves keyboard focus and selected evidence while sorting and searching", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("checkbox", {name: /Include Compare/}));
+    const sort = screen.getByRole("button", {name: "Newest first"});
+    sort.focus();
+    await userEvent.keyboard("{Enter}");
+    await screen.findByRole("button", {name: "Oldest first"});
+    expect(document.activeElement).toBe(sort);
+    expect((screen.getByRole("checkbox", {name: /Include Compare/}) as HTMLInputElement).checked).toBe(true);
+    mocks.history.mockResolvedValue({...data, sessions: [], total: 0, query: "missing"});
+    const search = screen.getByRole("textbox", {name: "Search project history"});
+    await userEvent.type(search, "missing{Enter}");
+    await screen.findByText("No matching sessions");
+    expect(document.activeElement).toBe(search);
+    await userEvent.click(screen.getByRole("button", {name: "Prepare handoff (1)"}));
+    expect((screen.getByRole("textbox", {name: "Exact export contents"}) as HTMLTextAreaElement).value).toContain("Compare search methods");
+  });
+  it("clears selection explicitly when the source folder changes", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("checkbox", {name: /Include Compare/}));
+    await userEvent.selectOptions(screen.getByRole("combobox", {name: "Working folder"}), "/team/a/Atlas");
+    await screen.findByText("Selection cleared because the source scope changed.");
+    expect((screen.getByRole("button", {name: "Prepare handoff"}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", {name: /Include Compare/}) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("never labels a prompt as an answer in the compact preview", async () => {
+    mount();
+    await screen.findByRole("checkbox", {name: /Include Compare/});
+    const preview = document.querySelector(".story-session-excerpt")!;
+    expect(preview.textContent).toContain("First prompt · excerpt");
+    expect(preview.textContent).toContain("Investigate method A");
+    expect(preview.textContent).not.toContain("Last recorded answer");
+  });
+
 });

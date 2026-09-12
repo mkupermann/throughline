@@ -4,7 +4,7 @@ import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
 import { NavLink, Outlet, ScrollRestoration, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { Moon, Sun, Monitor, Keyboard } from "lucide-react";
+import { Moon, Sun, Monitor, Keyboard, Menu, X } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
 import { NAV, NAV_GROUPS } from "@/lib/nav";
@@ -160,7 +160,50 @@ export function Shell() {
   const [density, setDensity] = useState<Density>(readDensity);
   const helpTriggerRef = useRef<HTMLButtonElement>(null);
 
-  useGoChords(sp, !helpOpen);
+  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 768px)").matches);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuCloseRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const wasMenuOpen = useRef(false);
+  const closeMenu = () => {
+    setMenuOpen(false);
+  };
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 768px)");
+    const update = () => { setMobile(query.matches); setMenuOpen(false); };
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (menuOpen) closeMenu();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (wasMenuOpen.current && !menuOpen && mobile) menuTriggerRef.current?.focus();
+    wasMenuOpen.current = menuOpen;
+    if (!mobile || !menuOpen) return;
+    menuCloseRef.current?.focus();
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [mobile, menuOpen]);
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!mobile || !menuOpen || helpOpen) return;
+    if (event.key === "Escape") { event.preventDefault(); closeMenu(); }
+    if (event.key !== "Tab") return;
+    const items = sidebarRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled])');
+    if (!items?.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+
+  useGoChords(sp, !helpOpen && !menuOpen);
 
   const closeHelp = () => {
     setHelpOpen(false);
@@ -184,7 +227,19 @@ export function Shell() {
     <div className="shell">
       <a href="#main" className="sr-only">{t("Skip to main content")}</a>
 
-      <aside className="sidebar">
+      {mobile && <header className="mobile-header" inert={menuOpen}>
+        <div className="mobile-brand"><Logo size={24} title={null} /><strong>Throughline</strong></div>
+        <button ref={menuTriggerRef} type="button" className="mobile-menu-button" aria-expanded={menuOpen} aria-controls="app-navigation" onClick={() => setMenuOpen(true)}>
+          <Menu size={20} aria-hidden />{lang === "de" ? "Menü" : "Menu"}
+        </button>
+      </header>}
+      {mobile && menuOpen && <div className="mobile-nav-backdrop" onClick={closeMenu} aria-hidden="true" />}
+      <aside id="app-navigation" ref={sidebarRef} className={`sidebar${menuOpen ? " is-open" : ""}`} hidden={mobile && !menuOpen}
+        role={mobile ? "dialog" : undefined} aria-modal={mobile && menuOpen ? true : undefined}
+        aria-label={mobile ? "Navigation" : undefined} onKeyDown={onMenuKeyDown}>
+        {mobile && <button ref={menuCloseRef} type="button" className="mobile-menu-button mobile-menu-close" onClick={closeMenu}>
+          <X size={20} aria-hidden />{lang === "de" ? "Menü schließen" : "Close menu"}
+        </button>}
         <div className="brand">
           <div className="brand-mark">
             <Logo size={28} title={null} />
@@ -203,6 +258,7 @@ export function Shell() {
                 {NAV.filter((item) => item.group === group && (access.admin || !adminPage(item.to))).map((item) => (
                   <li key={item.to}>
                     <NavLink
+                      onClick={() => { if (mobile) closeMenu(); }}
                       to={carryProviders(item.to, sp)}
                       end={item.to === "/"}
                       aria-label={t(item.label)}
@@ -251,7 +307,7 @@ export function Shell() {
         </div>
       </aside>
 
-      <main id="main" className="main" tabIndex={-1}>
+      <main id="main" className="main" tabIndex={-1} inert={mobile && menuOpen}>
         <ProviderBar />
         {!access.admin && adminPage(location.pathname) ? <p role="alert">{t("This area requires an administrator.")}</p> : <Outlet />}
       </main>
