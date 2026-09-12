@@ -1,3 +1,4 @@
+import {ProcessingWorkbench} from "./ProcessingWorkbench";
 import {ProcessAll} from "@/features/operate/ProcessAll";
 import { t } from "@/lib/ui";
 import { useLanguage } from "@/lib/language";
@@ -307,6 +308,7 @@ export function OperatePage() {
         </div>
       )}
 
+      <ProcessingWorkbench/>
       <ProcessAll />
       <Pipeline
         stages={pipelineStages}

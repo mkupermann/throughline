@@ -715,7 +715,7 @@ a.pipeline-action {
 }
 .status-pill.status-ok {
   color: var(--status-good);
-  background: var(--status-good-wash);
+  background: var(--surface-base);
 }
 .status-pill.status-pending,
 .status-pill.status-not_ingested {

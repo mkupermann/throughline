@@ -1,3 +1,4 @@
+import {ContinueProject} from "./ContinueProject";
 import {ProjectAssignment} from "./ProjectAssignment";
 import {useAccess} from "@/features/access/AccessGate";
 import { ProjectName, projectLabel } from "./ProjectName";
@@ -142,6 +143,7 @@ function Story({ project }: { project: string }) {
           <Link to={`/project/${encodeURIComponent(project)}?mode=document`}>{t("Full document")}</Link>
         </div>
       </header>
+      <ContinueProject key={project} project={project}/>
       <nav className="story-jump" aria-label={t("Project sections")}>
         <a href="#position-title">{t("Where we stand")}</a><a href="#history-title">{t("Project history")}</a><a href="#project-details">{t("Project details")}</a>
       </nav>

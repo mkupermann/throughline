@@ -154,7 +154,7 @@
 }
 .pm-status-fail,
 .pm-status-crashed {
-  background: var(--status-critical-wash);
+  background: var(--surface-base);
   color: var(--status-critical);
 }
 .pm-status-budget_exceeded {
@@ -1525,3 +1525,13 @@ a.pm-catalog-link:hover {
 .pm-runtime li p { margin-block: 6px; }
 .pm-runtime code { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
 .pm-runtime > button { justify-self: start; }
+
+.continuation-panel, .processing-workbench { margin-block: var(--space-5, 20px); padding: var(--space-4, 16px); border: 1px solid var(--border); border-radius: 8px; }
+.continuation-panel p, .processing-workbench p { margin-block: 12px; }
+.continuation-text { width: 100%; max-width: 100%; margin-block: 12px; background: var(--surface-base); color: var(--text-primary); font-family: var(--font-mono); }
+.processing-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.processing-controls label { display: grid; gap: 6px; max-width: 100%; }
+.processing-controls select { max-width: 100%; }
+.processing-workbench details { margin-top: 16px; }
+.data-counts { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; margin-block: 12px; }
+@media (max-width: 600px) { .processing-controls { display: grid; } .processing-controls select { width: 100%; min-width: 0; } }

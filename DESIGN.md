@@ -4,7 +4,7 @@
 
 Throughline is a workspace for recovering project context and coordinating AI teams. Its first screen should answer: what needs my attention, what is running, and what should happen next?
 
-Implementation status: the Operations overview, persistent template library, versioned references, resource creation and editable project briefs are implemented. Runtime assignments use the existing resource editors. Template workflow/review prose is configuration guidance, not enforced execution; the executor integration and guided launch flow below remain future work.
+Implementation status: the Operations overview, persistent template library, versioned references, resource creation and editable project briefs are implemented. Runtime assignments use the existing resource editors. Template workflow/review prose is configuration guidance, not enforced execution; the existing launch action requires a separately installed compatible executor; the guided launch and enforced review flow below remain future work.
 
 ## Research basis
 
@@ -93,3 +93,11 @@ Mobile: preserve the existing full-width drawer shell, stack panes, provide comf
 The Throughline mark is one continuous, turning path: work retains its context across sessions and tools. The app component, favicon and SVG wordmarks share the same geometry. Use the existing `--accent` token (#0550ae light / #58a6ff dark), with `--text-primary` for lettering. No new brand palette is introduced. The mark has a 56-unit square viewBox, a 6-unit stroke and rounded terminals. Allow 8 units clear space; render at 16px or larger.
 
 Assets and use guidelines: [brand identity](docs/brand/README.md).
+
+
+## Continuation and processing controls
+
+Project workspaces expose an on-demand continuation panel with a plain-text, source-linked preview and Markdown download.
+Operate places bounded project processing before the full pipeline and groups data reconciliation and measured model timings in expandable sections.
+Use existing surface, border, text and accent tokens, responsive wrapping and named form controls.
+Neither elapsed-time indicators nor successful connection tests imply model quality or an assured speedup.

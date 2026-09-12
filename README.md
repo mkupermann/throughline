@@ -36,6 +36,25 @@ The core import, browsing and handoff workflow works without a connected model. 
 
 **Team templates configure work; they do not execute it by themselves.** Launching agent runs requires a separately installed compatible executor. Workflow instructions and review policies are guidance, not automatically enforced approval gates.
 
+## Continue work without rebuilding context
+
+Open a project and choose **Continue this project** for a bounded Markdown brief of recorded knowledge and recent conversation excerpts, with links back to the evidence.
+It runs locally without an AI call and is also available as the MCP tool `continue_project(project, max_chars=12000)`.
+Excerpts are historical evidence, not verified instructions: the brief does not inspect current code, infer task completion, or invent missing decisions.
+
+In **Operate**, use **Process recent conversations** to select one project or the newest conversations across projects, with a per-stage limit.
+Successful source versions—including valid empty results—are checkpointed atomically with their derived records.
+Unchanged versions are skipped on later runs; edited versions become eligible again.
+Existing history without checkpoints needs one initial pass.
+API processing supports one to four workers; CLI processing stays serial to avoid contention on the host bridge.
+Timings and approximate remaining time are measured during processing; no fixed speedup or automatic model switch is promised.
+Use **Embeddings first** to make existing knowledge searchable without waiting for the full enrichment pass.
+
+Expand **Where is my data?** to compare stored, visible, and generated conversations, historical project records and separate Operations projects.
+The same panel shows the connected database, pending extraction versions and actual model selections.
+Database health does not certify backups; restore verification remains an external deployment responsibility.
+See [processing and recovery](docs/AI_PROCESSING.md) for checkpoint, retry and concurrency details.
+
 ## See Throughline
 
 [![Animated walkthrough of the current Throughline interface](docs/media/throughline-tour.gif)](docs/media/throughline-tour.mp4)
@@ -92,10 +111,10 @@ Templates are starting points for a human-reviewed brief, not claims of professi
 
 Docker Compose includes PostgreSQL 16 with pgvector and serves the application on loopback. You need Git, Python 3 and Docker with Compose.
 
-This redesigned workspace is currently a development preview on `feature/throughline-workspace-redesign`. The commands below select that branch explicitly; it has not yet been merged into `main`.
+The workspace, template library and incremental processing controls are included on `main`. Use a separate demo database to evaluate them before processing a private corpus.
 
 ```bash
-git clone --branch feature/throughline-workspace-redesign https://github.com/mkupermann/throughline.git
+git clone --branch main https://github.com/mkupermann/throughline.git
 cd throughline
 python3 scripts/init_compose_env.py --check-docker
 docker compose up -d

@@ -25,10 +25,25 @@ try {
     }, theme);
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    for (const route of ['/project/Atlas%20(demo)', '/pm', '/pm/templates']) {
+    for (const route of ['/project/Atlas%20(demo)', '/pm', '/pm/templates', '/operate']) {
       await page.goto(base + route);
       await page.waitForLoadState('networkidle');
-      if (route.includes('/project/')) await page.getByRole('heading', { name: 'Where we stand' }).waitFor();
+      if (route.includes('/project/')) {
+        await page.getByRole('heading', { name: 'Where we stand' }).waitFor();
+        await page.getByRole('button', { name: 'Continue this project', exact: true }).click();
+        const brief = page.getByRole('textbox', { name: 'Continuation brief' });
+        await brief.waitFor();
+        assert.ok((await brief.inputValue()).includes('# Continue: Atlas (demo)'));
+        const downloading = page.waitForEvent('download');
+        await page.getByRole('button', { name: 'Download continuation brief' }).click();
+        assert.equal((await downloading).suggestedFilename(), 'throughline-continuation.md');
+      }
+      if (route === '/operate') {
+        await page.getByText('Where is my data?', {exact:true}).click();
+        await page.getByText('Actual model routes and measured speed', {exact:true}).click();
+        await page.getByRole('combobox', {name:'Project',exact:true}).selectOption('Atlas (demo)');
+        assert.ok(await page.getByText('Stored conversations', {exact:true}).isVisible());
+      }
       if (route === '/pm/templates') {
         await page.getByRole('combobox', { name: 'Category', exact: true }).selectOption('finance');
         await page.waitForFunction(() => document.querySelectorAll('.template-card').length === 3);

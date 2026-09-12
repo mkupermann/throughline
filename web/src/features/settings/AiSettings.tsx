@@ -211,13 +211,13 @@ function Purpose({
             setTesting(purpose);
             setMessage("");
             try {
-              const result = await request<{ ok: boolean; error?: string }>(
+              const result = await request<{ ok: boolean; error?: string; elapsed_seconds?: number }>(
                 `/ai/settings/${purpose}/test`,
                 { method: "POST" },
               );
               setMessage(
                 result.ok
-                  ? t("Connection verified")
+                  ? `${t("Connection verified")}${result.elapsed_seconds === undefined ? "" : ` · ${result.elapsed_seconds}s`}`
                   : t(result.error ?? "Connection failed"),
               );
             } catch (e) {

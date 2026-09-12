@@ -1,6 +1,7 @@
 """Purpose-specific AI settings; credentials stay in the existing provider store."""
 
 import json
+import time
 import urllib.error
 from typing import Literal
 
@@ -40,7 +41,7 @@ def settings_view(settings: Settings = Depends(get_settings)):
 def save(purpose: str, body: PurposeBinding, settings: Settings = Depends(get_settings)):
     from ..jobs import runner
 
-    if runner.current("process-all"):
+    if any(runner.current(name) for name in ("process-all", "process-recent", "extract", "entities")):
         raise HTTPException(409, "Stop the complete pass before changing its AI destinations.")
     if purpose not in ai_runtime.PURPOSES or bool(body.provider_id) == bool(body.cli):
         raise HTTPException(422, "Select one API provider or one installed CLI for a supported purpose.")
@@ -89,6 +90,7 @@ def save(purpose: str, body: PurposeBinding, settings: Settings = Depends(get_se
 def test_binding(purpose: str):
     if purpose not in ai_runtime.PURPOSES:
         raise HTTPException(404, "Unknown purpose")
+    started = time.monotonic()
     try:
         config = ai_runtime.route(purpose)
         if not config:
@@ -110,7 +112,12 @@ def test_binding(purpose: str):
             )
             if json.loads(output).get("status") != "OK":
                 raise ValueError("Structured connection test failed")
-        return {"ok": True, "destination": ai_runtime.destination(config)}
+        return {
+            "ok": True,
+            "destination": ai_runtime.destination(config),
+            "elapsed_seconds": round(time.monotonic() - started, 2),
+            "check": "synthetic structured response; not an extraction-quality benchmark",
+        }
     except AIConnectionError as exc:
         return {"ok": False, "error": str(exc), "error_code": exc.code}
     except urllib.error.HTTPError as exc:

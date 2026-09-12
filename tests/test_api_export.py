@@ -132,7 +132,7 @@ def test_operate_status_reports_the_generation_backend(monkeypatch):
     monkeypatch.setattr(
         llm,
         "backend_info",
-        lambda: llm.LLMInfo(True, backend="ollama", model="qwen3.5:9b", local=True, detail="qwen3.5:9b"),
+        lambda *, purpose: llm.LLMInfo(True, backend="ollama", model="qwen3.5:9b", local=True, detail="qwen3.5:9b"),
     )
     payload = operate.generation_panel()
 
@@ -146,7 +146,7 @@ def test_an_unavailable_generation_backend_says_why(monkeypatch):
     from throughline import llm
     from throughline.api.routers import operate
 
-    monkeypatch.setattr(llm, "backend_info", lambda: llm.LLMInfo(False, detail="No model available."))
+    monkeypatch.setattr(llm, "backend_info", lambda *, purpose: llm.LLMInfo(False, detail="No model available."))
     payload = operate.generation_panel()
 
     assert payload["available"] is False

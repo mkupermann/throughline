@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bounded project-specific processing with per-conversation source fingerprints, atomic checkpoints, measured progress and configurable API concurrency.
+- Source-linked continuation briefs in project workspaces and the existing MCP server, with explicit excerpt and character limits.
+- Operate data visibility for stored versus hidden conversations, separate project datasets, actual model routes and measured processing times.
+
+### Fixed
+
+- Valid empty Operate extractions no longer repeat for unchanged source versions; malformed entity responses remain retryable.
+- Operate reports the selected extraction model and AI connection tests report synthetic-call elapsed time.
+- Improved contrast of failed/crashed Operations status badges.
+
+
 - Check execution prerequisites before enabling task launch, with actionable server setup guidance.
 - Detect unsupported private-source Docker mount configurations before writing bootstrap settings.
 - Add real-server Chromium accessibility and mobile keyboard checks to CI against the installed wheel.

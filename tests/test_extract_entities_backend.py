@@ -45,3 +45,12 @@ def test_the_call_still_runs_outside_the_users_project_directory(monkeypatch):
     monkeypatch.setattr(ee.llm, "complete", lambda prompt, **kw: (seen.update(kw), ("{}", None))[1])
     ee.call_model("x")
     assert str(ee.agent_call_cwd()) == seen["cwd"]
+
+
+def test_invalid_response_is_not_a_successful_empty_extraction():
+    import pytest
+
+    for payload in ("not JSON", "{}", '{"entities":["bad"],"relationships":[]}'):
+        with pytest.raises(ValueError):
+            ee.parse_json_response(payload)
+    assert ee.parse_json_response('{"entities":[],"relationships":[]}') == {"entities": [], "relationships": []}

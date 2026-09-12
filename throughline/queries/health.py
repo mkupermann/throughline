@@ -28,35 +28,18 @@ def pipeline_counts(conn) -> Row:
 
 
 def pending_extraction(conn, min_messages: int = 5) -> int:
-    """Conversations with no extracted chunks yet.
+    """Human source versions not yet checkpointed by the enrichment worker."""
+    from throughline.jobs.incremental import FINGERPRINT
 
-    Note the known issue this inherits: a conversation that legitimately
-    yields zero chunks stays "pending" forever and is re-analysed on every
-    run. Fixing that needs an explicit processed-marker column, which is a
-    schema change and therefore out of scope for the extraction phase — it is
-    tracked separately.
-    """
     return int(
         scalar(
             conn,
-            """
-            SELECT count(*) FROM conversations c
-            -- Sessions a person had. 137 of 276 queued conversations were the
-            -- tool's own `claude -p` calls, so this told the user to spend
-            -- model calls distilling memory out of Throughline talking to
-            -- itself — the exact waste the ingest filter exists to prevent,
-            -- arriving through a different door.
-            WHERE c.generated_by IS NULL
-              AND NOT EXISTS (
-                SELECT 1 FROM memory_chunks mc
-                WHERE mc.source_type = 'conversation' AND mc.source_id = c.id
-            )
-              AND c.message_count >= %s
-            """,
+            f"""SELECT count(*) FROM conversations c
+        LEFT JOIN processing_checkpoints p ON p.conversation_id=c.id AND p.stage='extract'
+        WHERE c.generated_by IS NULL AND c.message_count >= %s
+        AND (p.fingerprint IS NULL OR p.fingerprint <> {FINGERPRINT})""",
             (min_messages,),
-            0,
         )
-        or 0
     )
 
 
@@ -98,10 +81,9 @@ def embedding_coverage(
 ) -> Row:
     """Share of active chunks usable by the selected embedding backend."""
     column_filter = _embedding_column_filter(column)
-    return (
-        one(
-            conn,
-            f"""
+    return one(
+        conn,
+        f"""
         SELECT
             count(*) AS total,
             count(*) FILTER (
@@ -116,10 +98,8 @@ def embedding_coverage(
         FROM memory_chunks mc
         WHERE COALESCE(mc.status, 'active') = 'active'
         """,
-            (model, model),
-        )
-        or {"total": 0, "embedded": 0}
-    )
+        (model, model),
+    ) or {"total": 0, "embedded": 0}
 
 
 def recent_ingestion(conn, limit: int = 50) -> list[Row]:

@@ -108,6 +108,13 @@ def _job_module(module: str, *args: str) -> list[str]:
 
 
 JOBS: dict[str, JobSpec] = {
+    "process-recent": JobSpec(
+        "process-recent",
+        "Process recent conversations",
+        "Checkpoint changed conversations in bounded batches. Uses your selected extraction model.",
+        _job_module("throughline.jobs.incremental"),
+        requires="model:extraction",
+    ),
     "process-all": JobSpec(
         "process-all",
         "Process everything",
@@ -125,7 +132,7 @@ JOBS: dict[str, JobSpec] = {
         "entities",
         "Extract entities",
         "Extract people, technologies and other entities from conversations.",
-        _job_module("throughline.jobs.extract_entities"),
+        _job_module("throughline.jobs.incremental", "--stage", "entities"),
         requires="model:extraction",
     ),
     "ingest": JobSpec(
@@ -149,8 +156,8 @@ JOBS: dict[str, JobSpec] = {
     "extract": JobSpec(
         "extract",
         "Extract memory",
-        "Run the LLM extraction pass over conversations with no memory yet.",
-        _cli("extract-memory"),
+        "Process changed conversation versions; completed and valid empty results are retained.",
+        _job_module("throughline.jobs.incremental", "--stage", "extract"),
         requires="model:extraction",
     ),
     "embed": JobSpec(
