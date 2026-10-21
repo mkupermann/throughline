@@ -183,9 +183,9 @@ pub fn hybrid<C: GenericClient>(
     hits.append(&mut memory_hits(client, query, limit)?);
 
     let mut seen = std::collections::HashSet::new();
-    hits.retain(|h| match h.message_id {
-        Some(id) => seen.insert(id),
-        None => true,
+    hits.retain(|h| {
+        let key = format!("{}:{}", h.kind, h.message_id.unwrap_or(0));
+        seen.insert(key)
     });
     hits.sort_by(|a, b| {
         b.score
@@ -232,7 +232,9 @@ fn memory_hits<C: GenericClient>(
         role: r.get(4),
         snippet: r.get(5),
         created_at: r.get(6),
-        score: 0.55,
+        // Durable notes that literally match the query outrank fuzzy semantic
+        // hits so Find surfaces agent/project memory in the GUI.
+        score: 0.9,
         kind: "memory",
     }));
     if let Ok(rows) = client.query(
@@ -254,7 +256,7 @@ fn memory_hits<C: GenericClient>(
             role: "instruction".into(),
             snippet: r.get(3),
             created_at: r.get(4),
-            score: 0.45,
+            score: 0.85,
             kind: "instruction",
         }));
     }
