@@ -5,225 +5,308 @@
   </picture>
 </p>
 
-<p align="center"><strong>Recover the context. Organize the team. Continue the work.</strong></p>
+<p align="center"><strong>Your tools change. Your project context should not disappear.</strong></p>
+<p align="center">A self-hosted memory layer for AI coding sessions.</p>
+<p align="center"><a href="LICENSE">MIT</a> · <a href="rust/Cargo.toml">Rust</a> · <a href="docker-compose.yml">PostgreSQL + pgvector</a> · Beta</p>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1f2328.svg" alt="MIT license"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.10%2B-151b1e.svg" alt="Python 3.10 or newer"></a>
-  <a href="sql/schema.sql"><img src="https://img.shields.io/badge/postgres-16%20%2B%20pgvector-151b1e.svg" alt="PostgreSQL 16 with pgvector"></a>
-  <a href="https://github.com/mkupermann/throughline/actions/workflows/ci.yml"><img src="https://github.com/mkupermann/throughline/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/status-beta-0550ae.svg" alt="Beta"></a>
-</p>
+Throughline brings local AI conversations into one searchable history. Recover a decision, inspect the original messages and tool calls, and carry a source-linked handoff into your next session—even when you switch coding tools.
 
-Throughline is a self-hosted workspace for AI-assisted projects. Bring conversations from nine tools into one source-linked history, recover the decisions behind your work, and configure AI teams with reusable project, team and role templates.
+**Import → inspect → remember → continue.** Browsing, keyword search and handoff briefs work without a generation model. Optional models add embeddings, memory extraction and cited answers.
 
-**Return after a month and know what happened, what supports it, and what to do next.** Your conversations stay connected to their projects. Your teams start with a brief, defined responsibilities and review criteria.
+[Try the demo](#try-it-with-fictional-data) · [Install](#use-your-own-sessions) · [Product tour](#the-product-tour) · [CLI and MCP](#beyond-the-browser) · [Architecture](#how-it-fits-together) · [Limits](#current-boundaries)
 
-[Quick start](#quick-start) · [Product tour](#see-throughline) · [Template library](#a-template-library-for-real-work) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
+![Throughline Home with fictional corpus totals, activity and an offline handoff](docs/media/rust/home.png)
 
-![Throughline project workspace showing recorded context, next steps and source conversations](docs/media/workspace.png)
+*Actual application, fictional data. All screenshots use the same isolated database; no API responses are mocked. [Capture manifest](docs/media/rust/manifest.json).*
 
-## From scattered sessions to continued work
+> **Which version is this?** Default Docker Compose builds the Rust application and its embedded HTML/CSS/JavaScript interface. The repository also contains an earlier Python/FastAPI + React application. Its AI team operations, template library and account-management screens are **not features of the current Rust UI**. This README documents the default Rust path.
 
-| Recover project context | Prepare AI team operations |
-|---|---|
-| Import local sessions from Claude Code, Codex, Vibe and six other tools. | Start with a project template and its linked team and roles. |
-| Inspect recorded goals, blockers, next steps and supporting messages. | Customize objectives, deliverables and acceptance criteria. |
-| Search across tools without losing the original conversation. | Keep role responsibilities separate from model assignments. |
-| Select sessions and download a Markdown handoff for your next tool. | Save editable resources with their original template versions. |
+## Why use Throughline?
 
-The core import, browsing and handoff workflow works without a connected model. Optional AI adds extraction, semantic search and generated answers. Light and dark themes, English and German navigation, and a mobile drawer keep the same workspace usable across devices.
+| When you need to… | Throughline gives you… |
+| --- | --- |
+| Resume a project after time away | Recent sessions, durable notes and an offline handoff brief. |
+| Understand why a decision was made | Search results connected to the original conversation. |
+| Move between coding tools | A shared store, Markdown export and MCP access. |
+| Inspect what an agent recorded | Message content, tool-call JSON, timestamps and source-tool labels. |
+| Maintain accumulated context | Memory categories, deduplication, stale-memory reports and explicit writeback. |
 
-**Team templates configure work; they do not execute it by themselves.** Launching agent runs requires a separately installed compatible executor. Workflow instructions and review policies are guidance, not automatically enforced approval gates.
+### Supported session sources
 
-## Continue work without rebuilding context
+The Rust registry includes **11 adapters**: Claude Code, Codex, Cursor, Zed, Continue, Cline, Windsurf, Vibe, Hermes, OpenCode and Aider. They read supported local files; they are not cloud-account sync integrations. Format coverage varies by tool.
 
-Open a project and choose **Continue this project** for a bounded Markdown brief of recorded knowledge and recent conversation excerpts, with links back to the evidence.
-It runs locally without an AI call and is also available as the MCP tool `continue_project(project, max_chars=12000)`.
-Excerpts are historical evidence, not verified instructions: the brief does not inspect current code, infer task completion, or invent missing decisions.
+Standard Compose mounts the first nine tool directories read-only. OpenCode and Aider require their source directories to be made available separately. See the [adapter registry and implementations](rust/crates/throughline/src/adapters/registry.rs).
 
-In **Operate**, use **Process recent conversations** to select one project or the newest conversations across projects, with a per-stage limit.
-Successful source versions—including valid empty results—are checkpointed atomically with their derived records.
-Unchanged versions are skipped on later runs; edited versions become eligible again.
-Existing history without checkpoints needs one initial pass.
-API processing supports one to four workers; CLI processing stays serial to avoid contention on the host bridge.
-Timings and approximate remaining time are measured during processing; no fixed speedup or automatic model switch is promised.
-Use **Embeddings first** to make existing knowledge searchable without waiting for the full enrichment pass.
+## Try it with fictional data
 
-Expand **Where is my data?** to compare stored, visible, and generated conversations, historical project records and separate Operations projects.
-The same panel shows the connected database, pending extraction versions and actual model selections.
-Database health does not certify backups; restore verification remains an external deployment responsibility.
-See [processing and recovery](docs/AI_PROCESSING.md) for checkpoint, retry and concurrency details.
-
-## See Throughline
-
-[![Animated walkthrough of the current Throughline interface](docs/media/throughline-tour.gif)](docs/media/throughline-tour.mp4)
-
-[Watch the full video](docs/media/throughline-tour.mp4) · [English captions](docs/media/throughline-tour.vtt) · [Template walkthrough](docs/media/templates-tour.mp4) · [Template captions](docs/media/templates-tour.vtt) · [Earlier feature walkthroughs](docs/videos/README.md)
-
-The tour and screenshots show the actual application with fictional demonstration data. The full tour has burned-in English captions and a separate caption track; the GIF is a short preview. They demonstrate navigation and template inspection, not completed model calls or autonomous agent execution. To run your own demonstration, follow the [demo guide](docs/DEMO.md) using a separate database ending in `_demo`.
-
-| AI Team Operations | Template library |
-|---|---|
-| ![Operations overview with project and team resources](docs/media/operations.png) | ![Searchable project, team and role template library](docs/media/templates.png) |
-
-<details>
-<summary>See the mobile workspace</summary>
-
-<p align="center"><img src="docs/media/mobile.png" alt="Throughline mobile workspace with full-width content and drawer navigation" width="300"></p>
-
-</details>
-
-## A template library for real work
-
-Open **AI Team Operations → Templates** to search the library, filter by category, preview a template and create an editable resource.
-
-| Template type | What it provides |
-|---|---|
-| **Project** | Objective, required inputs, planned stages, deliverables, acceptance criteria and a linked team. |
-| **Team** | Role composition, collaboration order, handoff expectations and review policy. |
-| **Role** | Responsibilities, instructions, requested tools and expected output. |
-
-Projects create their linked teams and roles together. Instances retain a template snapshot; editing the library does not silently rewrite existing work. Assign models, providers and members through the resource editors after creation.
-
-**103 starter templates: 43 projects, 15 teams and 45 roles.** Fourteen professional categories each provide three project blueprints, one team and three specialist roles, alongside five general product-improvement starters: one project, one team and three roles. [Browse the complete catalog, deliverables and usage guide](docs/TEMPLATES.md).
-
-| Category | Example project templates |
-|---|---|
-| **Finance** | Rolling cash-flow forecast · Budget variance review · Unit economics assessment |
-| **Science** | Reproducible experiment · Structured literature review · Dataset quality assessment |
-| **Education** | Course module design · Assessment and feedback pack · Learning support intervention |
-| **Enterprise** | Application portfolio review · Enterprise AI pilot · Change readiness assessment |
-| **Mid-size business** | Sales-to-delivery handoff · ERP selection brief · Capacity and hiring plan |
-| **Startups** | Problem validation sprint · MVP scope and launch plan · Pricing experiment design |
-| **Engineering** | API integration delivery · Legacy refactoring plan · Incident analysis and prevention |
-| **Product and design** | Usability improvement sprint · Design system consolidation · Onboarding activation review |
-| **Marketing** | Campaign planning kit · Content refresh audit · Customer case study draft |
-| **Operations** | Standard operating procedure · Supplier performance review · Service capacity improvement |
-| **Security** | Threat modelling workshop · Access review preparation · Security incident tabletop |
-| **Legal and compliance** | Policy gap assessment · Contract review preparation · Audit evidence readiness |
-| **Healthcare** | Clinic administration workflow · Patient information readability · Healthcare service quality review |
-| **Nonprofit and public good** | Grant proposal preparation · Programme impact framework · Volunteer onboarding programme |
-
-Templates are starting points for a human-reviewed brief, not claims of professional accreditation or regulatory compliance.
-
-## Quick start
-
-Docker Compose includes PostgreSQL 16 with pgvector and serves the application on loopback. You need Git, Python 3 and Docker with Compose.
-
-The workspace, template library and incremental processing controls are included on `main`. Use a separate demo database to evaluate them before processing a private corpus.
+Install Git and Docker with Compose. The first run builds the Rust image; no model download or API key is required.
 
 ```bash
-git clone --branch main https://github.com/mkupermann/throughline.git
+git clone https://github.com/mkupermann/throughline.git
 cd throughline
-python3 scripts/init_compose_env.py --check-docker
-docker compose up -d
-docker compose exec web throughline ingest --all
+docker compose -f docs/demo/rust/compose.yml up -d --build
 ```
 
-Open **[http://127.0.0.1:8788](http://127.0.0.1:8788)**.
+Open **[http://127.0.0.1:8796](http://127.0.0.1:8796)**.
 
-On Windows, use `py -3` if `python3` is unavailable. The initializer creates an ignored `.env` with a random database password and detects Cline's task directory. Source folders are mounted read-only; inspect [docker-compose.yml](docker-compose.yml) to adjust the imports. Ingestion is explicit.
+The demo has its own database and volume, exposes only the web port on loopback, and mounts no personal session folders. Its public password is only for this disposable stack. Model endpoints deliberately point to an unavailable loopback address.
 
-1. Open **Projects** and choose an imported project.
-2. Follow a recorded note to its source, then select conversations for a handoff.
-3. Open **AI Team Operations → Templates** to create a configured project.
-4. Add model connections in **AI settings** when you want optional AI processing.
+| Demo project | Story to explore |
+| --- | --- |
+| **Atlas-demo** | Retain lexical retrieval as a baseline; investigate a long-document counterexample. |
+| **Harbor-demo** | Preserve keyboard navigation and visible focus; prepare a release handoff. |
+| **Orchard-demo** | Validate data contracts; rehearse recovery from an interrupted load. |
 
-For a native installation with an existing PostgreSQL instance, see [Installation](docs/INSTALLATION.md). For a shared workspace, follow [Team deployment](docs/TEAM_DEPLOYMENT.md).
+The fixture contains **18 conversations, 72 messages, 12 memory notes and three projects**, spanning six source-tool labels. Decisions, tool results and model names are invented. Dates are rebased on seed; this is not benchmark evidence or completed agent work.
 
-### Update without losing your corpus
+1. Open **Projects → Atlas-demo**, then open a conversation and expand its messages.
+2. Inspect the fictional `Read` tool result through **Browse**.
+3. In **Find**, select **Lexical** and search for `decision`.
+4. In **Agent Memory**, filter the `decision` category.
+5. Switch **Timeline** to **Calendar**, then return **Home** for the handoff.
+6. Open **Operate → Status** to check the corpus totals.
+
+Stop with `docker compose -f docs/demo/rust/compose.yml stop`. See the [demo guide](docs/demo/rust/README.md) for reseeding, screenshots and cleanup.
+
+## Use your own sessions
+
+Install Git, Python 3 for the environment initializer, and Docker with Compose. The application runs as Rust inside the container.
 
 ```bash
-docker compose exec web throughline backup
+git clone https://github.com/mkupermann/throughline.git
+cd throughline
+python3 scripts/init_compose_env.py --check-docker
+docker compose up -d --build
+docker compose exec web throughline ingest --source all
+docker compose exec web throughline doctor
+```
+
+Open **[http://127.0.0.1:8788](http://127.0.0.1:8788)**. On Windows, use `py -3` if `python3` is unavailable.
+
+The initializer creates an ignored `.env` with a random database password and resolves the Cline mount. Review [docker-compose.yml](docker-compose.yml) for source locations. Import is explicit; unchanged file hashes are skipped on subsequent ingestion. A new `.env` does not rotate credentials in an existing database volume.
+
+### Back up, update and export
+
+Use an explicit destination in the mounted backup volume:
+
+```bash
+docker compose exec web throughline backup --dir /var/lib/throughline/backups
 git pull
 docker compose build web migrate
 docker compose up -d migrate web
 docker compose exec web throughline doctor
 ```
 
-The database lives in a persistent named volume. **`docker compose down -v` deletes it.** Keep verified backups and follow [Upgrading](docs/UPGRADING.md) and [Deployment](docs/DEPLOYMENT.md) for migration and recovery details.
+Rust reads `THROUGHLINE_BACKUP_DIR`, not the older `CLAUDE_MEMORY_BACKUP_DIR` variable in Compose. The explicit `--dir` avoids writing a backup only into the container's disposable layer. Keep off-host copies and verify restoration.
 
-## Connect your tools and models
+```bash
+docker compose exec web throughline export-markdown --out /home/throughline/exports
+```
 
-**Supported conversation sources:** Claude Code, Cline, Codex CLI, Continue, Cursor, Hermes, Vibe, Windsurf and Zed. Adapters normalize supported local formats into conversations and messages. Re-ingestion updates changed source files without duplicating conversations. See [Adapter development](docs/ADAPTER_DEVELOPMENT.md).
+Exports go to mounted `./exports` unless you change `THROUGHLINE_EXPORT_DIR`. Options include `--project`, `--include-generated` and `--redact`. Inspect exports before sharing; redaction does not guarantee complete anonymization.
 
-Choose a provider independently for answers, conversation titles, project names, knowledge extraction, reflection and search embeddings. Generation supports Ollama, OpenAI, Anthropic, Mistral, Gemini, OpenRouter and OpenAI-compatible APIs. An optional authenticated host bridge connects Codex, Vibe and Claude Code using your existing CLI access.
+**`docker compose down -v` deletes data volumes. Do not use it on your real installation unless that deletion is intended.**
 
-Embeddings require a compatible embedding API and a 768- or 1536-dimensional model; chat CLIs cannot supply them. Explicit saved selections never silently fall back to another provider. A local CLI may still contact a hosted service.
+## The product tour
 
-**Process everything** runs ingestion and pending enrichment stages with progress and a Stop action. Requests and completed steps are persisted; interrupted steps may repeat after recovery. See [AI processing and provider setup](docs/AI_PROCESSING.md) for model requirements, data destinations and the host CLI bridge.
+All nine menus are covered below. Expand a section for its screenshot. The [complete visual feature guide](docs/FEATURE_GUIDE.md) covers alternate views, detail screens, every maintenance action and the CLI.
 
-## Evidence you can inspect
+| Menu | Purpose | Chord |
+| --- | --- | --- |
+| Home | Totals, activity, recovery hints, handoff and recent sessions. | `g h` |
+| History | Filter, sort, page and export conversations. | `g s` |
+| Browse | Search messages and tool calls. | `g b` |
+| Agent Memory | Inspect durable notes by category. | `g m` |
+| Find | Lexical, semantic and hybrid search. | `g f` |
+| Projects | Open a workspace's filtered history. | `g j` |
+| Timeline | Activity by date and source tool. | `g t` |
+| Ask | Answers with source references. | `g a` |
+| Operate | Maintenance and ingestion status. | `g p` |
 
-Throughline preserves distinctions that matter when resuming work:
+Press `Ctrl+K` / `Cmd+K` for the command palette. A chord means press `g`, then the second key.
 
-- **Recorded project state** is a sourced statement, not independent verification.
-- **Extracted memories and generated answers** remain model output that needs review.
-- **Prompt and answer excerpts** are labelled separately; open the conversation for their sequence.
-- **File references** show what was recorded, without claiming that the file still exists.
-- **Missing timestamps and relationships** stay missing. Chronology does not establish causality.
+<details>
+<summary><strong>Home — recover the thread</strong></summary>
 
-Projects expose source folders and assignment history. Renaming a display label does not move conversations. Explicit assignments survive re-import, while earlier notes retain their original context. See the [project history and provenance guide](docs/PROJECT_STORY.md).
+Click metrics to drill into the corpus. Inspect activity, recent sessions and the offline continuation brief. **Hide empty** changes the session listing; **Browse all** opens messages. The model-free demo visibly reports missing Ollama in its recovery hints.
 
-Markdown export carries your project history into other tools. The optional [MCP server](memory_mcp/) lets compatible clients search and maintain shared memory. See [Usage](docs/USAGE.md) for export, search, scheduling and CLI commands.
+![Home and continuation brief](docs/media/rust/home.png)
 
-## Architecture and deployment boundaries
+</details>
+
+<details>
+<summary><strong>History — conversations in context</strong></summary>
+
+Filter by text, tool, project and date. Sort, switch between table and cards, save filters, page through records or export CSV. Open a session to inspect its messages and roles.
+
+![History table and filters](docs/media/rust/history.png)
+
+[Card view](docs/media/rust/history-cards.png) · [Expanded conversation](docs/media/rust/conversation.png)
+
+</details>
+
+<details>
+<summary><strong>Browse — inspect the underlying messages</strong></summary>
+
+Filter by text, role, tool name or conversation ID; select **Tool calls only**. A message opens full content, tool-call JSON and content blocks, with **Copy JSON** and **Open session** actions.
+
+![Message browser](docs/media/rust/browse.png)
+
+[Message detail](docs/media/rust/message.png)
+
+</details>
+
+<details>
+<summary><strong>Agent Memory — keep durable context accessible</strong></summary>
+
+Search notes, filter categories and expand cards. **Ingest agent memory** reads local Markdown memory files; `THROUGHLINE_AGENT_MEMORY_DIR` overrides their location. Categories include decisions, preferences, patterns, insights, error solutions, project context and workflows.
+
+![Fictional memory notes and category filter](docs/media/rust/memory.png)
+
+</details>
+
+<details>
+<summary><strong>Find — search across tools</strong></summary>
+
+Choose **Lexical**, **Semantic** or **Hybrid**. Lexical search needs no model; semantic search requires stored embeddings and a compatible embedding service. Results link to conversations and identify the search backend. Scores are not truth probabilities.
+
+![Lexical search for decision](docs/media/rust/find.png)
+
+</details>
+
+<details>
+<summary><strong>Projects — enter through a workspace</strong></summary>
+
+Cards show a recorded description, status and conversation count. Select one to open its history. Recorded state is not an independent inspection of today's repository.
+
+![Atlas, Harbor and Orchard project cards](docs/media/rust/projects.png)
+
+</details>
+
+<details>
+<summary><strong>Timeline — follow activity over time</strong></summary>
+
+Inspect daily conversation volume, filter by provider, switch to the calendar, navigate months or return to today. Drill into activity without confusing chronology with causality.
+
+![Activity by day and source tool](docs/media/rust/timeline.png)
+
+[Calendar view](docs/media/rust/calendar.png)
+
+</details>
+
+<details>
+<summary><strong>Ask — question the recorded evidence</strong></summary>
+
+Enter a question and follow the returned sources. A configured generation backend is required. After backend resolution, generation failures can return excerpts; an unresolved backend can instead cause an error. This screenshot shows the input state, not an invented answer.
+
+![Ask before submitting the example question](docs/media/rust/ask.png)
+
+</details>
+
+<details>
+<summary><strong>Operate — maintain the store</strong></summary>
+
+Run ingestion, status, embedding, deduplication, backup, audit, stale-memory reporting, instruction-file writeback or answer evaluation. Some actions mutate data or files; model-dependent actions require configuration. See the [action reference](docs/FEATURE_GUIDE.md#maintenance-actions).
+
+![All nine maintenance actions and ingestion status](docs/media/rust/operate.png)
+
+[Completed demo Status action](docs/media/rust/operate-status.png)
+
+</details>
+
+## Beyond the browser
+
+### CLI functions
+
+Use `throughline --help` and `throughline <command> --help` for options. In Compose, prefix commands with `docker compose exec web`.
+
+```bash
+throughline ingest --source codex
+throughline search "decision" --limit 10
+throughline handoff --project Atlas-demo
+throughline decisions --project Atlas-demo
+throughline export-markdown --out ./exports --project Atlas-demo
+```
+
+| Area | Commands |
+| --- | --- |
+| Setup and health | `migrate`, `serve`, `status`, `doctor` |
+| Import and retrieve | `ingest`, `search`, `ask`, `handoff` |
+| Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
+| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval` |
+| Carry context forward | `scan-instructions`, `writeback`, `export-markdown` |
+| Protect and integrate | `backup`, `mcp` |
+
+See the [function reference](docs/FEATURE_GUIDE.md#cli-functions) for dependencies and side effects. Availability is not a claim that every command was tested against every schema variant.
+
+### MCP
+
+Launch `throughline mcp` from a compatible client over stdio, with database variables in that process's environment. The container equivalent is `docker compose run -i --rm mcp`.
+
+The Rust server advertises `search`, `list_projects`, `stats`, `write` and `forget`. **Known fresh-schema gap:** `forget` updates `memory_chunks.updated_at`, which the current Rust migration does not create. Do not rely on that action until the schema and implementation are corrected. The older Python MCP server has a different tool contract.
+
+### Optional models
+
+Set these in the **application process/container environment**. Compose needs an `environment` entry or override for variables it does not already forward.
+
+| Purpose | Rust settings |
+| --- | --- |
+| Database | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |
+| Ollama endpoint | `OLLAMA_HOST`, e.g. `http://host.docker.internal:11434` on Docker Desktop |
+| Embeddings | `THROUGHLINE_EMBED_BACKEND=ollama`, `OLLAMA_EMBED_MODEL=nomic-embed-text`; current path expects 768 dimensions |
+| Ollama generation | `THROUGHLINE_ANSWER_BACKEND=ollama`, `THROUGHLINE_ANSWER_MODEL=<installed-model>` |
+| Compatible generation | `THROUGHLINE_ANSWER_BACKEND=compatible`, `THROUGHLINE_ANSWER_BASE_URL`, `THROUGHLINE_ANSWER_MODEL`, optionally `THROUGHLINE_ANSWER_API_KEY` |
+| Backup directory | `THROUGHLINE_BACKUP_DIR` or CLI `backup --dir` |
+
+The Rust implementation supports Ollama and an explicitly configured OpenAI-compatible generation endpoint. Its named hosted OpenAI mode is disabled; embeddings use an Ollama-compatible service. A remote endpoint receives the content sent to it. See [generation](rust/crates/throughline/src/llm.rs) and [embedding](rust/crates/throughline/src/embedding.rs) configuration in the source.
+
+## How it fits together
 
 ```mermaid
 flowchart LR
-    Sources[Local AI session files] --> Adapters[Source adapters]
-    Adapters --> DB[(PostgreSQL + pgvector)]
-    DB <--> API[Python / FastAPI]
-    API <--> UI[React / TypeScript workspace]
-    API <--> Models[Optional model providers]
-    API <--> CLI[CLI and MCP clients]
-    UI --> Templates[Project / Team / Role templates]
-    Templates --> Resources[Configured operational resources]
-    Resources -. separate setup .-> Executor[External agent executor]
+    Files[Local session files] --> Import[11 source adapters]
+    Import --> DB[(PostgreSQL + pgvector)]
+    DB <--> Runtime[Rust application]
+    Runtime <--> Browser[Embedded browser UI]
+    Runtime <--> Clients[CLI and MCP clients]
+    Runtime -. optional .-> Models[Ollama / compatible generation API]
+    Runtime --> Export[Markdown handoffs and exports]
+    Runtime --> Instructions[Explicit instruction-file writeback]
 ```
 
-The built frontend ships inside the Python package; using Throughline does not require Node. Compose applies ordered database migrations before starting the web service.
+The container embeds `rust/crates/throughline/web/index.html`; Node is not required to run it. Compose applies migrations before starting the web service. Source files, the PostgreSQL store and exported Markdown remain separate artifacts.
 
-| Boundary | Current behavior |
-|---|---|
-| **Local mode** | No login; loopback binding is the default. |
-| **Shared workspace** | Viewer, editor and administrator accounts with change history; one shared corpus. |
-| **Project confidentiality** | No project-level isolation between workspace members. SSO/MFA are not provided. |
-| **Model data** | Selected providers receive the content needed for their purpose; check each destination before processing private data. |
-| **Credentials** | Provider keys are stored as plaintext in the local database and omitted from normal provider/settings responses. Database access, backups and SQL Console access can expose them. |
-| **Agent execution** | Requires a separately configured external pipeline; template policies do not create enforced runtime permissions. |
+## Current boundaries
 
-Throughline is **beta software**. Read [Security](SECURITY.md) before a shared deployment and [Roadmap](docs/ROADMAP.md) for remaining work. A template in a regulated category does not make the application a certified system for that industry.
+- **Local, trusted use.** The current Rust router has no application login or role enforcement. Keep it on loopback. Older Python team-mode settings do not add authentication to this runtime.
+- **Historical evidence.** Conversations, notes and answers may be incomplete, stale or wrong. Tool-call records do not prove a command succeeded or a file still exists.
+- **Separate model validation.** The demo demonstrates navigation and selected deterministic actions, not model quality, vector retrieval, agent execution or backup restoration.
+- **Incomplete parity.** React team operations, the 103-template library, Review, SQL Console and account management are not registered by the Rust server. Older documentation may use different commands and variables.
+- **Limited evaluation.** Answer evaluation checks citations and configured phrases; its reported rate is not a general factual-accuracy measure. Entity extraction uses token heuristics.
 
-## Documentation
+See the [verification record](docs/demo/rust/VERIFICATION.md) for evidence and remaining gaps, and [Security](SECURITY.md) for reporting issues.
 
-| Start and operate | Understand and extend |
-|---|---|
-| [Installation](docs/INSTALLATION.md) | [Project history and provenance](docs/PROJECT_STORY.md) |
-| [Team deployment](docs/TEAM_DEPLOYMENT.md) | [Design blueprint](DESIGN.md) |
-| [Upgrading](docs/UPGRADING.md) | [Architecture](docs/architecture.md) |
-| [Template catalog and usage](docs/TEMPLATES.md) | [Adapter development](docs/ADAPTER_DEVELOPMENT.md) |
-| [AI processing](docs/AI_PROCESSING.md) | [Current tour media](docs/media/README.md) |
-| [CLI usage](docs/USAGE.md) | [FAQ](docs/FAQ.md) |
-| [Fictional demo and recordings](docs/DEMO.md) | [Changelog](CHANGELOG.md) |
+## Develop and contribute
 
-## Development and contributing
-
-Read [Contributing](CONTRIBUTING.md) for development setup, branch conventions and commit requirements. Maintainers use the [release validation checklist](docs/RELEASE_CHECKLIST.md) before publishing; the release workflow publishes container images, not GitHub Releases or PyPI packages. Run the checks used by CI:
+The default runtime lives in [`rust/`](rust/). Use a toolchain compatible with its lockfile; the container pins Rust 1.90.
 
 ```bash
-pip install -r requirements-dev.txt
-pytest tests/ -m "not integration" --ignore=tests/integration
-ruff check throughline memory_mcp scripts skill/scripts evals tests
-black --check throughline memory_mcp scripts skill/scripts evals tests
-npm --prefix web ci
-npm --prefix web run typecheck
-npm --prefix web test
-npm --prefix web run build
+cargo build --release --manifest-path rust/Cargo.toml -p throughline
+cargo test --manifest-path rust/Cargo.toml -p throughline --lib
 ```
 
-Integration tests require a disposable PostgreSQL 16 database with pgvector. Contributions follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report reproducible bugs through [GitHub Issues](https://github.com/mkupermann/throughline/issues), and security issues through [Security](SECURITY.md).
+Integration tests require a disposable PostgreSQL database with pgvector. Screenshot tooling lives under `web/`; that does not make React the default interface.
+
+| Read next | Contents |
+| --- | --- |
+| [Visual feature guide](docs/FEATURE_GUIDE.md) | All current menus, detail views, maintenance actions and CLI functions. |
+| [Rust demo guide](docs/demo/rust/README.md) | Isolated fixture, screenshot regeneration and cleanup. |
+| [Verification record](docs/demo/rust/VERIFICATION.md) | What was checked and what remains unverified. |
+| [Contributing](CONTRIBUTING.md) | Contribution conventions; distinguish Rust work from Python/React checks. |
+| [Changelog](CHANGELOG.md) | Recorded project changes. |
+| [Earlier Python/React demo](docs/DEMO.md) | The previous application's fixture and recordings. |
+
+Report reproducible bugs through [GitHub Issues](https://github.com/mkupermann/throughline/issues). Contributions follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

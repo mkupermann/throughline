@@ -1,0 +1,72 @@
+{
+  "fixture": "docs/demo/rust/seed.sql",
+  "capturedAt": "2026-10-21T23:55:53.710Z",
+  "uiSha256": "de63268b544bbc08c93cf581c551e64858ef1d703eacc254d6eb23becac8a466",
+  "fictionalData": true,
+  "mockedResponses": false,
+  "modelCalls": false,
+  "agentLaunches": false,
+  "corpus": {
+    "conversations": 18,
+    "messages": 72,
+    "memory_chunks": 12,
+    "embeddings": 0,
+    "projects": 3,
+    "first_started_at": "2026-10-04T09:00:00Z",
+    "last_started_at": "2026-10-21T09:00:00Z",
+    "tools": [
+      {
+        "source_tool": "opencode",
+        "conversations": 3,
+        "messages": 12
+      },
+      {
+        "source_tool": "claude_code",
+        "conversations": 3,
+        "messages": 12
+      },
+      {
+        "source_tool": "cursor",
+        "conversations": 3,
+        "messages": 12
+      },
+      {
+        "source_tool": "aider",
+        "conversations": 3,
+        "messages": 12
+      },
+      {
+        "source_tool": "codex",
+        "conversations": 3,
+        "messages": 12
+      },
+      {
+        "source_tool": "vibe",
+        "conversations": 3,
+        "messages": 12
+      }
+    ]
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "screenshots": [
+    "home",
+    "history",
+    "history-cards",
+    "conversation",
+    "browse",
+    "message",
+    "memory",
+    "find",
+    "projects",
+    "timeline",
+    "calendar",
+    "ask",
+    "operate",
+    "operate-status",
+    "palette"
+  ],
+  "pageErrors": []
+}

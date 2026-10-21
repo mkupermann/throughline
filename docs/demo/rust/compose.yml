@@ -1,0 +1,64 @@
+name: throughline-readme-demo
+
+# Fictional, disposable corpus. No host sessions, keys or project folders mounted.
+x-db: &db
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGDATABASE: throughline_readme_demo
+  PGUSER: demo
+  PGPASSWORD: fictional-demo-only
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: throughline_readme_demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: fictional-demo-only
+    volumes:
+      - demo_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d throughline_readme_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: ${THROUGHLINE_DEMO_IMAGE:-throughline-readme-demo:local}
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.rust
+    environment: *db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["throughline", "migrate"]
+
+  seed:
+    image: pgvector/pgvector:pg16
+    environment: *db
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./seed.sql:/demo/seed.sql:ro
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/demo/seed.sql"]
+
+  web:
+    image: ${THROUGHLINE_DEMO_IMAGE:-throughline-readme-demo:local}
+    environment:
+      <<: *db
+      # Unreachable loopback endpoints prevent demo model traffic.
+      OLLAMA_HOST: http://127.0.0.1:1
+      THROUGHLINE_ANSWER_BACKEND: compatible
+      THROUGHLINE_ANSWER_BASE_URL: http://127.0.0.1:1/v1
+      THROUGHLINE_ANSWER_MODEL: fictional-demo-offline
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${THROUGHLINE_DEMO_PORT:-8796}:8787"
+    command: ["throughline", "serve", "--host", "0.0.0.0", "--port", "8787"]
+
+volumes:
+  demo_data:
