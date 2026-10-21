@@ -468,14 +468,12 @@ def test_private_source_mount_reads_or_rejects_unsupported_daemon(tmp_path: Path
     )
     override = tmp_path / "compose.uid-test.yml"
     override.write_text(
-        "services:\n"
-        "  web:\n"
+        "services:\n" "  web:\n"
         # `cat`, not `python -c`: the web image is the Rust binary on
         # debian-slim and carries no interpreter. What is under test is whether
         # the unprivileged container user can read a 0600 host file through the
         # read-only mount, which cat demonstrates in either image.
-        "    command: [cat, /home/throughline/.claude/private.jsonl]\n"
-        "    volumes:\n"
+        "    command: [cat, /home/throughline/.claude/private.jsonl]\n" "    volumes:\n"
         # Compose replaces the base source mount by its target path. Mounting a
         # file below that read-only base directory would require OCI to create
         # a nested mountpoint and fails before the permission assertion runs.
