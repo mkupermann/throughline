@@ -1,0 +1,9 @@
+[Unit]
+Description=Throughline Rust hourly ingest
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

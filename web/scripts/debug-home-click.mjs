@@ -1,0 +1,18 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ headless: true });
+const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+const errs = [];
+p.on("pageerror", (e) => errs.push(String(e)));
+await p.goto("http://127.0.0.1:8787", { waitUntil: "networkidle" });
+await p.locator("nav button", { hasText: "Home" }).first().click();
+await p.waitForTimeout(700);
+const sel = "#home-list button, #home-list .row";
+const first = p.locator(sel).first();
+console.log("tag", await first.evaluate((el) => el.tagName + "." + el.className));
+console.log("data-id", await first.getAttribute("data-id"));
+await first.click();
+await p.waitForTimeout(800);
+console.log("detail", await p.locator("#view-detail").isVisible());
+console.log("title", await p.locator("#detail-title").innerText());
+console.log("errs", errs);
+await b.close();

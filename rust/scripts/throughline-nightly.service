@@ -1,0 +1,11 @@
+[Unit]
+Description=Throughline Rust nightly extract/embed/backup
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/throughline/env
+ExecStart=/bin/bash %h/src/throughline/rust/scripts/throughline-nightly.sh
+
+[Install]
+WantedBy=default.target

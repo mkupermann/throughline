@@ -1,0 +1,13 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ headless: true });
+const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+await p.goto("http://127.0.0.1:8787", { waitUntil: "networkidle" });
+await p.locator("nav button", { hasText: "Timeline" }).first().click();
+await p.waitForTimeout(500);
+await p.locator("#timeline-mode-cal").click();
+await p.waitForTimeout(500);
+console.log("cal_visible", await p.locator("#timeline-calendar-panel").isVisible());
+console.log("days", await p.locator("#timeline-calendar .cal-day:not(.is-empty)").count());
+console.log("label", await p.locator("#cal-month-label").innerText());
+await p.screenshot({ path: "output/playwright/gui-timeline-calendar.png" });
+await b.close();

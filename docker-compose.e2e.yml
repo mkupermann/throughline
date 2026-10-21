@@ -1,0 +1,83 @@
+# Isolated end-to-end stack — fresh database, no clash with the live compose project.
+# Usage:
+#   docker compose -f docker-compose.e2e.yml down -v
+#   docker compose -f docker-compose.e2e.yml up -d --build
+#   docker compose -f docker-compose.e2e.yml run --rm ingest
+
+name: throughline-e2e
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tl-e2e-postgres
+    environment:
+      POSTGRES_DB: throughline
+      POSTGRES_USER: throughline
+      POSTGRES_PASSWORD: e2e-fresh-password
+    volumes:
+      - tl_e2e_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U throughline -d throughline"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    container_name: tl-e2e-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: throughline
+      PGUSER: throughline
+      PGPASSWORD: e2e-fresh-password
+    command: ["throughline", "migrate"]
+    restart: "no"
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    container_name: tl-e2e-ingest
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: throughline
+      PGUSER: throughline
+      PGPASSWORD: e2e-fresh-password
+      THROUGHLINE_CLAUDE_PROJECTS_DIR: /home/throughline/.claude/projects
+    volumes:
+      - ~/.claude:/home/throughline/.claude:ro
+    command: ["throughline", "ingest", "--source", "claude_code"]
+    profiles:
+      - ingest
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    container_name: tl-e2e-web
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: throughline
+      PGUSER: throughline
+      PGPASSWORD: e2e-fresh-password
+      THROUGHLINE_ALLOW_REMOTE: "1"
+    ports:
+      - "127.0.0.1:8791:8787"
+    command: ["throughline", "serve", "--host", "0.0.0.0", "--port", "8787"]
+
+volumes:
+  tl_e2e_pg:
