@@ -13,7 +13,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def client(db_env):
     deps.close_pool()
-    with TestClient(create_app(Settings(web_dist=None)), raise_server_exceptions=False) as client:
+    with TestClient(create_app(Settings(web_dist=None, enable_pm=True)), raise_server_exceptions=False) as client:
         yield client
     deps.close_pool()
 

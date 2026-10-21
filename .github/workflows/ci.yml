@@ -185,6 +185,8 @@ jobs:
       PGPASSWORD: postgres
       PGDATABASE: throughline_browser_demo
       THROUGHLINE_DEMO_URL: http://127.0.0.1:8795
+      # The smoke run drives /pm/templates, and Project Management is opt-in.
+      THROUGHLINE_ENABLE_PM: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
