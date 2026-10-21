@@ -256,14 +256,22 @@ test -n "$(find /tmp/backups -type f -name '*.sql.gz' -print -quit)"
 
 
 def test_current_outbound_templates_do_not_advertise_an_unused_anthropic_key() -> None:
-    """A key documented as consumed changes the user's data-egress assessment."""
+    """A key documented as consumed changes the user's data-egress assessment.
+
+    Hosted OpenAI is disabled: templates must not claim OPENAI_API_KEY
+    selects an embeddings or generation backend.
+    """
     for path in (ROOT / ".env.example", ROOT / "SECURITY.md"):
         text = path.read_text(encoding="utf-8")
+        lowered = text.lower()
         assert "ANTHROPIC_API_KEY" not in text
-        assert "OPENAI_API_KEY" in text
+        # The wording differs between the two files; the claim must not.
+        assert "hosted openai is disabled" in lowered or "hosted openai is not" in lowered
+        assert "auto` selects hosted OpenAI" not in text
 
-    assert "embed --backend auto` whenever it is set" in (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "auto` selects hosted OpenAI" in (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "THROUGHLINE_API_KEY" in env_text
+    assert "OPENAI_API_KEY=sk-" not in env_text
 
 
 def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> None:

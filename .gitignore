@@ -107,3 +107,23 @@ build/
 
 # Intermediate recordings; publish reviewed MP4/GIF assets instead.
 docs/media/*.webm
+
+# Autonomous-crew operational files. MISSIONS.md and AGENTS.md carry
+# machine-local paths and a database password; the dated rust/*.md files are
+# exported real session transcripts, not source. None of it belongs in a
+# public repository.
+rust/MISSIONS.md
+rust/AGENTS.md
+rust/20*.md
+rust/serve.out
+rust/serve.err
+rust/docs/
+docs/STATUS-AUTONOMOUS.md
+
+# Local agent/tooling caches and scratch output.
+.agents/
+.mimocode/
+.playwright-cli/
+skills-lock.json
+web/output/
+throughline-operate-quality-pass.png

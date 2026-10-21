@@ -12,15 +12,15 @@ So: a backend is chosen the same way the embedding backend already is —
 probed, environment-driven, no new config format to learn — and the probe
 order puts local models first, because that is what the product promises.
 
-    THROUGHLINE_ANSWER_BACKEND   auto | ollama | openai   (default: auto)
+    THROUGHLINE_ANSWER_BACKEND   auto | ollama | compatible   (default: auto)
     THROUGHLINE_ANSWER_MODEL     model name for that backend
-    THROUGHLINE_ANSWER_BASE_URL  OpenAI-compatible endpoint (LM Studio, vLLM,
-                                 llama.cpp, LiteLLM, a colleague's server…)
-    OPENAI_API_KEY               only read by the `openai` backend
+    THROUGHLINE_ANSWER_BASE_URL  OpenAI-compatible endpoint (Xiaomi MiMo,
+                                 LM Studio, vLLM, llama.cpp, LiteLLM…)
+    THROUGHLINE_API_KEY          bearer token for that endpoint (never OpenAI)
 
-`auto` tries Ollama, then any OpenAI-compatible server named by BASE_URL,
-then hosted OpenAI. A machine with Ollama running never reaches a network
-call, and never had to be configured to avoid one.
+`auto` tries Ollama, then any OpenAI-compatible server named by BASE_URL.
+Hosted OpenAI is not a fallback. A machine with Ollama running never
+reaches a network call, and never had to be configured to avoid one.
 
 The `claude` CLI was a backend here and is not one any more. It was the last
 route by which generation could reach one specific vendor without anyone
@@ -57,7 +57,7 @@ _DEFAULT_OPENAI_COMPAT = "http://localhost:1234/v1"
 #: what makes the answer good here — the retrieval is.
 _DEFAULT_MODEL = {
     "ollama": "qwen3.5:9b",
-    "openai": "gpt-4o-mini",
+    "compatible": "mimo-v2.6-flash",
 }
 
 
@@ -178,12 +178,15 @@ def backend_info(purpose: str | None = None) -> LLMInfo:
         # be worse than letting the call report the real error.
         return pick("ollama", local=True, detail=", ".join(chat[:3]))
 
-    if preferred == "openai":
-        if base:
-            return pick("openai", local=_is_loopback(base), detail=base)
-        if not os.environ.get("OPENAI_API_KEY", "").strip():
-            return LLMInfo(False, detail="OPENAI_API_KEY is not set and no BASE_URL was given.")
-        return pick("openai", local=False, detail="api.openai.com")
+    if preferred in ("openai", "compatible", "xiaomi", "mimo"):
+        if not base:
+            return LLMInfo(
+                False,
+                detail=(
+                    "Hosted OpenAI is disabled. Set THROUGHLINE_ANSWER_BASE_URL " "to a local or Xiaomi MiMo endpoint."
+                ),
+            )
+        return pick("compatible", local=_is_loopback(base), detail=base)
 
     if preferred == "claude":
         return LLMInfo(
@@ -195,21 +198,18 @@ def backend_info(purpose: str | None = None) -> LLMInfo:
             ),
         )
 
-    # auto — local first, and never silently reaching the network when
-    # something on this machine can do the job.
+    # auto — local first, then an explicitly named non-OpenAI endpoint.
     chat = _ollama_chat_models()
     if chat:
         return pick("ollama", local=True, detail=", ".join(chat[:3]))
     if base:
-        return pick("openai", local=_is_loopback(base), detail=base)
-    if os.environ.get("OPENAI_API_KEY", "").strip():
-        return pick("openai", local=False, detail="api.openai.com")
+        return pick("compatible", local=_is_loopback(base), detail=base)
     return LLMInfo(
         False,
         detail=(
             "No model available. Start Ollama (`ollama serve`) and pull a "
-            "generation model, or set THROUGHLINE_ANSWER_BASE_URL to an "
-            "OpenAI-compatible server."
+            "generation model, or set THROUGHLINE_ANSWER_BASE_URL to a "
+            "non-OpenAI endpoint (e.g. Xiaomi MiMo)."
         ),
     )
 
@@ -281,11 +281,16 @@ def complete(
             answer = (data.get("response") or "").strip() or (data.get("thinking") or "").strip()
             return answer, None
 
-        if info.backend == "openai":
-            base = _openai_compat_base() or "https://api.openai.com/v1"
+        if info.backend in ("openai", "compatible"):
+            base = _openai_compat_base()
+            if not base:
+                return None, "THROUGHLINE_ANSWER_BASE_URL is not set (hosted OpenAI is disabled)."
             headers = {}
-            key = os.environ.get("OPENAI_API_KEY", "").strip()
-            # A local server usually wants no key; a hosted one always does.
+            key = (
+                os.environ.get("THROUGHLINE_API_KEY", "").strip()
+                or os.environ.get("THROUGHLINE_ANSWER_API_KEY", "").strip()
+            )
+            # A local server usually wants no key; Xiaomi MiMo always does.
             if key:
                 headers["authorization"] = f"Bearer {key}"
             data = _http_json(

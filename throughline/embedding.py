@@ -13,7 +13,6 @@ and not 500.
 
 from __future__ import annotations
 
-import os
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -57,16 +56,10 @@ def _probe(preferred: str) -> str:
     is a multi-minute operation and must never happen inside a request.
     """
     ge = _load_module()
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if preferred == "openai":
-        return "" if key else "OPENAI_API_KEY is not set."
-    if preferred == "auto" and key:
-        return ""
+    if preferred in ("openai", "hosted", "openai-compatible"):
+        return "Hosted OpenAI embeddings are disabled. Use local Ollama."
     if not ge.ollama_up():
-        return (
-            f"Ollama is not running on {ge.OLLAMA_URL} and OPENAI_API_KEY "
-            "is not set. Start Ollama (`ollama serve`) or set an API key."
-        )
+        return f"Ollama is not running on {ge.OLLAMA_URL}. Start Ollama (`ollama serve`)."
     if not ge.ollama_has_model(ge.OLLAMA_MODEL):
         return f"Ollama model `{ge.OLLAMA_MODEL}` is not pulled. Run: ollama pull {ge.OLLAMA_MODEL}"
     return ""

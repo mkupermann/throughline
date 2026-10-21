@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { features } from "@/lib/features";
+
 /**
  * Six surfaces, replacing the fourteen flat nav entries of the Streamlit
  * app. Nine of those fourteen were variations on "find something", which is
@@ -40,3 +42,19 @@ export const NAV: NavItem[] = [
 ];
 
 export const NAV_GROUPS = ["Work", "Trust", "System"] as const;
+
+export type NavGroup = (typeof NAV_GROUPS)[number];
+
+/** Nav items the running server actually serves. PM is opt-in behind
+ *  THROUGHLINE_ENABLE_PM, so a fenced-off build must not advertise it.
+ *  Keyed on the route rather than the group: AI team operations sits in
+ *  System alongside surfaces that are always present. */
+export function visibleNav(): NavItem[] {
+  return features().pm ? NAV : NAV.filter((item) => !item.to.startsWith("/pm"));
+}
+
+/** Groups with at least one visible item — an empty group heading is noise. */
+export function visibleNavGroups(): NavGroup[] {
+  const items = visibleNav();
+  return NAV_GROUPS.filter((group) => items.some((item) => item.group === group));
+}

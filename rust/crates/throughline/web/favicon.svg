@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Throughline">
+  <defs>
+    <linearGradient id="tlg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2dd4a7"/>
+      <stop offset="55%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#tlg)"/>
+  <!-- continuous throughline: thread through memory nodes -->
+  <path d="M14 44 C22 44 22 30 30 30 C38 30 38 18 50 18"
+        fill="none" stroke="#042116" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="14" cy="44" r="4.2" fill="#042116"/>
+  <circle cx="30" cy="30" r="4.2" fill="#042116"/>
+  <circle cx="50" cy="18" r="4.2" fill="#042116"/>
+  <circle cx="30" cy="30" r="2" fill="#9ff0d4"/>
+</svg>

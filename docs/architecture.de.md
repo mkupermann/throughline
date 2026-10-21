@@ -148,9 +148,9 @@ Alle modelbasierten Operationen können Inhalte an den gewählten Model Provider
 senden. Lokale Backends halten sie auf dem Rechner. Für Remote Antworten kann
 `THROUGHLINE_REDACT_PROMPTS=1` die Exzerpte redigieren. Die Extraction verwendet
 standardmäßig die Heuristik in `throughline/pii.py`.
-Die Embedding-Automatik wählt bei vorhandenem `OPENAI_API_KEY` das gehostete
-OpenAI-Backend, sonst Ollama; für eine strikt lokale Verarbeitung ist daher
-`throughline embed --backend ollama` erforderlich.
+Die Embedding-Automatik nutzt ausschließlich ein lokales Ollama-Embedding-Modell
+(z. B. `nomic-embed-text`). Gehostetes OpenAI ist kein Embedding-Backend;
+`OPENAI_API_KEY` aktiviert es nicht.
 
 ## Qualitätssicherung
 

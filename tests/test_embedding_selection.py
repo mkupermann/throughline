@@ -1,15 +1,18 @@
 """Embedding backend-selection contracts."""
 
+import pytest
+
 from throughline.jobs import generate_embeddings
 
 
-def test_embedding_auto_prefers_openai_when_a_key_is_present(monkeypatch):
-    """This precedence is a data-egress boundary and must remain documented."""
+def test_embedding_auto_never_falls_through_to_hosted_openai(monkeypatch):
+    """Hosted OpenAI is not an embedding backend. An API key must not turn
+    data-egress on by itself - the job exits instead of sending transcripts."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    backend = generate_embeddings.pick_backend("auto")
-
-    assert isinstance(backend, generate_embeddings.OpenAIBackend)
+    with pytest.raises(SystemExit) as exc:
+        generate_embeddings.pick_backend("auto")
+    assert exc.value.code == 2
 
 
 # --------------------------------------------------------------------------- #

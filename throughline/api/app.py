@@ -8,17 +8,17 @@ the SPA from the same process on the same port. One command, one port —
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from throughline import __version__
-from throughline.jobs.pm_watch import poll_all_running
 
 from . import deps
 from .deps import DatabaseUnavailable, close_pool, init_pool
@@ -33,7 +33,6 @@ from .routers import (
     find,
     operate,
     overview,
-    pm,
     projects,
     providers,
     story,
@@ -55,6 +54,9 @@ def _pm_watch_tick(settings: Settings) -> None:
     and file reads, none of it awaitable. Run only via `asyncio.to_thread`
     (see `_pm_watch_loop`) — called directly on the event loop it would
     block every other request for the tick's duration."""
+    # Imported here so a build with PM fenced off never loads pm_watch at all.
+    from throughline.jobs.pm_watch import poll_all_running
+
     with deps.connection(settings) as conn:
         poll_all_running(conn)
 
@@ -95,18 +97,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_pool(settings)
-        watch_task = asyncio.create_task(_pm_watch_loop(settings))
+        # PM is opt-in (THROUGHLINE_ENABLE_PM). When it is off there is no
+        # watch loop and no pm_watch_task — the knowledge pipeline must not
+        # depend on either existing. Processing is unconditional.
+        watch_task: asyncio.Task[None] | None = None
+        if settings.enable_pm:
+            watch_task = asyncio.create_task(_pm_watch_loop(settings))
+            app.state.pm_watch_task = watch_task
         processing_task = asyncio.create_task(_processing_loop())
-        app.state.pm_watch_task = watch_task
         try:
             yield
         finally:
             processing_task.cancel()
             with suppress(asyncio.CancelledError):
                 await processing_task
-            watch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await watch_task
+            if watch_task is not None:
+                watch_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await watch_task
             close_pool()
 
     app = FastAPI(
@@ -162,7 +170,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(projects.router, prefix="/api")
     app.include_router(story.router, prefix="/api")
     app.include_router(export.router, prefix="/api")
-    app.include_router(pm.router, prefix="/api")
+    if settings.enable_pm:
+        # Imported here so `import throughline.api.app` stays free of the PM
+        # domain when the surface is fenced off.
+        from .routers import pm as pm_router
+
+        app.include_router(pm_router.router, prefix="/api")
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -172,11 +185,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 cur.execute("SELECT 1")
         return {"status": "ok", "version": __version__}
 
-    _mount_frontend(app, settings.web_dist)
+    _mount_frontend(app, settings.web_dist, settings)
     return app
 
 
-def _mount_frontend(app: FastAPI, dist: Path | None) -> None:
+def _inject_meta(html: str, settings: Settings | None) -> str:
+    """Stamp runtime feature flags into the SPA shell.
+
+    The built index.html is static, so the only way for a single committed
+    bundle to know whether PM is on is a value the server writes at serve
+    time. The frontend reads `window.__THROUGHLINE_META__` synchronously on
+    boot — no fetch, no flash of a nav item the API will 404.
+    """
+    meta = {"features": {"pm": bool(settings.enable_pm) if settings else False}}
+    payload = json.dumps(meta, separators=(",", ":"))
+    script = f"<script>window.__THROUGHLINE_META__={payload};</script>"
+    marker = "</head>"
+    if marker in html:
+        return html.replace(marker, f"{script}{marker}", 1)
+    return f"{script}{html}"
+
+
+def _mount_frontend(app: FastAPI, dist: Path | None, settings: Settings | None = None) -> None:
     """Serve the built SPA, if there is one.
 
     Absent during backend-only development: the API keeps working and only
@@ -203,6 +233,26 @@ def _mount_frontend(app: FastAPI, dist: Path | None) -> None:
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
     index = dist / "index.html"
+    if not index.is_file():
+        # Partial/failed build: do not crash create_app — the API (and
+        # /api/health) must stay up even when the SPA is missing.
+
+        @app.get("/{full_path:path}")
+        def _no_index(full_path: str):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "frontend_not_built",
+                    "detail": "index.html is missing from the built frontend.",
+                    "hint": "Run `npm --prefix web install && npm --prefix web run build`.",
+                },
+            )
+
+        return
+
+    # Read once: the file is immutable for the life of the process, and every
+    # deep-link refresh would otherwise re-read and re-inject.
+    index_html = _inject_meta(index.read_text(encoding="utf-8"), settings)
 
     @app.get("/{full_path:path}")
     def spa(full_path: str):
@@ -217,4 +267,4 @@ def _mount_frontend(app: FastAPI, dist: Path | None) -> None:
                 return FileResponse(candidate)
         if full_path.startswith("api/"):
             return JSONResponse(status_code=404, content={"error": "not_found"})
-        return FileResponse(index)
+        return HTMLResponse(index_html)

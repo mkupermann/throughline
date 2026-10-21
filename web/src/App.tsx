@@ -17,6 +17,7 @@ import { ProjectPage } from "@/features/projects/ProjectPage";
 import { OperatePage } from "@/features/operate/OperatePage";
 import { ConsolePage } from "@/features/console/ConsolePage";
 import { ToastProvider } from "@/components/Toaster";
+import { features } from "@/lib/features";
 import { DashboardPage } from "@/features/pm/DashboardPage";
 import { CockpitPage } from "@/features/pm/CockpitPage";
 import { TaskPage } from "@/features/pm/TaskPage";
@@ -43,6 +44,22 @@ const queryClient = new QueryClient({
   },
 });
 
+/** PM is opt-in (THROUGHLINE_ENABLE_PM). When the server fenced it off the
+ *  routes are not registered at all — a deep link falls through to the SPA
+ *  shell's unmatched route rather than mounting pages whose API calls 404. */
+const pmRoutes = features().pm
+  ? [
+      { path: "pm", element: <DashboardPage /> },
+      { path: "pm/projects/:id", element: <CockpitPage /> },
+      { path: "pm/tasks/:id", element: <TaskPage /> },
+      { path: "pm/templates", element: <TemplatesPage /> },
+      { path: "pm/roles", element: <RolesPage /> },
+      { path: "pm/members", element: <MembersPage /> },
+      { path: "pm/teams", element: <TeamsPage /> },
+      { path: "pm/models", element: <ModelsPage /> },
+    ]
+  : [];
+
 const router = createBrowserRouter([
   {
     path: "/",
@@ -66,14 +83,7 @@ const router = createBrowserRouter([
         element: <DetailPage kind={kind} />,
       })),
       { path: "console", element: <ConsolePage /> },
-      { path: "pm", element: <DashboardPage /> },
-      { path: "pm/projects/:id", element: <CockpitPage /> },
-      { path: "pm/tasks/:id", element: <TaskPage /> },
-      { path: "pm/templates", element: <TemplatesPage /> },
-      { path: "pm/roles", element: <RolesPage /> },
-      { path: "pm/members", element: <MembersPage /> },
-      { path: "pm/teams", element: <TeamsPage /> },
-      { path: "pm/models", element: <ModelsPage /> },
+      ...pmRoutes,
     ],
   },
 ]);

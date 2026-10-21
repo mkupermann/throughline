@@ -1,0 +1,43 @@
+[package]
+name = "throughline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rust rewrite of Throughline — local memory layer for AI coding sessions"
+repository.workspace = true
+
+[[bin]]
+name = "throughline"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum = "0.8.9"
+chrono.workspace = true
+clap.workspace = true
+dirs.workspace = true
+postgres.workspace = true
+regex = "1.13.1"
+# Hermes state.db path. Optional so a SQLite-free build stays possible;
+# enabled by default because state.db is Hermes's primary source.
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
+uuid.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+default = ["hermes-sqlite"]
+# Parse Hermes `state.db` (SQLite). JSON session exports work without it.
+hermes-sqlite = ["dep:rusqlite"]
+
+[package.metadata]
+# Keep migrations inside the crate so `throughline migrate` works from a
+# wheel-equivalent install without the Python package layout.

@@ -89,3 +89,15 @@ web/
 # Project specific
 .k2a/
 sql/migrations/
+
+rust/target
+web/node_modules
+web/output
+.playwright-cli
+.agents
+
+.worktrees
+-worktrees
+backups
+exports
+*.png

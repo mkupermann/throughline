@@ -412,15 +412,8 @@ def _port_open(host: str, port: int, timeout: float = 1.0) -> bool:
 
 @_check("embeddings_backend", "embeddings")
 def check_embeddings_backend() -> CheckResult:
-    # Heuristic preference order: env vars first, then ollama default port.
-    if os.environ.get("OPENAI_API_KEY"):
-        return CheckResult(
-            "embeddings_backend",
-            "embeddings",
-            "pass",
-            "OpenAI API key present (1536-dim embeddings)",
-            details={"backend": "openai"},
-        )
+    # Hosted OpenAI is not an embeddings backend. THROUGHLINE_API_KEY is the
+    # generation bearer token and must not greenlight vectorisation.
     ollama_host = os.environ.get("OLLAMA_HOST", "localhost")
     ollama_port = int(os.environ.get("OLLAMA_PORT", "11434"))
     if _port_open(ollama_host, ollama_port):
@@ -437,8 +430,8 @@ def check_embeddings_backend() -> CheckResult:
         "warn",
         "no embeddings backend reachable",
         remedy=(
-            "either export OPENAI_API_KEY=…, or run a local Ollama "
-            "(`brew install ollama && ollama serve && ollama pull nomic-embed-text`). "
+            "run a local Ollama (`ollama serve && ollama pull nomic-embed-text`). "
+            "Hosted OpenAI is not used for embeddings. "
             "Throughline still works with keyword-only search if you skip this."
         ),
     )
@@ -460,7 +453,7 @@ def check_answer_backend() -> CheckResult:
     info = llm.backend_info()
     if not info.available:
         default = llm._DEFAULT_MODEL.get("ollama", "")
-        remedy = f"ollama pull {default} — or set THROUGHLINE_ANSWER_BASE_URL / OPENAI_API_KEY"
+        remedy = f"ollama pull {default} — or set THROUGHLINE_ANSWER_BASE_URL (e.g. Xiaomi MiMo)"
         # Someone whose generation used to run through the `claude` CLI still
         # has the setting that selected it. Without a word here they meet the
         # removal as an unexplained failure.

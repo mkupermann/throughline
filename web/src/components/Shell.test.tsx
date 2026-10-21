@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/lib/theme";
+import { clearFeatures, setFeatures } from "@/lib/features";
 import { Shell } from "./Shell";
 
 vi.mock("react-router-dom", async () => {
@@ -40,6 +41,10 @@ function renderShell(path = "/curate?provider=hermes") {
 }
 
 describe("Shell", () => {
+  afterEach(() => {
+    clearFeatures();
+  });
+
   it("groups task navigation, names Review, and retains provider scope", () => {
     renderShell();
 
@@ -146,6 +151,24 @@ describe("Shell", () => {
     expect(document.documentElement.dataset.density).toBe("compact");
     expect(localStorage.getItem("throughline-density")).toBe("compact");
     expect(screen.getByTestId("location").textContent).toBe("/curate?provider=hermes");
+  });
+
+  it("hides AI team operations and its go chord when the surface is fenced off", async () => {
+    setFeatures({ pm: false });
+    const user = userEvent.setup();
+    renderShell();
+
+    expect(screen.queryByRole("link", { name: "AI team operations" })).toBeNull();
+    // The knowledge pipeline stays. These surfaces are not admin-gated, so
+    // they are present regardless of the access level the shell renders with.
+    for (const name of ["Projects", "Conversations", "Find", "Timeline", "Review"]) {
+      expect(screen.getByRole("link", { name })).toBeTruthy();
+    }
+
+    await user.click(screen.getByRole("button", { name: /keyboard shortcuts/i }));
+    const help = screen.getByRole("dialog", { name: /keyboard shortcuts/i });
+    expect(within(help).queryByText("g m")).toBeNull();
+    expect(within(help).getByText("g f")).toBeTruthy();
   });
 });
 

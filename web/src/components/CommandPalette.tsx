@@ -7,7 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Download, Moon, Sun, Monitor, FileSearch, Play } from "lucide-react";
 
-import { NAV, NAV_GROUPS } from "@/lib/nav";
+import { NAV_GROUPS, visibleNav } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
 import { findApi, operateApi, type FindItem } from "@/lib/api";
@@ -146,9 +146,9 @@ export function CommandPalette() {
       <Command.List className="palette-list">
         <Command.Empty className="palette-empty">{t("No matches.")}</Command.Empty>
 
-        {NAV_GROUPS.filter(group=>NAV.some(item=>item.group===group && (admin || !adminPage(item.to)))).map((group) => (
+        {NAV_GROUPS.filter(group=>visibleNav().some(item=>item.group===group && (admin || !adminPage(item.to)))).map((group) => (
           <Command.Group key={group} heading={t(group)} className="palette-group">
-            {NAV.filter((item) => item.group === group && (admin || !adminPage(item.to))).map((item) => (
+            {visibleNav().filter((item) => item.group === group && (admin || !adminPage(item.to))).map((item) => (
               <Command.Item
                 key={item.to}
                 value={`${t(item.label)} ${item.description ?? ""}`}

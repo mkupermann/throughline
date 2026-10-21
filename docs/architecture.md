@@ -76,7 +76,10 @@ embeddings and the ingestion ledger. `pgvector` supplies the vector type and HNS
 - **GUI** (`throughline/api/` and `web/src/`) — one FastAPI process serves the JSON API and
   built React SPA. It has eight route components: Overview, Find, Timeline, Curate, Project,
   Detail, Operate, and Console. Overview, Find, Timeline, Curate, Operate, and Console are
-  in the main navigation; project and detail routes open from records.
+  in the main navigation; project and detail routes open from records. Project Management
+  (`/pm`, the `pm_*` tables) is a separate surface behind `THROUGHLINE_ENABLE_PM` — off by
+  default, not imported by the server, not registered as routes, and not shown in the
+  navigation when fenced. The knowledge pipeline does not depend on it.
 - **Scheduled jobs** — launchd plists (`launchd/`) on macOS and systemd timers
   (`systemd/`) on Linux run ingestion, memory extraction and `pg_dump` backups
   unattended.

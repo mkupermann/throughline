@@ -37,7 +37,7 @@ The selected model or service receives data for these optional operations:
 2. **Project names, conversation titles, knowledge, entities and reflection** send source previews or candidate knowledge records. Extraction redaction is on by default; `THROUGHLINE_REDACT_PII=0` disables it. This does not imply that every other purpose uses the same redaction path.
 3. **Embeddings** send text to the chosen embedding API.
 
-Saved **AI settings** bindings take precedence over legacy environment defaults and the embedding CLI's `--backend` flag. They never silently fall back to another provider. For local-only processing, save local endpoints for every purpose. Without a saved binding, embedding `auto` selects hosted OpenAI when `OPENAI_API_KEY` is set; generation uses its existing auto-detection path. A loopback client or a locally installed CLI does not make a hosted model local.
+Saved **AI settings** bindings take precedence over legacy environment defaults and the embedding CLI's `--backend` flag. They never silently fall back to another provider. For local-only processing, save local endpoints for every purpose. Without a saved binding, embedding `auto` uses a local Ollama embedding model — hosted OpenAI is not an embeddings backend — and generation probes Ollama first, then an OpenAI-compatible endpoint you named in `THROUGHLINE_ANSWER_BASE_URL`. A loopback client or a locally installed CLI does not make a hosted model local.
 
 The optional host bridge executes only its registered Codex, Vibe and Claude adapters, in temporary directories with bounded concurrency and a timeout. It requires a bearer token. CLI authentication stays on the host. Requests can still be sent remotely through the CLI's configured service. Keep the bridge on a trusted host/container network; never publish its token. A local Stop cannot retract an already submitted provider request. See [AI processing](docs/AI_PROCESSING.md).
 
@@ -129,8 +129,9 @@ raw transcript to reach the model.
 
 ### API keys
 
-Throughline reads `OPENAI_API_KEY` from the environment. It must never be
-committed. `.env` files are gitignored — verify with
+Throughline reads `THROUGHLINE_API_KEY` from the environment, the bearer token
+for an OpenAI-compatible endpoint you named. It must never be committed.
+`.env` files are gitignored — verify with
 `git check-ignore -v .env` before any commit.
 
 Provider keys entered through AI-team operations are stored as plaintext in

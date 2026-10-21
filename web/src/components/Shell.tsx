@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Moon, Sun, Monitor, Keyboard, Menu, X } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
-import { NAV, NAV_GROUPS } from "@/lib/nav";
+import { NAV_GROUPS, visibleNav } from "@/lib/nav";
 import { useTheme } from "@/lib/theme";
 import { carryProviders } from "@/lib/providerScope";
 import { readDensity, saveDensity, type Density } from "@/lib/density";
@@ -42,7 +42,7 @@ function useGoChords(sp: URLSearchParams, enabled: boolean) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (armed.current) {
-        const item = NAV.find((n) => n.chord === e.key.toLowerCase());
+        const item = visibleNav().find((n) => n.chord === e.key.toLowerCase());
         if (item && (admin || !adminPage(item.to))) {
           e.preventDefault();
           navigate(carryProviders(item.to, sp));
@@ -137,7 +137,7 @@ function KeyboardHelp({ onClose }: { onClose: () => void }) {
         </div>
         <dl>
           <div><dt><kbd>Cmd/Ctrl+K</kbd></dt><dd>{t("Open the command palette")}</dd></div>
-          {NAV.filter(item=>admin || !adminPage(item.to)).map((item) => (
+          {visibleNav().filter(item=>admin || !adminPage(item.to)).map((item) => (
             <div key={item.to}><dt><kbd>g {item.chord}</kbd></dt><dd>{t(item.label)}</dd></div>
           ))}
         </dl>
@@ -251,11 +251,11 @@ export function Shell() {
         </div>
 
         <div className="nav-groups">
-          {NAV_GROUPS.filter(group=>NAV.some(item=>item.group===group && (access.admin || !adminPage(item.to)))).map((group) => (
+          {NAV_GROUPS.filter(group=>visibleNav().some(item=>item.group===group && (access.admin || !adminPage(item.to)))).map((group) => (
             <nav key={group} aria-label={t(group)}>
               <h2 className="nav-group-title">{t(group)}</h2>
               <ul className="nav-list">
-                {NAV.filter((item) => item.group === group && (access.admin || !adminPage(item.to))).map((item) => (
+                {visibleNav().filter((item) => item.group === group && (access.admin || !adminPage(item.to))).map((item) => (
                   <li key={item.to}>
                     <NavLink
                       onClick={() => { if (mobile) closeMenu(); }}

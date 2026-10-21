@@ -110,27 +110,27 @@ throughline ask "which tools do I actually use" --json
 cite. `--top-k` widens or narrows retrieval; recall@24 measured 75% against
 recall@12's 60% on this corpus, which is why 24 is the default.
 
-Retrieval is entirely local. Content can leave the machine when a hosted model
-is selected for embedding, answering, extraction, titles, or reflection:
+Retrieval is entirely local. Content can leave the machine when a named remote
+model is selected for embedding, answering, extraction, titles, or reflection:
 
 | Variable | Purpose |
 |---|---|
-| `THROUGHLINE_ANSWER_BACKEND` | `auto` (default), `ollama`, `openai`, `claude` |
+| `THROUGHLINE_ANSWER_BACKEND` | `auto` (default), `ollama`, `compatible` (`openai` is a deprecated alias) |
 | `THROUGHLINE_ANSWER_MODEL` | model name for that backend |
-| `THROUGHLINE_ANSWER_BASE_URL` | any OpenAI-compatible server — LM Studio, llama.cpp, vLLM, LiteLLM |
-| `OPENAI_API_KEY` | makes embedding `auto` use hosted OpenAI; also enables the OpenAI model backend |
+| `THROUGHLINE_ANSWER_BASE_URL` | an OpenAI-compatible server you name — LM Studio, llama.cpp, vLLM, LiteLLM |
+| `THROUGHLINE_API_KEY` | bearer token for that endpoint (never hosted OpenAI) |
 
 These variables control answering. Extraction, titling, and reflection are also
-model operations and can send their respective content to a hosted provider;
-use their documented local configuration where content must remain on the
-machine. `THROUGHLINE_MEMORY_LANG` forces the language extracted memory and
+model operations and can send their respective content to a named remote
+endpoint; use their documented local configuration where content must remain on
+the machine. `THROUGHLINE_MEMORY_LANG` forces the language extracted memory and
 generated titles are written in; left unset they follow the session, so German
 sessions produce German memory and English ones English.
 
-For embeddings, `auto` chooses OpenAI when `OPENAI_API_KEY` is set, otherwise
-Ollama. Answering can select a configured remote OpenAI-compatible endpoint,
-or hosted OpenAI; other model operations can also use hosted
-providers. `throughline doctor` prints which model will answer and whether it
+For embeddings, `auto` uses a local Ollama embedding model only. Hosted OpenAI
+is not an embeddings backend. For generation, the probe is Ollama, then an
+OpenAI-compatible endpoint you named in `THROUGHLINE_ANSWER_BASE_URL`.
+`throughline doctor` prints which model will answer and whether it
 runs locally; the UI says so on screen with every answer. `--model` overrides
 the model for a single question.
 

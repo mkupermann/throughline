@@ -92,7 +92,7 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.rust
       args:
         THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
         THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
@@ -116,7 +116,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.rust
       args:
         THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
         THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
@@ -135,6 +135,9 @@ services:
       THROUGHLINE_ALLOW_REMOTE: "1"
       THROUGHLINE_AUTH_MODE: "${THROUGHLINE_AUTH_MODE:-local}"
       THROUGHLINE_PUBLIC_URL: "${THROUGHLINE_PUBLIC_URL:-}"
+      # Project Management is opt-in. Off unless .env sets THROUGHLINE_ENABLE_PM=1;
+      # the knowledge pipeline (ingest, find, ask, export) never depends on it.
+      THROUGHLINE_ENABLE_PM: "${THROUGHLINE_ENABLE_PM:-0}"
       # This path is a named volume initialized with 0700 ownership in the
       # image, so backups survive web-container replacement without becoming
       # readable by other container users.
@@ -197,7 +200,7 @@ services:
   mcp:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.rust
       args:
         THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
         THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"
@@ -211,7 +214,7 @@ services:
     environment:
       <<: *pg-env
     volumes: *source-mounts
-    command: ["python", "-m", "memory_mcp.server"]
+    command: ["throughline", "mcp"]
     profiles:
       - mcp
 
@@ -221,7 +224,7 @@ services:
   credential-rotate:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.legacy
       args:
         THROUGHLINE_UID: "${THROUGHLINE_UID:-1000}"
         THROUGHLINE_GID: "${THROUGHLINE_GID:-1000}"

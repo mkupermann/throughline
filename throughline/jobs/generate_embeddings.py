@@ -2,9 +2,8 @@
 """
 Embedding generator for the Throughline database.
 
-Two backends are supported:
-  --backend openai   -> OpenAI text-embedding-3-small (1536 dim)   [OPENAI_API_KEY]
-  --backend ollama   -> Ollama nomic-embed-text (768 dim)          [lokal]
+Backend:
+  --backend ollama   -> local nomic-embed-text (768 dim)  [default, no hosted OpenAI]
 
 Generates embeddings for:
   - ALLE memory_chunks
@@ -186,27 +185,19 @@ def ollama_pull(model: str) -> bool:
 
 
 def pick_backend(choice: str) -> Backend:
-    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if choice in ("openai", "auto") and openai_key:
-        if choice == "auto":
-            print("Backend: openai (OPENAI_API_KEY found)")
-        return OpenAIBackend(openai_key)
-    if choice == "openai":
+    # Hosted OpenAI embeddings are disabled. Local Ollama only.
+    if choice in ("openai", "openai-compatible", "hosted"):
         sys.stderr.write(
-            "ERROR: --backend openai selected, but OPENAI_API_KEY is not set.\n"
-            "  Set: export OPENAI_API_KEY=sk-...\n"
-            "  Or use: --backend ollama (local, free, no key required)\n"
+            "ERROR: hosted OpenAI embeddings are disabled.\n" "  Use: --backend ollama (local nomic-embed-text)\n"
         )
         sys.exit(2)
 
-    # Ollama-Pfad
     if not ollama_up():
         sys.stderr.write(
-            "ERROR: Neither OPENAI_API_KEY nor Ollama is available.\n"
+            "ERROR: Ollama is not available.\n"
             f"  Ollama is not running on {OLLAMA_URL}.\n"
-            "  Start it with:  brew services start ollama   (or)   ollama serve\n"
-            "  Install with:   brew install ollama\n"
-            "  Or set OPENAI_API_KEY=sk-... and re-run with --backend openai.\n"
+            "  Start it with:  ollama serve\n"
+            "  Then:           ollama pull nomic-embed-text\n"
         )
         sys.exit(2)
     if not ollama_has_model(OLLAMA_MODEL):
@@ -215,7 +206,7 @@ def pick_backend(choice: str) -> Backend:
             sys.stderr.write(f"ERROR: could not pull model '{OLLAMA_MODEL}'.\n  Manuell:  ollama pull {OLLAMA_MODEL}\n")
             sys.exit(2)
     if choice == "auto":
-        print("Backend: ollama (no OPENAI_API_KEY, Ollama reachable)")
+        print("Backend: ollama (local embeddings)")
     return OllamaBackend()
 
 

@@ -69,6 +69,26 @@ Conversations now has its own project selector, compact conversation list and si
 
 ### Upgrading
 
+**Hosted OpenAI is removed.** `OPENAI_API_KEY` no longer selects an embedding
+or generation backend. Embeddings are local Ollama only. Generation uses
+Ollama, or an OpenAI-compatible endpoint you name with
+`THROUGHLINE_ANSWER_BASE_URL` (+ `THROUGHLINE_API_KEY` if it needs a bearer).
+`throughline doctor` no longer claims OpenAI embeddings from an API key.
+
+**Project Management is now opt-in behind `THROUGHLINE_ENABLE_PM`.** It was
+always a second product bolted onto the knowledge pipeline; the fence keeps
+the core independent of it. Off by default: the `/pm` routes, the pm watch
+loop, and the navigation entry disappear until you ask for them. The `pm_*`
+tables stay where they are — nothing is dropped or migrated. To keep the
+surface:
+
+```bash
+echo "THROUGHLINE_ENABLE_PM=1" >> .env
+# Docker: the same variable is passed through to the web container.
+```
+
+If you never opened Project Management, do nothing.
+
 **The default database is now `throughline`, was `claude_memory`.** Only the
 default changed; no data is moved, copied or dropped. Pick one:
 

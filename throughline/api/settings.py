@@ -20,6 +20,11 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 #: a typo in a launch script.
 ALLOW_REMOTE_ENV = "THROUGHLINE_ALLOW_REMOTE"
 
+#: Opt-in for the Project Management (Virtual Team Ops) surface. Off by
+#: default: it is a second product bolted onto the knowledge pipeline, and
+#: the core memory workflow must not depend on it being present.
+ENABLE_PM_ENV = "THROUGHLINE_ENABLE_PM"
+
 
 def default_web_dist() -> Path | None:
     """Locate the built frontend, or None if it has not been built.
@@ -60,6 +65,10 @@ class Settings:
     redact: bool = True
     auth_mode: str = "local"
     public_url: str = ""
+    #: Project Management surface (pm_* tables, /pm routes, pm watch loop).
+    #: Off unless explicitly enabled: the knowledge pipeline must work
+    #: without it, and it must not appear in the navigation when it is off.
+    enable_pm: bool = False
 
     def __post_init__(self):
         if self.auth_mode not in {"local", "team"}:
@@ -86,6 +95,7 @@ class Settings:
             pool_min=int(os.environ.get("THROUGHLINE_POOL_MIN", "1")),
             pool_max=int(os.environ.get("THROUGHLINE_POOL_MAX", "8")),
             redact=os.environ.get("THROUGHLINE_REDACT", "1").lower() not in ("0", "false", "no", "off"),
+            enable_pm=os.environ.get(ENABLE_PM_ENV, "").lower() in ("1", "true", "yes", "on"),
         )
 
 

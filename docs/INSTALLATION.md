@@ -200,7 +200,7 @@ Pick a backend:
 **OpenAI** (cheapest, cloud):
 
 ```bash
-export OPENAI_API_KEY=sk-...
+# export THROUGHLINE_API_KEY=...   # only for a named compatible endpoint
 throughline embed --backend openai
 ```
 

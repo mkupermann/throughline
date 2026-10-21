@@ -39,6 +39,10 @@ ALLOWED: frozenset[str] = frozenset(
         "CONTRIBUTING.md",
         "DESIGN.md",
         "Dockerfile",
+        # The Compose stack builds web/migrate/mcp from the Rust image and
+        # keeps the Python image for credential rotation.
+        "Dockerfile.legacy",
+        "Dockerfile.rust",
         "LICENSE",
         "Makefile",
         "README.md",
@@ -54,6 +58,7 @@ ALLOWED: frozenset[str] = frozenset(
         "pytest.ini",
         "requirements-dev.txt",
         "requirements.txt",
+        "rust",
         "scripts",
         "skill",
         "sql",

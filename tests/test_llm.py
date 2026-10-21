@@ -66,7 +66,7 @@ def test_an_openai_compatible_server_on_loopback_counts_as_local(monkeypatch):
     stub(monkeypatch, claude=True)
 
     info = llm.backend_info()
-    assert info.backend == "openai"
+    assert info.backend == "compatible"
     assert info.local is True
 
 
@@ -143,10 +143,10 @@ def test_the_pulled_model_is_used_rather_than_a_hardcoded_guess(monkeypatch):
 
 
 def test_naming_a_backend_overrides_the_probe_order(monkeypatch):
-    monkeypatch.setenv("THROUGHLINE_ANSWER_BACKEND", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-something")
+    monkeypatch.setenv("THROUGHLINE_ANSWER_BACKEND", "compatible")
+    monkeypatch.setenv("THROUGHLINE_ANSWER_BASE_URL", "http://127.0.0.1:1234/v1")
     stub(monkeypatch, ollama=["qwen3.5:9b"])
-    assert llm.backend_info().backend == "openai"
+    assert llm.backend_info().backend == "compatible"
 
 
 def test_naming_a_model_overrides_what_is_pulled(monkeypatch):
@@ -165,12 +165,13 @@ def test_choosing_ollama_without_a_chat_model_says_what_to_do(monkeypatch):
     assert "ollama pull" in info.detail
 
 
-def test_choosing_openai_without_a_key_or_a_url_says_so(monkeypatch):
+def test_choosing_openai_without_a_url_says_so(monkeypatch):
     monkeypatch.setenv("THROUGHLINE_ANSWER_BACKEND", "openai")
+    monkeypatch.delenv("THROUGHLINE_ANSWER_BASE_URL", raising=False)
     stub(monkeypatch)
     info = llm.backend_info()
     assert info.available is False
-    assert "OPENAI_API_KEY" in info.detail
+    assert "BASE_URL" in info.detail
 
 
 # ── Failure never raises into a question ────────────────────────────────────
@@ -378,6 +379,9 @@ def test_truncated_ollama_output_is_an_error(monkeypatch):
 
 
 def test_truncated_compatible_output_is_an_error(monkeypatch):
+    # The probe only resolves a compatible backend when BASE_URL names one, and
+    # `complete` refuses to invent an endpoint — hosted OpenAI is not a fallback.
+    monkeypatch.setenv("THROUGHLINE_ANSWER_BASE_URL", "http://localhost:1234/v1")
     monkeypatch.setattr(llm, "backend_info", lambda: llm.LLMInfo(True, "openai", "local", local=True))
     monkeypatch.setattr(
         llm, "_http_json", lambda *a, **k: {"choices": [{"message": {"content": "[]"}, "finish_reason": "length"}]}

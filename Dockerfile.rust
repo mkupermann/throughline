@@ -1,0 +1,52 @@
+# Throughline — Rust binary (cutover image)
+# Replaces the Python/FastAPI service. Single static-ish binary + embedded SPA.
+
+# ---------- build ----------
+FROM rust:1.90-slim AS build
+WORKDIR /src
+
+# Build with system libpq for the `postgres` crate's runtime link if needed;
+# the bundled-free path still needs openssl/rustls stack for reqwest.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY rust/Cargo.toml rust/Cargo.lock* ./
+COPY rust/crates ./crates
+# Workspace root Cargo.toml is at rust/Cargo.toml
+WORKDIR /src
+RUN cargo build --release -p throughline \
+    && strip target/release/throughline
+
+# ---------- runtime ----------
+# trixie glibc matches rust:1.90-slim (bookworm's 2.36 is too old for the binary)
+FROM debian:trixie-slim
+
+ARG THROUGHLINE_UID=1000
+ARG THROUGHLINE_GID=1000
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl postgresql-client \
+    && (getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline) \
+    && useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID" \
+        --shell /usr/sbin/nologin throughline \
+    && install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/target/release/throughline /usr/local/bin/throughline
+
+ENV HOME=/home/throughline \
+    PGHOST=postgres \
+    PGPORT=5432 \
+    THROUGHLINE_EXPORT_ROOT=/home/throughline/exports
+
+USER throughline
+WORKDIR /home/throughline
+
+EXPOSE 8787
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:8787/api/health || exit 1
+
+# Container networking needs 0.0.0.0; compose publishes loopback on the host.
+CMD ["throughline", "serve", "--host", "0.0.0.0", "--port", "8787"]

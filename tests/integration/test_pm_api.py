@@ -34,7 +34,7 @@ def client(db_env):
     from throughline.api import deps
 
     deps.close_pool()
-    with TestClient(create_app(Settings(web_dist=None)), raise_server_exceptions=False) as c:
+    with TestClient(create_app(Settings(web_dist=None, enable_pm=True)), raise_server_exceptions=False) as c:
         yield c
     deps.close_pool()
 
@@ -711,7 +711,7 @@ def test_watcher_loop_registered_and_cancelled_on_shutdown(db_env):
     from throughline.api import deps
 
     deps.close_pool()
-    app = create_app(Settings(web_dist=None))
+    app = create_app(Settings(web_dist=None, enable_pm=True))
     with TestClient(app, raise_server_exceptions=False):
         task = app.state.pm_watch_task
         assert task is not None

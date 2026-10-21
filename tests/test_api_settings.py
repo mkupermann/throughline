@@ -13,6 +13,7 @@ import pytest
 
 from throughline.api.settings import (
     ALLOW_REMOTE_ENV,
+    ENABLE_PM_ENV,
     LOOPBACK_HOSTS,
     RemoteBindRefused,
     Settings,
@@ -50,7 +51,7 @@ def test_falsey_opt_in_still_refuses(value, monkeypatch):
 
 
 def test_defaults_are_loopback(monkeypatch):
-    for var in ("THROUGHLINE_HOST", "THROUGHLINE_PORT", "THROUGHLINE_WEB_DIST"):
+    for var in ("THROUGHLINE_HOST", "THROUGHLINE_PORT", "THROUGHLINE_WEB_DIST", ENABLE_PM_ENV):
         monkeypatch.delenv(var, raising=False)
     s = Settings.from_env()
     assert s.host in LOOPBACK_HOSTS
@@ -60,6 +61,21 @@ def test_defaults_are_loopback(monkeypatch):
     # than the three staying distinct — they reach different databases.
     assert s.port == 8790
     assert s.redact is True
+    # PM is opt-in: the knowledge pipeline must work without it, and the UI
+    # must not advertise a surface the API does not serve.
+    assert s.enable_pm is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_pm_is_opt_in(value, monkeypatch):
+    monkeypatch.setenv(ENABLE_PM_ENV, value)
+    assert Settings.from_env().enable_pm is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
+def test_pm_stays_off_for_falsey_values(value, monkeypatch):
+    monkeypatch.setenv(ENABLE_PM_ENV, value)
+    assert Settings.from_env().enable_pm is False
 
 
 def test_env_overrides(monkeypatch, tmp_path):
