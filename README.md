@@ -109,7 +109,7 @@ Exports go to mounted `./exports` unless you change `THROUGHLINE_EXPORT_DIR`. Op
 
 ## The product tour
 
-All nine menus are covered below. Expand a section for its screenshot. The [complete visual feature guide](docs/FEATURE_GUIDE.md) covers alternate views, detail screens, every maintenance action and the CLI.
+All nine menus and their supporting views are illustrated below. The [complete visual feature guide](docs/FEATURE_GUIDE.md) covers alternate views, detail screens, every maintenance action and the CLI.
 
 | Menu | Purpose | Chord |
 | --- | --- | --- |
@@ -125,94 +125,75 @@ All nine menus are covered below. Expand a section for its screenshot. The [comp
 
 Press `Ctrl+K` / `Cmd+K` for the command palette. A chord means press `g`, then the second key.
 
-<details>
-<summary><strong>Home — recover the thread</strong></summary>
+### Home — recover the thread
 
 Click metrics to drill into the corpus. Inspect activity, recent sessions and the offline continuation brief. **Hide empty** changes the session listing; **Browse all** opens messages. The model-free demo visibly reports missing Ollama in its recovery hints.
 
 ![Home and continuation brief](docs/media/rust/home.png)
 
-</details>
-
-<details>
-<summary><strong>History — conversations in context</strong></summary>
+### History — conversations in context
 
 Filter by text, tool, project and date. Sort, switch between table and cards, save filters, page through records or export CSV. Open a session to inspect its messages and roles.
 
 ![History table and filters](docs/media/rust/history.png)
 
-[Card view](docs/media/rust/history-cards.png) · [Expanded conversation](docs/media/rust/conversation.png)
+![History card view](docs/media/rust/history-cards.png)
 
-</details>
+![Expanded conversation](docs/media/rust/conversation.png)
 
-<details>
-<summary><strong>Browse — inspect the underlying messages</strong></summary>
+### Browse — inspect the underlying messages
 
 Filter by text, role, tool name or conversation ID; select **Tool calls only**. A message opens full content, tool-call JSON and content blocks, with **Copy JSON** and **Open session** actions.
 
 ![Message browser](docs/media/rust/browse.png)
 
-[Message detail](docs/media/rust/message.png)
+![Message detail](docs/media/rust/message.png)
 
-</details>
-
-<details>
-<summary><strong>Agent Memory — keep durable context accessible</strong></summary>
+### Agent Memory — keep durable context accessible
 
 Search notes, filter categories and expand cards. **Ingest agent memory** reads local Markdown memory files; `THROUGHLINE_AGENT_MEMORY_DIR` overrides their location. Categories include decisions, preferences, patterns, insights, error solutions, project context and workflows.
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 
-</details>
-
-<details>
-<summary><strong>Find — search across tools</strong></summary>
+### Find — search across tools
 
 Choose **Lexical**, **Semantic** or **Hybrid**. Lexical search needs no model; semantic search requires stored embeddings and a compatible embedding service. Results link to conversations and identify the search backend. Scores are not truth probabilities.
 
 ![Lexical search for decision](docs/media/rust/find.png)
 
-</details>
-
-<details>
-<summary><strong>Projects — enter through a workspace</strong></summary>
+### Projects — enter through a workspace
 
 Cards show a recorded description, status and conversation count. Select one to open its history. Recorded state is not an independent inspection of today's repository.
 
 ![Atlas, Harbor and Orchard project cards](docs/media/rust/projects.png)
 
-</details>
-
-<details>
-<summary><strong>Timeline — follow activity over time</strong></summary>
+### Timeline — follow activity over time
 
 Inspect daily conversation volume, filter by provider, switch to the calendar, navigate months or return to today. Drill into activity without confusing chronology with causality.
 
 ![Activity by day and source tool](docs/media/rust/timeline.png)
 
-[Calendar view](docs/media/rust/calendar.png)
+![Calendar view](docs/media/rust/calendar.png)
 
-</details>
-
-<details>
-<summary><strong>Ask — question the recorded evidence</strong></summary>
+### Ask — question the recorded evidence
 
 Enter a question and follow the returned sources. A configured generation backend is required. After backend resolution, generation failures can return excerpts; an unresolved backend can instead cause an error. This screenshot shows the input state, not an invented answer.
 
 ![Ask before submitting the example question](docs/media/rust/ask.png)
 
-</details>
-
-<details>
-<summary><strong>Operate — maintain the store</strong></summary>
+### Operate — maintain the store
 
 Run ingestion, status, embedding, deduplication, backup, audit, stale-memory reporting, instruction-file writeback or answer evaluation. Some actions mutate data or files; model-dependent actions require configuration. See the [action reference](docs/FEATURE_GUIDE.md#maintenance-actions).
 
 ![All nine maintenance actions and ingestion status](docs/media/rust/operate.png)
 
-[Completed demo Status action](docs/media/rust/operate-status.png)
+![Completed demo Status action](docs/media/rust/operate-status.png)
 
-</details>
+### Command palette
+
+Use the palette to jump between views, search sessions or select an action.
+
+![Command palette](docs/media/rust/palette.png)
 
 ## Beyond the browser
 

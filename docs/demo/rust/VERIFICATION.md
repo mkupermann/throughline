@@ -11,8 +11,8 @@ Scope: default Rust application, fictional demo and documentation. This is not a
 - Browser automation navigated all nine menus, switched History to cards, opened a conversation and a message, ran lexical search, opened Calendar and the command palette, and executed Status.
 - Fifteen actual screenshots were captured without JavaScript page exceptions. No API mocks, model calls or agent launches were used. Images were inspected for readable content and accidental private data.
 - The running CLI's help exposed 24 application commands. `search decision --limit 2` and `handoff --project Atlas-demo --limit 2` returned fictional corpus records.
-- All four new/revised Markdown documents passed markdownlint with the repository configuration. All 67 relative file links resolved, and `git diff --check` passed.
-- A local browser preview rendered the README, including nine expandable menu sections; all 11 embedded image elements loaded. The preview is in the ignored `.tmp/README-preview.html` file and is not a published website.
+- All four new/revised Markdown documents passed markdownlint with the repository configuration. After expanding the gallery, all 68 relative file links resolved, and `git diff --check` passed.
+- A local browser preview rendered all menu and supporting screenshots inline, with no collapsed sections; all 17 image elements loaded (15 distinct screenshots, the repeated Home image and the wordmark). The preview is in the ignored `.tmp/README-preview.html` file and is not a published website.
 
 ## Findings reflected in the documentation
 
