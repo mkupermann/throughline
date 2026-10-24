@@ -79,6 +79,9 @@ enum Command {
         include_generated: bool,
         #[arg(long)]
         redact: bool,
+        /// Also write a machine-readable evidence-manifest.json (provenance).
+        #[arg(long)]
+        evidence: bool,
     },
     /// Report corpus counts.
     Status,
@@ -399,6 +402,7 @@ fn main() -> Result<()> {
             project,
             include_generated,
             redact,
+            evidence,
         } => {
             let mut client = config::DbConfig::from_env()
                 .connect()
@@ -409,6 +413,7 @@ fn main() -> Result<()> {
                 project.as_deref(),
                 include_generated,
                 redact,
+                evidence,
             )?;
             println!(
                 "export: projects={} sessions={} messages={} files={}",

@@ -215,7 +215,7 @@ throughline ingest --source codex
 throughline search "decision" --limit 10
 throughline handoff --project Atlas-demo
 throughline decisions --project Atlas-demo
-throughline export-markdown --out ./exports --project Atlas-demo
+throughline export-markdown --out ./exports --project Atlas-demo --evidence
 ```
 
 | Bereich | Befehle |
@@ -276,6 +276,7 @@ Regulierer, Prüfer und Forschungseinrichtungen verlangen zunehmend dasselbe: KI
 | Log-Aufbewahrung von mindestens sechs Monaten durch den Betreiber | [EU AI Act, Art. 19 und Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | Der Korpus liegt im eigenen PostgreSQL-Volume, so lange Du ihn behältst, mit `backup` und Restore als expliziten Befehlen. Löschen ist eine bewusste Handlung. |
 | Ein Prüfer muss sehen, welches Modell lief, wie es angewiesen wurde und wie das Ergebnis validiert wurde | [Weltbank-Leitlinien zur KI-Reproduzierbarkeit](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Je Nachricht: Modell-Label, vollständiger Prompt- und Antworttext, Rolle, Zeitstempel. Je Antwort in Ask: die zitierten Quelldatensätze. |
 | Protokoll je Interaktion mit Zeitstempel, Modellversion, Prompts, Tool-Aufrufen und Ergebnissen für agentengestützte Forschung | [Logging-Schema aus arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | Der Nachrichtendatensatz enthält genau diese Felder, samt Tool-Call-JSON und Content-Blöcken, prüfbar in Browse. |
+| Ein Prüfpaket, das sich unabhängig vom erzeugenden System verifizieren lässt | [Weltbank-Leitlinien zur KI-Reproduzierbarkeit](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html), [arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | `export-markdown --evidence` legt dem Export ein Provenance-Manifest bei: je Konversation Modell, Quell-Tool und Zeitraum, je Datei SHA-256 und Größe, dazu die Korpus-Summen. Deterministisch bis auf den Erzeugungszeitstempel. |
 | Standardisierte Trace-Attribute für GenAI-Operationen | [OpenTelemetry-GenAI-Konventionen](https://opentelemetry.io/docs/specs/semconv/gen-ai/) | Die gespeicherten Felder lassen sich auf diese Konventionen abbilden. Ein nativer OTel-Export steht auf der Roadmap und ist nicht ausgeliefert. |
 
 Zwei ehrliche Grenzen. Erstens: Throughline zeichnet auf, was die Quell-Tools auf die Platte schreiben. Die Vollständigkeit hängt an deren Session-Formaten. Zweitens: Ob ein konkretes System unter den AI Act fällt, ist eine Rechtsfrage zu diesem System. Diese Software beantwortet sie nicht und behauptet für nichts eine Hochrisiko-Konformität. Was sie liefert, ist das Rohmaterial, das alle diese Rahmenwerke verlangen: die Originalevidenz, lokal gehalten, durchsuchbar, mit intaktem Kontext.

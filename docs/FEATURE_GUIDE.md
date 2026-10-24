@@ -125,7 +125,7 @@ All 24 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `answer-eval` | Evaluate supplied/default cases with citation and phrase checks. |
 | `scan-instructions` | Index local project instruction files into the store. |
 | `writeback` | Write distilled notes into project instructions; select `--root` deliberately. |
-| `export-markdown` | Write a Markdown vault; supports project selection and optional redaction. |
+| `export-markdown` | Write a Markdown vault; supports project selection and optional redaction. `--evidence` adds a provenance manifest with model, source tool, time range and SHA-256 per exported file. |
 | `backup` | Dump the database to a directory and apply retention. |
 | `mcp` | Serve the Rust MCP tool contract over stdio. |
 

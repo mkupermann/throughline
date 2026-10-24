@@ -215,7 +215,7 @@ throughline ingest --source codex
 throughline search "decision" --limit 10
 throughline handoff --project Atlas-demo
 throughline decisions --project Atlas-demo
-throughline export-markdown --out ./exports --project Atlas-demo
+throughline export-markdown --out ./exports --project Atlas-demo --evidence
 ```
 
 | Area | Commands |
@@ -276,6 +276,7 @@ Regulators, auditors and research institutions are converging on the same demand
 | Log retention of at least six months by the deployer | [EU AI Act, Art. 19 and Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | The corpus lives in your PostgreSQL volume for as long as you keep it, with `backup` and restore as explicit commands. Deletion is a deliberate act. |
 | A reviewer must see which model was used, how it was prompted and how the output was validated | [World Bank AI reproducibility guidelines](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Per message: model label, full prompt and response text, role, timestamps. Per answer in Ask: the cited source records. |
 | Per-interaction logs of timestamps, model version, prompts, tool calls and outputs for agent-assisted research | [Logging schema proposed in arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | The message record carries exactly these fields, including tool-call JSON and content blocks, inspectable in Browse. |
+| An evidence package that can be verified independently of the system that produced it | [World Bank AI reproducibility guidelines](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html), [arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | `export-markdown --evidence` ships a provenance manifest with the export: per conversation the model, source tool and time range, per file a SHA-256 hash and size, plus corpus totals. Deterministic except for the generation timestamp. |
 | Standardized trace attributes for GenAI operations | [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) | The stored fields map onto these conventions. A native OTel export is on the roadmap, not shipped. |
 
 Two honest limits. First, Throughline records what the source tools wrote to disk, so completeness depends on their session formats. Second, whether any concrete system falls under the AI Act is a legal question about that system. This software does not answer it and does not claim high-risk conformity for anything. What it gives you is the raw material every one of these frameworks asks for: the original evidence, kept locally, searchable, with its context intact.
