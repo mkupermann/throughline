@@ -239,6 +239,14 @@ The Rust server advertises `search`, `list_projects`, `stats`, `write` and `forg
 
 Set these in the application container's environment. Compose needs an `environment` entry or an override file for variables it does not already forward.
 
+The demo ships a ready-made overlay. One command starts a local Ollama, pulls `nomic-embed-text` plus a small instruct model, and switches the demo to live semantic search and Ask:
+
+```bash
+docker compose -f docs/demo/rust/compose.yml -f docs/demo/rust/compose.models.yml up -d --build
+```
+
+Without the second file the demo stays model-free. Nothing leaves your machine either way.
+
 | Purpose | Rust settings |
 | --- | --- |
 | Database | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |

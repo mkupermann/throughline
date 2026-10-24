@@ -239,6 +239,14 @@ Der Rust-Server bietet `search`, `list_projects`, `stats`, `write` und `forget` 
 
 Setze diese Variablen in der Umgebung des Anwendungs-Containers. Compose braucht einen `environment`-Eintrag oder eine Override-Datei für Variablen, die es nicht ohnehin weiterreicht.
 
+Die Demo bringt ein fertiges Overlay mit. Ein Befehl startet ein lokales Ollama, zieht `nomic-embed-text` plus ein kleines Instruct-Modell und schaltet die Demo auf echte semantische Suche und Ask:
+
+```bash
+docker compose -f docs/demo/rust/compose.yml -f docs/demo/rust/compose.models.yml up -d --build
+```
+
+Ohne die zweite Datei bleibt die Demo modellfrei. In beiden Fällen verlässt nichts Deinen Rechner.
+
 | Zweck | Rust-Einstellungen |
 | --- | --- |
 | Datenbank | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |

@@ -78,13 +78,10 @@ pub fn ask<C: GenericClient>(
     backend: &GenerationBackend,
     limit: i32,
 ) -> Result<AskAnswer> {
-    // Use source-aware search so memory and instructions surface too.
-    let hits: Vec<SearchHit> = search::search_from(
-        client,
-        question,
-        limit,
-        search::SearchSource::All,
-    )?;
+    // Hybrid retrieval: semantic (when embeddings exist) + lexical + memory/instructions.
+    // Pure lexical `search_from` misses natural-language questions (whole-string ILIKE).
+    let embed = crate::embedding::resolve().ok();
+    let hits: Vec<SearchHit> = search::hybrid(client, embed.as_ref(), question, limit)?;
     let (excerpts, sources) = build_excerpts(&hits);
 
     if sources.is_empty() {
