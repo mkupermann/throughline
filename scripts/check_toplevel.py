@@ -45,6 +45,7 @@ ALLOWED: frozenset[str] = frozenset(
         "Dockerfile.rust",
         "LICENSE",
         "Makefile",
+        "README.de.md",
         "README.md",
         "SECURITY.md",
         "config.example.yaml",
