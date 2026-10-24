@@ -283,6 +283,30 @@ try {
   await page.screenshot({ path: path.join(out, 'home-1920x1080.png'), fullPage: true });
   pass('f-responsive', 'core controls visible at 1280x720 and 1920x1080');
 
+  // ── (j) Language toggle: DE labels, persist across reload, back to EN ──
+  {
+    const histBtn = page.locator('#nav [data-view="history"]');
+    const enLabel = (await histBtn.textContent()) || '';
+    if (!enLabel.includes('History')) fail('j-lang-toggle', `expected English "History" before switch, got "${enLabel.trim()}"`);
+    await page.locator('#lang-select').selectOption('de');
+    await page.waitForTimeout(200);
+    const deLabel = (await histBtn.textContent()) || '';
+    if (!deLabel.includes('Verlauf')) fail('j-lang-toggle', `expected German "Verlauf" after switch, got "${deLabel.trim()}"`);
+    const storedLang = await page.evaluate(() => localStorage.getItem('th-lang'));
+    if (storedLang !== 'de') fail('j-lang-toggle', `localStorage th-lang=${storedLang}, expected de`);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    const afterReload = await page.evaluate(() => localStorage.getItem('th-lang'));
+    if (afterReload !== 'de') fail('j-lang-toggle', `th-lang lost after reload: ${afterReload}`);
+    const deLabel2 = (await page.locator('#nav [data-view="history"]').textContent()) || '';
+    if (!deLabel2.includes('Verlauf')) fail('j-lang-toggle', `DE labels lost after reload: "${deLabel2.trim()}"`);
+    await page.locator('#lang-select').selectOption('en');
+    await page.waitForTimeout(200);
+    const enLabel2 = (await histBtn.textContent()) || '';
+    if (!enLabel2.includes('History')) fail('j-lang-toggle', `expected English "History" after switch back, got "${enLabel2.trim()}"`);
+    pass('j-lang-toggle', `History↔Verlauf live, th-lang persists across reload, back to EN ok`);
+  }
+
   // ── Page error gate (criterion 5) ──────────────────────────────────────
   if (pageErrors.length) fail('g-no-pageerror', pageErrors.join(' | '));
   pass('g-no-pageerror', '0 pageerror events (fixture phase)');

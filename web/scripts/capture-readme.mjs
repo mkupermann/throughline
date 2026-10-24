@@ -9,7 +9,8 @@ import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const base = process.env.THROUGHLINE_DEMO_URL || 'http://127.0.0.1:8796';
 if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname)) throw Error('Loopback demo required');
-const out = path.join(root, 'docs/media/rust');
+const captureLang = process.env.THROUGHLINE_CAPTURE_LANG === 'de' ? 'de' : 'en';
+const out = path.join(root, captureLang === 'de' ? 'docs/media/rust/de' : 'docs/media/rust');
 const json = async route => {
   const r = await fetch(base + route);
   if (!r.ok) throw Error(`${route}: HTTP ${r.status}`);
@@ -30,7 +31,10 @@ const normalize = text => text.replace(/\r\n/g, '\n');
 if (normalize(source) !== normalize(served)) throw Error('Served UI differs from checkout; rebuild demo image');
 await mkdir(out, {recursive:true});
 const browser = await chromium.launch({channel:process.env.THROUGHLINE_SCREENSHOT_BROWSER || undefined});
-const page = await browser.newPage({viewport:{width:1440,height:1000}, deviceScaleFactor:1, reducedMotion:'reduce',locale:'en-GB',timezoneId:'UTC', colorScheme:'dark'});
+const page = await browser.newPage({viewport:{width:1440,height:1000}, deviceScaleFactor:1, reducedMotion:'reduce',locale: captureLang === 'de' ? 'de-DE' : 'en-GB',timezoneId:'UTC', colorScheme:'dark'});
+if (captureLang === 'de') {
+  await page.addInitScript(() => { try { localStorage.setItem('th-lang', 'de'); } catch {} });
+}
 page.setDefaultTimeout(20000);
 const errors = [];
 const shots = [];

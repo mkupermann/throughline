@@ -1606,7 +1606,7 @@ html {
 </style>
 </head>
 <body>
-<a href="#main" id="skip-link" style="position:absolute;left:-9999px;top:0;z-index:200;padding:10px 16px;background:#2dd4a7;color:#042116;border-radius:8px;font-weight:600;text-decoration:none">Skip to main content</a>
+<a href="#main" id="skip-link" style="position:absolute;left:-9999px;top:0;z-index:200;padding:10px 16px;background:#2dd4a7;color:#042116;border-radius:8px;font-weight:600;text-decoration:none" data-i18n="skip">Skip to main content</a>
 <div id="sr-status" class="sr" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="app">
   <aside class="sidebar">
@@ -1638,120 +1638,128 @@ html {
         <div class="brand-tag">Agent Memory · Rust</div>
       </div>
     </div>
-    <nav class="nav" id="nav" aria-label="Primary">
-      <button type="button" data-view="home" aria-current="page"><span class="icon">◎</span>Home</button>
-      <button type="button" data-view="history"><span class="icon">▤</span>History</button>
-      <button type="button" data-view="browse"><span class="icon">☰</span>Browse</button>
-      <button type="button" data-view="memory"><span class="icon">✦</span>Agent Memory</button>
-      <button type="button" data-view="find"><span class="icon">⌕</span>Find</button>
-      <button type="button" data-view="projects"><span class="icon">▣</span>Projects</button>
-      <button type="button" data-view="timeline"><span class="icon">⌁</span>Timeline</button>
-      <button type="button" data-view="ask"><span class="icon">✦</span>Ask</button>
-      <button type="button" data-view="operate"><span class="icon">⚙</span>Operate</button>
+    <nav class="nav" id="nav" data-i18n-attr="aria-label:nav.aria" aria-label="Primary">
+      <button type="button" data-view="home" aria-current="page"><span class="icon">◎</span><span data-i18n="nav.home">Home</span></button>
+      <button type="button" data-view="history"><span class="icon">▤</span><span data-i18n="nav.history">History</span></button>
+      <button type="button" data-view="browse"><span class="icon">☰</span><span data-i18n="nav.browse">Browse</span></button>
+      <button type="button" data-view="memory"><span class="icon">✦</span><span data-i18n="nav.memory">Agent Memory</span></button>
+      <button type="button" data-view="find"><span class="icon">⌕</span><span data-i18n="nav.find">Find</span></button>
+      <button type="button" data-view="projects"><span class="icon">▣</span><span data-i18n="nav.projects">Projects</span></button>
+      <button type="button" data-view="timeline"><span class="icon">⌁</span><span data-i18n="nav.timeline">Timeline</span></button>
+      <button type="button" data-view="ask"><span class="icon">✦</span><span data-i18n="nav.ask">Ask</span></button>
+      <button type="button" data-view="operate"><span class="icon">⚙</span><span data-i18n="nav.operate">Operate</span></button>
     </nav>
     <div class="sidebar-foot">
       <div class="health" id="health-pill">
         <span class="dot" id="health-dot"></span>
-        <span id="health-text" aria-live="polite">Checking</span>
+        <span id="health-text" aria-live="polite" data-i18n="health.checking">Checking</span>
       </div>
-      <div class="kbd-hint"><kbd>⌁˜K</kbd> palette · <kbd>g h</kbd> home · <kbd>g s</kbd> history · <kbd>g b</kbd> browse</div>
+      <div class="kbd-hint"><kbd>⌁˜K</kbd> <span data-i18n="kbd.hint">palette · g h home · g s history · g b browse</span></div>
     </div>
   </aside>
 
   <main class="main" id="main" tabindex="-1">
     <div class="main-inner">
       <div class="topbar">
-        <button class="search-pill" id="open-palette" type="button" aria-label="Open command palette">
-          <span>Search everything - sessions, messages, commands…</span>
+        <button class="search-pill" id="open-palette" type="button" data-i18n-attr="aria-label:pal.searchAria" aria-label="Open command palette">
+          <span data-i18n="topbar.search">Search everything - sessions, messages, commands…</span>
           <kbd>⌁˜K</kbd>
         </button>
         <div class="theme-switch">
-          <label for="theme-select">Theme</label>
-          <select id="theme-select" aria-label="Colour theme">
-            <option value="system">System</option>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
+          <label for="theme-select" data-i18n="topbar.theme">Theme</label>
+          <select id="theme-select" data-i18n-attr="aria-label:topbar.theme.aria" aria-label="Colour theme">
+            <option value="system" data-i18n="theme.system">System</option>
+            <option value="dark" data-i18n="theme.dark">Dark</option>
+            <option value="light" data-i18n="theme.light">Light</option>
           </select>
         </div>
-        <button class="btn btn-ghost" id="btn-hide-empty" type="button">Hide empty</button>
-        <button class="btn btn-primary" id="btn-browse" type="button">Browse all</button>
+        <div class="theme-switch">
+          <label for="lang-select" data-i18n="topbar.lang">Language</label>
+          <select id="lang-select" data-i18n-attr="aria-label:topbar.lang.aria" aria-label="Interface language">
+            <option value="system" data-i18n="lang.system">System</option>
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </div>
+        <button class="btn btn-ghost" id="btn-hide-empty" type="button" data-i18n="topbar.hideEmpty">Hide empty</button>
+        <button class="btn btn-primary" id="btn-browse" type="button" data-i18n="topbar.browseAll">Browse all</button>
       </div>
 
       <!-- HOME -->
       <section id="view-home">
-        <div class="eyebrow">Local memory store</div>
+        <div class="eyebrow" data-i18n="home.eyebrow">Local memory store</div>
         <div class="page-header">
           <div>
-            <h1>Your work, remembered</h1>
-            <p>Throughline · Agent Memory - every coding session, searchable, local-first.</p>
+            <h1 data-i18n="home.title">Your work, remembered</h1>
+            <p data-i18n="home.sub">Throughline · Agent Memory - every coding session, searchable, local-first.</p>
           </div>
           <div class="meta" id="home-range"></div>
         </div>
 
         <div class="metrics" id="metrics">
-          <button type="button" class="metric metric-click" data-drill="history" aria-label="Open conversation history">
-            <div class="metric-label">Conversations</div><div class="metric-value" id="m-conv">-</div><div class="metric-sub">ingested sessions</div>
+          <button type="button" class="metric metric-click" data-drill="history" data-i18n-attr="aria-label:aria.openHistory" aria-label="Open conversation history">
+            <div class="metric-label" data-i18n="home.conv">Conversations</div><div class="metric-value" id="m-conv">-</div><div class="metric-sub" data-i18n="home.conv.sub">ingested sessions</div>
           </button>
-          <button type="button" class="metric metric-click" data-drill="history" aria-label="Open full corpus history">
-            <div class="metric-label">Messages</div><div class="metric-value" id="m-msg">-</div><div class="metric-sub">across all tools</div>
+          <button type="button" class="metric metric-click" data-drill="history" data-i18n-attr="aria-label:aria.openCorpus" aria-label="Open full corpus history">
+            <div class="metric-label" data-i18n="home.msg">Messages</div><div class="metric-value" id="m-msg">-</div><div class="metric-sub" data-i18n="home.msg.sub">across all tools</div>
           </button>
-          <button type="button" class="metric metric-click" data-drill="memory" aria-label="Open agent memory">
-            <div class="metric-label">Memory</div><div class="metric-value" id="m-chunk">-</div><div class="metric-sub">extracted chunks</div>
+          <button type="button" class="metric metric-click" data-drill="memory" data-i18n-attr="aria-label:aria.openMemory" aria-label="Open agent memory">
+            <div class="metric-label" data-i18n="home.mem">Memory</div><div class="metric-value" id="m-chunk">-</div><div class="metric-sub" data-i18n="home.mem.sub">extracted chunks</div>
           </button>
-          <button type="button" class="metric metric-click" data-drill="find" aria-label="Open semantic find">
-            <div class="metric-label">Vectors</div><div class="metric-value" id="m-emb">-</div><div class="metric-sub">semantic index</div>
+          <button type="button" class="metric metric-click" data-drill="find" data-i18n-attr="aria-label:aria.openFind" aria-label="Open semantic find">
+            <div class="metric-label" data-i18n="home.vec">Vectors</div><div class="metric-value" id="m-emb">-</div><div class="metric-sub" data-i18n="home.vec.sub">semantic index</div>
           </button>
-          <button type="button" class="metric metric-click" data-drill="projects" aria-label="Open projects">
-            <div class="metric-label">Projects</div><div class="metric-value" id="m-proj">-</div><div class="metric-sub">workspaces seen</div>
+          <button type="button" class="metric metric-click" data-drill="projects" data-i18n-attr="aria-label:aria.openProjects" aria-label="Open projects">
+            <div class="metric-label" data-i18n="home.proj">Projects</div><div class="metric-value" id="m-proj">-</div><div class="metric-sub" data-i18n="home.proj.sub">workspaces seen</div>
           </button>
         </div>
 
         <div class="panel">
           <div class="panel-title">
-            <h2>Activity</h2>
-            <div class="meta" id="activity-meta">last 90 days</div>
+            <h2 data-i18n="home.activity">Activity</h2>
+            <div class="meta" id="activity-meta" data-i18n="home.activity.meta">last 90 days</div>
           </div>
           <div class="chart" id="activity-chart" aria-hidden="true"></div>
           <div class="chart-legend" id="tool-legend"></div>
         </div>
 
         <div class="panel" id="health-recovery" hidden>
-          <div class="panel-title"><h2>Needs attention</h2><div class="meta">one-click recovery</div></div>
+          <div class="panel-title"><h2 data-i18n="home.attention">Needs attention</h2><div class="meta" data-i18n="home.attention.meta">one-click recovery</div></div>
           <div id="health-recovery-body"></div>
         </div>
 
         <div class="panel">
           <div class="panel-title">
-            <h2>Continue where you left off</h2>
+            <h2 data-i18n="home.continue">Continue where you left off</h2>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <div class="meta">handoff brief · offline</div>
-              <button class="btn btn-ghost" id="handoff-copy" type="button">Copy handoff</button>
-              <button class="btn btn-ghost" id="handoff-download" type="button">Download .md</button>
+              <div class="meta" data-i18n="home.handoff.meta">handoff brief · offline</div>
+              <button class="btn btn-ghost" id="handoff-copy" type="button" data-i18n="home.handoff.copy">Copy handoff</button>
+              <button class="btn btn-ghost" id="handoff-download" type="button" data-i18n="home.handoff.download">Download .md</button>
             </div>
           </div>
-          <div class="history list-anim" id="handoff-brief" aria-live="polite" aria-busy="false"><div class="empty"><strong>Loading handoff brief</strong>Gathering resume context</div></div><div class="history list-anim" id="handoff-extra" hidden></div>
+          <div class="history list-anim" id="handoff-brief" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="home.handoff.loading">Loading handoff brief</strong><span data-i18n="home.handoff.loadingBody">Gathering resume context</span></div></div><div class="history list-anim" id="handoff-extra" hidden></div>
         </div>
 
         <div class="panel" id="home-quickstart" hidden>
-          <div class="panel-title"><h2>Get started in three steps</h2><div class="meta">empty corpus</div></div>
+          <div class="panel-title"><h2 data-i18n="home.quickstart">Get started in three steps</h2><div class="meta" data-i18n="home.quickstart.meta">empty corpus</div></div>
           <div class="empty" id="home-quickstart-body">
-            <strong>No conversations yet</strong>
-            Three steps to your first searchable session.
+            <strong data-i18n="home.quickstart.strong">No conversations yet</strong>
+            <span data-i18n="home.quickstart.body">Three steps to your first searchable session.</span>
             <ol style="text-align:left;margin:16px auto 0;max-width:420px;line-height:1.7">
-              <li>Check your sources in <strong>Operate</strong> → Ingestion status.</li>
-              <li>Run <strong>Ingest all providers</strong> to import transcripts.</li>
-              <li>Come back here — sessions, memory and handoff fill in automatically.</li>
+              <li><span data-i18n="home.quickstart.s1">Check your sources in </span><strong data-i18n="nav.operate">Operate</strong><span data-i18n="home.quickstart.s1b"> → Ingestion status.</span></li>
+              <li><span data-i18n="home.quickstart.s2">Run </span><strong data-i18n="op.ingest">Ingest all providers</strong><span data-i18n="home.quickstart.s2b"> to import transcripts.</span></li>
+              <li data-i18n="home.quickstart.s3">Come back here — sessions, memory and handoff fill in automatically.</li>
             </ol>
             <div class="empty-action">
-              <button class="btn btn-primary" type="button" data-drill="operate">Run ingest</button>
+              <button class="btn btn-primary" type="button" data-drill="operate" data-i18n="home.quickstart.action">Run ingest</button>
             </div>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-title">
-            <h2>Recent sessions</h2>
-            <button class="btn btn-ghost" type="button" id="see-all">See all →</button>
+            <h2 data-i18n="home.recent">Recent sessions</h2>
+            <button class="btn btn-ghost" type="button" id="see-all" data-i18n="home.seeAll">See all →</button>
           </div>
           <div class="history list-anim" id="home-list"></div>
         </div>
@@ -1759,68 +1767,68 @@ html {
 
       <!-- HISTORY -->
       <section id="view-history" hidden>
-        <div class="eyebrow">Full corpus</div>
+        <div class="eyebrow" data-i18n="hist.eyebrow">Full corpus</div>
         <div class="page-header">
           <div>
-            <h1>History</h1>
-            <p>Every ingested conversation - filter, sort, page, open.</p>
+            <h1 data-i18n="hist.title">History</h1>
+            <p data-i18n="hist.sub">Every ingested conversation - filter, sort, page, open.</p>
           </div>
           <div class="meta" id="hist-count"></div>
         </div>
 
         <div class="toolbar">
           <label class="field">
-            <span class="field-label">Filter</span>
-            <input id="hist-q" type="search" placeholder="text, session id, project…" />
+            <span class="field-label" data-i18n="hist.filter">Filter</span>
+            <input id="hist-q" type="search" data-i18n-attr="placeholder:hist.filter.ph" placeholder="text, session id, project…" />
           </label>
           <label class="field">
-            <span class="field-label">Tool</span>
-            <select id="hist-tool"><option value="">All</option></select>
+            <span class="field-label" data-i18n="hist.tool">Tool</span>
+            <select id="hist-tool"><option value="" data-i18n="all">All</option></select>
           </label>
           <label class="field">
-            <span class="field-label">Project</span>
-            <select id="hist-project"><option value="">All</option></select>
+            <span class="field-label" data-i18n="hist.project">Project</span>
+            <select id="hist-project"><option value="" data-i18n="all">All</option></select>
           </label>
           <label class="field">
-            <span class="field-label">Sort</span>
+            <span class="field-label" data-i18n="hist.sort">Sort</span>
             <select id="hist-sort">
-              <option value="recent">Newest</option>
-              <option value="old">Oldest</option>
-              <option value="messages">Most messages</option>
+              <option value="recent" data-i18n="hist.sort.new">Newest</option>
+              <option value="old" data-i18n="hist.sort.old">Oldest</option>
+              <option value="messages" data-i18n="hist.sort.msgs">Most messages</option>
             </select>
           </label>
           <label class="field">
-            <span class="field-label">From</span>
+            <span class="field-label" data-i18n="hist.from">From</span>
             <input id="hist-from" type="date" style="width:140px" />
           </label>
           <label class="field">
-            <span class="field-label">To</span>
+            <span class="field-label" data-i18n="hist.to">To</span>
             <input id="hist-to" type="date" style="width:140px" />
           </label>
-          <button class="btn btn-primary" id="hist-apply" type="button">Apply</button>
-          <button class="btn btn-ghost" id="hist-reset" type="button">Reset</button>
-          <button class="btn btn-ghost" id="hist-csv" type="button">Export CSV</button>
-          <button class="btn btn-ghost" id="hist-save-filter" type="button" title="Save current filter">★ Save</button>
-          <div class="view-toggle" role="group" aria-label="View mode">
-            <button class="btn btn-ghost togglable" id="hist-table-btn" type="button" aria-pressed="true">Table</button>
-            <button class="btn btn-ghost togglable" id="hist-cards-btn" type="button" aria-pressed="false">Cards</button>
+          <button class="btn btn-primary" id="hist-apply" type="button" data-i18n="hist.apply">Apply</button>
+          <button class="btn btn-ghost" id="hist-reset" type="button" data-i18n="hist.reset">Reset</button>
+          <button class="btn btn-ghost" id="hist-csv" type="button" data-i18n="hist.csv">Export CSV</button>
+          <button class="btn btn-ghost" id="hist-save-filter" type="button" data-i18n-attr="title:hist.save.title" title="Save current filter" data-i18n="hist.save">★ Save</button>
+          <div class="view-toggle" role="group" data-i18n-attr="aria-label:hist.viewMode" aria-label="View mode">
+            <button class="btn btn-ghost togglable" id="hist-table-btn" type="button" aria-pressed="true" data-i18n="hist.table">Table</button>
+            <button class="btn btn-ghost togglable" id="hist-cards-btn" type="button" aria-pressed="false" data-i18n="hist.cards">Cards</button>
           </div>
         </div>
         <div class="chip" id="hist-saved" style="margin-bottom:12px;display:none"></div>
-        <div class="chip" id="hist-stats" style="margin-bottom:12px">Filter stats load with results…</div>
+        <div class="chip" id="hist-stats" style="margin-bottom:12px" data-i18n="hist.stats.loading">Filter stats load with results…</div>
 
         <div id="hist-table-wrap" class="table-wrap">
           <table class="sessions" id="hist-table">
             <thead>
               <tr>
-                <th data-sort="id">ID <span class="sort-caret">↕</span></th>
-                <th data-sort="started_at">Started <span class="sort-caret">↕</span></th>
-                <th data-sort="ended_at">Ended <span class="sort-caret">↕</span></th>
-                <th data-sort="project">Project <span class="sort-caret">↕</span></th>
-                <th data-sort="tool">Tool <span class="sort-caret">↕</span></th>
-                <th data-sort="model">Model <span class="sort-caret">↕</span></th>
-                <th data-sort="message_count" class="td-num">Msgs <span class="sort-caret">↕</span></th>
-                <th>Preview</th>
+                <th data-sort="id"><span data-i18n="hist.th.id">ID</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="started_at"><span data-i18n="hist.th.started">Started</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="ended_at"><span data-i18n="hist.th.ended">Ended</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="project"><span data-i18n="hist.th.project">Project</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="tool"><span data-i18n="hist.th.tool">Tool</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="model"><span data-i18n="hist.th.model">Model</span> <span class="sort-caret">↕</span></th>
+                <th data-sort="message_count" class="td-num"><span data-i18n="hist.th.msgs">Msgs</span> <span class="sort-caret">↕</span></th>
+                <th data-i18n="hist.th.preview">Preview</th>
               </tr>
             </thead>
             <tbody id="hist-tbody"></tbody>
@@ -1829,170 +1837,170 @@ html {
 
         <div class="history list-anim" id="hist-list" hidden></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="hist-prev" type="button">← Prev</button>
+          <button class="btn btn-ghost" id="hist-prev" type="button" data-i18n="hist.prev">← Prev</button>
           <div id="hist-page-info">-</div>
-          <button class="btn btn-ghost" id="hist-next" type="button">Next →</button>
+          <button class="btn btn-ghost" id="hist-next" type="button" data-i18n="hist.next">Next →</button>
         </div>
       </section>
 
       <!-- BROWSE: every message / tool call -->
       <section id="view-browse" hidden>
-        <div class="eyebrow">Database browser</div>
+        <div class="eyebrow" data-i18n="browse.eyebrow">Database browser</div>
         <div class="page-header">
           <div>
-            <h1>Browse</h1>
-            <p>Every message and tool call in the store - searchable, filterable, paginated.</p>
+            <h1 data-i18n="browse.title">Browse</h1>
+            <p data-i18n="browse.sub">Every message and tool call in the store - searchable, filterable, paginated.</p>
           </div>
           <div class="meta" id="browse-count"></div>
         </div>
 
         <div class="toolbar">
           <label class="field" style="flex:1">
-            <span class="field-label">Search</span>
-            <input id="browse-q" type="search" placeholder="content, tool name, session id…" />
+            <span class="field-label" data-i18n="browse.search">Search</span>
+            <input id="browse-q" data-i18n-attr="placeholder:browse.search.ph" type="search" placeholder="content, tool name, session id…" />
           </label>
           <label class="field">
-            <span class="field-label">Role</span>
+            <span class="field-label" data-i18n="browse.role">Role</span>
             <select id="browse-role">
-              <option value="">All roles</option>
-              <option value="user">user</option>
-              <option value="assistant">assistant</option>
-              <option value="tool_result">tool_result</option>
-              <option value="system">system</option>
+              <option value="" data-i18n="browse.allRoles">All roles</option>
+              <option value="user" data-i18n="role.user">user</option>
+              <option value="assistant" data-i18n="role.assistant">assistant</option>
+              <option value="tool_result" data-i18n="role.tool_result">tool_result</option>
+              <option value="system" data-i18n="role.system">system</option>
             </select>
           </label>
           <label class="field">
             <span class="field-label">Tool</span>
-            <select id="browse-tool"><option value="">All tools</option></select>
+            <select id="browse-tool"><option value="" data-i18n="browse.allTools">All tools</option></select>
           </label>
           <label class="field">
-            <span class="field-label">Conv</span>
+            <span class="field-label" data-i18n="browse.conv">Conv</span>
             <input id="browse-conv" type="number" placeholder="#" style="width:90px" />
           </label>
-          <button class="btn btn-ghost togglable" id="browse-toolonly" type="button" aria-pressed="false">Tool calls only</button>
-          <button class="btn btn-primary" id="browse-apply" type="button">Apply</button>
-          <button class="btn btn-ghost" id="browse-reset" type="button">Reset</button>
+          <button class="btn btn-ghost togglable" id="browse-toolonly" type="button" aria-pressed="false" data-i18n="browse.toolOnly">Tool calls only</button>
+          <button class="btn btn-primary" id="browse-apply" type="button" data-i18n="browse.apply">Apply</button>
+          <button class="btn btn-ghost" id="browse-reset" type="button" data-i18n="browse.reset">Reset</button>
         </div>
 
         <div class="history list-anim" id="browse-list"></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="browse-prev" type="button">← Prev</button>
+          <button class="btn btn-ghost" id="browse-prev" type="button" data-i18n="browse.prev">← Prev</button>
           <div id="browse-page-info">-</div>
-          <button class="btn btn-ghost" id="browse-next" type="button">Next →</button>
+          <button class="btn btn-ghost" id="browse-next" type="button" data-i18n="browse.next">Next →</button>
         </div>
       </section>
 
       <!-- MESSAGE DETAIL (full content + tool_calls) -->
       <section id="view-msg" hidden>
-        <div class="eyebrow">Message</div>
+        <div class="eyebrow" data-i18n="msg.eyebrow">Message</div>
         <div class="detail-hero">
-          <button class="btn btn-ghost" id="msg-back" type="button">← Back</button>
-          <h1 id="msg-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em">Message</h1>
-          <button class="btn btn-ghost" id="msg-pin" type="button">Pin as note</button>
-          <button class="btn btn-ghost" id="msg-copy" type="button">Copy JSON</button>
-          <button class="btn btn-ghost" id="msg-open-conv" type="button">Open session</button>
+          <button class="btn btn-ghost" id="msg-back" type="button" data-i18n="msg.back">← Back</button>
+          <h1 id="msg-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em" data-i18n="msg.title">Message</h1>
+          <button class="btn btn-ghost" id="msg-pin" type="button" data-i18n="msg.pin">Pin as note</button>
+          <button class="btn btn-ghost" id="msg-copy" type="button" data-i18n="msg.copy">Copy JSON</button>
+          <button class="btn btn-ghost" id="msg-open-conv" type="button" data-i18n="msg.open">Open session</button>
         </div>
         <div class="chip" id="msg-meta" style="margin-bottom:16px"></div>
         <div class="panel">
-          <div class="panel-title"><h2>Content</h2></div>
+          <div class="panel-title"><h2 data-i18n="msg.content">Content</h2></div>
           <div class="prose" id="msg-content"></div>
         </div>
         <div class="panel" id="msg-tool-panel">
-          <div class="panel-title"><h2>Tool calls</h2><div class="meta" id="msg-tool-kind"></div></div>
+          <div class="panel-title"><h2 data-i18n="msg.tools">Tool calls</h2><div class="meta" id="msg-tool-kind"></div></div>
           <pre class="prose" id="msg-tool" style="max-height:480px;overflow:auto"></pre>
         </div>
         <div class="panel" id="msg-blocks-panel">
-          <div class="panel-title"><h2>Content blocks</h2></div>
+          <div class="panel-title"><h2 data-i18n="msg.blocks">Content blocks</h2></div>
           <pre class="prose" id="msg-blocks" style="max-height:320px;overflow:auto"></pre>
         </div>
       </section>
 
       <!-- AGENT MEMORY -->
       <section id="view-memory" hidden>
-        <div class="eyebrow">Agent Memory</div>
+        <div class="eyebrow" data-i18n="mem.eyebrow">Agent Memory</div>
         <div class="page-header">
           <div>
-            <h1>Agent Memory</h1>
-            <p>Durable agent memory from agent tools - decisions, rules, patterns, project context.</p>
+            <h1 data-i18n="mem.title">Agent Memory</h1>
+            <p data-i18n="mem.sub">Durable agent memory from agent tools - decisions, rules, patterns, project context.</p>
           </div>
           <div class="meta" id="memory-count"></div>
         </div>
         <div class="toolbar" style="margin-bottom:8px">
-          <div class="view-toggle" role="tablist" aria-label="Agent Memory mode">
-            <button type="button" class="togglable active" id="memory-tab-notes" role="tab" aria-selected="true" aria-pressed="true">Notes</button>
-            <button type="button" class="togglable" id="memory-tab-review" role="tab" aria-selected="false" aria-pressed="false">Review <span class="chip" id="review-count" title="Stale candidates">0</span></button>
+          <div class="view-toggle" role="tablist" data-i18n-attr="aria-label:mem.eyebrow" aria-label="Agent Memory mode">
+            <button type="button" class="togglable active" id="memory-tab-notes" role="tab" aria-selected="true" aria-pressed="true" data-i18n="mem.notes">Notes</button>
+            <button type="button" class="togglable" id="memory-tab-review" role="tab" aria-selected="false" aria-pressed="false"><span data-i18n="mem.review">Review</span> <span class="chip" id="review-count" data-i18n-attr="title:mem.review.title" title="Stale candidates">0</span></button>
           </div>
         </div>
         <div id="memory-notes-panel">
         <div class="toolbar">
           <label class="field" style="flex:1">
-            <span class="field-label">Search</span>
-            <input id="memory-q" type="search" placeholder="decision, rule, preference…" />
+            <span class="field-label" data-i18n="mem.search">Search</span>
+            <input id="memory-q" data-i18n-attr="placeholder:mem.search.ph" type="search" placeholder="decision, rule, preference…" />
           </label>
           <label class="field">
-            <span class="field-label">Category</span>
+            <span class="field-label" data-i18n="mem.category">Category</span>
             <select id="memory-cat">
-              <option value="">All</option>
-              <option value="decision">decision</option>
-              <option value="preference">preference</option>
-              <option value="pattern">pattern</option>
-              <option value="insight">insight</option>
-              <option value="error_solution">error_solution</option>
-              <option value="project_context">project_context</option>
-              <option value="workflow">workflow</option>
+              <option value="" data-i18n="all">All</option>
+              <option value="decision" data-i18n="cat.decision">decision</option>
+              <option value="preference" data-i18n="cat.preference">preference</option>
+              <option value="pattern" data-i18n="cat.pattern">pattern</option>
+              <option value="insight" data-i18n="cat.insight">insight</option>
+              <option value="error_solution" data-i18n="cat.error_solution">error_solution</option>
+              <option value="project_context" data-i18n="cat.project_context">project_context</option>
+              <option value="workflow" data-i18n="cat.workflow">workflow</option>
             </select>
           </label>
-          <button class="btn btn-primary" id="memory-go" type="button">Search</button>
-          <button class="btn btn-ghost" id="memory-ingest" type="button">Ingest agent memory</button>
+          <button class="btn btn-primary" id="memory-go" type="button" data-i18n="mem.searchBtn">Search</button>
+          <button class="btn btn-ghost" id="memory-ingest" type="button" data-i18n="mem.ingest">Ingest agent memory</button>
         </div>
         <div class="history list-anim" id="memory-list"></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="memory-prev" type="button">← Prev</button>
+          <button class="btn btn-ghost" id="memory-prev" type="button" data-i18n="mem.prev">← Prev</button>
           <div id="memory-page-info">-</div>
-          <button class="btn btn-ghost" id="memory-next" type="button">Next →</button>
+          <button class="btn btn-ghost" id="memory-next" type="button" data-i18n="mem.next">Next →</button>
         </div>
         </div>
         <div id="memory-review-panel" hidden>
-          <div class="meta" id="review-summary" style="margin-bottom:12px">Loading review candidates…</div>
+          <div class="meta" id="review-summary" style="margin-bottom:12px" data-i18n="mem.review.loading">Loading review candidates…</div>
           <div class="history list-anim" id="review-list"></div>
         </div>
       </section>
 
       <!-- FIND -->
       <section id="view-find" hidden>
-        <div class="eyebrow">Corpus search</div>
+        <div class="eyebrow" data-i18n="find.eyebrow">Corpus search</div>
         <div class="page-header">
           <div>
-            <h1>Find</h1>
-            <p>Lexical + semantic search across every message. Semantic uses local embeddings (Ollama).</p>
+            <h1 data-i18n="find.title">Find</h1>
+            <p data-i18n="find.sub">Lexical + semantic search across every message. Semantic uses local embeddings (Ollama).</p>
           </div>
           <div class="meta" id="find-backend"></div>
         </div>
         <div class="toolbar">
           <label class="field" style="flex:1">
-            <span class="field-label">Query</span>
-            <input id="find-q" type="search" placeholder="Meaning or keywords - e.g. why we chose Postgres" />
+            <span class="field-label" data-i18n="find.query">Query</span>
+            <input id="find-q" type="search" data-i18n-attr="placeholder:find.query.ph" placeholder="Meaning or keywords - e.g. why we chose Postgres" />
           </label>
           <label class="field">
-            <span class="field-label">Mode</span>
+            <span class="field-label" data-i18n="find.mode">Mode</span>
             <select id="find-mode">
-              <option value="hybrid" selected>Hybrid</option>
-              <option value="semantic">Semantic</option>
-              <option value="lexical">Lexical</option>
+              <option value="hybrid" selected data-i18n="find.hybrid">Hybrid</option>
+              <option value="semantic" data-i18n="find.semantic">Semantic</option>
+              <option value="lexical" data-i18n="find.lexical">Lexical</option>
             </select>
           </label>
-          <button class="btn btn-primary" id="find-go" type="button">Search</button>
+          <button class="btn btn-primary" id="find-go" type="button" data-i18n="find.search">Search</button>
         </div>
-        <div class="history list-anim" id="find-results" aria-live="polite" aria-busy="false"><div class="empty"><strong>Search your corpus</strong>Type keywords or a question. Hybrid blends meaning and matches.<div class="empty-action"><button type="button" class="btn btn-primary" id="find-empty-focus">Type a query</button></div></div></div>
+        <div class="history list-anim" id="find-results" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="find.searchCorpus">Search your corpus</strong><span data-i18n="find.typeKeywords">Type keywords or a question. Hybrid blends meaning and matches.</span><div class="empty-action"><button type="button" class="btn btn-primary" id="find-empty-focus" data-i18n="find.typeQuery">Type a query</button></div></div></div>
       </section>
 
       <!-- PROJECTS -->
       <section id="view-projects" hidden>
-        <div class="eyebrow">Workspaces</div>
+        <div class="eyebrow" data-i18n="proj.eyebrow">Workspaces</div>
         <div class="page-header">
           <div>
-            <h1>Projects</h1>
-            <p>Click a project to open its history.</p>
+            <h1 data-i18n="proj.title">Projects</h1>
+            <p data-i18n="proj.sub">Click a project to open its history.</p>
           </div>
         </div>
         <div class="grid list-anim" id="projects-grid"></div>
@@ -2000,22 +2008,22 @@ html {
 
       <!-- TIMELINE -->
       <section id="view-timeline" hidden>
-        <div class="eyebrow">Activity</div>
+        <div class="eyebrow" data-i18n="tl.eyebrow">Activity</div>
         <div class="page-header">
           <div>
-            <h1>Timeline</h1>
-            <p>Conversation volume by day and tool.</p>
+            <h1 data-i18n="tl.title">Timeline</h1>
+            <p data-i18n="tl.sub">Conversation volume by day and tool.</p>
           </div>
         </div>
         <div class="toolbar" style="margin:12px 0">
-          <div class="view-toggle" role="group" aria-label="Timeline view mode">
-            <button type="button" id="timeline-mode-chart" class="active">List</button>
-            <button type="button" id="timeline-mode-cal">Calendar</button>
+          <div class="view-toggle" role="group" data-i18n-attr="aria-label:tl.eyebrow" aria-label="Timeline view mode">
+            <button type="button" id="timeline-mode-chart" class="active" data-i18n="tl.list">List</button>
+            <button type="button" id="timeline-mode-cal" data-i18n="tl.calendar">Calendar</button>
           </div>
           <label class="field" style="min-width:220px">
-            <span class="field-label">Provider</span>
-            <select id="timeline-tool" aria-label="Filter timeline by provider">
-              <option value="">All providers</option>
+            <span class="field-label" data-i18n="tl.provider">Provider</span>
+            <select id="timeline-tool" data-i18n-attr="aria-label:tl.filterAria" aria-label="Filter timeline by provider">
+              <option value="" data-i18n="tl.allProviders">All providers</option>
             </select>
           </label>
           <div class="meta" id="timeline-cal-label"></div>
@@ -2025,25 +2033,25 @@ html {
         </div>
         <div class="panel" id="timeline-calendar-panel" hidden>
           <div class="panel-title">
-            <h2>Activity calendar</h2>
+            <h2 data-i18n="tl.calTitle">Activity calendar</h2>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-ghost" type="button" id="cal-prev" aria-label="Previous month">&#8249;</button>
+              <button class="btn btn-ghost" type="button" id="cal-prev" data-i18n-attr="aria-label:tl.prevMonth" aria-label="Previous month">&#8249;</button>
               <div class="meta" id="cal-month-label"></div>
-              <button class="btn btn-ghost" type="button" id="cal-next" aria-label="Next month">&#8250;</button>
-              <button class="btn btn-ghost" type="button" id="cal-today">Today</button>
+              <button class="btn btn-ghost" type="button" id="cal-next" data-i18n-attr="aria-label:tl.nextMonth" aria-label="Next month">&#8250;</button>
+              <button class="btn btn-ghost" type="button" id="cal-today" data-i18n="tl.today">Today</button>
             </div>
           </div>
           <div class="cal-weekdays" aria-hidden="true">
-            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            <span data-i18n="tl.mon">Mon</span><span data-i18n="tl.tue">Tue</span><span data-i18n="tl.wed">Wed</span><span data-i18n="tl.thu">Thu</span><span data-i18n="tl.fri">Fri</span><span data-i18n="tl.sat">Sat</span><span data-i18n="tl.sun">Sun</span>
           </div>
-          <div class="cal-grid" id="timeline-calendar" role="grid" aria-label="Activity by day"></div>
+          <div class="cal-grid" id="timeline-calendar" role="grid" data-i18n-attr="aria-label:tl.gridAria" aria-label="Activity by day"></div>
           <div class="meta" id="cal-legend" style="margin-top:10px">
-            <span class="chip">low</span>
+            <span class="chip" data-i18n="tl.low">low</span>
             <span class="cal-swatch l1"></span>
             <span class="cal-swatch l2"></span>
             <span class="cal-swatch l3"></span>
             <span class="cal-swatch l4"></span>
-            <span class="chip">high</span>
+            <span class="chip" data-i18n="tl.high">high</span>
           </div>
         </div>
         <div class="history list-anim" id="timeline-list"></div>
@@ -2051,65 +2059,65 @@ html {
 
       <!-- ASK -->
       <section id="view-ask" hidden>
-        <div class="eyebrow">Cited answers</div>
+        <div class="eyebrow" data-i18n="ask.eyebrow">Cited answers</div>
         <div class="page-header">
           <div>
-            <h1>Ask</h1>
-            <p>Grounded answers from your corpus. Fail-soft to excerpts if the model is down.</p>
+            <h1 data-i18n="ask.title">Ask</h1>
+            <p data-i18n="ask.sub">Grounded answers from your corpus. Fail-soft to excerpts if the model is down.</p>
           </div>
         </div>
         <div class="toolbar">
           <label class="field" style="flex:1">
-            <span class="field-label">Question</span>
-            <input id="ask-q" type="search" placeholder="What did we decide about…?" />
+            <span class="field-label" data-i18n="ask.question">Question</span>
+            <input id="ask-q" type="search" data-i18n-attr="placeholder:ask.question.ph" placeholder="What did we decide about…?" />
           </label>
-          <button class="btn btn-primary" id="ask-go" type="button">Ask</button>
+          <button class="btn btn-primary" id="ask-go" type="button" data-i18n="ask.go">Ask</button>
         </div>
-        <div id="ask-out" class="list-anim" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ask anything about your work</strong>Answers cite sessions and fail-soft to excerpts when the model is offline.<div class="empty-action"><button type="button" class="btn btn-primary" id="ask-empty-focus">Type a question</button></div></div></div>
+        <div id="ask-out" class="list-anim" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="ask.emptyTitle">Ask anything about your work</strong><span data-i18n="ask.emptyBody">Answers cite sessions and fail-soft to excerpts when the model is offline.</span><div class="empty-action"><button type="button" class="btn btn-primary" id="ask-empty-focus" data-i18n="ask.typeQuestion">Type a question</button></div></div></div>
       </section>
 
       <!-- OPERATE -->
       <section id="view-operate" hidden>
-        <div class="eyebrow">Jobs</div>
+        <div class="eyebrow" data-i18n="op.eyebrow">Jobs</div>
         <div class="page-header">
           <div>
-            <h1>Operate</h1>
-            <p>Run maintenance jobs against the store.</p>
+            <h1 data-i18n="op.title">Operate</h1>
+            <p data-i18n="op.sub">Run maintenance jobs against the store.</p>
           </div>
         </div>
         <div class="job-grid">
-          <button class="job" data-job="ingest"><strong>Ingest all providers</strong><span>Import sessions from every adapter</span></button>
-          <button class="job" data-job="status"><strong>Status</strong><span>Corpus counts</span></button>
-          <button class="job" data-job="embed"><strong>Embed</strong><span>Vectorise pending messages</span></button>
-          <button class="job" data-job="reflect"><strong>Reflect</strong><span>Dedup memory chunks</span></button>
-          <button class="job" data-job="backup"><strong>Backup</strong><span>pg_dump snapshot</span></button>
-          <button class="job" data-job="audit"><strong>Audit</strong><span>Agent accountability</span></button>
-          <button class="job" data-job="stale"><strong>Stale digest</strong><span>What went stale since last session</span></button>
-          <button class="job" data-job="writeback"><strong>Write to AGENTS.md</strong><span>Distilled decisions into the project file</span></button>
-          <button class="job" data-job="answer-eval"><strong>Answer eval</strong><span>Citations and hallucination check</span></button>
+          <button class="job" data-job="ingest"><strong data-i18n="op.ingest">Ingest all providers</strong><span data-i18n="op.ingest.sub">Import sessions from every adapter</span></button>
+          <button class="job" data-job="status"><strong data-i18n="op.status">Status</strong><span data-i18n="op.status.sub">Corpus counts</span></button>
+          <button class="job" data-job="embed"><strong data-i18n="op.embed">Embed</strong><span data-i18n="op.embed.sub">Vectorise pending messages</span></button>
+          <button class="job" data-job="reflect"><strong data-i18n="op.reflect">Reflect</strong><span data-i18n="op.reflect.sub">Dedup memory chunks</span></button>
+          <button class="job" data-job="backup"><strong data-i18n="op.backup">Backup</strong><span data-i18n="op.backup.sub">pg_dump snapshot</span></button>
+          <button class="job" data-job="audit"><strong data-i18n="op.audit">Audit</strong><span data-i18n="op.audit.sub">Agent accountability</span></button>
+          <button class="job" data-job="stale"><strong data-i18n="op.stale">Stale digest</strong><span data-i18n="op.stale.sub">What went stale since last session</span></button>
+          <button class="job" data-job="writeback"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></button>
+          <button class="job" data-job="answer-eval"><strong data-i18n="op.answerEval">Answer eval</strong><span data-i18n="op.answerEval.sub">Citations and hallucination check</span></button>
         </div>
         <div class="panel" id="ingest-status" style="margin-top:16px">
-          <div class="panel-title"><h2>Ingestion status</h2><div class="meta">per provider</div></div>
-          <div id="ingest-status-body" class="history list-anim">Loading…</div>
+          <div class="panel-title"><h2 data-i18n="op.ingestStatus">Ingestion status</h2><div class="meta" data-i18n="op.perProvider">per provider</div></div>
+          <div id="ingest-status-body" class="history list-anim" data-i18n="op.loading">Loading…</div>
         </div>
-        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ready for jobs</strong>Pick a maintenance job above. Progress and results appear here.<div class="empty-action"><button type="button" class="btn btn-primary" data-action="status">Run status</button></div></div></div>
+        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="op.ready">Ready for jobs</strong><span data-i18n="op.pickJob">Pick a maintenance job above. Progress and results appear here.</span><div class="empty-action"><button type="button" class="btn btn-primary" data-action="status" data-i18n="op.runStatus">Run status</button></div></div></div>
       </section>
 
       <!-- DETAIL -->
       <section id="view-detail" hidden>
-        <div class="eyebrow">Session</div>
+        <div class="eyebrow" data-i18n="detail.eyebrow">Session</div>
         <div class="detail-hero">
-          <button class="btn btn-ghost" id="back-btn" type="button">← Back</button>
-          <h1 id="detail-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em">Conversation</h1>
-          <button class="btn btn-ghost" id="detail-copy" type="button">Copy summary</button>
+          <button class="btn btn-ghost" id="back-btn" type="button" data-i18n="detail.back">← Back</button>
+          <h1 id="detail-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em" data-i18n="detail.title">Conversation</h1>
+          <button class="btn btn-ghost" id="detail-copy" type="button" data-i18n="detail.copy">Copy summary</button>
         </div>
         <div class="chip" id="detail-meta" style="margin-bottom:16px"></div>
         <div class="toolbar">
-          <button class="btn btn-ghost togglable" data-role="user" type="button" aria-pressed="true">User</button>
-          <button class="btn btn-ghost togglable" data-role="assistant" type="button" aria-pressed="true">Assistant</button>
-          <button class="btn btn-ghost togglable" data-role="tool" type="button" aria-pressed="true">Tool</button>
-          <button class="btn btn-ghost togglable" data-role="system" type="button" aria-pressed="true">System</button>
-          <button class="btn btn-ghost" id="detail-expand" type="button">Expand all</button>
+          <button class="btn btn-ghost togglable" data-role="user" type="button" aria-pressed="true" data-i18n="detail.user">User</button>
+          <button class="btn btn-ghost togglable" data-role="assistant" type="button" aria-pressed="true" data-i18n="detail.assistant">Assistant</button>
+          <button class="btn btn-ghost togglable" data-role="tool" type="button" aria-pressed="true" data-i18n="detail.tool">Tool</button>
+          <button class="btn btn-ghost togglable" data-role="system" type="button" aria-pressed="true" data-i18n="detail.system">System</button>
+          <button class="btn btn-ghost" id="detail-expand" type="button" data-i18n="detail.expandAll">Expand all</button>
         </div>
         <div id="detail-messages" class="list-anim"></div>
       </section>
@@ -2117,12 +2125,12 @@ html {
   </main>
 </div>
 
-<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" data-i18n-attr="aria-label:pal.searchAria" aria-label="Command palette">
   <div class="palette">
-    <input id="palette-input" type="text" placeholder="Type a command, session, project, or query…" autocomplete="off"  aria-label="Command palette search" aria-controls="palette-list" />
+    <input id="palette-input" type="text" data-i18n-attr="placeholder:pal.placeholder;aria-label:pal.searchAria" placeholder="Type a command, session, project, or query…" autocomplete="off"  aria-label="Command palette search" aria-controls="palette-list" />
     <div class="palette-list" id="palette-list"></div>
     <div class="palette-foot">
-      <span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>
+      <span data-i18n="pal.navigate">↑↓ navigate</span><span data-i18n="pal.open">↵ open</span><span data-i18n="pal.close">esc close</span>
     </div>
   </div>
 </div>
@@ -2130,22 +2138,22 @@ html {
 
 <div class="pin-dialog" id="pin-dialog" role="dialog" aria-modal="true" aria-labelledby="pin-dialog-title" hidden>
   <div class="pin-panel">
-    <h2 id="pin-dialog-title">Pin as note</h2>
-    <label for="pin-category">Category</label>
+    <h2 id="pin-dialog-title" data-i18n="pin.title">Pin as note</h2>
+    <label for="pin-category" data-i18n="pin.category">Category</label>
     <select id="pin-category">
-      <option value="insight">insight</option>
-      <option value="decision">decision</option>
-      <option value="preference">preference</option>
-      <option value="pattern">pattern</option>
-      <option value="error_solution">error_solution</option>
-      <option value="project_context">project_context</option>
-      <option value="workflow">workflow</option>
+      <option value="insight" data-i18n="cat.insight">insight</option>
+      <option value="decision" data-i18n="cat.decision">decision</option>
+      <option value="preference" data-i18n="cat.preference">preference</option>
+      <option value="pattern" data-i18n="cat.pattern">pattern</option>
+      <option value="error_solution" data-i18n="cat.error_solution">error_solution</option>
+      <option value="project_context" data-i18n="cat.project_context">project_context</option>
+      <option value="workflow" data-i18n="cat.workflow">workflow</option>
     </select>
-    <label for="pin-content">Content</label>
-    <textarea id="pin-content" aria-label="Note content"></textarea>
+    <label for="pin-content" data-i18n="pin.content">Content</label>
+    <textarea id="pin-content" data-i18n-attr="aria-label:pin.contentAria" aria-label="Note content"></textarea>
     <div class="pin-actions">
-      <button class="btn btn-ghost" id="pin-cancel" type="button">Cancel</button>
-      <button class="btn btn-primary" id="pin-save" type="button">Save note</button>
+      <button class="btn btn-ghost" id="pin-cancel" type="button" data-i18n="pin.cancel">Cancel</button>
+      <button class="btn btn-primary" id="pin-save" type="button" data-i18n="pin.save">Save note</button>
     </div>
   </div>
 </div>
@@ -2199,13 +2207,1185 @@ html {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-  const UI_LOCALE = "en-GB";
+  // --- i18n ----------------------------------------------------
+  const LANG_KEY = "th-lang";
+  const I18N = {
+    en: {
+      // chrome / sidebar / topbar
+      "skip": "Skip to main content",
+      "brand.tag": "Agent Memory · Rust",
+      "nav.home": "Home",
+      "nav.history": "History",
+      "nav.browse": "Browse",
+      "nav.memory": "Agent Memory",
+      "nav.find": "Find",
+      "nav.projects": "Projects",
+      "nav.timeline": "Timeline",
+      "nav.ask": "Ask",
+      "nav.operate": "Operate",
+      "nav.aria": "Primary",
+      "health.checking": "Checking",
+      "health.online": "Online · v",
+      "health.down": "Database unavailable",
+      "topbar.search": "Search everything - sessions, messages, commands…",
+      "topbar.theme": "Theme",
+      "topbar.theme.aria": "Colour theme",
+      "topbar.lang": "Language",
+      "topbar.lang.aria": "Interface language",
+      "theme.system": "System",
+      "theme.dark": "Dark",
+      "theme.light": "Light",
+      "lang.system": "System",
+      "topbar.hideEmpty": "Hide empty",
+      "topbar.showingEmpty": "Showing empty",
+      "topbar.browseAll": "Browse all",
+      // home
+      "home.eyebrow": "Local memory store",
+      "home.title": "Your work, remembered",
+      "home.sub": "Throughline · Agent Memory - every coding session, searchable, local-first.",
+      "home.conv": "Conversations",
+      "home.conv.sub": "ingested sessions",
+      "home.msg": "Messages",
+      "home.msg.sub": "across all tools",
+      "home.mem": "Memory",
+      "home.mem.sub": "extracted chunks",
+      "home.vec": "Vectors",
+      "home.vec.sub": "semantic index",
+      "home.proj": "Projects",
+      "home.proj.sub": "workspaces seen",
+      "home.range": "History range ",
+      "home.activity": "Activity",
+      "home.activity.meta": "last 90 days",
+      "home.attention": "Needs attention",
+      "home.attention.meta": "one-click recovery",
+      "home.continue": "Continue where you left off",
+      "home.handoff.meta": "handoff brief · offline",
+      "home.handoff.copy": "Copy handoff",
+      "home.handoff.download": "Download .md",
+      "home.handoff.loading": "Loading handoff brief",
+      "home.handoff.loadingBody": "Gathering resume context",
+      "home.quickstart": "Get started in three steps",
+      "home.quickstart.meta": "empty corpus",
+      "home.quickstart.strong": "No conversations yet",
+      "home.quickstart.body": "Three steps to your first searchable session.",
+      "home.quickstart.s1": "Check your sources in ",
+      "home.quickstart.s1b": " → Ingestion status.",
+      "home.quickstart.s2": "Run ",
+      "home.quickstart.s2b": " to import transcripts.",
+      "home.quickstart.s3": "Come back here — sessions, memory and handoff fill in automatically.",
+      "home.quickstart.action": "Run ingest",
+      "home.recent": "Recent sessions",
+      "home.seeAll": "See all →",
+      "home.noSessions": "No sessions yet",
+      "home.nothingIngested": "Nothing has been ingested yet.",
+      "home.couldNotLoad": "Could not load sessions",
+      "home.serverNoResponse": "The server did not respond.",
+      "home.checkHealth": "Check the health pill in the sidebar, then retry.",
+      // history
+      "hist.eyebrow": "Full corpus",
+      "hist.title": "History",
+      "hist.sub": "Every ingested conversation - filter, sort, page, open.",
+      "hist.filter": "Filter",
+      "hist.filter.ph": "text, session id, project…",
+      "hist.tool": "Tool",
+      "hist.project": "Project",
+      "hist.sort": "Sort",
+      "hist.sort.new": "Newest",
+      "hist.sort.old": "Oldest",
+      "hist.sort.msgs": "Most messages",
+      "hist.from": "From",
+      "hist.to": "To",
+      "hist.apply": "Apply",
+      "hist.reset": "Reset",
+      "hist.csv": "Export CSV",
+      "hist.save": "★ Save",
+      "hist.save.title": "Save current filter",
+      "hist.viewMode": "View mode",
+      "hist.table": "Table",
+      "hist.cards": "Cards",
+      "hist.stats.loading": "Filter stats load with results…",
+      "hist.th.id": "ID",
+      "hist.th.started": "Started",
+      "hist.th.ended": "Ended",
+      "hist.th.project": "Project",
+      "hist.th.tool": "Tool",
+      "hist.th.model": "Model",
+      "hist.th.msgs": "Msgs",
+      "hist.th.preview": "Preview",
+      "hist.prev": "← Prev",
+      "hist.next": "Next →",
+      "hist.noMatches": "No matches",
+      "hist.nothingFits": "Nothing fits the current filters.",
+      "hist.empty": "History is empty",
+      "hist.notIngested": "No conversations have been ingested yet.",
+      "hist.resetFilters": "Reset filters",
+      "hist.runIngest": "Run ingest",
+      "hist.couldNotLoad": "Could not load history",
+      "hist.couldNotLoadShort": "Could not load",
+      "hist.page": "Page ",
+      "of": "of",
+      "onThisPage": "on this page",
+      "avg": "avg",
+      "kbd.hint": "palette · g h home · g s history · g b browse",
+      "hist.of": " / ",
+      "hist.untitled": "Untitled session",
+      "all": "All",
+      // browse
+      "browse.eyebrow": "Database browser",
+      "browse.title": "Browse",
+      "browse.sub": "Every message and tool call in the store - searchable, filterable, paginated.",
+      "browse.search": "Search",
+      "browse.search.ph": "content, tool name, session id…",
+      "browse.role": "Role",
+      "browse.allRoles": "All roles",
+      "browse.tool": "Tool",
+      "browse.allTools": "All tools",
+      "browse.conv": "Conv",
+      "browse.toolOnly": "Tool calls only",
+      "browse.apply": "Apply",
+      "browse.reset": "Reset",
+      "browse.prev": "← Prev",
+      "browse.next": "Next →",
+      "browse.noMessages": "No messages",
+      "browse.loosen": "Loosen filters - the corpus has 164k+ rows.",
+      "browse.empty": "Browse is empty",
+      "browse.notIngested": "No messages have been ingested yet.",
+      "browse.resetFilters": "Reset filters",
+      "browse.runIngest": "Run ingest",
+      "browse.couldNotLoad": "Could not load messages",
+      "browse.rows": "row",
+      "browse.rows.many": "rows",
+      "browse.chars": "chars",
+      "browse.tok": "tok",
+      "browse.emptyPreview": "(empty)",
+      // message
+      "msg.eyebrow": "Message",
+      "msg.back": "← Back",
+      "msg.title": "Message",
+      "msg.pin": "Pin as note",
+      "msg.copy": "Copy JSON",
+      "msg.open": "Open session",
+      "msg.content": "Content",
+      "msg.tools": "Tool calls",
+      "msg.blocks": "Content blocks",
+      "msg.loading": "Loading message…",
+      "msg.error": "Error",
+      "msg.project": "project",
+      "msg.conv": "conv #",
+      "msg.call": "call",
+      "msg.calls": "calls",
+      // memory
+      "mem.eyebrow": "Agent Memory",
+      "mem.title": "Agent Memory",
+      "mem.sub": "Durable agent memory from agent tools - decisions, rules, patterns, project context.",
+      "mem.notes": "Notes",
+      "mem.review": "Review",
+      "mem.review.title": "Stale candidates",
+      "mem.search": "Search",
+      "mem.search.ph": "decision, rule, preference…",
+      "mem.category": "Category",
+      "mem.searchBtn": "Search",
+      "mem.ingest": "Ingest agent memory",
+      "mem.ingesting": "Ingesting…",
+      "mem.prev": "← Prev",
+      "mem.next": "Next →",
+      "mem.review.loading": "Loading review candidates…",
+      "mem.nothingToReview": "Nothing to review",
+      "mem.noMemory": "No memory yet",
+      "mem.ingestNotes": "Ingest agent memory to pull durable notes.",
+      "mem.runIngest": "Run ingest",
+      "mem.couldNotLoad": "Could not load memory",
+      "mem.recorded": "recorded ",
+      "mem.label": "Memory",
+      "mem.expand": "Click to expand full memory",
+      "mem.collapse": "Click to collapse",
+      "mem.candidate": "candidate",
+      "mem.candidates": "candidates",
+      // review
+      "review.clear": "Review is clear",
+      "review.noStale": "No stale memory candidates right now.",
+      "review.refresh": "Refresh",
+      "review.keep": "Keep",
+      "review.forget": "Forget",
+      "review.couldNotLoad": "Could not load review",
+      "review.retry": "Retry",
+      "review.kept": "Kept note #",
+      "review.keepFailed": "Keep failed: ",
+      "review.forgetConfirm": "Forget note #",
+      "review.forgetConfirm2": "? This marks it as forgotten.",
+      "review.forgot": "Forgot note #",
+      "review.undo": "Undo",
+      "review.restored": "Restored note #",
+      "review.undoFailed": "Undo failed: ",
+      "review.forgetFailed": "Forget failed: ",
+      // find
+      "find.eyebrow": "Corpus search",
+      "find.title": "Find",
+      "find.sub": "Lexical + semantic search across every message. Semantic uses local embeddings (Ollama).",
+      "find.query": "Query",
+      "find.query.ph": "Meaning or keywords - e.g. why we chose Postgres",
+      "find.mode": "Mode",
+      "find.hybrid": "Hybrid",
+      "find.semantic": "Semantic",
+      "find.lexical": "Lexical",
+      "find.search": "Search",
+      "find.searchCorpus": "Search your corpus",
+      "find.typeKeywords": "Type keywords or a question. Hybrid blends meaning and matches.",
+      "find.typeQuery": "Type a query",
+      "find.startTyping": "Start typing",
+      "find.searchEvery": "Search every ingested message.",
+      "find.corpusEmpty": "Corpus is empty",
+      "find.notIngested": "No conversations have been ingested yet.",
+      "find.runIngest": "Run ingest",
+      "find.noMatches": "No matches",
+      "find.nothingMatched": "Nothing matched in ",
+      "find.modeSuffix": " mode.",
+      "find.clearQuery": "Clear query",
+      "find.searchFailed": "Search failed",
+      "find.backendNoResponse": "The search backend did not respond.",
+      "find.checkServer": "Check that the server is running, then try again.",
+      "find.pinAria": "Pin this hit as a note",
+      "find.pinSource": "Source: conversation #",
+      "find.searching": "Searching...",
+      "find.noMatchesAnnounce": "No matches",
+      // projects
+      "proj.eyebrow": "Workspaces",
+      "proj.title": "Projects",
+      "proj.sub": "Click a project to open its history.",
+      "proj.noDescription": "No description",
+      "proj.sessions": "session",
+      "proj.sessions.many": "sessions",
+      "proj.statusActive": "active",
+      "proj.none": "No projects",
+      "proj.appearAfter": "Projects appear after ingest.",
+      "proj.runIngest": "Run ingest",
+      "proj.couldNotLoad": "Could not load projects",
+      // timeline
+      "tl.eyebrow": "Activity",
+      "tl.title": "Timeline",
+      "tl.sub": "Conversation volume by day and tool.",
+      "tl.list": "List",
+      "tl.calendar": "Calendar",
+      "tl.provider": "Provider",
+      "tl.allProviders": "All providers",
+      "tl.filterAria": "Filter timeline by provider",
+      "tl.calTitle": "Activity calendar",
+      "tl.prevMonth": "Previous month",
+      "tl.nextMonth": "Next month",
+      "tl.today": "Today",
+      "tl.mon": "Mon",
+      "tl.tue": "Tue",
+      "tl.wed": "Wed",
+      "tl.thu": "Thu",
+      "tl.fri": "Fri",
+      "tl.sat": "Sat",
+      "tl.sun": "Sun",
+      "tl.gridAria": "Activity by day",
+      "tl.low": "low",
+      "tl.high": "high",
+      "tl.noActivity": "No activity yet",
+      "tl.fillsAfter": "Timeline fills in after ingest.",
+      "tl.runIngest": "Run ingest",
+      "tl.openInHistory": "Open in History filter",
+      "tl.couldNotLoad": "Could not load timeline",
+      "tl.conversation": "conversation",
+      "tl.conversations": "conversations",
+      // ask
+      "ask.eyebrow": "Cited answers",
+      "ask.title": "Ask",
+      "ask.sub": "Grounded answers from your corpus. Fail-soft to excerpts if the model is down.",
+      "ask.question": "Question",
+      "ask.question.ph": "What did we decide about…?",
+      "ask.go": "Ask",
+      "ask.emptyTitle": "Ask anything about your work",
+      "ask.emptyBody": "Answers cite sessions and fail-soft to excerpts when the model is offline.",
+      "ask.typeQuestion": "Type a question",
+      "ask.askQuestion": "Ask a question",
+      "ask.typeSomething": "Type something like: what did we decide about the database?",
+      "ask.answersCite": "Answers cite sessions. The model can fail-soft to excerpts when offline.",
+      "ask.thinking": "Thinking...",
+      "ask.thinkingBody": "Searching your corpus for grounded excerpts.",
+      "ask.answer": "Answer",
+      "ask.local": "local",
+      "ask.remote": "remote",
+      "ask.cited": "cited",
+      "ask.excerptsOnly": "excerpts only",
+      "ask.noAnswer": "No answer produced.",
+      "ask.sources": "Sources",
+      "ask.noSources": "No sources cited",
+      "ask.notGrounded": "The answer could not be grounded in stored sessions.",
+      "ask.narrower": "Try a narrower question or ingest more history.",
+      "ask.failed": "Ask failed",
+      "ask.serviceNoResponse": "The answer service did not respond.",
+      "ask.serverBusy": "The server may be busy. Try again in a moment.",
+      // operate
+      "op.eyebrow": "Jobs",
+      "op.title": "Operate",
+      "op.sub": "Run maintenance jobs against the store.",
+      "op.ingest": "Ingest all providers",
+      "op.ingest.sub": "Import sessions from every adapter",
+      "op.status": "Status",
+      "op.status.sub": "Corpus counts",
+      "op.embed": "Embed",
+      "op.embed.sub": "Vectorise pending messages",
+      "op.reflect": "Reflect",
+      "op.reflect.sub": "Dedup memory chunks",
+      "op.backup": "Backup",
+      "op.backup.sub": "pg_dump snapshot",
+      "op.audit": "Audit",
+      "op.audit.sub": "Agent accountability",
+      "op.stale": "Stale digest",
+      "op.stale.sub": "What went stale since last session",
+      "op.writeback": "Write to AGENTS.md",
+      "op.writeback.sub": "Distilled decisions into the project file",
+      "op.answerEval": "Answer eval",
+      "op.answerEval.sub": "Citations and hallucination check",
+      "op.ingestStatus": "Ingestion status",
+      "op.perProvider": "per provider",
+      "op.loading": "Loading…",
+      "op.ready": "Ready for jobs",
+      "op.pickJob": "Pick a maintenance job above. Progress and results appear here.",
+      "op.runStatus": "Run status",
+      "op.running": "Running ",
+      "op.running2": "This job may take a moment. Results appear here when it finishes.",
+      "op.finished": " finished",
+      "op.failed": " failed",
+      "op.jobFailedBody": "The job did not complete.",
+      "op.staleReady": "stale digest ready",
+      "op.writebackDone": "writeback done",
+      "op.writebackFinished": "Writeback finished",
+      "op.wrote": "Wrote ",
+      "op.itemsTo": " to ",
+      "op.item": "item",
+      "op.items": "items",
+      "op.evalFinished": "Answer eval finished",
+      "op.evalDone": "answer eval done",
+      "op.auditFinished": "Audit finished",
+      "op.onDisk": "on disk",
+      "op.noSourceDir": "no source dir",
+      "op.last": "last ",
+      "op.filesLogged": "files logged: ",
+      "op.totals": "totals: ",
+      "op.session": "session",
+      "op.sessions": "sessions",
+      "op.message": "message",
+      "op.messages": "messages",
+      "op.noProviders": "No providers yet",
+      "op.couldNotLoadStatus": "Could not load ingest status",
+      "op.spinnerRunning": "Running …",
+      // detail
+      "detail.eyebrow": "Session",
+      "detail.back": "← Back",
+      "detail.title": "Conversation",
+      "detail.copy": "Copy summary",
+      "detail.user": "User",
+      "detail.assistant": "Assistant",
+      "detail.tool": "Tool",
+      "detail.system": "System",
+      "detail.expandAll": "Expand all",
+      "detail.loading": "Loading conversation…",
+      "detail.loadingAnnounce": "Loading conversation",
+      "detail.messages": "message",
+      "detail.messages.many": "messages",
+      "detail.couldNotLoad": "Could not load conversation",
+      "detail.serverNoResponse": "The server did not respond.",
+      "detail.goBack": "Go back and try another session, or check server health.",
+      "detail.noVisible": "No messages visible",
+      "detail.enableRoles": "Enable roles above.",
+      "detail.expand": "Expand",
+      "detail.empty": "(empty)",
+      // pin
+      "pin.title": "Pin as note",
+      "pin.category": "Category",
+      "pin.content": "Content",
+      "pin.contentAria": "Note content",
+      "aria.openHistory": "Open conversation history",
+      "aria.openCorpus": "Open full corpus history",
+      "aria.openMemory": "Open agent memory",
+      "aria.openFind": "Open semantic find",
+      "aria.openProjects": "Open projects",
+      "done": "done",
+      "pin.cancel": "Cancel",
+      "pin.save": "Save note",
+      "pin.pinned": "Pinned note #",
+      "pin.openMemory": "Open Agent Memory",
+      "pin.failed": "Pin failed: ",
+      "pin.source": "Source: conversation #",
+      // handoff
+      "handoff.title": "Throughline handoff",
+      "handoff.project": "Project: ",
+      "handoff.generated": "Generated: ",
+      "handoff.headline": "## Headline",
+      "handoff.ready": "Ready to continue",
+      "handoff.recent": "## Recent sessions",
+      "handoff.decisions": "## Decisions",
+      "handoff.openQuestions": "## Open questions",
+      "handoff.staleMemory": "## Stale memory",
+      "handoff.stats": "## Stats",
+      "handoff.conversations": "- conversations: ",
+      "handoff.messages": "- messages: ",
+      "handoff.chunks": "- memory chunks: ",
+      "handoff.msgs": " msgs",
+      "handoff.openSession": "Open session ",
+      "handoff.decisionsLabel": "Decisions",
+      "handoff.openQuestionsLabel": "Open questions",
+      "handoff.staleMemoryLabel": "Stale memory",
+      "handoff.noRecent": "No recent sessions",
+      "handoff.ingestThen": "Ingest transcripts, then handoff will surface resume context.",
+      "handoff.runIngest": "Run ingest",
+      "handoff.untitled": "(untitled session)",
+      "handoff.untitledShort": "(untitled)",
+      "handoff.none": "No handoff yet",
+      "handoff.unavailable": "Handoff brief unavailable. Try again after ingest.",
+      "handoff.notLoaded": "Handoff not loaded yet",
+      "handoff.copied": "Handoff copied (",
+      "handoff.chars": " chars)",
+      "handoff.downloaded": "Downloaded ",
+      // toasts / misc
+      "toast.theme": "Theme: ",
+      "toast.lang": "Language: ",
+      "toast.historyFiltered": "History filtered to ",
+      "toast.copied": "Copied to clipboard",
+      "toast.clipboardOff": "Clipboard unavailable",
+      "toast.csv": "CSV export started",
+      "toast.loadedFilter": "Loaded filter \"",
+      "toast.clearedSaved": "Saved filters cleared",
+      "toast.saved": "Saved \"",
+      "toast.reloaded": "Reloaded",
+      "toast.hideEmpty": "Empty sessions hidden",
+      "toast.showAll": "Showing all sessions",
+      "toast.includeEmpty": "Including empty sessions",
+      "toast.semanticOn": "Semantic mode on - type a question",
+      "toast.jsonCopied": "Message JSON copied",
+      "toast.agentMemory": "Agent memory: ",
+      "toast.files": "file",
+      "toast.files.many": "files",
+      "toast.chunks": "chunk",
+      "toast.chunks.many": "chunks",
+      "toast.ingested": "Ingested ",
+      "toast.ingestFailed": "Ingest failed: ",
+      "toast.gChord": "g…  h home · s history · b browse · f find · a ask",
+      // saved filters
+      "saved.saved": "Saved",
+      "saved.clear": "Clear",
+      "saved.namePrompt": "Name this filter:",
+      "saved.defaultName": "My filter",
+      // palette
+      "pal.placeholder": "Type a command, session, project, or query…",
+      "pal.searchAria": "Command palette search",
+      "pal.navigate": "↑↓ navigate",
+      "pal.open": "↵ open",
+      "pal.close": "esc close",
+      "pal.noCommands": "No commands",
+      "pal.go": "Go",
+      "pal.action": "Action",
+      "pal.toggle": "Toggle",
+      "pal.search": "Search",
+      "pal.filter": "Filter",
+      "pal.home": "Home",
+      "pal.home.hint": "dashboard",
+      "pal.history": "History",
+      "pal.history.hint": "full corpus",
+      "pal.memory": "Agent Memory",
+      "pal.memory.hint": "durable agent memory",
+      "pal.exportCsv": "Export sessions CSV",
+      "pal.exportCsv.hint": "current filters",
+      "pal.ingestFiles": "Ingest agent memory files",
+      "pal.ingestFiles.hint": "memory job",
+      "pal.browse": "Browse messages",
+      "pal.browse.hint": "db browser",
+      "pal.browseTools": "Browse tool calls only",
+      "pal.browseTools.hint": "json tool_calls",
+      "pal.find": "Find",
+      "pal.find.hint": "semantic + lexical",
+      "pal.semanticFind": "Semantic find…",
+      "pal.semanticFind.hint": "by meaning",
+      "pal.hybridFind": "Hybrid find…",
+      "pal.hybridFind.hint": "keywords + meaning",
+      "pal.projects": "Projects",
+      "pal.projects.hint": "workspaces",
+      "pal.timeline": "Timeline",
+      "pal.timeline.hint": "activity",
+      "pal.ask": "Ask",
+      "pal.ask.hint": "cited answers",
+      "pal.operate": "Operate",
+      "pal.operate.hint": "jobs",
+      "pal.showEmpty": "Show empty sessions",
+      "pal.hideEmpty": "Hide empty sessions",
+      "pal.hideEmpty.hint": "filter",
+      "pal.reload": "Reload corpus stats",
+      "pal.reload.hint": "refresh",
+      "pal.embed": "Embed pending messages",
+      "pal.embed.hint": "job",
+      "pal.backup": "Backup database",
+      "pal.backup.hint": "job",
+      "pal.semanticSearch": "Semantic find \"",
+      "pal.semanticSearch.hint": "hybrid · enter",
+      "pal.keywordSearch": "Keyword find \"",
+      "pal.keywordSearch.hint": "lexical",
+      "pal.filterHistory": "Filter history for \"",
+      "pal.filterHistory.hint": "sessions",
+      // keyboard
+      "kbd.goTo": "Go to: h home, s history, b browse, m memory, f find, j projects, t timeline, a ask, p operate",
+      // health recovery
+      "health.allOk": "All systems ok",
+      // ready
+      "ready": "Throughline ready",
+      // role filter options
+      "role.user": "user",
+      "role.assistant": "assistant",
+      "role.tool_result": "tool_result",
+      "role.system": "system",
+      // category filter options
+      "cat.decision": "decision",
+      "cat.preference": "preference",
+      "cat.pattern": "pattern",
+      "cat.insight": "insight",
+      "cat.error_solution": "error_solution",
+      "cat.project_context": "project_context",
+      "cat.workflow": "workflow",
+      // plural helpers
+      "p.session": "session",
+      "p.sessions": "sessions",
+      "p.msg": "msg",
+      "p.msgs": "msgs",
+      "p.model": "model",
+      "p.models": "models",
+      "p.tool": "tool",
+      "p.tools": "tools",
+      "p.message": "message",
+      "p.messages": "messages",
+      "p.conversation": "conversation",
+      "p.conversations": "conversations",
+      "p.file": "file",
+      "p.files": "files",
+      "p.chunk": "chunk",
+      "p.chunks": "chunks",
+      "p.item": "item",
+      "p.items": "items",
+      "p.recentSession": "recent session",
+      "p.recentSessions": "recent sessions",
+      "p.row": "row",
+      "p.rows": "rows",
+      "p.candidate": "candidate",
+      "p.candidates": "candidates",
+      "p.call": "call",
+      "p.calls": "calls",
+    },
+    de: {
+      "skip": "Zum Hauptinhalt springen",
+      "brand.tag": "Agent Memory · Rust",
+      "nav.home": "Start",
+      "nav.history": "Verlauf",
+      "nav.browse": "Durchsuchen",
+      "nav.memory": "Agent Memory",
+      "nav.find": "Suchen",
+      "nav.projects": "Projekte",
+      "nav.timeline": "Zeitachse",
+      "nav.ask": "Fragen",
+      "nav.operate": "Betrieb",
+      "nav.aria": "Hauptnavigation",
+      "health.checking": "Prüfung…",
+      "health.online": "Online · v",
+      "health.down": "Datenbank nicht erreichbar",
+      "topbar.search": "Alles durchsuchen – Sitzungen, Nachrichten, Befehle…",
+      "topbar.theme": "Design",
+      "topbar.theme.aria": "Farbschema",
+      "topbar.lang": "Sprache",
+      "topbar.lang.aria": "Oberflächensprache",
+      "theme.system": "System",
+      "theme.dark": "Dunkel",
+      "theme.light": "Hell",
+      "lang.system": "System",
+      "topbar.hideEmpty": "Leere ausblenden",
+      "topbar.showingEmpty": "Leere eingeblendet",
+      "topbar.browseAll": "Alle durchsuchen",
+      "home.eyebrow": "Lokaler Speicher",
+      "home.title": "Die eigene Arbeit, erinnert",
+      "home.sub": "Throughline · Agent Memory – jede Coding-Sitzung durchsuchbar, lokal zuerst.",
+      "home.conv": "Unterhaltungen",
+      "home.conv.sub": "importierte Sitzungen",
+      "home.msg": "Nachrichten",
+      "home.msg.sub": "über alle Werkzeuge",
+      "home.mem": "Gedächtnis",
+      "home.mem.sub": "extrahierte Blöcke",
+      "home.vec": "Vektoren",
+      "home.vec.sub": "semantischer Index",
+      "home.proj": "Projekte",
+      "home.proj.sub": "gesehene Arbeitsbereiche",
+      "home.range": "Zeitraum ",
+      "home.activity": "Aktivität",
+      "home.activity.meta": "letzte 90 Tage",
+      "home.attention": "Handlungsbedarf",
+      "home.attention.meta": "Wiederherstellung mit einem Klick",
+      "home.continue": "Weitermachen, wo es endete",
+      "home.handoff.meta": "Handoff-Kurzbericht · offline",
+      "home.handoff.copy": "Handoff kopieren",
+      "home.handoff.download": ".md herunterladen",
+      "home.handoff.loading": "Handoff-Kurzbericht wird geladen",
+      "home.handoff.loadingBody": "Fortsetzungskontext wird gesammelt",
+      "home.quickstart": "In drei Schritten starten",
+      "home.quickstart.meta": "leerer Bestand",
+      "home.quickstart.strong": "Noch keine Unterhaltungen",
+      "home.quickstart.body": "Drei Schritte bis zur ersten durchsuchbaren Sitzung.",
+      "home.quickstart.s1": "Quellen unter ",
+      "home.quickstart.s1b": " → Importstatus prüfen.",
+      "home.quickstart.s2": "Auftrag »",
+      "home.quickstart.s2b": "« ausführen, um Transkripte zu importieren.",
+      "home.quickstart.s3": "Wieder hierher zurückkehren – Sitzungen, Gedächtnis und Handoff füllen sich automatisch.",
+      "home.quickstart.action": "Ingest starten",
+      "home.recent": "Letzte Sitzungen",
+      "home.seeAll": "Alle anzeigen →",
+      "home.noSessions": "Noch keine Sitzungen",
+      "home.nothingIngested": "Es wurde noch nichts importiert.",
+      "home.couldNotLoad": "Sitzungen konnten nicht geladen werden",
+      "home.serverNoResponse": "Der Server hat nicht geantwortet.",
+      "home.checkHealth": "Statusanzeige in der Seitenleiste prüfen und erneut versuchen.",
+      "hist.eyebrow": "Gesamter Bestand",
+      "hist.title": "Verlauf",
+      "hist.sub": "Jede importierte Unterhaltung – filtern, sortieren, blättern, öffnen.",
+      "hist.filter": "Filter",
+      "hist.filter.ph": "Text, Sitzungs-ID, Projekt…",
+      "hist.tool": "Werkzeug",
+      "hist.project": "Projekt",
+      "hist.sort": "Sortierung",
+      "hist.sort.new": "Neueste",
+      "hist.sort.old": "Älteste",
+      "hist.sort.msgs": "Meiste Nachrichten",
+      "hist.from": "Von",
+      "hist.to": "Bis",
+      "hist.apply": "Anwenden",
+      "hist.reset": "Zurücksetzen",
+      "hist.csv": "CSV exportieren",
+      "hist.save": "★ Speichern",
+      "hist.save.title": "Aktuellen Filter speichern",
+      "hist.viewMode": "Ansicht",
+      "hist.table": "Tabelle",
+      "hist.cards": "Karten",
+      "hist.stats.loading": "Filterstatistik wird mit Ergebnissen geladen…",
+      "hist.th.id": "ID",
+      "hist.th.started": "Beginn",
+      "hist.th.ended": "Ende",
+      "hist.th.project": "Projekt",
+      "hist.th.tool": "Werkzeug",
+      "hist.th.model": "Modell",
+      "hist.th.msgs": "Nachr.",
+      "hist.th.preview": "Vorschau",
+      "hist.prev": "← Zurück",
+      "hist.next": "Weiter →",
+      "hist.noMatches": "Keine Treffer",
+      "hist.nothingFits": "Nichts passt zu den aktuellen Filtern.",
+      "hist.empty": "Verlauf ist leer",
+      "hist.notIngested": "Es wurden noch keine Unterhaltungen importiert.",
+      "hist.resetFilters": "Filter zurücksetzen",
+      "hist.runIngest": "Ingest starten",
+      "hist.couldNotLoad": "Verlauf konnte nicht geladen werden",
+      "hist.couldNotLoadShort": "Laden fehlgeschlagen",
+      "hist.page": "Seite ",
+      "of": "von",
+      "onThisPage": "auf dieser Seite",
+      "avg": "Ø",
+      "kbd.hint": "Palette · g h Start · s Verlauf · b Durchsuchen",
+      "hist.of": " / ",
+      "hist.untitled": "Unbenannte Sitzung",
+      "all": "Alle",
+      "browse.eyebrow": "Datenbankbrowser",
+      "browse.title": "Durchsuchen",
+      "browse.sub": "Jede Nachricht und jeder Werkzeugaufruf – durchsuchbar, filterbar, seitenweise.",
+      "browse.search": "Suche",
+      "browse.search.ph": "Inhalt, Werkzeugname, Sitzungs-ID…",
+      "browse.role": "Rolle",
+      "browse.allRoles": "Alle Rollen",
+      "browse.tool": "Werkzeug",
+      "browse.allTools": "Alle Werkzeuge",
+      "browse.conv": "Konn.",
+      "browse.toolOnly": "Nur Werkzeugaufrufe",
+      "browse.apply": "Anwenden",
+      "browse.reset": "Zurücksetzen",
+      "browse.prev": "← Zurück",
+      "browse.next": "Weiter →",
+      "browse.noMessages": "Keine Nachrichten",
+      "browse.loosen": "Filter lockern – der Bestand umfasst 164k+ Zeilen.",
+      "browse.empty": "Durchsuchen ist leer",
+      "browse.notIngested": "Es wurden noch keine Nachrichten importiert.",
+      "browse.resetFilters": "Filter zurücksetzen",
+      "browse.runIngest": "Ingest starten",
+      "browse.couldNotLoad": "Nachrichten konnten nicht geladen werden",
+      "browse.rows": "Zeile",
+      "browse.rows.many": "Zeilen",
+      "browse.chars": "Zeichen",
+      "browse.tok": "Tok",
+      "browse.emptyPreview": "(leer)",
+      "msg.eyebrow": "Nachricht",
+      "msg.back": "← Zurück",
+      "msg.title": "Nachricht",
+      "msg.pin": "Als Notiz merken",
+      "msg.copy": "JSON kopieren",
+      "msg.open": "Sitzung öffnen",
+      "msg.content": "Inhalt",
+      "msg.tools": "Werkzeugaufrufe",
+      "msg.blocks": "Inhaltsblöcke",
+      "msg.loading": "Nachricht wird geladen…",
+      "msg.error": "Fehler",
+      "msg.project": "Projekt",
+      "msg.conv": "Konn. #",
+      "msg.call": "Aufruf",
+      "msg.calls": "Aufrufe",
+      "mem.eyebrow": "Agent Memory",
+      "mem.title": "Agent Memory",
+      "mem.sub": "Dauerhaftes Agent-Gedächtnis aus Agent-Werkzeugen – Entscheidungen, Regeln, Muster, Projektkontext.",
+      "mem.notes": "Notizen",
+      "mem.review": "Prüfung",
+      "mem.review.title": "Veraltete Kandidaten",
+      "mem.search": "Suche",
+      "mem.search.ph": "Entscheidung, Regel, Präferenz…",
+      "mem.category": "Kategorie",
+      "mem.searchBtn": "Suchen",
+      "mem.ingest": "Agent Memory importieren",
+      "mem.ingesting": "Import läuft…",
+      "mem.prev": "← Zurück",
+      "mem.next": "Weiter →",
+      "mem.review.loading": "Prüfkandidaten werden geladen…",
+      "mem.nothingToReview": "Nichts zu prüfen",
+      "mem.noMemory": "Noch kein Gedächtnis",
+      "mem.ingestNotes": "Agent Memory importieren, um dauerhafte Notizen zu ziehen.",
+      "mem.runIngest": "Ingest starten",
+      "mem.couldNotLoad": "Gedächtnis konnte nicht geladen werden",
+      "mem.recorded": "erfasst ",
+      "mem.label": "Gedächtnis",
+      "mem.expand": "Klicken, um den vollen Eintrag zu zeigen",
+      "mem.collapse": "Klicken, um einzuklappen",
+      "mem.candidate": "Kandidat",
+      "mem.candidates": "Kandidaten",
+      "review.clear": "Prüfung ist leer",
+      "review.noStale": "Zurzeit keine veralteten Gedächtniseinträge.",
+      "review.refresh": "Aktualisieren",
+      "review.keep": "Behalten",
+      "review.forget": "Vergessen",
+      "review.couldNotLoad": "Prüfung konnte nicht geladen werden",
+      "review.retry": "Erneut versuchen",
+      "review.kept": "Notiz behalten #",
+      "review.keepFailed": "Behalten fehlgeschlagen: ",
+      "review.forgetConfirm": "Notiz #",
+      "review.forgetConfirm2": " vergessen? Sie wird als vergessen markiert.",
+      "review.forgot": "Notiz vergessen #",
+      "review.undo": "Rückgängig",
+      "review.restored": "Notiz wiederhergestellt #",
+      "review.undoFailed": "Rückgängig fehlgeschlagen: ",
+      "review.forgetFailed": "Vergessen fehlgeschlagen: ",
+      "find.eyebrow": "Bestandssuche",
+      "find.title": "Suchen",
+      "find.sub": "Lexikalische + semantische Suche über alle Nachrichten. Semantik nutzt lokale Einbettungen (Ollama).",
+      "find.query": "Anfrage",
+      "find.query.ph": "Bedeutung oder Stichwörter – z. B. warum wir uns für Postgres entschieden haben",
+      "find.mode": "Modus",
+      "find.hybrid": "Hybrid",
+      "find.semantic": "Semantisch",
+      "find.lexical": "Lexikalisch",
+      "find.search": "Suchen",
+      "find.searchCorpus": "Bestand durchsuchen",
+      "find.typeKeywords": "Stichwörter oder eine Frage eingeben. Hybrid verbindet Bedeutung und Treffer.",
+      "find.typeQuery": "Anfrage eingeben",
+      "find.startTyping": "Eingabe beginnen",
+      "find.searchEvery": "Alle importierten Nachrichten durchsuchen.",
+      "find.corpusEmpty": "Bestand ist leer",
+      "find.notIngested": "Es wurden noch keine Unterhaltungen importiert.",
+      "find.runIngest": "Ingest starten",
+      "find.noMatches": "Keine Treffer",
+      "find.nothingMatched": "Nichts gefunden im Modus ",
+      "find.modeSuffix": ".",
+      "find.clearQuery": "Anfrage löschen",
+      "find.searchFailed": "Suche fehlgeschlagen",
+      "find.backendNoResponse": "Die Such-Engine hat nicht geantwortet.",
+      "find.checkServer": "Prüfen, ob der Server läuft, und erneut versuchen.",
+      "find.pinAria": "Diesen Treffer als Notiz merken",
+      "find.pinSource": "Quelle: Unterhaltung #",
+      "find.searching": "Suche läuft…",
+      "find.noMatchesAnnounce": "Keine Treffer",
+      "proj.eyebrow": "Arbeitsbereiche",
+      "proj.title": "Projekte",
+      "proj.sub": "Projekt anklicken, um den Verlauf zu öffnen.",
+      "proj.noDescription": "Keine Beschreibung",
+      "proj.sessions": "Sitzung",
+      "proj.sessions.many": "Sitzungen",
+      "proj.statusActive": "aktiv",
+      "proj.none": "Keine Projekte",
+      "proj.appearAfter": "Projekte erscheinen nach dem Ingest.",
+      "proj.runIngest": "Ingest starten",
+      "proj.couldNotLoad": "Projekte konnten nicht geladen werden",
+      "tl.eyebrow": "Aktivität",
+      "tl.title": "Zeitachse",
+      "tl.sub": "Unterhaltungsvolumen nach Tag und Werkzeug.",
+      "tl.list": "Liste",
+      "tl.calendar": "Kalender",
+      "tl.provider": "Anbieter",
+      "tl.allProviders": "Alle Anbieter",
+      "tl.filterAria": "Zeitachse nach Anbieter filtern",
+      "tl.calTitle": "Aktivitätskalender",
+      "tl.prevMonth": "Vorheriger Monat",
+      "tl.nextMonth": "Nächster Monat",
+      "tl.today": "Heute",
+      "tl.mon": "Mo",
+      "tl.tue": "Di",
+      "tl.wed": "Mi",
+      "tl.thu": "Do",
+      "tl.fri": "Fr",
+      "tl.sat": "Sa",
+      "tl.sun": "So",
+      "tl.gridAria": "Aktivität nach Tag",
+      "tl.low": "niedrig",
+      "tl.high": "hoch",
+      "tl.noActivity": "Noch keine Aktivität",
+      "tl.fillsAfter": "Die Zeitachse füllt sich nach dem Ingest.",
+      "tl.runIngest": "Ingest starten",
+      "tl.openInHistory": "Im Verlauf öffnen",
+      "tl.couldNotLoad": "Zeitachse konnte nicht geladen werden",
+      "tl.conversation": "Unterhaltung",
+      "tl.conversations": "Unterhaltungen",
+      "ask.eyebrow": "Antworten mit Quellen",
+      "ask.title": "Fragen",
+      "ask.sub": "Belegte Antworten aus dem Bestand. Ohne Modell greifen Auszüge als Fallback.",
+      "ask.question": "Frage",
+      "ask.question.ph": "Worüber haben wir entschieden…?",
+      "ask.go": "Fragen",
+      "ask.emptyTitle": "Alles zur eigenen Arbeit fragen",
+      "ask.emptyBody": "Antworten zitieren Sitzungen und greifen ohne Modell auf Auszüge zurück.",
+      "ask.typeQuestion": "Frage eingeben",
+      "ask.askQuestion": "Eine Frage stellen",
+      "ask.typeSomething": "Etwas eingeben wie: Worüber haben wir bei der Datenbank entschieden?",
+      "ask.answersCite": "Antworten zitieren Sitzungen. Ohne Modell greifen Auszüge.",
+      "ask.thinking": "Denkt nach…",
+      "ask.thinkingBody": "Bestand wird nach belegten Auszügen durchsucht.",
+      "ask.answer": "Antwort",
+      "ask.local": "lokal",
+      "ask.remote": "entfernt",
+      "ask.cited": "belegt",
+      "ask.excerptsOnly": "nur Auszüge",
+      "ask.noAnswer": "Keine Antwort erzeugt.",
+      "ask.sources": "Quellen",
+      "ask.noSources": "Keine Quellen zitiert",
+      "ask.notGrounded": "Die Antwort konnte nicht durch gespeicherte Sitzungen belegt werden.",
+      "ask.narrower": "Engere Frage stellen oder mehr Verlauf importieren.",
+      "ask.failed": "Fragen fehlgeschlagen",
+      "ask.serviceNoResponse": "Der Antwortdienst hat nicht geantwortet.",
+      "ask.serverBusy": "Der Server ist möglicherweise ausgelastet. Später erneut versuchen.",
+      "op.eyebrow": "Aufträge",
+      "op.title": "Betrieb",
+      "op.sub": "Wartungsaufträge gegen den Speicher ausführen.",
+      "op.ingest": "Alle Anbieter importieren",
+      "op.ingest.sub": "Sitzungen aus allen Adaptern importieren",
+      "op.status": "Status",
+      "op.status.sub": "Bestandszahlen",
+      "op.embed": "Einbetten",
+      "op.embed.sub": "Ausstehende Nachrichten vektorisieren",
+      "op.reflect": "Reflektieren",
+      "op.reflect.sub": "Gedächtnisblöcke deduplizieren",
+      "op.backup": "Sicherung",
+      "op.backup.sub": "pg_dump-Snapshot",
+      "op.audit": "Prüfung",
+      "op.audit.sub": "Agent-Verantwortlichkeit",
+      "op.stale": "Veraltungsbericht",
+      "op.stale.sub": "Was seit der letzten Sitzung veraltet ist",
+      "op.writeback": "In AGENTS.md schreiben",
+      "op.writeback.sub": "Destillierte Entscheidungen in die Projektdatei",
+      "op.answerEval": "Antwortbewertung",
+      "op.answerEval.sub": "Zitate und Halluzinationsprüfung",
+      "op.ingestStatus": "Importstatus",
+      "op.perProvider": "pro Anbieter",
+      "op.loading": "Lädt…",
+      "op.ready": "Bereit für Aufträge",
+      "op.pickJob": "Oben einen Wartungsauftrag wählen. Fortschritt und Ergebnisse erscheinen hier.",
+      "op.runStatus": "Status ausführen",
+      "op.running": "Läuft: ",
+      "op.running2": "Der Auftrag kann einen Moment dauern. Ergebnisse erscheinen nach Abschluss.",
+      "op.finished": " abgeschlossen",
+      "op.failed": " fehlgeschlagen",
+      "op.jobFailedBody": "Der Auftrag wurde nicht abgeschlossen.",
+      "op.staleReady": "Veraltungsbericht bereit",
+      "op.writebackDone": "Writeback abgeschlossen",
+      "op.writebackFinished": "Writeback abgeschlossen",
+      "op.wrote": "Geschrieben: ",
+      "op.itemsTo": " nach ",
+      "op.item": "Eintrag",
+      "op.items": "Einträge",
+      "op.evalFinished": "Antwortbewertung abgeschlossen",
+      "op.evalDone": "Antwortbewertung abgeschlossen",
+      "op.auditFinished": "Prüfung abgeschlossen",
+      "op.onDisk": "auf Datenträger",
+      "op.noSourceDir": "kein Quellverzeichnis",
+      "op.last": "zuletzt ",
+      "op.filesLogged": "protokollierte Dateien: ",
+      "op.totals": "Summen: ",
+      "op.session": "Sitzung",
+      "op.sessions": "Sitzungen",
+      "op.message": "Nachricht",
+      "op.messages": "Nachrichten",
+      "op.noProviders": "Noch keine Anbieter",
+      "op.couldNotLoadStatus": "Importstatus konnte nicht geladen werden",
+      "op.spinnerRunning": "Läuft …",
+      "detail.eyebrow": "Sitzung",
+      "detail.back": "← Zurück",
+      "detail.title": "Unterhaltung",
+      "detail.copy": "Zusammenfassung kopieren",
+      "detail.user": "Nutzer",
+      "detail.assistant": "Assistent",
+      "detail.tool": "Werkzeug",
+      "detail.system": "System",
+      "detail.expandAll": "Alle aufklappen",
+      "detail.loading": "Unterhaltung wird geladen…",
+      "detail.loadingAnnounce": "Unterhaltung wird geladen",
+      "detail.message": "Nachricht",
+      "detail.messages": "Nachrichten",
+      "detail.couldNotLoad": "Unterhaltung konnte nicht geladen werden",
+      "detail.serverNoResponse": "Der Server hat nicht geantwortet.",
+      "detail.goBack": "Zurückgehen und eine andere Sitzung versuchen oder Serverstatus prüfen.",
+      "detail.noVisible": "Keine sichtbaren Nachrichten",
+      "detail.enableRoles": "Oben Rollen aktivieren.",
+      "detail.expand": "Aufklappen",
+      "detail.empty": "(leer)",
+      "pin.title": "Als Notiz merken",
+      "pin.category": "Kategorie",
+      "pin.content": "Inhalt",
+      "pin.contentAria": "Notizinhalt",
+      "aria.openHistory": "Unterhaltungsverlauf öffnen",
+      "aria.openCorpus": "Gesamten Verlauf öffnen",
+      "aria.openMemory": "Agent Memory öffnen",
+      "aria.openFind": "Semantische Suche öffnen",
+      "aria.openProjects": "Projekte öffnen",
+      "done": "fertig",
+      "pin.cancel": "Abbrechen",
+      "pin.save": "Notiz speichern",
+      "pin.pinned": "Notiz gemerkt #",
+      "pin.openMemory": "Agent Memory öffnen",
+      "pin.failed": "Meren fehlgeschlagen: ",
+      "pin.source": "Quelle: Unterhaltung #",
+      "handoff.title": "Throughline Handoff",
+      "handoff.project": "Projekt: ",
+      "handoff.generated": "Erstellt: ",
+      "handoff.headline": "## Schlagzeile",
+      "handoff.ready": "Bereit zum Fortsetzen",
+      "handoff.recent": "## Letzte Sitzungen",
+      "handoff.decisions": "## Entscheidungen",
+      "handoff.openQuestions": "## Offene Fragen",
+      "handoff.staleMemory": "## Veraltetes Gedächtnis",
+      "handoff.stats": "## Statistik",
+      "handoff.conversations": "- Unterhaltungen: ",
+      "handoff.messages": "- Nachrichten: ",
+      "handoff.chunks": "- Gedächtnisblöcke: ",
+      "handoff.msgs": " Nachr.",
+      "handoff.openSession": "Sitzung öffnen ",
+      "handoff.decisionsLabel": "Entscheidungen",
+      "handoff.openQuestionsLabel": "Offene Fragen",
+      "handoff.staleMemoryLabel": "Veraltetes Gedächtnis",
+      "handoff.noRecent": "Keine letzten Sitzungen",
+      "handoff.ingestThen": "Transkripte importieren, dann zeigt der Handoff den Fortsetzungskontext.",
+      "handoff.runIngest": "Ingest starten",
+      "handoff.untitled": "(unbenannte Sitzung)",
+      "handoff.untitledShort": "(unbenannt)",
+      "handoff.none": "Noch kein Handoff",
+      "handoff.unavailable": "Handoff-Kurzbericht nicht verfügbar. Nach dem Ingest erneut versuchen.",
+      "handoff.notLoaded": "Handoff noch nicht geladen",
+      "handoff.copied": "Handoff kopiert (",
+      "handoff.chars": " Zeichen)",
+      "handoff.downloaded": "Heruntergeladen: ",
+      "toast.theme": "Design: ",
+      "toast.lang": "Sprache: ",
+      "toast.historyFiltered": "Verlauf gefiltert auf ",
+      "toast.copied": "In die Zwischenablage kopiert",
+      "toast.clipboardOff": "Zwischenablage nicht verfügbar",
+      "toast.csv": "CSV-Export gestartet",
+      "toast.loadedFilter": "Filter geladen \"",
+      "toast.clearedSaved": "Gespeicherte Filter gelöscht",
+      "toast.saved": "Gespeichert \"",
+      "toast.reloaded": "Neu geladen",
+      "toast.hideEmpty": "Leere Sitzungen ausgeblendet",
+      "toast.showAll": "Alle Sitzungen werden angezeigt",
+      "toast.includeEmpty": "Leere Sitzungen eingeschlossen",
+      "toast.semanticOn": "Semantischer Modus aktiv – Frage eingeben",
+      "toast.jsonCopied": "Nachrichten-JSON kopiert",
+      "toast.agentMemory": "Agent Memory: ",
+      "toast.files": "Datei",
+      "toast.files.many": "Dateien",
+      "toast.chunks": "Block",
+      "toast.chunks.many": "Blöcke",
+      "toast.ingested": "Importiert: ",
+      "toast.ingestFailed": "Ingest fehlgeschlagen: ",
+      "toast.gChord": "g…  h Start · s Verlauf · d Durchsuchen · f Suchen · a Fragen",
+      "saved.saved": "Gespeichert",
+      "saved.clear": "Löschen",
+      "saved.namePrompt": "Filter benennen:",
+      "saved.defaultName": "Mein Filter",
+      "pal.placeholder": "Befehl, Sitzung, Projekt oder Anfrage eingeben…",
+      "pal.searchAria": "Befehlspalette suchen",
+      "pal.navigate": "↑↓ navigieren",
+      "pal.open": "↵ öffnen",
+      "pal.close": "esc schließen",
+      "pal.noCommands": "Keine Befehle",
+      "pal.go": "Gehe zu",
+      "pal.action": "Aktion",
+      "pal.toggle": "Umschalten",
+      "pal.search": "Suche",
+      "pal.filter": "Filter",
+      "pal.home": "Start",
+      "pal.home.hint": "Übersicht",
+      "pal.history": "Verlauf",
+      "pal.history.hint": "gesamter Bestand",
+      "pal.memory": "Agent Memory",
+      "pal.memory.hint": "dauerhaftes Agent-Gedächtnis",
+      "pal.exportCsv": "Sitzungen als CSV exportieren",
+      "pal.exportCsv.hint": "aktuelle Filter",
+      "pal.ingestFiles": "Agent-Memory-Dateien importieren",
+      "pal.ingestFiles.hint": "Gedächtnisauftrag",
+      "pal.browse": "Nachrichten durchsuchen",
+      "pal.browse.hint": "Datenbankbrowser",
+      "pal.browseTools": "Nur Werkzeugaufrufe anzeigen",
+      "pal.browseTools.hint": "json tool_calls",
+      "pal.find": "Suchen",
+      "pal.find.hint": "semantisch + lexikalisch",
+      "pal.semanticFind": "Semantische Suche…",
+      "pal.semanticFind.hint": "nach Bedeutung",
+      "pal.hybridFind": "Hybride Suche…",
+      "pal.hybridFind.hint": "Stichwörter + Bedeutung",
+      "pal.projects": "Projekte",
+      "pal.projects.hint": "Arbeitsbereiche",
+      "pal.timeline": "Zeitachse",
+      "pal.timeline.hint": "Aktivität",
+      "pal.ask": "Fragen",
+      "pal.ask.hint": "Antworten mit Quellen",
+      "pal.operate": "Betrieb",
+      "pal.operate.hint": "Aufträge",
+      "pal.showEmpty": "Leere Sitzungen anzeigen",
+      "pal.hideEmpty": "Leere Sitzungen ausblenden",
+      "pal.hideEmpty.hint": "Filter",
+      "pal.reload": "Bestandsstatistik neu laden",
+      "pal.reload.hint": "aktualisieren",
+      "pal.embed": "Ausstehende Nachrichten einbetten",
+      "pal.embed.hint": "Auftrag",
+      "pal.backup": "Datenbank sichern",
+      "pal.backup.hint": "Auftrag",
+      "pal.semanticSearch": "Semantische Suche \"",
+      "pal.semanticSearch.hint": "hybrid · Enter",
+      "pal.keywordSearch": "Stichwortsuche \"",
+      "pal.keywordSearch.hint": "lexikalisch",
+      "pal.filterHistory": "Verlauf filtern nach \"",
+      "pal.filterHistory.hint": "Sitzungen",
+      "kbd.goTo": "Gehe zu: h Start, s Verlauf, d Durchsuchen, m Memory, f Suchen, j Projekte, t Zeitachse, a Fragen, p Betrieb",
+      "health.allOk": "Alles in Ordnung",
+      "ready": "Throughline bereit",
+      "role.user": "Nutzer",
+      "role.assistant": "Assistent",
+      "role.tool_result": "Werkzeugergebnis",
+      "role.system": "System",
+      "cat.decision": "Entscheidung",
+      "cat.preference": "Präferenz",
+      "cat.pattern": "Muster",
+      "cat.insight": "Erkenntnis",
+      "cat.error_solution": "Fehlerlösung",
+      "cat.project_context": "Projektkontext",
+      "cat.workflow": "Arbeitsablauf",
+      "p.session": "Sitzung",
+      "p.sessions": "Sitzungen",
+      "p.msg": "Nachr.",
+      "p.msgs": "Nachr.",
+      "p.model": "Modell",
+      "p.models": "Modelle",
+      "p.tool": "Werkzeug",
+      "p.tools": "Werkzeuge",
+      "p.message": "Nachricht",
+      "p.messages": "Nachrichten",
+      "p.conversation": "Unterhaltung",
+      "p.conversations": "Unterhaltungen",
+      "p.file": "Datei",
+      "p.files": "Dateien",
+      "p.chunk": "Block",
+      "p.chunks": "Blöcke",
+      "p.item": "Eintrag",
+      "p.items": "Einträge",
+      "p.recentSession": "letzte Sitzung",
+      "p.recentSessions": "letzte Sitzungen",
+      "p.row": "Zeile",
+      "p.rows": "Zeilen",
+      "p.candidate": "Kandidat",
+      "p.candidates": "Kandidaten",
+      "p.call": "Aufruf",
+      "p.calls": "Aufrufe",
+    },
+  };
+  let currentLang = "en";
+  function resolveLang(choice) {
+    if (choice === "en" || choice === "de") return choice;
+    try {
+      return (navigator.language || "en").toLowerCase().startsWith("de") ? "de" : "en";
+    } catch { return "en"; }
+  }
+  function t(key) {
+    const dict = I18N[currentLang] || I18N.en;
+    return dict[key] != null ? dict[key] : (I18N.en[key] != null ? I18N.en[key] : key);
+  }
+  function uiLocale() {
+    return currentLang === "de" ? "de-DE" : "en-GB";
+  }
+  function applyI18n() {
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const key = el.getAttribute("data-i18n");
+      if (key) el.textContent = t(key);
+    });
+    document.querySelectorAll("[data-i18n-attr]").forEach((el) => {
+      const spec = el.getAttribute("data-i18n-attr") || "";
+      spec.split(";").forEach((pair) => {
+        const idx = pair.indexOf(":");
+        if (idx <= 0) return;
+        const attr = pair.slice(0, idx).trim();
+        const key = pair.slice(idx + 1).trim();
+        if (attr && key) el.setAttribute(attr, t(key));
+      });
+    });
+    const sel = $("lang-select");
+    if (sel) sel.value = (function () {
+      let c = "system";
+      try { c = localStorage.getItem(LANG_KEY) || "system"; } catch {}
+      return ["en", "de", "system"].includes(c) ? c : "system";
+    })();
+  }
+  function applyLang(choice, persist) {
+    currentLang = resolveLang(choice);
+    if (persist) {
+      try { localStorage.setItem(LANG_KEY, choice); } catch {}
+    }
+    applyI18n();
+  }
+  function initLang() {
+    let choice = "system";
+    try { choice = localStorage.getItem(LANG_KEY) || "system"; } catch {}
+    if (!["en", "de", "system"].includes(choice)) choice = "system";
+    applyLang(choice, false);
+    const sel = $("lang-select");
+    if (sel) {
+      sel.addEventListener("change", () => {
+        const v = sel.value;
+        applyLang(v, true);
+        toast(t("toast.lang") + v);
+        commands = buildCommands();
+        // Re-render dynamic content in the current view
+        try {
+          if (current === "home") { loadHomeList(); loadStatus(); loadActivity(); loadHandoff(); }
+          else if (current === "history") loadHistory();
+          else if (current === "browse") loadBrowse();
+          else if (current === "memory") { loadMemory(); loadReview(); }
+          else if (current === "find") { /* keep results; labels already updated */ }
+          else if (current === "projects") loadProjects();
+          else if (current === "timeline") loadTimeline();
+          else if (current === "operate") loadIngestStatus();
+        } catch {}
+      });
+    }
+  }
   function fmtDateTime(iso) {
-    try { return new Date(iso).toLocaleString(UI_LOCALE); } catch { return iso; }
+    try { return new Date(iso).toLocaleString(uiLocale()); } catch { return iso; }
   }
   function fmtDate(iso, opts) {
     try {
-      return new Date(iso).toLocaleDateString(UI_LOCALE, opts || {
+      return new Date(iso).toLocaleDateString(uiLocale(), opts || {
         month: "short", day: "numeric",
       });
     } catch { return iso; }
@@ -2299,7 +3479,7 @@ html {
       sel.addEventListener("change", () => {
         const v = sel.value;
         applyTheme(v, true);
-        toast("Theme: " + v);
+        toast(t("toast.theme") + v);
       });
     }
     try {
@@ -2345,10 +3525,10 @@ html {
     try {
       const h = await fetchJson("/api/health");
       $("health-dot").classList.remove("down");
-      $("health-text").textContent = "Online · v" + h.version;
+      $("health-text").textContent = t("health.online") + h.version;
     } catch {
       $("health-dot").classList.add("down");
-      $("health-text").textContent = "Database unavailable";
+      $("health-text").textContent = t("health.down");
     }
   }
 
@@ -2362,7 +3542,7 @@ html {
       $("m-proj").textContent = (s.projects ?? 0).toLocaleString();
       if (s.first_started_at && s.last_started_at) {
         $("home-range").textContent =
-          "History range " + fmtDate(s.first_started_at) + " → " + fmtDate(s.last_started_at);
+          t("home.range") + fmtDate(s.first_started_at) + " → " + fmtDate(s.last_started_at);
       }
       const legend = $("tool-legend");
       legend.innerHTML = (s.tools || []).map((t) =>
@@ -2407,7 +3587,7 @@ html {
         if ($("hist-to")) $("hist-to").value = "";
         showView("history");
         loadHistory();
-        toast("History filtered to " + tool);
+        toast(t("toast.historyFiltered") + tool);
       }
       return;
     }
@@ -2455,7 +3635,7 @@ html {
       }
       const max = Math.max(1, ...series.map((s) => s.count));
       const barHtml = series.map((s) => {
-        const convLabel = s.count + " " + plural(s.count, "conversation", "conversations");
+        const convLabel = s.count + " " + plural(s.count, t("tl.conversation"), t("tl.conversations"));
         return (
           '<button type="button" class="chart-bar chart-bar-click" data-day="' + s.day +
           '" title="' + s.day + " · " + convLabel + '" aria-label="' + s.day + ": " + convLabel +
@@ -2478,7 +3658,7 @@ html {
             if ($("hist-tool")) $("hist-tool").value = tool;
             showView("history");
             loadHistory();
-            toast("History filtered to " + day + (tool ? " · " + tool : ""));
+            toast(t("toast.historyFiltered") + day + (tool ? " · " + tool : ""));
           });
         });
       };
@@ -2489,7 +3669,7 @@ html {
 
   // --- history -------------------------------------------------
   function rowHtml(c, query) {
-    const title = c.preview || "Untitled session";
+    const title = c.preview || t("hist.untitled");
     const mark = (text) => {
       const esc = escapeHtml(text);
       if (!query) return esc;
@@ -2506,7 +3686,7 @@ html {
       (c.project_name ? '<span class="chip">' + escapeHtml(c.project_name) + "</span>" : "") +
       "</div>" +
       '<div class="row-main"><div class="row-title">' + mark(title) + "</div>" +
-      '<div class="row-sub">' + fmtDateTime(c.started_at) + " · " + c.message_count + " " + plural(c.message_count, "msg", "msgs") + " · " +
+      '<div class="row-sub">' + fmtDateTime(c.started_at) + " · " + c.message_count + " " + plural(c.message_count, t("p.msg"), t("p.msgs")) + " · " +
       escapeHtml(String(c.session_id || "").slice(0, 8)) + "…</div></div>" +
       '<div class="row-meta">' + (c.model ? escapeHtml(c.model) : "") + "</div>" +
       "</button>"
@@ -2556,18 +3736,18 @@ html {
       if (quick) quick.hidden = items.length > 0;
       el.innerHTML = items.map((c) => rowHtml(c, "")).join("") ||
         emptyBox(
-          "No sessions yet",
-          "Nothing has been ingested yet.",
+          t("home.noSessions"),
+          t("home.nothingIngested"),
           "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>'
+          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("home.quickstart.action") + '</button>'
         );
       bindRows(el);
-      announce(items.length ? items.length + " " + plural(items.length, "recent session", "recent sessions") : "No sessions yet");
+      announce(items.length ? items.length + " " + plural(items.length, t("p.recentSession"), t("p.recentSessions")) : t("home.noSessions"));
     } catch (e) {
       el.innerHTML = emptyBox(
-        "Could not load sessions",
-        e.message || "The server did not respond.",
-        "Check the health pill in the sidebar, then retry."
+        t("home.couldNotLoad"),
+        e.message || t("home.serverNoResponse"),
+        t("home.checkHealth")
       );
     }
   }
@@ -2640,12 +3820,12 @@ html {
         if (!items.length) {
           const hasFilters = !!(state.hist.q || state.hist.tool || state.hist.project || state.hist.from || state.hist.to);
           const action = hasFilters
-            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset">Reset filters</button>'
-            : '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>';
+            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset">' + t("hist.resetFilters") + '</button>'
+            : '<button type="button" class="btn btn-primary" data-drill="operate">' + t("hist.runIngest") + '</button>';
           tbody.innerHTML =
             '<tr><td colspan="8"><div class="empty"><strong>' +
-            (hasFilters ? "No matches" : "History is empty") + "</strong>" +
-            (hasFilters ? "Nothing fits the current filters." : "No conversations have been ingested yet.") +
+            (hasFilters ? t("hist.noMatches") : t("hist.empty")) + "</strong>" +
+            (hasFilters ? t("hist.nothingFits") : t("hist.notIngested")) +
             '<div class="empty-action">' + action + "</div>" +
             "</div></td></tr>";
           const er = $("hist-empty-reset");
@@ -2694,12 +3874,12 @@ html {
         if (!items.length) {
           const hasFilters2 = !!(state.hist.q || state.hist.tool || state.hist.project || state.hist.from || state.hist.to);
           const action2 = hasFilters2
-            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset-cards">Reset filters</button>'
-            : '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>';
+            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset-cards">' + t("hist.resetFilters") + '</button>'
+            : '<button type="button" class="btn btn-primary" data-drill="operate">' + t("hist.runIngest") + '</button>';
           el.innerHTML =
             '<div class="empty"><strong>' +
-            (hasFilters2 ? "No matches" : "History is empty") + "</strong>" +
-            (hasFilters2 ? "Nothing fits the current filters." : "No conversations have been ingested yet.") +
+            (hasFilters2 ? t("hist.noMatches") : t("hist.empty")) + "</strong>" +
+            (hasFilters2 ? t("hist.nothingFits") : t("hist.notIngested")) +
             '<div class="empty-action">' + action2 + "</div></div>";
           const er2 = $("hist-empty-reset-cards");
           if (er2) er2.addEventListener("click", () => $("hist-reset") && $("hist-reset").click());
@@ -2712,8 +3892,8 @@ html {
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("hist-count").textContent =
-        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString() +
-        (useTable ? " " + plural(data.total, "session", "sessions") : "");
+        from.toLocaleString() + "-" + to.toLocaleString() + " " + t("of") + " " + data.total.toLocaleString() +
+        (useTable ? " " + plural(data.total, t("p.session"), t("p.sessions")) : "");
       // Filter stats (innovative: live aggregate for the current page slice + total)
       const statsEl = $("hist-stats");
       if (statsEl && items.length) {
@@ -2721,27 +3901,27 @@ html {
         const models = new Set(items.map((c) => c.model || "-"));
         const tools = new Set(items.map((c) => c.source_tool || "-"));
         statsEl.innerHTML =
-          "<strong>Filter</strong> · " + data.total.toLocaleString() + " " + plural(data.total, "session", "sessions") + " · " +
-          msgs.toLocaleString() + " " + plural(msgs, "msg", "msgs") + " on this page · avg " +
+          "<strong>" + t("hist.filter") + "</strong> · " + data.total.toLocaleString() + " " + plural(data.total, t("p.session"), t("p.sessions")) + " · " +
+          msgs.toLocaleString() + " " + plural(msgs, t("p.msg"), t("p.msgs")) + " " + t("onThisPage") + " · " + t("avg") + " " +
           Math.round(msgs / items.length) +
-          " · " + models.size + " " + plural(models.size, "model", "models") + " · " + tools.size + " " + plural(tools.size, "tool", "tools") +
+          " · " + models.size + " " + plural(models.size, t("p.model"), t("p.models")) + " · " + tools.size + " " + plural(tools.size, t("p.tool"), t("p.tools")) +
           (state.hist.from || state.hist.to
             ? " · range " + (state.hist.from || "…") + " → " + (state.hist.to || "…")
             : "");
       }
       const page = Math.floor(data.offset / state.hist.limit) + 1;
       const pages = Math.max(1, Math.ceil(data.total / state.hist.limit));
-      $("hist-page-info").textContent = "Page " + page + " / " + pages;
+      $("hist-page-info").textContent = t("hist.page") + page + t("hist.of") + pages;
       $("hist-prev").disabled = data.offset <= 0;
       $("hist-next").disabled = data.offset + state.hist.limit >= data.total;
     } catch (e) {
       if (useTable && tbody) {
         tbody.innerHTML =
-          '<tr><td colspan="8"><div class="empty"><strong>Could not load</strong>' +
+          '<tr><td colspan="8"><div class="empty"><strong>' + t("hist.couldNotLoadShort") + '</strong>' +
           escapeHtml(e.message) +
           "</div></td></tr>";
       } else if (el) {
-        el.innerHTML = emptyBox("Could not load history", e.message);
+        el.innerHTML = emptyBox(t("hist.couldNotLoad"), e.message);
       }
     }
   }
@@ -2790,10 +3970,10 @@ html {
       tool + tc +
       '<span class="chip">conv #' + m.conversation_id + "</span>" +
       "</div>" +
-      '<div class="row-main"><div class="row-title">' + escapeHtml(m.preview || "(empty)") + "</div>" +
+      '<div class="row-main"><div class="row-title">' + escapeHtml(m.preview || t("browse.emptyPreview")) + "</div>" +
       '<div class="row-sub">' + fmtDateTime(m.created_at) +
-      " · " + m.content_len + " chars" +
-      (m.token_count ? " · " + m.token_count + " tok" : "") +
+      " · " + m.content_len + " " + t("browse.chars") +
+      (m.token_count ? " · " + m.token_count + " " + t("browse.tok") : "") +
       (m.model ? " · " + escapeHtml(m.model) : "") +
       "</div></div>" +
       '<div class="row-meta">' + escapeHtml(m.project_name || "") + "</div>" +
@@ -2821,10 +4001,10 @@ html {
       if (!items.length) {
         const hasFilters = !!(b.q || b.role || b.tool || b.conversation_id || b.tool_only);
         el.innerHTML = hasFilters
-          ? emptyBox("No messages", "Loosen filters - the corpus has 164k+ rows.", "",
-              '<button type="button" class="btn btn-primary" id="browse-empty-reset">Reset filters</button>')
-          : emptyBox("Browse is empty", "No messages have been ingested yet.", "",
-              '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
+          ? emptyBox(t("browse.noMessages"), t("browse.loosen"), "",
+              '<button type="button" class="btn btn-primary" id="browse-empty-reset">' + t("browse.resetFilters") + '</button>')
+          : emptyBox(t("browse.empty"), t("browse.notIngested"), "",
+              '<button type="button" class="btn btn-primary" data-drill="operate">' + t("browse.runIngest") + '</button>');
         const ber = $("browse-empty-reset");
         if (ber) ber.addEventListener("click", () => $("browse-reset") && $("browse-reset").click());
       } else {
@@ -2836,14 +4016,14 @@ html {
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("browse-count").textContent =
-        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString() + " " + plural(data.total, "row", "rows");
+        from.toLocaleString() + "-" + to.toLocaleString() + " " + t("of") + " " + data.total.toLocaleString() + " " + plural(data.total, t("browse.rows"), t("browse.rows.many"));
       const page = Math.floor(data.offset / b.limit) + 1;
       const pages = Math.max(1, Math.ceil(data.total / b.limit));
-      $("browse-page-info").textContent = "Page " + page + " / " + pages;
+      $("browse-page-info").textContent = t("hist.page") + page + t("hist.of") + pages;
       $("browse-prev").disabled = data.offset <= 0;
       $("browse-next").disabled = data.offset + b.limit >= data.total;
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load messages", e.message);
+      el.innerHTML = emptyBox(t("browse.couldNotLoad"), e.message);
     }
   }
 
@@ -2858,7 +4038,7 @@ html {
   async function openMessage(id) {
     if (current !== "msg" && current !== "detail") previous = current;
     showView("msg");
-    $("msg-title").textContent = "Loading message…";
+    $("msg-title").textContent = t("msg.loading");
     $("msg-content").textContent = "";
     $("msg-tool").textContent = "";
     $("msg-blocks").textContent = "";
@@ -2868,20 +4048,20 @@ html {
       $("msg-title").textContent = "#" + m.id + " · " + (m.role || "") +
         (m.tool_name ? " · " + m.tool_name : "");
       $("msg-meta").innerHTML =
-        "<strong>" + escapeHtml(m.project_name || "project") + "</strong>" +
-        " · conv #" + m.conversation_id +
+        "<strong>" + escapeHtml(m.project_name || t("msg.project")) + "</strong>" +
+        " · " + t("msg.conv") + m.conversation_id +
         " · " + fmtDateTime(m.created_at) +
         (m.model ? " · " + escapeHtml(m.model) : "") +
-        (m.token_count != null ? " · " + m.token_count + " tok" : "") +
+        (m.token_count != null ? " · " + m.token_count + " " + t("browse.tok") : "") +
         (m.duration_ms != null ? " · " + m.duration_ms + " ms" : "");
-      $("msg-content").textContent = m.content || "(empty)";
+      $("msg-content").textContent = m.content || t("browse.emptyPreview");
       const hasTools = m.tool_calls != null &&
         ["null", "[]", "{}", '""', ""].indexOf(JSON.stringify(m.tool_calls)) === -1;
       $("msg-tool-panel").hidden = !hasTools;
       if (hasTools) {
         $("msg-tool").textContent = prettyJson(m.tool_calls);
         $("msg-tool-kind").textContent = Array.isArray(m.tool_calls)
-          ? m.tool_calls.length + " " + plural(m.tool_calls.length, "call", "calls")
+          ? m.tool_calls.length + " " + plural(m.tool_calls.length, t("p.call"), t("p.calls"))
           : typeof m.tool_calls;
       }
       const hasBlocks = m.content_blocks != null &&
@@ -2889,7 +4069,7 @@ html {
       $("msg-blocks-panel").hidden = !hasBlocks;
       if (hasBlocks) $("msg-blocks").textContent = prettyJson(m.content_blocks);
     } catch (e) {
-      $("msg-title").textContent = "Error";
+      $("msg-title").textContent = t("msg.error");
       $("msg-content").textContent = e.message;
     }
   }
@@ -2899,27 +4079,27 @@ html {
     if (current !== "detail" && current !== "msg") previous = current;
     showView("detail");
     const list = $("detail-messages");
-    $("detail-title").textContent = "Loading conversation…";
+    $("detail-title").textContent = t("detail.loading");
     $("detail-meta").textContent = "";
     list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
-    announce("Loading conversation");
+    announce(t("detail.loadingAnnounce"));
     try {
       const c = await fetchJson("/api/conversations/" + id);
       state.detail = c;
-      $("detail-title").textContent = (c.project_name || "Conversation") + " · #" + c.id;
+      $("detail-title").textContent = (c.project_name || t("detail.title")) + " · #" + c.id;
       $("detail-meta").innerHTML =
         "<strong>" + escapeHtml(c.source_tool || "tool") + "</strong>" +
         (c.model ? " · " + escapeHtml(c.model) : "") +
         " · " + fmtDateTime(c.started_at) +
-        " · " + c.messages.length + " " + plural(c.messages.length, "message", "messages");
+        " · " + c.messages.length + " " + plural(c.messages.length, t("p.message"), t("p.messages"));
       renderMessages();
     } catch (e) {
       list.innerHTML = emptyBox(
-        "Could not load conversation",
-        e.message || "The server did not respond.",
-        "Go back and try another session, or check server health."
+        t("detail.couldNotLoad"),
+        e.message || t("detail.serverNoResponse"),
+        t("detail.goBack")
       );
-      announce("Could not load conversation");
+      announce(t("detail.couldNotLoad"));
     }
   }
 
@@ -2929,11 +4109,11 @@ html {
     if (!c) return;
     const msgs = (c.messages || []).filter((m) => state.detailRoles.has(m.role));
     if (!msgs.length) {
-      list.innerHTML = emptyBox("No messages visible", "Enable roles above.");
+      list.innerHTML = emptyBox(t("detail.noVisible"), t("detail.enableRoles"));
       return;
     }
     list.innerHTML = msgs.map((m) => {
-      const text = m.content || "(empty)";
+      const text = m.content || t("browse.emptyPreview");
       const preview = text.length > 900 ? text.slice(0, 900) + "…" : text;
       return (
         '<article class="msg" data-role="' + escapeHtml(m.role) + '">' +
@@ -2941,7 +4121,7 @@ html {
         escapeHtml(m.role) + "</span>" +
         (m.model ? escapeHtml(m.model) + " · " : "") +
         fmtDateTime(m.created_at) +
-        (text.length > 900 ? ' · <button class="btn btn-ghost" data-expand="1" style="min-height:28px;padding:0 10px;font-size:11px">Expand</button>' : "") +
+        (text.length > 900 ? ' · <button class="btn btn-ghost" data-expand="1" style="min-height:28px;padding:0 10px;font-size:11px">' + t("detail.expand") + '</button>' : "") +
         "</div><pre>" + escapeHtml(preview) + "</pre></article>"
       );
     }).join("");
@@ -2953,7 +4133,7 @@ html {
         const m = (c.messages || []).find((x) => x.role === role && (x.content || "").startsWith(pre.textContent.slice(0, 40)));
         if (m) {
           art.classList.add("open");
-          pre.textContent = m.content || "(empty)";
+          pre.textContent = m.content || t("browse.emptyPreview");
           btn.remove();
         }
       });
@@ -2967,10 +4147,10 @@ html {
     if (!q.trim()) {
       el.setAttribute("aria-busy", "false");
       el.innerHTML = emptyBox(
-        "Start typing",
-        "Search every ingested message.",
+        t("find.startTyping"),
+        t("find.searchEvery"),
         "",
-        '<button type="button" class="btn btn-primary" id="find-empty-focus-2">Type a query</button>'
+        '<button type="button" class="btn btn-primary" id="find-empty-focus-2">' + t("find.typeQuery") + '</button>'
       );
       const f2 = $("find-empty-focus-2");
       if (f2) f2.addEventListener("click", () => $("find-q") && $("find-q").focus());
@@ -2978,7 +4158,7 @@ html {
     }
     el.setAttribute("aria-busy", "true");
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
-    announce("Searching...");
+    announce(t("find.searching"));
     try {
       const data = await fetchJson(
         "/api/search?q=" + encodeURIComponent(q) + "&limit=50&mode=" + encodeURIComponent(m)
@@ -2994,20 +4174,20 @@ html {
         el.setAttribute("aria-busy", "false");
         const emptyCorpus = (await fetchJson("/api/status").catch(() => ({}))).conversations === 0;
         el.innerHTML = emptyCorpus
-          ? emptyBox("Corpus is empty", "No conversations have been ingested yet.", "",
-              '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>')
+          ? emptyBox(t("find.corpusEmpty"), t("find.notIngested"), "",
+              '<button type="button" class="btn btn-primary" data-drill="operate">' + t("find.runIngest") + '</button>')
           : emptyBox(
-              "No matches",
-              "Nothing matched in " + m + " mode.",
+              t("find.noMatches"),
+              t("find.nothingMatched") + m + t("find.modeSuffix"),
               "",
-              '<button type="button" class="btn btn-primary" id="find-empty-clear">Clear query</button>'
+              '<button type="button" class="btn btn-primary" id="find-empty-clear">' + t("find.clearQuery") + '</button>'
             );
         const fe = $("find-empty-clear");
         if (fe) fe.addEventListener("click", () => {
           $("find-q").value = "";
-          $("find-results").innerHTML = emptyBox("Search your corpus", "Type keywords or a question.");
+          $("find-results").innerHTML = emptyBox(t("find.searchCorpus"), t("find.typeKeywords"));
         });
-        announce("No matches");
+        announce(t("find.noMatchesAnnounce"));
         return;
       }
       el.innerHTML = hits.map((h) => {
@@ -3026,7 +4206,7 @@ html {
           ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
           '<div class="row-main"><div class="row-title">' + escapeHtml(h.snippet || "") + "</div>" +
           '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
-          '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-pin="' + pinData + '" aria-label="Pin this hit as a note">Pin as note</button></div>' +
+          '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-pin="' + pinData + '" aria-label="' + t("find.pinAria") + '">' + t("msg.pin") + '</button></div>' +
           "</div>"
         );
       }).join("");
@@ -3036,7 +4216,7 @@ html {
           let payload = {};
           try { payload = JSON.parse(decodeURIComponent(b.getAttribute("data-pin") || "{}")); } catch {}
           openPinDialog({
-            content: (payload.snippet || "") + "\n\nSource: conversation #" + (payload.conversation_id || "?"),
+            content: (payload.snippet || "") + "\n\n" + t("find.pinSource") + (payload.conversation_id || "?"),
             project_name: payload.project_name || "",
             category: "insight",
           });
@@ -3046,11 +4226,11 @@ html {
     } catch (e) {
       el.setAttribute("aria-busy", "false");
       el.innerHTML = emptyBox(
-        "Search failed",
-        e.message || "The search backend did not respond.",
-        "Check that the server is running, then try again."
+        t("find.searchFailed"),
+        e.message || t("find.backendNoResponse"),
+        t("find.checkServer")
       );
-      announce("Search failed");
+      announce(t("find.searchFailed"));
     } finally {
       el.setAttribute("aria-busy", "false");
     }
@@ -3065,11 +4245,11 @@ html {
       el.innerHTML = items.map((p) =>
         '<button class="card" data-project="' + escapeHtml(p.name) + '">' +
         "<h3>" + escapeHtml(p.name) + "</h3>" +
-        "<p>" + escapeHtml(p.description || "No description") + "</p>" +
+        "<p>" + escapeHtml(p.description || t("proj.noDescription")) + "</p>" +
         '<div class="card-meta"><span>' + Number(p.conversations || 0).toLocaleString() +
-        " " + plural(p.conversations || 0, "session", "sessions") + "</span><span>" + escapeHtml(p.status || "active") + "</span></div></button>"
-      ).join("") || emptyBox("No projects", "Projects appear after ingest.", "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
+        " " + plural(p.conversations || 0, t("p.session"), t("p.sessions")) + "</span><span>" + escapeHtml(p.status || t("proj.statusActive")) + "</span></div></button>"
+      ).join("") || emptyBox(t("proj.none"), t("proj.appearAfter"), "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("proj.runIngest") + '</button>');
       el.querySelectorAll("[data-project]").forEach((b) => {
         b.addEventListener("click", () => {
           state.hist.project = b.getAttribute("data-project");
@@ -3080,7 +4260,7 @@ html {
         });
       });
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load projects", e.message);
+      el.innerHTML = emptyBox(t("proj.couldNotLoad"), e.message);
     }
   }
 
@@ -3136,7 +4316,7 @@ html {
       const isToday = ds === todayStr ? " is-today" : "";
       html +=
         '<button type="button" class="cal-day ' + level + isToday + '" data-day="' + ds +
-        '" aria-label="' + ds + ": " + count + " " + plural(count, "conversation", "conversations") + '">' +
+        '" aria-label="' + ds + ": " + count + " " + plural(count, t("tl.conversation"), t("tl.conversations")) + '">' +
         '<span class="cal-day-num">' + day + "</span>" +
         '<span class="cal-day-count">' + (count || "") + "</span></button>";
     }
@@ -3206,8 +4386,8 @@ html {
         });
       const rows = Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? 1 : -1)).slice(0, 60);
       if (!rows.length) {
-        el.innerHTML = emptyBox("No activity yet", "Timeline fills in after ingest.", "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
+        el.innerHTML = emptyBox(t("tl.noActivity"), t("tl.fillsAfter"), "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("tl.runIngest") + '</button>');
       } else {
         el.innerHTML = rows.map((r) =>
           '<button type="button" class="row" data-day="' + escapeHtml(r.day) + '" style="cursor:pointer;text-align:left;width:100%">' +
@@ -3215,8 +4395,8 @@ html {
           '<div class="card-top" style="margin:0;gap:6px">' +
           r.tools.slice(0, 4).map((t) => '<span class="chip">' + escapeHtml(t) + "</span>").join("") +
           "</div>" +
-          '<div class="row-main"><div class="row-title">' + r.total + " " + plural(r.total, "conversation", "conversations") + "</div></div>" +
-          '<div class="row-meta">Open in History filter</div></button>'
+          '<div class="row-main"><div class="row-title">' + r.total + " " + plural(r.total, t("tl.conversation"), t("tl.conversations")) + "</div></div>" +
+          '<div class="row-meta">' + t("tl.openInHistory") + '</div></button>'
         ).join("");
         // click a day row -> History filtered to that day
         el.querySelectorAll(".row[data-day]").forEach((row) => {
@@ -3227,13 +4407,13 @@ html {
             if ($("hist-to")) $("hist-to").value = day;
             if ($("hist-tool") && tool) $("hist-tool").value = tool;
             if (typeof loadHistory === "function") loadHistory();
-            toast("History filtered to " + day + (tool ? " · " + tool : ""));
+            toast(t("toast.historyFiltered") + day + (tool ? " · " + tool : ""));
           });
         });
       }
       renderCalendar();
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load timeline", e.message);
+      el.innerHTML = emptyBox(t("tl.couldNotLoad"), e.message);
     }
   }
 
@@ -3242,26 +4422,26 @@ html {
     if (!q || !q.trim()) {
       el.setAttribute("aria-busy", "false");
       el.innerHTML = emptyBox(
-        "Ask a question",
-        "Type something like: what did we decide about the database?",
-        "Answers cite sessions. The model can fail-soft to excerpts when offline."
+        t("ask.askQuestion"),
+        t("ask.typeSomething"),
+        t("ask.answersCite")
       );
       return;
     }
     el.setAttribute("aria-busy", "true");
-    el.innerHTML = '<div class="empty" aria-busy="true"><strong>Thinking...</strong>Searching your corpus for grounded excerpts.</div>';
-    announce("Thinking");
+    el.innerHTML = '<div class="empty" aria-busy="true"><strong>' + t("ask.thinking") + '</strong>' + t("ask.thinkingBody") + '</div>';
+    announce(t("ask.thinking"));
     try {
       const a = await fetchJson("/api/ask?q=" + encodeURIComponent(q));
       let html =
-        '<div class="panel"><div class="panel-title"><h2>Answer</h2>' +
+        '<div class="panel"><div class="panel-title"><h2>' + t("ask.answer") + '</h2>' +
         '<div class="meta">' + escapeHtml(a.model || "model") +
-        (a.local ? " · local" : " · remote") +
-        (a.cited ? " · cited" : " · excerpts only") + "</div></div>" +
-        '<div class="prose">' + escapeHtml(a.answer || "No answer produced.") + "</div></div>";
+        (a.local ? " · " + t("ask.local") : " · " + t("ask.remote")) +
+        (a.cited ? " · " + t("ask.cited") : " · " + t("ask.excerptsOnly")) + "</div></div>" +
+        '<div class="prose">' + escapeHtml(a.answer || t("ask.noAnswer")) + "</div></div>";
       const sources = a.sources || [];
       if (sources.length) {
-        html += '<div class="metric-sub" style="margin:8px 0">Sources (' + sources.length + ")</div>";
+        html += '<div class="metric-sub" style="margin:8px 0">' + t("ask.sources") + " (" + sources.length + ")</div>";
       }
       sources.forEach((s, i) => {
         html +=
@@ -3273,21 +4453,21 @@ html {
       });
       if (!sources.length) {
         html += emptyBox(
-          "No sources cited",
-          "The answer could not be grounded in stored sessions.",
-          "Try a narrower question or ingest more history."
+          t("ask.noSources"),
+          t("ask.notGrounded"),
+          t("ask.narrower")
         );
       }
       el.innerHTML = html;
       bindRows(el);
-      announce("Answer ready");
+      announce(t("ask.answer"));
     } catch (e) {
       el.innerHTML = emptyBox(
-        "Ask failed",
-        e.message || "The answer service did not respond.",
-        "The server may be busy. Try again in a moment."
+        t("ask.failed"),
+        e.message || t("ask.serviceNoResponse"),
+        t("ask.serverBusy")
       );
-      announce("Ask failed");
+      announce(t("ask.failed"));
     } finally {
       el.setAttribute("aria-busy", "false");
     }
@@ -3303,12 +4483,12 @@ html {
       btn.setAttribute("aria-busy", "true");
       btn.classList.add("is-running");
       restoreLabel = btn.innerHTML;
-      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Running …';
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + t("op.spinnerRunning");
     }
     el.innerHTML =
-      '<div class="result-block" role="status"><strong>Running ' + escapeHtml(label) + '…</strong>' +
-      'This job may take a moment. Results appear here when it finishes.</div>';
-    announce("Running " + label);
+      '<div class="result-block" role="status"><strong>' + t("op.running") + escapeHtml(label) + '…</strong>' +
+      t("op.running2") + '</div>';
+    announce(t("op.running") + label);
     try {
       if (job === "stale") {
         const d = await fetchJson("/api/stale-digest");
@@ -3318,27 +4498,27 @@ html {
         });
         html += "</ul></div>";
         el.innerHTML = html;
-        toast("stale digest ready");
+        toast(t("op.staleReady"));
         return;
       }
       if (job === "writeback") {
         const w = await fetchJson("/api/writeback");
-        el.innerHTML = '<div class="result-block"><strong>Writeback finished</strong>Wrote ' + w.items_written + " " + plural(w.items_written, "item", "items") + " to " + escapeHtml(w.file) + "</div>";
-        toast("writeback done");
+        el.innerHTML = '<div class="result-block"><strong>' + t("op.writebackFinished") + '</strong>' + t("op.wrote") + w.items_written + " " + plural(w.items_written, t("op.item"), t("op.items")) + t("op.itemsTo") + escapeHtml(w.file) + "</div>";
+        toast(t("op.writebackDone"));
         return;
       }
       if (job === "answer-eval") {
         const r = await fetchJson("/api/answer-eval");
-        el.innerHTML = '<div class="result-block"><strong>Answer eval finished</strong> passed=' + r.passed +
+        el.innerHTML = '<div class="result-block"><strong>' + t("op.evalFinished") + '</strong> passed=' + r.passed +
           "/" + (r.passed + r.failed) +
           " hallucination_rate=" + Math.round((r.hallucination_rate || 0) * 100) + "%</div>";
-        toast("answer eval done");
+        toast(t("op.evalDone"));
         return;
       }
       if (job === "audit") {
         const a = await fetchJson("/api/audit");
         let html =
-          '<div class="result-block"><strong>Audit finished</strong> ' +
+          '<div class="result-block"><strong>' + t("op.auditFinished") + '</strong> ' +
           'mcp_writes=' + a.mcp_writes +
           ' reflections=' + a.reflections +
           ' forgotten=' + a.forgotten +
@@ -3349,21 +4529,21 @@ html {
         });
         html += '</ul></div>';
         el.innerHTML = html;
-        toast("Audit finished");
-        announce("Audit finished");
+        toast(t("op.auditFinished"));
+        announce(t("op.auditFinished"));
         return;
       }
       const r = await fetchJson("/api/operate?job=" + encodeURIComponent(job));
       el.innerHTML =
-        '<div class="result-block"><strong>' + escapeHtml(label) + ' finished</strong>' +
-        escapeHtml(r.message || "done") + '</div>';
+        '<div class="result-block"><strong>' + escapeHtml(label) + t("op.finished") + '</strong>' +
+        escapeHtml(r.message || t("done")) + '</div>';
       loadStatus();
-      toast(label + " finished");
-      announce(label + " finished");
+      toast(label + t("op.finished"));
+      announce(label + t("op.finished"));
     } catch (e) {
-      el.innerHTML = '<div class="result-block is-error"><strong>' + escapeHtml(label) + " failed</strong>" +
-        escapeHtml(e.message || "The job did not complete.") + "</div>";
-      announce(label + " failed");
+      el.innerHTML = '<div class="result-block is-error"><strong>' + escapeHtml(label) + t("op.failed") + '</strong>' +
+        escapeHtml(e.message || t("op.jobFailedBody")) + "</div>";
+      announce(label + t("op.failed"));
     } finally {
       el.setAttribute("aria-busy", "false");
       if (btn) {
@@ -3381,62 +4561,62 @@ html {
       const r = await fetchJson("/api/ingest-status");
       let html = "";
       (r.providers || []).forEach((p) => {
-        const badge = p.adapter_present ? "on disk" : "no source dir";
+        const badge = p.adapter_present ? t("op.onDisk") : t("op.noSourceDir");
         html +=
           '<button class="row" data-ingest-tool="' + escapeHtml(p.source_tool) + '" style="cursor:pointer;text-align:left;width:100%"><div class="row-main"><div class="row-title">' +
           escapeHtml(p.source_tool) +
           ' <span class="chip">' + badge + '</span></div><div class="row-meta">' +
-          p.conversations + " " + plural(p.conversations, "conversation", "conversations") + " · " + p.messages + " " + plural(p.messages, "message", "messages") +
-          (p.last_session ? " · last " + escapeHtml(String(p.last_session).slice(0, 10)) : "") +
+          p.conversations + " " + plural(p.conversations, t("p.conversation"), t("p.conversations")) + " · " + p.messages + " " + plural(p.messages, t("p.message"), t("p.messages")) +
+          (p.last_session ? " · " + t("op.last") + escapeHtml(String(p.last_session).slice(0, 10)) : "") +
           '</div></div></button>';
       });
-      html += '<div class="row-meta" style="margin-top:8px">files logged: ' + (r.total_files_logged || 0) +
-        ' · totals: ' + (r.total_conversations || 0) + ' ' + plural(r.total_conversations || 0, 'session', 'sessions') + ' / ' + (r.total_messages || 0) + ' ' + plural(r.total_messages || 0, 'message', 'messages') + '</div>';
-      el.innerHTML = html || '<div class="empty">No providers yet</div>';
+      html += '<div class="row-meta" style="margin-top:8px">' + t("op.filesLogged") + (r.total_files_logged || 0) +
+        ' · ' + t("op.totals") + (r.total_conversations || 0) + ' ' + plural(r.total_conversations || 0, t("p.session"), t("p.sessions")) + ' / ' + (r.total_messages || 0) + ' ' + plural(r.total_messages || 0, t("p.message"), t("p.messages")) + '</div>';
+      el.innerHTML = html || '<div class="empty">' + t("op.noProviders") + '</div>';
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load ingest status", e.message);
+      el.innerHTML = emptyBox(t("op.couldNotLoadStatus"), e.message);
     }
   }
 
   /** Render the handoff brief as Markdown for clipboard / download. */
   function handoffMarkdown(b) {
     const lines = [];
-    lines.push("# Throughline handoff");
-    if (b.project) lines.push("Project: " + b.project);
-    lines.push("Generated: " + (b.generated_at || new Date().toISOString()));
+    lines.push("# " + t("handoff.title"));
+    if (b.project) lines.push(t("handoff.project") + b.project);
+    lines.push(t("handoff.generated") + (b.generated_at || new Date().toISOString()));
     lines.push("");
-    lines.push("## Headline");
-    lines.push(b.headline || "Ready to continue");
+    lines.push(t("handoff.headline"));
+    lines.push(b.headline || t("handoff.ready"));
     lines.push("");
     if ((b.recent_sessions || []).length) {
-      lines.push("## Recent sessions");
+      lines.push(t("handoff.recent"));
       b.recent_sessions.forEach((s) => {
-        lines.push("- #" + s.id + " " + (s.summary || s.first_user || "(untitled)") + " — " + (s.source_tool || "tool") + " · " + (s.message_count || 0) + " msgs");
+        lines.push("- #" + s.id + " " + (s.summary || s.first_user || t("handoff.untitledShort")) + " — " + (s.source_tool || "tool") + " · " + (s.message_count || 0) + t("handoff.msgs"));
       });
       lines.push("");
     }
     if ((b.decisions || []).length) {
-      lines.push("## Decisions");
+      lines.push(t("handoff.decisions"));
       b.decisions.forEach((d) => {
         lines.push("- [" + (d.category || "decision") + "] " + (d.content || ""));
       });
       lines.push("");
     }
     if ((b.open_questions || []).length) {
-      lines.push("## Open questions");
+      lines.push(t("handoff.openQuestions"));
       b.open_questions.forEach((q) => lines.push("- " + q));
       lines.push("");
     }
     if ((b.stale_memory || []).length) {
-      lines.push("## Stale memory");
+      lines.push(t("handoff.staleMemory"));
       b.stale_memory.forEach((s) => lines.push("- " + s));
       lines.push("");
     }
     if (b.stats) {
-      lines.push("## Stats");
-      lines.push("- conversations: " + (b.stats.conversations || 0));
-      lines.push("- messages: " + (b.stats.messages || 0));
-      lines.push("- memory chunks: " + (b.stats.memory_chunks || 0));
+      lines.push(t("handoff.stats"));
+      lines.push(t("handoff.conversations") + (b.stats.conversations || 0));
+      lines.push(t("handoff.messages") + (b.stats.messages || 0));
+      lines.push(t("handoff.chunks") + (b.stats.memory_chunks || 0));
     }
     return lines.join("\n") + "\n";
   }
@@ -3457,32 +4637,32 @@ html {
       const sessions = (b.recent_sessions || []).slice(0, 4);
       let html =
         '<div class="empty" style="border-style:solid;padding:20px">' +
-        escapeHtml(b.headline || "Ready to continue") +
+        escapeHtml(b.headline || t("handoff.ready")) +
         "</div>";
       if (!sessions.length) {
         html += emptyBox(
-          "No recent sessions",
-          "Ingest transcripts, then handoff will surface resume context.",
+          t("handoff.noRecent"),
+          t("handoff.ingestThen"),
           "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>'
+          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("handoff.runIngest") + '</button>'
         );
       }
       sessions.forEach((s) => {
-        const title = s.summary || s.first_user || "(untitled session)";
+        const title = s.summary || s.first_user || t("handoff.untitled");
         html +=
           '<button class="row" type="button" data-id="' + escapeHtml(String(s.id)) + '" ' +
-          'aria-label="Open session ' + escapeHtml(String(s.id)) + '">' +
+          'aria-label="' + t("handoff.openSession") + escapeHtml(String(s.id)) + '">' +
           '<div class="row-id">#' + escapeHtml(String(s.id)) + "</div>" +
           '<div class="row-main"><div class="row-title">' +
           escapeHtml(title) +
           '</div><div class="row-sub">' +
           escapeHtml(s.source_tool || "tool") +
-          " · " + Number(s.message_count || 0) + " " + plural(s.message_count || 0, "msg", "msgs") + " · open →" +
+          " · " + Number(s.message_count || 0) + " " + plural(s.message_count || 0, t("p.msg"), t("p.msgs")) + " · →" +
           "</div></div></button>";
       });
       if ((b.decisions || []).length) {
         html +=
-          '<div class="row-meta" style="margin-top:10px"><strong>Decisions</strong> ' +
+          '<div class="row-meta" style="margin-top:10px"><strong>' + t("handoff.decisionsLabel") + '</strong> ' +
           b.decisions
             .slice(0, 3)
             .map((d) => escapeHtml((d.content || "").slice(0, 90)))
@@ -3498,12 +4678,12 @@ html {
         if (questions.length || stale.length) {
           let eh = "";
           if (questions.length) {
-            eh += '<div class="row-meta" style="margin-top:6px"><strong>Open questions</strong><ul style="margin:6px 0 0 18px;padding:0">';
+            eh += '<div class="row-meta" style="margin-top:6px"><strong>' + t("handoff.openQuestionsLabel") + '</strong><ul style="margin:6px 0 0 18px;padding:0">';
             questions.forEach((q) => { eh += "<li>" + escapeHtml(q.slice(0, 120)) + "</li>"; });
             eh += "</ul></div>";
           }
           if (stale.length) {
-            eh += '<div class="row-meta" style="margin-top:8px"><strong>Stale memory</strong> ' +
+            eh += '<div class="row-meta" style="margin-top:8px"><strong>' + t("handoff.staleMemoryLabel") + '</strong> ' +
               stale.map((s) => escapeHtml(s.slice(0, 60))).join(" · ") + "</div>";
           }
           extra.innerHTML = eh;
@@ -3516,8 +4696,8 @@ html {
     } catch (e) {
       el.setAttribute("aria-busy", "false");
       el.innerHTML = emptyBox(
-        "No handoff yet",
-        e.message || "Handoff brief unavailable. Try again after ingest."
+        t("handoff.none"),
+        e.message || t("handoff.unavailable")
       );
       if (extra) extra.hidden = true;
     }
@@ -3529,22 +4709,22 @@ html {
     if (copyBtn) {
       copyBtn.addEventListener("click", async () => {
         if (!lastHandoff) {
-          toast("Handoff not loaded yet");
+          toast(t("handoff.notLoaded"));
           return;
         }
         const text = handoffMarkdown(lastHandoff);
         try {
           await navigator.clipboard.writeText(text);
-          toast("Handoff copied (" + text.length + " chars)");
+          toast(t("handoff.copied") + text.length + t("handoff.chars"));
         } catch {
-          toast("Clipboard unavailable");
+          toast(t("toast.clipboardOff"));
         }
       });
     }
     if (dlBtn) {
       dlBtn.addEventListener("click", () => {
         if (!lastHandoff) {
-          toast("Handoff not loaded yet");
+          toast(t("handoff.notLoaded"));
           return;
         }
         const text = handoffMarkdown(lastHandoff);
@@ -3558,32 +4738,32 @@ html {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-        toast("Downloaded " + name);
+        toast(t("handoff.downloaded") + name);
       });
     }
   })();
-  const commands = [
-    { kind: "Go", label: "Home", hint: "dashboard", run: () => { showView("home"); loadHomeList(); loadStatus(); loadActivity(); } },
-    { kind: "Go", label: "History", hint: "full corpus", run: () => { showView("history"); loadHistory(); loadProjectsFilter(); } },
-    { kind: "Go", label: "Agent Memory", hint: "durable agent memory", run: () => { showView("memory"); loadMemory(); loadReview(); } },
-    { kind: "Action", label: "Export sessions CSV", hint: "current filters", run: () => {
+  function buildCommands() { return [
+    { kind: t("pal.go"), label: t("pal.home"), hint: t("pal.home.hint"), run: () => { showView("home"); loadHomeList(); loadStatus(); loadActivity(); } },
+    { kind: t("pal.go"), label: t("pal.history"), hint: t("pal.history.hint"), run: () => { showView("history"); loadHistory(); loadProjectsFilter(); } },
+    { kind: t("pal.go"), label: t("pal.memory"), hint: t("pal.memory.hint"), run: () => { showView("memory"); loadMemory(); loadReview(); } },
+    { kind: t("pal.action"), label: t("pal.exportCsv"), hint: t("pal.exportCsv.hint"), run: () => {
       showView("history");
       loadHistory();
       const b = $("hist-csv");
       if (b) b.click();
     }},
-    { kind: "Action", label: "Ingest agent memory files", hint: "memory job", run: async () => {
+    { kind: t("pal.action"), label: t("pal.ingestFiles"), hint: t("pal.ingestFiles.hint"), run: async () => {
       showView("memory");
       try {
         const r = await fetchJson("/api/agent-memory/ingest");
-        toast("Agent memory: " + r.files_scanned + " " + plural(r.files_scanned, "file", "files") + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, "chunk", "chunks"));
+        toast(t("toast.agentMemory") + r.files_scanned + " " + plural(r.files_scanned, t("p.file"), t("p.files")) + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, t("p.chunk"), t("p.chunks")));
         loadMemory();
       } catch (e) {
-        toast("Ingest failed: " + e.message);
+        toast(t("toast.ingestFailed") + e.message);
       }
     }},
-    { kind: "Go", label: "Browse messages", hint: "db browser", run: () => { showView("browse"); loadBrowse(); loadToolFilter(); } },
-    { kind: "Action", label: "Browse tool calls only", hint: "json tool_calls", run: () => {
+    { kind: t("pal.go"), label: t("pal.browse"), hint: t("pal.browse.hint"), run: () => { showView("browse"); loadBrowse(); loadToolFilter(); } },
+    { kind: t("pal.action"), label: t("pal.browseTools"), hint: t("pal.browseTools.hint"), run: () => {
       showView("browse");
       if ($("browse-toolonly")) $("browse-toolonly").setAttribute("aria-pressed", "true");
       state.browse.tool_only = true;
@@ -3591,32 +4771,33 @@ html {
       loadBrowse();
       loadToolFilter();
     }},
-    { kind: "Go", label: "Find", hint: "semantic + lexical", run: () => { showView("find"); $("find-q").focus(); } },
-    { kind: "Action", label: "Semantic find…", hint: "by meaning", run: () => {
+    { kind: t("pal.go"), label: t("pal.find"), hint: t("pal.find.hint"), run: () => { showView("find"); $("find-q").focus(); } },
+    { kind: t("pal.action"), label: t("pal.semanticFind"), hint: t("pal.semanticFind.hint"), run: () => {
       showView("find");
       if ($("find-mode")) $("find-mode").value = "semantic";
       $("find-q").focus();
-      toast("Semantic mode on - type a question");
+      toast(t("toast.semanticOn"));
     }},
-    { kind: "Action", label: "Hybrid find…", hint: "keywords + meaning", run: () => {
+    { kind: t("pal.action"), label: t("pal.hybridFind"), hint: t("pal.hybridFind.hint"), run: () => {
       showView("find");
       if ($("find-mode")) $("find-mode").value = "hybrid";
       $("find-q").focus();
     }},
-    { kind: "Go", label: "Projects", hint: "workspaces", run: () => { showView("projects"); loadProjects(); } },
-    { kind: "Go", label: "Timeline", hint: "activity", run: () => { showView("timeline"); loadTimeline(); } },
-    { kind: "Go", label: "Ask", hint: "cited answers", run: () => { showView("ask"); $("ask-q").focus(); } },
-    { kind: "Go", label: "Operate", hint: "jobs", run: () => showView("operate") },
-    { kind: "Toggle", label: state.hideEmpty ? "Show empty sessions" : "Hide empty sessions", hint: "filter", run: () => {
+    { kind: t("pal.go"), label: t("pal.projects"), hint: t("pal.projects.hint"), run: () => { showView("projects"); loadProjects(); } },
+    { kind: t("pal.go"), label: t("pal.timeline"), hint: t("pal.timeline.hint"), run: () => { showView("timeline"); loadTimeline(); } },
+    { kind: t("pal.go"), label: t("pal.ask"), hint: t("pal.ask.hint"), run: () => { showView("ask"); $("ask-q").focus(); } },
+    { kind: t("pal.go"), label: t("pal.operate"), hint: t("pal.operate.hint"), run: () => showView("operate") },
+    { kind: t("pal.toggle"), label: state.hideEmpty ? t("pal.showEmpty") : t("pal.hideEmpty"), hint: t("pal.hideEmpty.hint"), run: () => {
       state.hideEmpty = !state.hideEmpty;
-      commands[7].label = state.hideEmpty ? "Show empty sessions" : "Hide empty sessions";
+      commands = buildCommands();
       loadHistory(); loadHomeList();
-      toast(state.hideEmpty ? "Empty sessions hidden" : "Showing all sessions");
+      toast(state.hideEmpty ? t("toast.hideEmpty") : t("toast.showAll"));
     }},
-    { kind: "Action", label: "Reload corpus stats", hint: "refresh", run: () => { loadStatus(); loadHealth(); loadHomeList(); toast("Reloaded"); } },
-    { kind: "Action", label: "Embed pending messages", hint: "job", run: () => { showView("operate"); runJob("embed"); } },
-    { kind: "Action", label: "Backup database", hint: "job", run: () => { showView("operate"); runJob("backup"); } },
-  ];
+    { kind: t("pal.action"), label: t("pal.reload"), hint: t("pal.reload.hint"), run: () => { loadStatus(); loadHealth(); loadHomeList(); toast(t("toast.reloaded")); } },
+    { kind: t("pal.action"), label: t("pal.embed"), hint: t("pal.embed.hint"), run: () => { showView("operate"); runJob("embed"); } },
+    { kind: t("pal.action"), label: t("pal.backup"), hint: t("pal.backup.hint"), run: () => { showView("operate"); runJob("backup"); } },
+  ]; }
+  let commands = buildCommands();
 
   function renderPalette(query) {
     const q = (query || "").trim().toLowerCase();
@@ -3630,7 +4811,7 @@ html {
       '<button class="palette-item' + (i === paletteIndex ? " active" : "") + '" data-i="' + i + '">' +
       "<span>" + escapeHtml(c.label) + "</span>" +
       '<span class="kind">' + escapeHtml(c.kind) + " · " + escapeHtml(c.hint || "") + "</span></button>"
-    ).join("") || '<div class="empty" style="border:0">No commands</div>';
+    ).join("") || '<div class="empty" style="border:0">' + t("pal.noCommands") + '</div>';
     $("palette-list").querySelectorAll("[data-i]").forEach((el) => {
       el.addEventListener("click", () => {
         const i = Number(el.getAttribute("data-i"));
@@ -3687,8 +4868,8 @@ html {
       const extraSearch = {
         type: "search",
         kind: "Search",
-        label: "Semantic find \"" + query + "\"",
-        hint: "hybrid · enter",
+        label: t("pal.semanticSearch") + query + "\"",
+        hint: t("pal.semanticSearch.hint"),
         run: () => {
           state.hist.q = query;
           $("hist-q").value = query;
@@ -3701,8 +4882,8 @@ html {
       const extraLex = {
         type: "search",
         kind: "Search",
-        label: "Keyword find \"" + query + "\"",
-        hint: "lexical",
+        label: t("pal.keywordSearch") + query + "\"",
+        hint: t("pal.keywordSearch.hint"),
         run: () => {
           showView("find");
           if ($("find-mode")) $("find-mode").value = "lexical";
@@ -3713,8 +4894,8 @@ html {
       const extraHist = {
         type: "search",
         kind: "Filter",
-        label: "Filter history for \"" + query + "\"",
-        hint: "sessions",
+        label: t("pal.filterHistory") + query + "\"",
+        hint: t("pal.filterHistory.hint"),
         run: () => {
           state.hist.q = query;
           state.hist.offset = 0;
@@ -3824,8 +5005,8 @@ html {
     }
     if (key === "g") {
       armed = true;
-      announce("Go to: h home, s history, b browse, m memory, f find, j projects, t timeline, a ask, p operate");
-      toast("g…  h home · s history · b browse · f find · a ask");
+      announce(t("kbd.goTo"));
+      toast(t("toast.gChord"));
       setTimeout(() => { armed = false; }, 1200);
     }
   });
@@ -3857,10 +5038,10 @@ html {
   });
   $("btn-hide-empty").addEventListener("click", () => {
     state.hideEmpty = !state.hideEmpty;
-    $("btn-hide-empty").textContent = state.hideEmpty ? "Hide empty" : "Showing empty";
+    $("btn-hide-empty").textContent = state.hideEmpty ? t("topbar.hideEmpty") : t("topbar.showingEmpty");
     loadHistory();
     loadHomeList();
-    toast(state.hideEmpty ? "Empty sessions hidden" : "Including empty sessions");
+    toast(state.hideEmpty ? t("toast.hideEmpty") : t("toast.includeEmpty"));
   });
   $("back-btn").addEventListener("click", () => {
     const target = previous && previous !== "detail" && previous !== "msg" ? previous : "home";
@@ -3873,9 +5054,9 @@ html {
       (c.messages || []).slice(0, 20).map((m) => m.role + ": " + (m.content || "").slice(0, 200)).join("\n");
     try {
       await navigator.clipboard.writeText(text);
-      toast("Copied to clipboard");
+      toast(t("toast.copied"));
     } catch {
-      toast("Clipboard unavailable");
+      toast(t("toast.clipboardOff"));
     }
   });
   $("detail-expand").addEventListener("click", () => {
@@ -3961,7 +5142,7 @@ html {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast("CSV export started");
+      toast(t("toast.csv"));
     });
   })();
 
@@ -3984,9 +5165,9 @@ html {
         return;
       }
       slot.style.display = "flex";
-      slot.innerHTML = "<strong>Saved</strong> " + list.map((f, i) =>
+      slot.innerHTML = "<strong>" + t("saved.saved") + "</strong> " + list.map((f, i) =>
         '<button class="chip clickable" data-si="' + i + '">' + escapeHtml(f.name) + "</button>"
-      ).join("") + '<button class="chip clickable" data-clear="1">Clear</button>';
+      ).join("") + '<button class="chip clickable" data-clear="1">' + t("saved.clear") + '</button>';
       slot.querySelectorAll("[data-si]").forEach((b) => {
         b.addEventListener("click", () => {
           const f = list[Number(b.getAttribute("data-si"))];
@@ -3997,7 +5178,7 @@ html {
           if ($("hist-from")) $("hist-from").value = f.from || "";
           if ($("hist-to")) $("hist-to").value = f.to || "";
           $("hist-apply").click();
-          toast("Loaded filter \"" + f.name + "\"");
+          toast(t("toast.loadedFilter") + f.name + "\"");
         });
       });
       const clear = slot.querySelector("[data-clear]");
@@ -4005,13 +5186,13 @@ html {
         clear.addEventListener("click", () => {
           localStorage.removeItem("tl-saved-filters");
           renderSaved();
-          toast("Saved filters cleared");
+          toast(t("toast.clearedSaved"));
         });
       }
     }
     if (saveBtn) {
       saveBtn.addEventListener("click", () => {
-        const name = prompt("Name this filter:", "My filter");
+        const name = prompt(t("saved.namePrompt"), t("saved.defaultName"));
         if (!name) return;
         const list = loadSaved();
         list.push({
@@ -4024,7 +5205,7 @@ html {
         });
         localStorage.setItem("tl-saved-filters", JSON.stringify(list.slice(-8)));
         renderSaved();
-        toast("Saved \"" + name + "\"");
+        toast(t("toast.saved") + name + "\"");
       });
     }
     renderSaved();
@@ -4057,16 +5238,16 @@ html {
           '<div class="card-top" style="margin:0 0 8px">' +
           '<span class="chip">' + cat + "</span>" + proj +
           '<span class="chip">#' + c.id + "</span>" +
-          '<span class="chip">recorded ' + date + "</span>" +
+          '<span class="chip">' + t("mem.recorded") + date + "</span>" +
           "</div>" +
           (same
             ? '<p class="mem-preview" style="-webkit-line-clamp:4;margin:0">' + preview + "</p>"
             : '<p class="mem-preview" style="-webkit-line-clamp:4;margin:0">' + preview + "</p>" +
               '<p class="mem-full" hidden style="margin:8px 0 0;white-space:pre-wrap">' + full + "</p>") +
-          '<div class="card-meta"><span>' + (same ? "Memory" : "Click to expand full memory") + "</span></div></button>"
+          '<div class="card-meta"><span>' + (same ? t("mem.label") : t("mem.expand")) + "</span></div></button>"
         );
-      }).join("") || emptyBox("No memory yet", "Ingest agent memory to pull durable notes.", "",
-          '<button type="button" class="btn btn-primary" id="memory-empty-ingest">Run ingest</button>');
+      }).join("") || emptyBox(t("mem.noMemory"), t("mem.ingestNotes"), "",
+          '<button type="button" class="btn btn-primary" id="memory-empty-ingest">' + t("mem.runIngest") + '</button>');
       const mei = $("memory-empty-ingest");
       if (mei) mei.addEventListener("click", () => $("memory-ingest") && $("memory-ingest").click());
       el.querySelectorAll(".mem-card").forEach((btn) => {
@@ -4079,20 +5260,20 @@ html {
           if (prev) prev.hidden = !open;
           full.hidden = open;
           const meta = btn.querySelector(".card-meta span");
-          if (meta) meta.textContent = open ? "Click to expand full memory" : "Click to collapse";
+          if (meta) meta.textContent = open ? t("mem.expand") : t("mem.collapse");
         });
       });
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("memory-count").textContent =
-        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString();
+        from.toLocaleString() + "-" + to.toLocaleString() + " " + t("of") + " " + data.total.toLocaleString();
       const page = Math.floor(data.offset / state.memory.limit) + 1;
       const pages = Math.max(1, Math.ceil(data.total / state.memory.limit));
-      $("memory-page-info").textContent = "Page " + page + " / " + pages;
+      $("memory-page-info").textContent = t("hist.page") + page + t("hist.of") + pages;
       $("memory-prev").disabled = data.offset <= 0;
       $("memory-next").disabled = data.offset + state.memory.limit >= data.total;
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load memory", e.message);
+      el.innerHTML = emptyBox(t("mem.couldNotLoad"), e.message);
     }
   }
 
@@ -4124,17 +5305,17 @@ html {
     if (ingest) {
       ingest.addEventListener("click", async () => {
         ingest.disabled = true;
-        ingest.textContent = "Ingesting…";
+        ingest.textContent = t("mem.ingesting");
         try {
           const r = await fetchJson("/api/agent-memory/ingest");
-          toast("Ingested " + r.files_scanned + " " + plural(r.files_scanned, "file", "files") + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, "chunk", "chunks"));
+          toast(t("toast.ingested") + r.files_scanned + " " + plural(r.files_scanned, t("p.file"), t("p.files")) + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, t("p.chunk"), t("p.chunks")));
           loadMemory();
           loadStatus();
         } catch (e) {
-          toast("Ingest failed: " + e.message);
+          toast(t("toast.ingestFailed") + e.message);
         } finally {
           ingest.disabled = false;
-          ingest.textContent = "Ingest agent memory";
+          ingest.textContent = t("mem.ingest");
         }
       });
     }
@@ -4180,11 +5361,11 @@ html {
       const category = $("pin-category").value;
       const save = $("pin-save");
       save.disabled = true;
-      save.innerHTML = '<span class="spinner" aria-hidden="true"></span>Running …';
+      save.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + t("op.spinnerRunning");
       try {
         const r = await postJson("/api/memory", { content, category });
         closePinDialog();
-        const link = toastWithLink("Pinned note #" + r.id, "#", "Open Agent Memory");
+        const link = toastWithLink(t("pin.pinned") + r.id, "#", t("pin.openMemory"));
         link.addEventListener("click", () => {
           showView("memory");
           setMemoryTab("notes");
@@ -4192,10 +5373,10 @@ html {
         });
         loadStatus();
       } catch (e) {
-        toast("Pin failed: " + e.message);
+        toast(t("pin.failed") + e.message);
       } finally {
         save.disabled = false;
-        save.textContent = "Save note";
+        save.textContent = t("pin.save");
       }
     });
   })();
@@ -4205,7 +5386,7 @@ html {
       const m = state.msg;
       if (!m) return;
       openPinDialog({
-        content: (m.content || "").slice(0, 2000) + "\n\nSource: conversation #" + m.conversation_id,
+        content: (m.content || "").slice(0, 2000) + "\n\n" + t("pin.source") + m.conversation_id,
         category: "insight",
       });
     });
@@ -4241,15 +5422,15 @@ html {
       const items = d.items || [];
       const n = items.length;
       const countEl = $("review-count");
-      if (countEl) countEl.textContent = n + " " + plural(n, "candidate", "candidates");
+      if (countEl) countEl.textContent = n + " " + plural(n, t("mem.candidate"), t("mem.candidates"));
       if (summary) {
         summary.textContent = n
-          ? n + " " + plural(n, "candidate", "candidates") + " · " + (d.banner || "")
-          : (d.banner || "Nothing to review");
+          ? n + " " + plural(n, t("mem.candidate"), t("mem.candidates")) + " · " + (d.banner || "")
+          : (d.banner || t("mem.nothingToReview"));
       }
       if (!n) {
-        el.innerHTML = emptyBox("Review is clear", "No stale memory candidates right now.", "",
-          '<button type="button" class="btn btn-primary" id="review-empty-refresh">Refresh</button>');
+        el.innerHTML = emptyBox(t("review.clear"), t("review.noStale"), "",
+          '<button type="button" class="btn btn-primary" id="review-empty-refresh">' + t("review.refresh") + '</button>');
         const rf = $("review-empty-refresh");
         if (rf) rf.addEventListener("click", loadReview);
         return;
@@ -4264,14 +5445,14 @@ html {
         "</div>" +
         "<p style=\"margin:0\">" + escapeHtml((it.content || "").slice(0, 280)) + "</p>" +
         '<div class="review-actions">' +
-        '<button type="button" class="btn btn-primary" data-review-keep="' + it.id + '">Keep</button>' +
-        '<button type="button" class="btn btn-danger" data-review-forget="' + it.id + '">Forget</button>' +
+        '<button type="button" class="btn btn-primary" data-review-keep="' + it.id + '">' + t("review.keep") + '</button>' +
+        '<button type="button" class="btn btn-danger" data-review-forget="' + it.id + '">' + t("review.forget") + '</button>' +
         "</div></article>"
       ).join("");
       wireReviewCards(el);
     } catch (e) {
-      el.innerHTML = emptyBox("Could not load review", e.message, "",
-        '<button type="button" class="btn btn-primary" id="review-empty-retry">Retry</button>');
+      el.innerHTML = emptyBox(t("review.couldNotLoad"), e.message, "",
+        '<button type="button" class="btn btn-primary" id="review-empty-retry">' + t("review.retry") + '</button>');
       const rt = $("review-empty-retry");
       if (rt) rt.addEventListener("click", loadReview);
     }
@@ -4283,11 +5464,11 @@ html {
         b.disabled = true;
         try {
           await postJson("/api/memory/" + id + "/keep", {});
-          toast("Kept note #" + id);
+          toast(t("review.kept") + id);
           loadReview();
           loadMemory();
         } catch (e) {
-          toast("Keep failed: " + e.message);
+          toast(t("review.keepFailed") + e.message);
           b.disabled = false;
         }
       });
@@ -4296,7 +5477,7 @@ html {
       b.addEventListener("click", () => {
         const id = Number(b.getAttribute("data-review-forget"));
         const card = b.closest(".review-card");
-        if (!window.confirm("Forget note #" + id + "? This marks it as forgotten.")) return;
+        if (!window.confirm(t("review.forgetConfirm") + id + t("review.forgetConfirm2"))) return;
         forgetWithUndo(id, card);
       });
     });
@@ -4305,7 +5486,7 @@ html {
     try {
       await postJson("/api/memory/" + id + "/forget", {});
     } catch (e) {
-      toast("Forget failed: " + e.message);
+      toast(t("review.forgetFailed") + e.message);
       return;
     }
     // Remove the card now; the undo bar restores it via keep.
@@ -4314,11 +5495,11 @@ html {
     const bar = document.createElement("div");
     bar.className = "undo-bar";
     bar.setAttribute("role", "status");
-    bar.innerHTML = "Forgot note #" + id + " · ";
+    bar.innerHTML = t("review.forgot") + id + " · ";
     const undoBtn = document.createElement("button");
     undoBtn.type = "button";
     undoBtn.className = "btn btn-ghost";
-    undoBtn.textContent = "Undo";
+    undoBtn.textContent = t("review.undo");
     const countdown = document.createElement("span");
     countdown.textContent = "(" + seconds + "s)";
     bar.appendChild(undoBtn);
@@ -4339,11 +5520,11 @@ html {
       bar.remove();
       try {
         await postJson("/api/memory/" + id + "/keep", {});
-        toast("Restored note #" + id);
+        toast(t("review.restored") + id);
         loadReview();
         loadMemory();
       } catch (e) {
-        toast("Undo failed: " + e.message);
+        toast(t("review.undoFailed") + e.message);
       }
     });
   }
@@ -4484,9 +5665,9 @@ html {
         if (!state.msg) return;
         try {
           await navigator.clipboard.writeText(prettyJson(state.msg));
-          toast("Message JSON copied");
+          toast(t("toast.jsonCopied"));
         } catch {
-          toast("Clipboard unavailable");
+          toast(t("toast.clipboardOff"));
         }
       });
     }
@@ -4587,6 +5768,7 @@ html {
 
   // boot
   initTheme();
+  initLang();
   loadHealth();
   loadStatus();
   loadActivity();
@@ -4607,12 +5789,12 @@ html {
       '<div class="row" style="cursor:default"><div class="row-main"><div class="row-title">' +
       escapeHtml(a.label) + '</div><div class="row-meta">' + escapeHtml(a.hint || "") +
       "</div></div></div>"
-    ).join("") || '<div class="empty">All systems ok</div>';
+    ).join("") || '<div class="empty">' + t("health.allOk") + '</div>';
   }).catch(() => {});
   loadIngestStatus();
   loadProjectsFilter();
-  $("btn-hide-empty").textContent = "Hide empty";
-  announce("Throughline ready");
+  $("btn-hide-empty").textContent = t("topbar.hideEmpty");
+  announce(t("ready"));
 })();
 </script>
 </body>

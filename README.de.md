@@ -138,71 +138,71 @@ Alle neun Menüs und ihre Nebenansichten sind unten abgebildet, aufgenommen aus 
 
 Klick auf eine Kennzahl und steig in den Korpus ein. Prüfe Aktivität, letzte Sessions und das Offline-Briefing. **Hide empty** räumt die Session-Liste auf, **Browse all** öffnet die Nachrichten. Die modellfreie Demo meldet das fehlende Ollama sichtbar in den Hinweisen. Nichts wird versteckt.
 
-![Home mit Übergabe-Briefing](docs/media/rust/home.png)
+![Home mit Übergabe-Briefing](docs/media/rust/de/home.png)
 
 ### History. Konversationen im Zusammenhang
 
 Filtere nach Text, Tool, Projekt und Datum. Sortiere, wechsle zwischen Tabelle und Karten, speichere Filter, blättere oder exportiere CSV. Öffne eine Session und lies ihre Nachrichten mit Rollen.
 
-![History-Tabelle mit Filtern](docs/media/rust/history.png)
+![History-Tabelle mit Filtern](docs/media/rust/de/history.png)
 
-![History-Kartenansicht](docs/media/rust/history-cards.png)
+![History-Kartenansicht](docs/media/rust/de/history-cards.png)
 
-![Aufgeklappte Konversation](docs/media/rust/conversation.png)
+![Aufgeklappte Konversation](docs/media/rust/de/conversation.png)
 
 ### Browse. Die Nachrichten darunter prüfen
 
 Filtere nach Text, Rolle, Tool-Name oder Konversations-ID, oder wähle **Tool calls only**. Eine Nachricht öffnet den vollen Inhalt, das Tool-Call-JSON und die Content-Blöcke, mit **Copy JSON** und **Open session**.
 
-![Nachrichten-Browser](docs/media/rust/browse.png)
+![Nachrichten-Browser](docs/media/rust/de/browse.png)
 
-![Nachrichten-Detail](docs/media/rust/message.png)
+![Nachrichten-Detail](docs/media/rust/de/message.png)
 
 ### Agent Memory. Dauerhaften Kontext griffbereit halten
 
 Durchsuche Notizen, filtere Kategorien und klappe Karten auf. **Ingest agent memory** liest lokale Markdown-Memory-Dateien. `THROUGHLINE_AGENT_MEMORY_DIR` bestimmt deren Ort. Die Kategorien decken Entscheidungen, Präferenzen, Muster, Erkenntnisse, Fehlerlösungen, Projektkontext und Workflows ab.
 
-![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/memory.png)
+![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 
 ### Find. Über alle Tools hinweg suchen
 
 Wähle **Lexical**, **Semantic** oder **Hybrid**. Die lexikalische Suche braucht kein Modell. Die semantische Suche braucht gespeicherte Embeddings und einen passenden Embedding-Dienst. Treffer verlinken auf Konversationen und nennen das Such-Backend. Scores sind Retrieval-Werte, keine Wahrheits-Wahrscheinlichkeiten.
 
-![Lexikalische Suche nach decision](docs/media/rust/find.png)
+![Lexikalische Suche nach decision](docs/media/rust/de/find.png)
 
 ### Projects. Über den Arbeitsbereich einsteigen
 
 Karten zeigen die aufgezeichnete Beschreibung, den Status und die Konversations-Anzahl. Eine Auswahl öffnet die Projekt-Historie. Aufgezeichneter Stand ist Historie, keine Prüfung des heutigen Repositories.
 
-![Projektkarten Atlas, Harbor und Orchard](docs/media/rust/projects.png)
+![Projektkarten Atlas, Harbor und Orchard](docs/media/rust/de/projects.png)
 
 ### Timeline. Aktivität über die Zeit verfolgen
 
 Prüfe das tägliche Konversations-Volumen, filtere nach Anbieter, wechsle in den Kalender, navigiere durch Monate oder spring zurück auf heute. Chronologie ist keine Kausalität, und die Ansicht hält diesen Unterschied sichtbar.
 
-![Aktivität nach Tag und Quell-Tool](docs/media/rust/timeline.png)
+![Aktivität nach Tag und Quell-Tool](docs/media/rust/de/timeline.png)
 
-![Kalenderansicht](docs/media/rust/calendar.png)
+![Kalenderansicht](docs/media/rust/de/calendar.png)
 
 ### Ask. Die aufgezeichnete Evidenz befragen
 
 Stelle eine Frage und folge den gelieferten Quellen. Ein konfiguriertes Generierungs-Backend ist Voraussetzung. Nach der Backend-Auflösung kann ein Generierungsfehler noch Auszüge liefern. Ein nicht auflösbares Backend liefert stattdessen einen Fehler. Der Screenshot zeigt den Eingabe-Zustand, keine erfundene Antwort.
 
-![Ask vor dem Absenden der Beispielfrage](docs/media/rust/ask.png)
+![Ask vor dem Absenden der Beispielfrage](docs/media/rust/de/ask.png)
 
 ### Operate. Den Speicher pflegen
 
 Starte Ingestion, Status, Embedding, Deduplizierung, Backup, Audit, Stale-Memory-Bericht, Instruktionsdatei-Writeback oder Antwort-Evaluierung. Einige Aktionen verändern Daten oder Dateien, und modellabhängige Aktionen brauchen vorher Konfiguration. Siehe die [Aktions-Referenz](docs/FEATURE_GUIDE.md#maintenance-actions).
 
-![Alle neun Wartungsaktionen mit Ingestion-Status](docs/media/rust/operate.png)
+![Alle neun Wartungsaktionen mit Ingestion-Status](docs/media/rust/de/operate.png)
 
-![Abgeschlossene Status-Aktion der Demo](docs/media/rust/operate-status.png)
+![Abgeschlossene Status-Aktion der Demo](docs/media/rust/de/operate-status.png)
 
 ### Befehls-Palette
 
 Spring zwischen Ansichten, suche Sessions oder wähle eine Aktion, ohne die Tastatur zu verlassen.
 
-![Befehls-Palette](docs/media/rust/palette.png)
+![Befehls-Palette](docs/media/rust/de/palette.png)
 
 ## Jenseits des Browsers
 
