@@ -266,6 +266,22 @@ flowchart LR
 
 The container embeds `rust/crates/throughline/web/index.html`. Node is not required to run it. Compose applies migrations before starting the web service. Source files, the PostgreSQL store and exported Markdown stay separate artifacts.
 
+## Traceability by design
+
+Regulators, auditors and research institutions are converging on the same demand: AI-assisted work must be reconstructable after the fact. Throughline records AI coding work in exactly the shape those frameworks describe. That is a design statement, not a compliance certification.
+
+| Requirement | Source | What Throughline stores |
+| --- | --- | --- |
+| Automatic recording of events over the system's lifetime, for traceability | [EU AI Act, Art. 12(1) and 12(2)](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-12), Regulation (EU) 2024/1689 | Every imported session is recorded automatically with timestamps, source tool and model label. No manual bookkeeping. |
+| Log retention of at least six months by the deployer | [EU AI Act, Art. 19 and Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | The corpus lives in your PostgreSQL volume for as long as you keep it, with `backup` and restore as explicit commands. Deletion is a deliberate act. |
+| A reviewer must see which model was used, how it was prompted and how the output was validated | [World Bank AI reproducibility guidelines](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Per message: model label, full prompt and response text, role, timestamps. Per answer in Ask: the cited source records. |
+| Per-interaction logs of timestamps, model version, prompts, tool calls and outputs for agent-assisted research | [Logging schema proposed in arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | The message record carries exactly these fields, including tool-call JSON and content blocks, inspectable in Browse. |
+| Standardized trace attributes for GenAI operations | [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) | The stored fields map onto these conventions. A native OTel export is on the roadmap, not shipped. |
+
+Two honest limits. First, Throughline records what the source tools wrote to disk, so completeness depends on their session formats. Second, whether any concrete system falls under the AI Act is a legal question about that system. This software does not answer it and does not claim high-risk conformity for anything. What it gives you is the raw material every one of these frameworks asks for: the original evidence, kept locally, searchable, with its context intact.
+
+Public administrations pushing for digital sovereignty, such as the [Franco-German initiative for an open-source administrative workplace](https://www.dbb.de/artikel-dbb-europathemen/silberbach-begruesst-deutsch-franzoesische-initiative.html), name the same properties this project is built on: open source, local operation, no vendor lock-in.
+
 ## Current boundaries
 
 Honest limits beat silent surprises. These are the current ones.

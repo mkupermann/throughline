@@ -266,6 +266,22 @@ flowchart LR
 
 Der Container bettet `rust/crates/throughline/web/index.html` ein. Node ist für den Betrieb nicht nötig. Compose wendet Migrationen an, bevor der Web-Dienst startet. Quelldateien, der PostgreSQL-Speicher und exportiertes Markdown bleiben getrennte Artefakte.
 
+## Nachvollziehbarkeit als Bauprinzip
+
+Regulierer, Prüfer und Forschungseinrichtungen verlangen zunehmend dasselbe: KI-gestützte Arbeit muss im Nachhinein rekonstruierbar sein. Throughline zeichnet KI-Coding-Arbeit genau in der Form auf, die diese Rahmenwerke beschreiben. Das ist eine Design-Aussage, keine Compliance-Zertifizierung.
+
+| Anforderung | Quelle | Was Throughline speichert |
+| --- | --- | --- |
+| Automatische Aufzeichnung von Ereignissen über die Lebensdauer des Systems, für Nachvollziehbarkeit | [EU AI Act, Art. 12(1) und 12(2)](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-12), Verordnung (EU) 2024/1689 | Jede importierte Session wird automatisch erfasst, mit Zeitstempeln, Quell-Tool und Modell-Label. Keine manuelle Buchführung. |
+| Log-Aufbewahrung von mindestens sechs Monaten durch den Betreiber | [EU AI Act, Art. 19 und Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | Der Korpus liegt im eigenen PostgreSQL-Volume, so lange Du ihn behältst, mit `backup` und Restore als expliziten Befehlen. Löschen ist eine bewusste Handlung. |
+| Ein Prüfer muss sehen, welches Modell lief, wie es angewiesen wurde und wie das Ergebnis validiert wurde | [Weltbank-Leitlinien zur KI-Reproduzierbarkeit](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Je Nachricht: Modell-Label, vollständiger Prompt- und Antworttext, Rolle, Zeitstempel. Je Antwort in Ask: die zitierten Quelldatensätze. |
+| Protokoll je Interaktion mit Zeitstempel, Modellversion, Prompts, Tool-Aufrufen und Ergebnissen für agentengestützte Forschung | [Logging-Schema aus arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | Der Nachrichtendatensatz enthält genau diese Felder, samt Tool-Call-JSON und Content-Blöcken, prüfbar in Browse. |
+| Standardisierte Trace-Attribute für GenAI-Operationen | [OpenTelemetry-GenAI-Konventionen](https://opentelemetry.io/docs/specs/semconv/gen-ai/) | Die gespeicherten Felder lassen sich auf diese Konventionen abbilden. Ein nativer OTel-Export steht auf der Roadmap und ist nicht ausgeliefert. |
+
+Zwei ehrliche Grenzen. Erstens: Throughline zeichnet auf, was die Quell-Tools auf die Platte schreiben. Die Vollständigkeit hängt an deren Session-Formaten. Zweitens: Ob ein konkretes System unter den AI Act fällt, ist eine Rechtsfrage zu diesem System. Diese Software beantwortet sie nicht und behauptet für nichts eine Hochrisiko-Konformität. Was sie liefert, ist das Rohmaterial, das alle diese Rahmenwerke verlangen: die Originalevidenz, lokal gehalten, durchsuchbar, mit intaktem Kontext.
+
+Verwaltungen auf dem Weg zur digitalen Souveränität, etwa die [deutsch-französische Initiative für einen quelloffenen Verwaltungsarbeitsplatz](https://www.dbb.de/artikel-dbb-europathemen/silberbach-begruesst-deutsch-franzoesische-initiative.html), nennen genau die Eigenschaften, auf denen dieses Projekt aufbaut: quelloffen, lokaler Betrieb, keine Anbieterbindung.
+
 ## Aktuelle Grenzen
 
 Ehrliche Grenzen sind besser als stille Überraschungen. Das sind die aktuellen.
