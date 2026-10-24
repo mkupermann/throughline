@@ -30,7 +30,7 @@ const normalize = text => text.replace(/\r\n/g, '\n');
 if (normalize(source) !== normalize(served)) throw Error('Served UI differs from checkout; rebuild demo image');
 await mkdir(out, {recursive:true});
 const browser = await chromium.launch({channel:process.env.THROUGHLINE_SCREENSHOT_BROWSER || undefined});
-const page = await browser.newPage({viewport:{width:1440,height:1000}, deviceScaleFactor:1, reducedMotion:'reduce',locale:'en-GB',timezoneId:'UTC'});
+const page = await browser.newPage({viewport:{width:1440,height:1000}, deviceScaleFactor:1, reducedMotion:'reduce',locale:'en-GB',timezoneId:'UTC', colorScheme:'dark'});
 page.setDefaultTimeout(20000);
 const errors = [];
 const shots = [];

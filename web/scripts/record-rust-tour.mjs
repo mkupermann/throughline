@@ -91,6 +91,7 @@ const context = await browser.newContext({
   reducedMotion: 'reduce',
   locale: 'en-GB',
   timezoneId: 'UTC',
+  colorScheme: 'dark',
 });
 const page = await context.newPage();
 page.setDefaultTimeout(20000);
@@ -196,6 +197,7 @@ const captureArtwork = async ({ name, view: viewName, waitFor, sourceViewport, c
     reducedMotion: 'reduce',
     locale: 'en-GB',
     timezoneId: 'UTC',
+    colorScheme: 'dark',
   });
   const sourcePage = await sourceContext.newPage();
   sourcePage.on('pageerror', e => errors.push(`${name} source page error: ${e.message}`));

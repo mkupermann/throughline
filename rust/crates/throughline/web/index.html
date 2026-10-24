@@ -67,6 +67,87 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
   --sidebar: 236px;
+  /* Chart / status colours (adjusted per theme below) */
+  --chart-bar: #2dd4a7;
+  --chart-bar-dim: rgba(45, 212, 167, 0.35);
+  --status-ok: #2dd4a7;
+  --status-warn: #fbbf24;
+  --status-bad: #f87171;
+  --focus-ring: #2dd4a7;
+}
+
+/* Light theme: CSS variable override. Dark stays the design default;
+   system-light users get this block via the media query unless they
+   forced dark. Explicit choice is stored in localStorage `th-theme`. */
+[data-theme="light"] {
+  --bg: #f4f6fa;
+  --bg-elevated: #ffffff;
+  --bg-soft: #e8edf5;
+  --bg-hover: #d9e2ef;
+  --bg-inset: #eef2f8;
+  --border: #c3cedd;
+  --border-subtle: #d5dee9;
+  --border-strong: #9aabc0;
+  --text: #0f172a;
+  --text-2: #334155;
+  --text-3: #5b6b80;
+  --accent: #0f766e;
+  --accent-2: #0369a1;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --accent-ring: rgba(15, 118, 110, 0.38);
+  --accent-strong: #0d9488;
+  --danger: #b91c1c;
+  --danger-soft: rgba(185, 28, 28, 0.12);
+  --warning: #b45309;
+  --user: #15803d;
+  --assistant: #1d4ed8;
+  --tool: #b45309;
+  --system: #64748b;
+  --shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.1);
+  --chart-bar: #0f766e;
+  --chart-bar-dim: rgba(15, 118, 110, 0.35);
+  --status-ok: #0f766e;
+  --status-warn: #b45309;
+  --status-bad: #b91c1c;
+  --focus-ring: #0f766e;
+}
+
+/* System-light default when the user has not forced dark. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f6fa;
+    --bg-elevated: #ffffff;
+    --bg-soft: #e8edf5;
+    --bg-hover: #d9e2ef;
+    --bg-inset: #eef2f8;
+    --border: #c3cedd;
+    --border-subtle: #d5dee9;
+    --border-strong: #9aabc0;
+    --text: #0f172a;
+    --text-2: #334155;
+    --text-3: #5b6b80;
+    --accent: #0f766e;
+    --accent-2: #0369a1;
+    --accent-soft: rgba(15, 118, 110, 0.12);
+    --accent-ring: rgba(15, 118, 110, 0.38);
+    --accent-strong: #0d9488;
+    --danger: #b91c1c;
+    --danger-soft: rgba(185, 28, 28, 0.12);
+    --warning: #b45309;
+    --user: #15803d;
+    --assistant: #1d4ed8;
+    --tool: #b45309;
+    --system: #64748b;
+    --shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+    --shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.1);
+    --chart-bar: #0f766e;
+    --chart-bar-dim: rgba(15, 118, 110, 0.35);
+    --status-ok: #0f766e;
+    --status-warn: #b45309;
+    --status-bad: #b91c1c;
+    --focus-ring: #0f766e;
+  }
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -82,6 +163,21 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+/* Light-theme body wash */
+[data-theme="light"] body {
+  background:
+    radial-gradient(1100px 560px at 82% -12%, rgba(15, 118, 110, 0.07), transparent 52%),
+    radial-gradient(880px 480px at 8% 112%, rgba(3, 105, 161, 0.05), transparent 46%),
+    var(--bg);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) body {
+    background:
+      radial-gradient(1100px 560px at 82% -12%, rgba(15, 118, 110, 0.07), transparent 52%),
+      radial-gradient(880px 480px at 8% 112%, rgba(3, 105, 161, 0.05), transparent 46%),
+      var(--bg);
+  }
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -130,7 +226,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   height: 100vh;
 }
 .sidebar {
-  background: rgba(13, 17, 24, 0.94);
+  background: var(--bg-elevated);
   border-right: 1px solid var(--border-subtle);
   padding: var(--space-5) var(--space-3) var(--space-4);
   display: flex;
@@ -336,20 +432,20 @@ select option { background: var(--bg-elevated); color: var(--text); }
   outline-offset: 2px;
 }
 .btn-primary {
-  background: linear-gradient(145deg, #2dd4a7, #14b8a6);
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
   border-color: transparent;
-  color: #042116;
-  box-shadow: 0 6px 18px rgba(45, 212, 167, 0.22);
+  color: var(--bg);
+  box-shadow: 0 6px 18px var(--accent-soft);
 }
 .btn-primary:hover {
   filter: brightness(1.06);
   border-color: transparent;
-  background: linear-gradient(145deg, #2dd4a7, #14b8a6);
-  box-shadow: 0 8px 22px rgba(45, 212, 167, 0.3);
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 8px 22px var(--accent-ring);
 }
 .btn-primary:active {
   filter: brightness(0.97);
-  box-shadow: 0 3px 10px rgba(45, 212, 167, 0.2);
+  box-shadow: 0 3px 10px var(--accent-soft);
 }
 .btn-ghost {
   background: transparent;
@@ -526,7 +622,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   flex: 1;
   min-width: 3px;
   border-radius: 3px 3px 1px 1px;
-  background: linear-gradient(180deg, var(--accent), rgba(45, 212, 167, 0.22));
+  background: linear-gradient(180deg, var(--chart-bar), var(--chart-bar-dim));
   opacity: 0.82;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
@@ -1069,10 +1165,10 @@ table.sessions tr.active td { background: var(--accent-soft); }
   font-size: 16px;
   font-weight: 600;
 }
-.cal-day.l1 { background: rgba(34, 197, 94, 0.12); }
-.cal-day.l2 { background: rgba(34, 197, 94, 0.22); }
-.cal-day.l3 { background: rgba(34, 197, 94, 0.35); }
-.cal-day.l4 { background: rgba(34, 197, 94, 0.5); }
+.cal-day.l1 { background: color-mix(in srgb, var(--chart-bar) 12%, transparent); }
+.cal-day.l2 { background: color-mix(in srgb, var(--chart-bar) 22%, transparent); }
+.cal-day.l3 { background: color-mix(in srgb, var(--chart-bar) 35%, transparent); }
+.cal-day.l4 { background: color-mix(in srgb, var(--chart-bar) 50%, transparent); }
 .cal-swatch {
   display: inline-block;
   width: 14px;
@@ -1080,10 +1176,10 @@ table.sessions tr.active td { background: var(--accent-soft); }
   border-radius: 4px;
   vertical-align: middle;
 }
-.cal-swatch.l1 { background: rgba(34, 197, 94, 0.12); }
-.cal-swatch.l2 { background: rgba(34, 197, 94, 0.22); }
-.cal-swatch.l3 { background: rgba(34, 197, 94, 0.35); }
-.cal-swatch.l4 { background: rgba(34, 197, 94, 0.5); }
+.cal-swatch.l1 { background: color-mix(in srgb, var(--chart-bar) 12%, transparent); }
+.cal-swatch.l2 { background: color-mix(in srgb, var(--chart-bar) 22%, transparent); }
+.cal-swatch.l3 { background: color-mix(in srgb, var(--chart-bar) 35%, transparent); }
+.cal-swatch.l4 { background: color-mix(in srgb, var(--chart-bar) 50%, transparent); }
 
 /* Toast */
 .toast {
@@ -1119,6 +1215,155 @@ table.sessions tr.active td { background: var(--accent-soft); }
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 55%),
     var(--bg-inset);
+}
+[data-theme="light"] .empty {
+  background: var(--bg-inset);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .empty {
+    background: var(--bg-inset);
+  }
+}
+.empty .empty-action {
+  margin-top: var(--space-4);
+}
+/* Theme switcher (topbar) */
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.theme-switch label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.theme-switch select {
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0 8px;
+}
+/* Spinner for running jobs */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.btn.is-running {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.job.is-running {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  opacity: 0.85;
+}
+/* Operate result blocks */
+.result-block {
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--status-ok);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text-2);
+}
+.result-block.is-error {
+  border-left-color: var(--status-bad);
+}
+.result-block strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+/* Review cards (memory keep/forget) */
+.review-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.review-card .review-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.review-card.is-gone {
+  opacity: 0.45;
+}
+.undo-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+/* Pin-as-note dialog */
+.pin-dialog {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 14, 0.55);
+  z-index: 120;
+}
+.pin-dialog.open { display: flex; }
+.pin-dialog .pin-panel {
+  width: min(480px, calc(100vw - 32px));
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  box-shadow: var(--shadow);
+}
+.pin-dialog h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+}
+.pin-dialog label {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  margin: var(--space-3) 0 4px;
+}
+.pin-dialog select,
+.pin-dialog textarea {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--text);
+  padding: 8px 10px;
+}
+.pin-dialog textarea {
+  min-height: 110px;
+  resize: vertical;
+  font-family: var(--font);
+}
+.pin-dialog .pin-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 .empty::before {
   content: "";
@@ -1420,6 +1665,14 @@ html {
           <span>Search everything - sessions, messages, commands…</span>
           <kbd>⌁˜K</kbd>
         </button>
+        <div class="theme-switch">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select" aria-label="Colour theme">
+            <option value="system">System</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
         <button class="btn btn-ghost" id="btn-hide-empty" type="button">Hide empty</button>
         <button class="btn btn-primary" id="btn-browse" type="button">Browse all</button>
       </div>
@@ -1470,9 +1723,29 @@ html {
         <div class="panel">
           <div class="panel-title">
             <h2>Continue where you left off</h2>
-            <div class="meta">handoff brief · offline</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <div class="meta">handoff brief · offline</div>
+              <button class="btn btn-ghost" id="handoff-copy" type="button">Copy handoff</button>
+              <button class="btn btn-ghost" id="handoff-download" type="button">Download .md</button>
+            </div>
           </div>
           <div class="history list-anim" id="handoff-brief" aria-live="polite" aria-busy="false"><div class="empty"><strong>Loading handoff brief</strong>Gathering resume context</div></div><div class="history list-anim" id="handoff-extra" hidden></div>
+        </div>
+
+        <div class="panel" id="home-quickstart" hidden>
+          <div class="panel-title"><h2>Get started in three steps</h2><div class="meta">empty corpus</div></div>
+          <div class="empty" id="home-quickstart-body">
+            <strong>No conversations yet</strong>
+            Three steps to your first searchable session.
+            <ol style="text-align:left;margin:16px auto 0;max-width:420px;line-height:1.7">
+              <li>Check your sources in <strong>Operate</strong> → Ingestion status.</li>
+              <li>Run <strong>Ingest all providers</strong> to import transcripts.</li>
+              <li>Come back here — sessions, memory and handoff fill in automatically.</li>
+            </ol>
+            <div class="empty-action">
+              <button class="btn btn-primary" type="button" data-drill="operate">Run ingest</button>
+            </div>
+          </div>
         </div>
 
         <div class="panel">
@@ -1615,6 +1888,7 @@ html {
         <div class="detail-hero">
           <button class="btn btn-ghost" id="msg-back" type="button">← Back</button>
           <h1 id="msg-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em">Message</h1>
+          <button class="btn btn-ghost" id="msg-pin" type="button">Pin as note</button>
           <button class="btn btn-ghost" id="msg-copy" type="button">Copy JSON</button>
           <button class="btn btn-ghost" id="msg-open-conv" type="button">Open session</button>
         </div>
@@ -1643,6 +1917,13 @@ html {
           </div>
           <div class="meta" id="memory-count"></div>
         </div>
+        <div class="toolbar" style="margin-bottom:8px">
+          <div class="view-toggle" role="tablist" aria-label="Agent Memory mode">
+            <button type="button" class="togglable active" id="memory-tab-notes" role="tab" aria-selected="true" aria-pressed="true">Notes</button>
+            <button type="button" class="togglable" id="memory-tab-review" role="tab" aria-selected="false" aria-pressed="false">Review <span class="chip" id="review-count" title="Stale candidates">0</span></button>
+          </div>
+        </div>
+        <div id="memory-notes-panel">
         <div class="toolbar">
           <label class="field" style="flex:1">
             <span class="field-label">Search</span>
@@ -1669,6 +1950,11 @@ html {
           <button class="btn btn-ghost" id="memory-prev" type="button">← Prev</button>
           <div id="memory-page-info">-</div>
           <button class="btn btn-ghost" id="memory-next" type="button">Next →</button>
+        </div>
+        </div>
+        <div id="memory-review-panel" hidden>
+          <div class="meta" id="review-summary" style="margin-bottom:12px">Loading review candidates…</div>
+          <div class="history list-anim" id="review-list"></div>
         </div>
       </section>
 
@@ -1697,7 +1983,7 @@ html {
           </label>
           <button class="btn btn-primary" id="find-go" type="button">Search</button>
         </div>
-        <div class="history list-anim" id="find-results" aria-live="polite" aria-busy="false"><div class="empty"><strong>Search your corpus</strong>Type keywords or a question. Hybrid blends meaning and matches.</div></div>
+        <div class="history list-anim" id="find-results" aria-live="polite" aria-busy="false"><div class="empty"><strong>Search your corpus</strong>Type keywords or a question. Hybrid blends meaning and matches.<div class="empty-action"><button type="button" class="btn btn-primary" id="find-empty-focus">Type a query</button></div></div></div>
       </section>
 
       <!-- PROJECTS -->
@@ -1779,7 +2065,7 @@ html {
           </label>
           <button class="btn btn-primary" id="ask-go" type="button">Ask</button>
         </div>
-        <div id="ask-out" class="list-anim" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ask anything about your work</strong>Answers cite sessions and fail-soft to excerpts when the model is offline.</div></div>
+        <div id="ask-out" class="list-anim" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ask anything about your work</strong>Answers cite sessions and fail-soft to excerpts when the model is offline.<div class="empty-action"><button type="button" class="btn btn-primary" id="ask-empty-focus">Type a question</button></div></div></div>
       </section>
 
       <!-- OPERATE -->
@@ -1806,7 +2092,7 @@ html {
           <div class="panel-title"><h2>Ingestion status</h2><div class="meta">per provider</div></div>
           <div id="ingest-status-body" class="history list-anim">Loading…</div>
         </div>
-        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ready for jobs</strong>Pick a maintenance job above. Progress and results appear here.</div></div>
+        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong>Ready for jobs</strong>Pick a maintenance job above. Progress and results appear here.<div class="empty-action"><button type="button" class="btn btn-primary" data-action="status">Run status</button></div></div></div>
       </section>
 
       <!-- DETAIL -->
@@ -1841,6 +2127,28 @@ html {
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<div class="pin-dialog" id="pin-dialog" role="dialog" aria-modal="true" aria-labelledby="pin-dialog-title" hidden>
+  <div class="pin-panel">
+    <h2 id="pin-dialog-title">Pin as note</h2>
+    <label for="pin-category">Category</label>
+    <select id="pin-category">
+      <option value="insight">insight</option>
+      <option value="decision">decision</option>
+      <option value="preference">preference</option>
+      <option value="pattern">pattern</option>
+      <option value="error_solution">error_solution</option>
+      <option value="project_context">project_context</option>
+      <option value="workflow">workflow</option>
+    </select>
+    <label for="pin-content">Content</label>
+    <textarea id="pin-content" aria-label="Note content"></textarea>
+    <div class="pin-actions">
+      <button class="btn btn-ghost" id="pin-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="pin-save" type="button">Save note</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -1912,6 +2220,24 @@ html {
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.remove("show"), 2200);
   }
+  /** Toast with a single link action (e.g. open Agent Memory). */
+  function toastWithLink(msg, href, linkLabel) {
+    const el = $("toast");
+    el.innerHTML = "";
+    el.appendChild(document.createTextNode(msg + " · "));
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = linkLabel;
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      el.classList.remove("show");
+    });
+    el.appendChild(a);
+    el.classList.add("show");
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove("show"), 4200);
+    return a;
+  }
   async function fetchJson(path) {
     const res = await fetch(path, { headers: { Accept: "application/json" } });
     if (!res.ok) {
@@ -1923,6 +2249,66 @@ html {
       throw new Error(detail);
     }
     return res.json();
+  }
+  async function postJson(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const b = await res.json();
+        detail = b.detail || b.error || detail;
+      } catch {}
+      const err = new Error(detail);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  // --- theme ---------------------------------------------------
+  const THEME_KEY = "th-theme";
+  function resolveTheme(choice) {
+    if (choice === "light" || choice === "dark") return choice;
+    // system (default): follow the OS
+    try {
+      return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  }
+  function applyTheme(choice, persist) {
+    const resolved = resolveTheme(choice);
+    document.documentElement.setAttribute("data-theme", resolved);
+    const sel = $("theme-select");
+    if (sel) sel.value = choice === "light" || choice === "dark" ? choice : "system";
+    if (persist) {
+      try { localStorage.setItem(THEME_KEY, choice); } catch {}
+    }
+  }
+  function initTheme() {
+    let choice = "system";
+    try { choice = localStorage.getItem(THEME_KEY) || "system"; } catch {}
+    if (!["light", "dark", "system"].includes(choice)) choice = "system";
+    applyTheme(choice, false);
+    const sel = $("theme-select");
+    if (sel) {
+      sel.addEventListener("change", () => {
+        const v = sel.value;
+        applyTheme(v, true);
+        toast("Theme: " + v);
+      });
+    }
+    try {
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+        let c = "system";
+        try { c = localStorage.getItem(THEME_KEY) || "system"; } catch {}
+        if (c === "system") applyTheme("system", false);
+      });
+    } catch {}
   }
 
   function showView(name) {
@@ -2038,11 +2424,15 @@ html {
     } else if (drill === "memory") {
       showView("memory");
       if (typeof loadMemory === "function") loadMemory();
+      if (typeof loadReview === "function") loadReview();
     } else if (drill === "find") {
       showView("find");
     } else if (drill === "projects") {
       showView("projects");
       if (typeof loadProjects === "function") loadProjects();
+    } else if (drill === "operate") {
+      showView("operate");
+      loadIngestStatus();
     }
   });
 
@@ -2125,32 +2515,51 @@ html {
 
   function bindRows(container) {
     container.querySelectorAll(".row[data-id]").forEach((el) => {
-      el.addEventListener("click", () => openDetail(el.getAttribute("data-id")));
+      const open = () => openDetail(el.getAttribute("data-id"));
+      el.addEventListener("click", open);
+      if (el.tagName !== "BUTTON") {
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            open();
+          }
+        });
+      }
     });
   }
 
-  function emptyBox(title, body, hint) {
+  function emptyBox(title, body, hint, actionHtml) {
     return (
       '<div class="empty"><strong>' + escapeHtml(title) + "</strong>" +
       escapeHtml(body || "") +
       (hint ? '<div class="metric-sub" style="margin-top:8px">' + escapeHtml(hint) + "</div>" : "") +
+      (actionHtml ? '<div class="empty-action">' + actionHtml + "</div>" : "") +
       "</div>"
     );
+  }
+  /** Empty state with exactly one action button wired to a handler. */
+  function emptyAction(title, sentence, actionLabel, onAction, actionId) {
+    const id = actionId || "empty-action-btn";
+    const html = emptyBox(title, sentence, "", '<button type="button" class="btn btn-primary" id="' + id + '">' + escapeHtml(actionLabel) + "</button>");
+    return { html, id, onAction };
   }
 
   async function loadHomeList() {
     const el = $("home-list");
+    const quick = $("home-quickstart");
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     try {
       const data = await fetchJson(
         "/api/conversations?limit=8&offset=0&all=1&hide_empty=1&sort=recent"
       );
       const items = data.conversations || [];
+      if (quick) quick.hidden = items.length > 0;
       el.innerHTML = items.map((c) => rowHtml(c, "")).join("") ||
         emptyBox(
           "No sessions yet",
           "Nothing has been ingested yet.",
-          "Run throughline ingest to import transcripts, then reload."
+          "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>'
         );
       bindRows(el);
       announce(items.length ? items.length + " " + plural(items.length, "recent session", "recent sessions") : "No sessions yet");
@@ -2229,8 +2638,18 @@ html {
 
       if (useTable && tbody) {
         if (!items.length) {
+          const hasFilters = !!(state.hist.q || state.hist.tool || state.hist.project || state.hist.from || state.hist.to);
+          const action = hasFilters
+            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset">Reset filters</button>'
+            : '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>';
           tbody.innerHTML =
-            '<tr><td colspan="8"><div class="empty"><strong>No matches</strong>Nothing fits the current filters.<div class="metric-sub" style="margin-top:8px">Loosen filters, clear dates, or press Reset.</div></div></td></tr>';
+            '<tr><td colspan="8"><div class="empty"><strong>' +
+            (hasFilters ? "No matches" : "History is empty") + "</strong>" +
+            (hasFilters ? "Nothing fits the current filters." : "No conversations have been ingested yet.") +
+            '<div class="empty-action">' + action + "</div>" +
+            "</div></td></tr>";
+          const er = $("hist-empty-reset");
+          if (er) er.addEventListener("click", () => $("hist-reset") && $("hist-reset").click());
         } else {
           tbody.innerHTML = items.map((c) => {
             const dur =
@@ -2272,9 +2691,22 @@ html {
           }
         });
       } else if (el) {
-        el.innerHTML = items.map((c) => rowHtml(c, state.hist.q)).join("") ||
-          emptyBox("No matches", "Nothing fits the current filters.", "Loosen filters, clear dates, or press Reset.");
-        bindRows(el);
+        if (!items.length) {
+          const hasFilters2 = !!(state.hist.q || state.hist.tool || state.hist.project || state.hist.from || state.hist.to);
+          const action2 = hasFilters2
+            ? '<button type="button" class="btn btn-primary" id="hist-empty-reset-cards">Reset filters</button>'
+            : '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>';
+          el.innerHTML =
+            '<div class="empty"><strong>' +
+            (hasFilters2 ? "No matches" : "History is empty") + "</strong>" +
+            (hasFilters2 ? "Nothing fits the current filters." : "No conversations have been ingested yet.") +
+            '<div class="empty-action">' + action2 + "</div></div>";
+          const er2 = $("hist-empty-reset-cards");
+          if (er2) er2.addEventListener("click", () => $("hist-reset") && $("hist-reset").click());
+        } else {
+          el.innerHTML = items.map((c) => rowHtml(c, state.hist.q)).join("");
+          bindRows(el);
+        }
       }
 
       const from = data.total ? data.offset + 1 : 0;
@@ -2386,8 +2818,18 @@ html {
       const data = await fetchJson("/api/messages?" + p.toString());
       b.total = data.total || 0;
       const items = data.messages || [];
-      el.innerHTML = items.map(msgRowHtml).join("") ||
-        emptyBox("No messages", "Loosen filters - the corpus has 164k+ rows.");
+      if (!items.length) {
+        const hasFilters = !!(b.q || b.role || b.tool || b.conversation_id || b.tool_only);
+        el.innerHTML = hasFilters
+          ? emptyBox("No messages", "Loosen filters - the corpus has 164k+ rows.", "",
+              '<button type="button" class="btn btn-primary" id="browse-empty-reset">Reset filters</button>')
+          : emptyBox("Browse is empty", "No messages have been ingested yet.", "",
+              '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
+        const ber = $("browse-empty-reset");
+        if (ber) ber.addEventListener("click", () => $("browse-reset") && $("browse-reset").click());
+      } else {
+        el.innerHTML = items.map(msgRowHtml).join("");
+      }
       el.querySelectorAll("[data-msg]").forEach((row) => {
         row.addEventListener("click", () => openMessage(row.getAttribute("data-msg")));
       });
@@ -2527,8 +2969,11 @@ html {
       el.innerHTML = emptyBox(
         "Start typing",
         "Search every ingested message.",
-        "Hybrid blends keywords + meaning. Switch mode above for lexical-only or semantic-only."
+        "",
+        '<button type="button" class="btn btn-primary" id="find-empty-focus-2">Type a query</button>'
       );
+      const f2 = $("find-empty-focus-2");
+      if (f2) f2.addEventListener("click", () => $("find-q") && $("find-q").focus());
       return;
     }
     el.setAttribute("aria-busy", "true");
@@ -2547,29 +2992,56 @@ html {
       const hits = data.hits || [];
       if (!hits.length) {
         el.setAttribute("aria-busy", "false");
-        el.innerHTML = emptyBox(
-          "No matches",
-          "Nothing matched in " + m + " mode.",
-          "Try fewer keywords, a different mode, or clear filters on History."
-        );
+        const emptyCorpus = (await fetchJson("/api/status").catch(() => ({}))).conversations === 0;
+        el.innerHTML = emptyCorpus
+          ? emptyBox("Corpus is empty", "No conversations have been ingested yet.", "",
+              '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>')
+          : emptyBox(
+              "No matches",
+              "Nothing matched in " + m + " mode.",
+              "",
+              '<button type="button" class="btn btn-primary" id="find-empty-clear">Clear query</button>'
+            );
+        const fe = $("find-empty-clear");
+        if (fe) fe.addEventListener("click", () => {
+          $("find-q").value = "";
+          $("find-results").innerHTML = emptyBox("Search your corpus", "Type keywords or a question.");
+        });
         announce("No matches");
         return;
       }
       el.innerHTML = hits.map((h) => {
         const kind = h.kind || "lexical";
         const pct = Math.round((h.score || 0) * 100);
+        const pinData = encodeURIComponent(JSON.stringify({
+          snippet: h.snippet || "",
+          conversation_id: h.conversation_id,
+          project_name: h.project_name || "",
+        }));
         return (
-          '<button class="row" data-id="' + h.conversation_id + '">' +
+          '<div class="row" data-id="' + h.conversation_id + '" role="button" tabindex="0">' +
           '<div class="row-id">#' + h.conversation_id + "</div>" +
           '<div><span class="chip">' + escapeHtml(h.source_tool || "tool") + "</span>" +
           ' <span class="chip">' + escapeHtml(h.project_name || "-") + "</span>" +
           ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
           '<div class="row-main"><div class="row-title">' + escapeHtml(h.snippet || "") + "</div>" +
           '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
-          '<div class="row-meta">' + escapeHtml(String(h.session_id || "").slice(0, 8)) + "</div>" +
-          "</button>"
+          '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-pin="' + pinData + '" aria-label="Pin this hit as a note">Pin as note</button></div>' +
+          "</div>"
         );
       }).join("");
+      el.querySelectorAll(".pin-hit").forEach((b) => {
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          let payload = {};
+          try { payload = JSON.parse(decodeURIComponent(b.getAttribute("data-pin") || "{}")); } catch {}
+          openPinDialog({
+            content: (payload.snippet || "") + "\n\nSource: conversation #" + (payload.conversation_id || "?"),
+            project_name: payload.project_name || "",
+            category: "insight",
+          });
+        });
+      });
       bindRows(el);
     } catch (e) {
       el.setAttribute("aria-busy", "false");
@@ -2596,7 +3068,8 @@ html {
         "<p>" + escapeHtml(p.description || "No description") + "</p>" +
         '<div class="card-meta"><span>' + Number(p.conversations || 0).toLocaleString() +
         " " + plural(p.conversations || 0, "session", "sessions") + "</span><span>" + escapeHtml(p.status || "active") + "</span></div></button>"
-      ).join("") || emptyBox("No projects", "Projects appear after ingest.");
+      ).join("") || emptyBox("No projects", "Projects appear after ingest.", "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
       el.querySelectorAll("[data-project]").forEach((b) => {
         b.addEventListener("click", () => {
           state.hist.project = b.getAttribute("data-project");
@@ -2732,27 +3205,32 @@ html {
           rec.tools.push((d.source_tool || "unknown") + " \u00d7 " + d.count);
         });
       const rows = Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? 1 : -1)).slice(0, 60);
-      el.innerHTML = rows.map((r) =>
-        '<button type="button" class="row" data-day="' + escapeHtml(r.day) + '" style="cursor:pointer;text-align:left;width:100%">' +
-        '<div class="row-id">' + escapeHtml(r.day) + "</div>" +
-        '<div class="card-top" style="margin:0;gap:6px">' +
-        r.tools.slice(0, 4).map((t) => '<span class="chip">' + escapeHtml(t) + "</span>").join("") +
-        "</div>" +
-        '<div class="row-main"><div class="row-title">' + r.total + " " + plural(r.total, "conversation", "conversations") + "</div></div>" +
-        '<div class="row-meta">Open in History filter</div></button>'
-      ).join("");
-      // click a day row -> History filtered to that day
-      el.querySelectorAll(".row[data-day]").forEach((row) => {
-        row.addEventListener("click", () => {
-          const day = row.getAttribute("data-day");
-          showView("history");
-          if ($("hist-from")) $("hist-from").value = day;
-          if ($("hist-to")) $("hist-to").value = day;
-          if ($("hist-tool") && tool) $("hist-tool").value = tool;
-          if (typeof loadHistory === "function") loadHistory();
-          toast("History filtered to " + day + (tool ? " · " + tool : ""));
+      if (!rows.length) {
+        el.innerHTML = emptyBox("No activity yet", "Timeline fills in after ingest.", "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>');
+      } else {
+        el.innerHTML = rows.map((r) =>
+          '<button type="button" class="row" data-day="' + escapeHtml(r.day) + '" style="cursor:pointer;text-align:left;width:100%">' +
+          '<div class="row-id">' + escapeHtml(r.day) + "</div>" +
+          '<div class="card-top" style="margin:0;gap:6px">' +
+          r.tools.slice(0, 4).map((t) => '<span class="chip">' + escapeHtml(t) + "</span>").join("") +
+          "</div>" +
+          '<div class="row-main"><div class="row-title">' + r.total + " " + plural(r.total, "conversation", "conversations") + "</div></div>" +
+          '<div class="row-meta">Open in History filter</div></button>'
+        ).join("");
+        // click a day row -> History filtered to that day
+        el.querySelectorAll(".row[data-day]").forEach((row) => {
+          row.addEventListener("click", () => {
+            const day = row.getAttribute("data-day");
+            showView("history");
+            if ($("hist-from")) $("hist-from").value = day;
+            if ($("hist-to")) $("hist-to").value = day;
+            if ($("hist-tool") && tool) $("hist-tool").value = tool;
+            if (typeof loadHistory === "function") loadHistory();
+            toast("History filtered to " + day + (tool ? " · " + tool : ""));
+          });
         });
-      });
+      }
       renderCalendar();
     } catch (e) {
       el.innerHTML = emptyBox("Could not load timeline", e.message);
@@ -2819,18 +3297,22 @@ html {
     const btn = document.querySelector('#view-operate [data-job="' + job + '"]');
     const label = btn ? (btn.querySelector("strong") || btn).textContent.trim() : job;
     el.setAttribute("aria-busy", "true");
+    let restoreLabel = null;
     if (btn) {
       btn.disabled = true;
       btn.setAttribute("aria-busy", "true");
+      btn.classList.add("is-running");
+      restoreLabel = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Running …';
     }
     el.innerHTML =
-      '<div class="empty"><strong>Running ' + escapeHtml(label) + '...</strong>' +
+      '<div class="result-block" role="status"><strong>Running ' + escapeHtml(label) + '…</strong>' +
       'This job may take a moment. Results appear here when it finishes.</div>';
     announce("Running " + label);
     try {
       if (job === "stale") {
         const d = await fetchJson("/api/stale-digest");
-        let html = '<div class="prose"><strong>' + escapeHtml(d.banner || "") + "</strong><ul>";
+        let html = '<div class="result-block"><strong>' + escapeHtml(d.banner || "") + "</strong><ul>";
         (d.items || []).slice(0, 15).forEach((it) => {
           html += "<li>[" + escapeHtml(it.reason) + "] " + escapeHtml((it.content || "").slice(0, 90)) + "</li>";
         });
@@ -2841,13 +3323,13 @@ html {
       }
       if (job === "writeback") {
         const w = await fetchJson("/api/writeback");
-        el.innerHTML = '<div class="prose">Wrote ' + w.items_written + " " + plural(w.items_written, "item", "items") + " to " + escapeHtml(w.file) + "</div>";
+        el.innerHTML = '<div class="result-block"><strong>Writeback finished</strong>Wrote ' + w.items_written + " " + plural(w.items_written, "item", "items") + " to " + escapeHtml(w.file) + "</div>";
         toast("writeback done");
         return;
       }
       if (job === "answer-eval") {
         const r = await fetchJson("/api/answer-eval");
-        el.innerHTML = '<div class="prose"><strong>answer-eval</strong> passed=' + r.passed +
+        el.innerHTML = '<div class="result-block"><strong>Answer eval finished</strong> passed=' + r.passed +
           "/" + (r.passed + r.failed) +
           " hallucination_rate=" + Math.round((r.hallucination_rate || 0) * 100) + "%</div>";
         toast("answer eval done");
@@ -2856,7 +3338,7 @@ html {
       if (job === "audit") {
         const a = await fetchJson("/api/audit");
         let html =
-          '<div class="prose"><strong>audit (' + a.since_days + 'd)</strong> ' +
+          '<div class="result-block"><strong>Audit finished</strong> ' +
           'mcp_writes=' + a.mcp_writes +
           ' reflections=' + a.reflections +
           ' forgotten=' + a.forgotten +
@@ -2873,19 +3355,22 @@ html {
       }
       const r = await fetchJson("/api/operate?job=" + encodeURIComponent(job));
       el.innerHTML =
-        '<div class="empty"><strong>' + escapeHtml(label) + ' finished</strong>' +
+        '<div class="result-block"><strong>' + escapeHtml(label) + ' finished</strong>' +
         escapeHtml(r.message || "done") + '</div>';
       loadStatus();
       toast(label + " finished");
       announce(label + " finished");
     } catch (e) {
-      el.innerHTML = emptyBox(label + " failed", e.message || "The job did not complete.");
+      el.innerHTML = '<div class="result-block is-error"><strong>' + escapeHtml(label) + " failed</strong>" +
+        escapeHtml(e.message || "The job did not complete.") + "</div>";
       announce(label + " failed");
     } finally {
       el.setAttribute("aria-busy", "false");
       if (btn) {
         btn.disabled = false;
         btn.removeAttribute("aria-busy");
+        btn.classList.remove("is-running");
+        if (restoreLabel != null) btn.innerHTML = restoreLabel;
       }
     }
   }
@@ -2913,6 +3398,54 @@ html {
     }
   }
 
+  /** Render the handoff brief as Markdown for clipboard / download. */
+  function handoffMarkdown(b) {
+    const lines = [];
+    lines.push("# Throughline handoff");
+    if (b.project) lines.push("Project: " + b.project);
+    lines.push("Generated: " + (b.generated_at || new Date().toISOString()));
+    lines.push("");
+    lines.push("## Headline");
+    lines.push(b.headline || "Ready to continue");
+    lines.push("");
+    if ((b.recent_sessions || []).length) {
+      lines.push("## Recent sessions");
+      b.recent_sessions.forEach((s) => {
+        lines.push("- #" + s.id + " " + (s.summary || s.first_user || "(untitled)") + " — " + (s.source_tool || "tool") + " · " + (s.message_count || 0) + " msgs");
+      });
+      lines.push("");
+    }
+    if ((b.decisions || []).length) {
+      lines.push("## Decisions");
+      b.decisions.forEach((d) => {
+        lines.push("- [" + (d.category || "decision") + "] " + (d.content || ""));
+      });
+      lines.push("");
+    }
+    if ((b.open_questions || []).length) {
+      lines.push("## Open questions");
+      b.open_questions.forEach((q) => lines.push("- " + q));
+      lines.push("");
+    }
+    if ((b.stale_memory || []).length) {
+      lines.push("## Stale memory");
+      b.stale_memory.forEach((s) => lines.push("- " + s));
+      lines.push("");
+    }
+    if (b.stats) {
+      lines.push("## Stats");
+      lines.push("- conversations: " + (b.stats.conversations || 0));
+      lines.push("- messages: " + (b.stats.messages || 0));
+      lines.push("- memory chunks: " + (b.stats.memory_chunks || 0));
+    }
+    return lines.join("\n") + "\n";
+  }
+  function handoffFilename(b) {
+    const proj = (b.project || "all").replace(/[^\w.-]+/g, "-");
+    const day = new Date().toISOString().slice(0, 10);
+    return "handoff-" + proj + "-" + day + ".md";
+  }
+  let lastHandoff = null;
   async function loadHandoff() {
     const el = $("handoff-brief");
     const extra = $("handoff-extra");
@@ -2920,6 +3453,7 @@ html {
     el.setAttribute("aria-busy", "true");
     try {
       const b = await fetchJson("/api/handoff");
+      lastHandoff = b;
       const sessions = (b.recent_sessions || []).slice(0, 4);
       let html =
         '<div class="empty" style="border-style:solid;padding:20px">' +
@@ -2928,7 +3462,9 @@ html {
       if (!sessions.length) {
         html += emptyBox(
           "No recent sessions",
-          "Ingest transcripts, then handoff will surface resume context."
+          "Ingest transcripts, then handoff will surface resume context.",
+          "",
+          '<button type="button" class="btn btn-primary" data-drill="operate">Run ingest</button>'
         );
       }
       sessions.forEach((s) => {
@@ -2987,10 +3523,49 @@ html {
     }
   }
   // --- command palette -----------------------------------------
+  (function wireHandoffActions() {
+    const copyBtn = $("handoff-copy");
+    const dlBtn = $("handoff-download");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        if (!lastHandoff) {
+          toast("Handoff not loaded yet");
+          return;
+        }
+        const text = handoffMarkdown(lastHandoff);
+        try {
+          await navigator.clipboard.writeText(text);
+          toast("Handoff copied (" + text.length + " chars)");
+        } catch {
+          toast("Clipboard unavailable");
+        }
+      });
+    }
+    if (dlBtn) {
+      dlBtn.addEventListener("click", () => {
+        if (!lastHandoff) {
+          toast("Handoff not loaded yet");
+          return;
+        }
+        const text = handoffMarkdown(lastHandoff);
+        const name = handoffFilename(lastHandoff);
+        const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        toast("Downloaded " + name);
+      });
+    }
+  })();
   const commands = [
     { kind: "Go", label: "Home", hint: "dashboard", run: () => { showView("home"); loadHomeList(); loadStatus(); loadActivity(); } },
     { kind: "Go", label: "History", hint: "full corpus", run: () => { showView("history"); loadHistory(); loadProjectsFilter(); } },
-    { kind: "Go", label: "Agent Memory", hint: "durable agent memory", run: () => { showView("memory"); loadMemory(); } },
+    { kind: "Go", label: "Agent Memory", hint: "durable agent memory", run: () => { showView("memory"); loadMemory(); loadReview(); } },
     { kind: "Action", label: "Export sessions CSV", hint: "current filters", run: () => {
       showView("history");
       loadHistory();
@@ -3238,7 +3813,7 @@ html {
         if (v === "home") { loadHomeList(); loadStatus(); loadActivity(); }
         if (v === "history") { loadHistory(); loadProjectsFilter(); }
         if (v === "browse") { loadBrowse(); loadToolFilter(); }
-        if (v === "memory") loadMemory();
+        if (v === "memory") { loadMemory(); loadReview(); }
         if (v === "find") $("find-q").focus();
         if (v === "projects") loadProjects();
         if (v === "timeline") loadTimeline();
@@ -3263,7 +3838,7 @@ html {
       if (v === "home") { loadHomeList(); loadStatus(); loadActivity(); }
       if (v === "history") { loadHistory(); loadProjectsFilter(); }
       if (v === "browse") { loadBrowse(); loadToolFilter(); }
-      if (v === "memory") loadMemory();
+      if (v === "memory") { loadMemory(); loadReview(); }
       if (v === "find") $("find-q").focus();
       if (v === "projects") loadProjects();
       if (v === "timeline") loadTimeline();
@@ -3490,7 +4065,10 @@ html {
               '<p class="mem-full" hidden style="margin:8px 0 0;white-space:pre-wrap">' + full + "</p>") +
           '<div class="card-meta"><span>' + (same ? "Memory" : "Click to expand full memory") + "</span></div></button>"
         );
-      }).join("") || emptyBox("No memory yet", "Ingest agent memory to pull durable notes.");
+      }).join("") || emptyBox("No memory yet", "Ingest agent memory to pull durable notes.", "",
+          '<button type="button" class="btn btn-primary" id="memory-empty-ingest">Run ingest</button>');
+      const mei = $("memory-empty-ingest");
+      if (mei) mei.addEventListener("click", () => $("memory-ingest") && $("memory-ingest").click());
       el.querySelectorAll(".mem-card").forEach((btn) => {
         btn.addEventListener("click", () => {
           const open = btn.getAttribute("aria-expanded") === "true";
@@ -3560,6 +4138,226 @@ html {
         }
       });
     }
+  })();
+
+  // --- pin as note ---------------------------------------------
+  let pinReturnFocus = null;
+  function openPinDialog(opts) {
+    const dlg = $("pin-dialog");
+    if (!dlg) return;
+    pinReturnFocus = document.activeElement;
+    $("pin-category").value = opts.category || "insight";
+    $("pin-content").value = opts.content || "";
+    dlg.hidden = false;
+    dlg.classList.add("open");
+    $("pin-content").focus();
+  }
+  function closePinDialog() {
+    const dlg = $("pin-dialog");
+    if (!dlg) return;
+    dlg.classList.remove("open");
+    dlg.hidden = true;
+    if (pinReturnFocus && typeof pinReturnFocus.focus === "function") {
+      try { pinReturnFocus.focus(); } catch {}
+    }
+    pinReturnFocus = null;
+  }
+  (function wirePinDialog() {
+    const dlg = $("pin-dialog");
+    if (!dlg) return;
+    $("pin-cancel").addEventListener("click", closePinDialog);
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg) closePinDialog();
+    });
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePinDialog();
+      }
+    });
+    $("pin-save").addEventListener("click", async () => {
+      const content = $("pin-content").value;
+      const category = $("pin-category").value;
+      const save = $("pin-save");
+      save.disabled = true;
+      save.innerHTML = '<span class="spinner" aria-hidden="true"></span>Running …';
+      try {
+        const r = await postJson("/api/memory", { content, category });
+        closePinDialog();
+        const link = toastWithLink("Pinned note #" + r.id, "#", "Open Agent Memory");
+        link.addEventListener("click", () => {
+          showView("memory");
+          setMemoryTab("notes");
+          loadMemory();
+        });
+        loadStatus();
+      } catch (e) {
+        toast("Pin failed: " + e.message);
+      } finally {
+        save.disabled = false;
+        save.textContent = "Save note";
+      }
+    });
+  })();
+  const msgPin = $("msg-pin");
+  if (msgPin) {
+    msgPin.addEventListener("click", () => {
+      const m = state.msg;
+      if (!m) return;
+      openPinDialog({
+        content: (m.content || "").slice(0, 2000) + "\n\nSource: conversation #" + m.conversation_id,
+        category: "insight",
+      });
+    });
+  }
+
+  // --- memory review (stale candidates, keep/forget + undo) ----
+  function setMemoryTab(tab) {
+    const notes = $("memory-notes-panel");
+    const review = $("memory-review-panel");
+    const notesBtn = $("memory-tab-notes");
+    const reviewBtn = $("memory-tab-review");
+    const isReview = tab === "review";
+    if (notes) notes.hidden = isReview;
+    if (review) review.hidden = !isReview;
+    if (notesBtn) {
+      notesBtn.setAttribute("aria-selected", isReview ? "false" : "true");
+      notesBtn.setAttribute("aria-pressed", isReview ? "false" : "true");
+      notesBtn.classList.toggle("active", !isReview);
+    }
+    if (reviewBtn) {
+      reviewBtn.setAttribute("aria-selected", isReview ? "true" : "false");
+      reviewBtn.setAttribute("aria-pressed", isReview ? "true" : "false");
+      reviewBtn.classList.toggle("active", isReview);
+    }
+  }
+  async function loadReview() {
+    const el = $("review-list");
+    const summary = $("review-summary");
+    if (!el) return;
+    el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+    try {
+      const d = await fetchJson("/api/stale-digest");
+      const items = d.items || [];
+      const n = items.length;
+      const countEl = $("review-count");
+      if (countEl) countEl.textContent = n + " " + plural(n, "candidate", "candidates");
+      if (summary) {
+        summary.textContent = n
+          ? n + " " + plural(n, "candidate", "candidates") + " · " + (d.banner || "")
+          : (d.banner || "Nothing to review");
+      }
+      if (!n) {
+        el.innerHTML = emptyBox("Review is clear", "No stale memory candidates right now.", "",
+          '<button type="button" class="btn btn-primary" id="review-empty-refresh">Refresh</button>');
+        const rf = $("review-empty-refresh");
+        if (rf) rf.addEventListener("click", loadReview);
+        return;
+      }
+      el.innerHTML = items.map((it) =>
+        '<article class="review-card" data-review-id="' + it.id + '">' +
+        '<div class="card-top" style="margin:0 0 8px">' +
+        '<span class="chip">' + escapeHtml(it.reason || "stale") + "</span>" +
+        '<span class="chip">' + escapeHtml(it.category || "insight") + "</span>" +
+        (it.project_name ? '<span class="chip">' + escapeHtml(it.project_name) + "</span>" : "") +
+        '<span class="chip">#' + it.id + "</span>" +
+        "</div>" +
+        "<p style=\"margin:0\">" + escapeHtml((it.content || "").slice(0, 280)) + "</p>" +
+        '<div class="review-actions">' +
+        '<button type="button" class="btn btn-primary" data-review-keep="' + it.id + '">Keep</button>' +
+        '<button type="button" class="btn btn-danger" data-review-forget="' + it.id + '">Forget</button>' +
+        "</div></article>"
+      ).join("");
+      wireReviewCards(el);
+    } catch (e) {
+      el.innerHTML = emptyBox("Could not load review", e.message, "",
+        '<button type="button" class="btn btn-primary" id="review-empty-retry">Retry</button>');
+      const rt = $("review-empty-retry");
+      if (rt) rt.addEventListener("click", loadReview);
+    }
+  }
+  function wireReviewCards(root) {
+    root.querySelectorAll("[data-review-keep]").forEach((b) => {
+      b.addEventListener("click", async () => {
+        const id = Number(b.getAttribute("data-review-keep"));
+        b.disabled = true;
+        try {
+          await postJson("/api/memory/" + id + "/keep", {});
+          toast("Kept note #" + id);
+          loadReview();
+          loadMemory();
+        } catch (e) {
+          toast("Keep failed: " + e.message);
+          b.disabled = false;
+        }
+      });
+    });
+    root.querySelectorAll("[data-review-forget]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = Number(b.getAttribute("data-review-forget"));
+        const card = b.closest(".review-card");
+        if (!window.confirm("Forget note #" + id + "? This marks it as forgotten.")) return;
+        forgetWithUndo(id, card);
+      });
+    });
+  }
+  async function forgetWithUndo(id, card) {
+    try {
+      await postJson("/api/memory/" + id + "/forget", {});
+    } catch (e) {
+      toast("Forget failed: " + e.message);
+      return;
+    }
+    // Remove the card now; the undo bar restores it via keep.
+    if (card) card.remove();
+    let seconds = 10;
+    const bar = document.createElement("div");
+    bar.className = "undo-bar";
+    bar.setAttribute("role", "status");
+    bar.innerHTML = "Forgot note #" + id + " · ";
+    const undoBtn = document.createElement("button");
+    undoBtn.type = "button";
+    undoBtn.className = "btn btn-ghost";
+    undoBtn.textContent = "Undo";
+    const countdown = document.createElement("span");
+    countdown.textContent = "(" + seconds + "s)";
+    bar.appendChild(undoBtn);
+    bar.appendChild(countdown);
+    const list = $("review-list");
+    if (list) list.prepend(bar);
+    const timer = setInterval(() => {
+      seconds -= 1;
+      countdown.textContent = "(" + Math.max(0, seconds) + "s)";
+      if (seconds <= 0) {
+        clearInterval(timer);
+        bar.remove();
+        loadReview();
+      }
+    }, 1000);
+    undoBtn.addEventListener("click", async () => {
+      clearInterval(timer);
+      bar.remove();
+      try {
+        await postJson("/api/memory/" + id + "/keep", {});
+        toast("Restored note #" + id);
+        loadReview();
+        loadMemory();
+      } catch (e) {
+        toast("Undo failed: " + e.message);
+      }
+    });
+  }
+  (function wireMemoryTabs() {
+    const notesBtn = $("memory-tab-notes");
+    const reviewBtn = $("memory-tab-review");
+    if (notesBtn) notesBtn.addEventListener("click", () => {
+      setMemoryTab("notes");
+      loadMemory();
+    });
+    if (reviewBtn) reviewBtn.addEventListener("click", () => {
+      setMemoryTab("review");
+      loadReview();
+    });
   })();
 
   // Sortable table headers
@@ -3722,9 +4520,22 @@ html {
   $("ask-q").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); runAsk($("ask-q").value); }
   });
+  (function wireAskEmpty() {
+    const b = $("ask-empty-focus");
+    if (b) b.addEventListener("click", () => {
+      const q = $("ask-q");
+      if (q) q.focus();
+    });
+    const f = $("find-empty-focus");
+    if (f) f.addEventListener("click", () => {
+      const q = $("find-q");
+      if (q) q.focus();
+    });
+  })();
 
-  document.querySelectorAll("#view-operate [data-job]").forEach((b) => {
-    b.addEventListener("click", () => runJob(b.getAttribute("data-job")));
+  document.querySelector("#view-operate").addEventListener("click", (e) => {
+    const b = e.target && e.target.closest && e.target.closest("[data-job], [data-action]");
+    if (b) runJob(b.getAttribute("data-job") || b.getAttribute("data-action"));
   });
 
   // skip link reveal on focus
@@ -3775,6 +4586,7 @@ html {
   })();
 
   // boot
+  initTheme();
   loadHealth();
   loadStatus();
   loadActivity();

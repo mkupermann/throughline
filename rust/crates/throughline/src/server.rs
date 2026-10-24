@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -1001,6 +1001,133 @@ async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Re
     }
 }
 
+// ─── UI memory write path: pin / keep / forget ─────────────────────────────
+
+/// Categories the UI may assign. Matches the Agent Memory picklist and the
+/// extraction prompt (without `contact`, which the UI does not offer).
+pub const MEMORY_CATEGORIES: &[&str] = &[
+    "decision",
+    "preference",
+    "pattern",
+    "insight",
+    "error_solution",
+    "project_context",
+    "workflow",
+];
+
+/// Shared validation for `POST /api/memory`. Pure so unit tests can cover
+/// the 422 cases without a database.
+fn validate_memory_create(
+    content: &str,
+    category: &str,
+) -> std::result::Result<(), (StatusCode, &'static str, String)> {
+    if content.trim().is_empty() {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "content is required".into(),
+        ));
+    }
+    if !MEMORY_CATEGORIES.contains(&category) {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            format!("unknown category: {category}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Map an UPDATE row count to the keep/forget response. `rows == 0` is a
+/// missing id and becomes 404.
+fn memory_status_response(id: i64, rows: u64, status: &str) -> Response {
+    if rows == 0 {
+        api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "memory chunk not found",
+        )
+    } else {
+        Json(serde_json::json!({ "id": id, "status": status })).into_response()
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryCreate {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    category: String,
+    project_name: Option<String>,
+}
+
+async fn memory_create(State(state): State<AppState>, Json(body): Json<MemoryCreate>) -> Response {
+    if let Err((status, code, detail)) = validate_memory_create(&body.content, &body.category) {
+        return api_error(status, code, detail);
+    }
+    let content = body.content.trim().to_string();
+    let category = body.category.trim().to_string();
+    let project = body
+        .project_name
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    match with_db(&state, move |client| {
+        let row = client.query_one(
+            r#"
+            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status)
+            VALUES ('ui_pin', $1, $2, $3, 1.0, 'active')
+            RETURNING id
+            "#,
+            &[&content, &category, &project],
+        )?;
+        Ok::<i64, anyhow::Error>(row.get(0))
+    })
+    .await
+    {
+        Ok(id) => Json(serde_json::json!({ "id": id })).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn memory_forget(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+    match with_db(&state, move |client| {
+        Ok(client.execute(
+            "UPDATE memory_chunks SET status = 'forgotten', updated_at = now() WHERE id = $1",
+            &[&id],
+        )?)
+    })
+    .await
+    {
+        Ok(rows) => memory_status_response(id, rows, "forgotten"),
+        Err(resp) => resp,
+    }
+}
+
+async fn memory_keep(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+    match with_db(&state, move |client| {
+        // Confirm the note: restore to active (undo of forget) and stamp
+        // reviewed via updated_at (M2 column) plus a durable tag.
+        Ok(client.execute(
+            r#"
+            UPDATE memory_chunks
+            SET status = 'active',
+                updated_at = now(),
+                tags = CASE
+                    WHEN 'reviewed' = ANY(COALESCE(tags, '{}')) THEN tags
+                    ELSE array_append(COALESCE(tags, '{}'), 'reviewed')
+                END
+            WHERE id = $1
+            "#,
+            &[&id],
+        )?)
+    })
+    .await
+    {
+        Ok(rows) => memory_status_response(id, rows, "active"),
+        Err(resp) => resp,
+    }
+}
+
 async fn agent_memory_ingest(State(state): State<AppState>) -> Response {
     match with_db(&state, |client| crate::agent_memory::ingest_agent_memory(client)).await {
         Ok((files, chunks)) => Json(serde_json::json!({
@@ -1215,8 +1342,19 @@ async fn operate_handler(State(state): State<AppState>, Query(params): Query<Job
     }
 }
 
-async fn handoff_handler(State(state): State<AppState>, Query(params): Query<SearchParams>) -> Response {
-    let project = params.q.clone().filter(|s| !s.trim().is_empty());
+#[derive(serde::Deserialize)]
+struct HandoffParams {
+    /// Preferred filter key (spec: `GET /api/handoff?project=X`).
+    project: Option<String>,
+    /// Back-compat alias used by older callers.
+    q: Option<String>,
+}
+
+async fn handoff_handler(State(state): State<AppState>, Query(params): Query<HandoffParams>) -> Response {
+    let project = params
+        .project
+        .or(params.q)
+        .filter(|s| !s.trim().is_empty());
     match with_db(&state, move |client| {
         crate::handoff::build_handoff(client, project.as_deref(), 8)
     })
@@ -1338,8 +1476,10 @@ pub fn app(state: AppState) -> Router {
         .route("/api/messages", get(messages_handler))
         .route("/api/messages/{id}", get(message_detail))
         .route("/api/tools", get(tools_handler))
-        .route("/api/memory", get(memory_handler))
+        .route("/api/memory", get(memory_handler).post(memory_create))
         .route("/api/memory/{id}", get(memory_detail))
+        .route("/api/memory/{id}/forget", post(memory_forget))
+        .route("/api/memory/{id}/keep", post(memory_keep))
         .route("/api/mimo-memory/ingest", get(agent_memory_ingest))
         .route("/api/agent-memory/ingest", get(agent_memory_ingest))
         .route("/api/conversations", get(recent))
@@ -1373,4 +1513,62 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
     eprintln!("Throughline GUI on http://{addr}");
     axum::serve(listener, app(state)).await.context("serve")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_create_unknown_category_is_422() {
+        let err = validate_memory_create("durable note", "not-a-category")
+            .expect_err("unknown category must be rejected");
+        assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.1, "validation_error");
+        assert!(err.2.contains("not-a-category"), "{}", err.2);
+    }
+
+    #[test]
+    fn memory_create_missing_content_is_422() {
+        for empty in ["", "   ", "\n\t"] {
+            let err = validate_memory_create(empty, "insight")
+                .expect_err("empty content must be rejected");
+            assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(err.1, "validation_error");
+            assert!(err.2.contains("content"), "{}", err.2);
+        }
+    }
+
+    #[test]
+    fn memory_create_accepts_known_categories() {
+        for cat in MEMORY_CATEGORIES {
+            validate_memory_create("a durable note body", cat)
+                .unwrap_or_else(|e| panic!("{cat} should be valid, got {e:?}"));
+        }
+    }
+
+    #[test]
+    fn forget_unknown_id_is_404() {
+        // rows == 0 is what an UPDATE on an unknown id returns.
+        let resp = memory_status_response(999_999, 0, "forgotten");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn keep_unknown_id_is_404() {
+        let resp = memory_status_response(999_999, 0, "active");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn keep_known_id_returns_active() {
+        let resp = memory_status_response(7, 1, "active");
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn forget_known_id_returns_forgotten() {
+        let resp = memory_status_response(7, 1, "forgotten");
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
 }
