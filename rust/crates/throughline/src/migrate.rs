@@ -171,6 +171,14 @@ const MSG_TOKEN_BIGINT: &str = r#"
 ALTER TABLE messages ALTER COLUMN token_count TYPE BIGINT;
 "#;
 
+/// `memory_chunks.updated_at` is written by MCP `forget` (status change to
+/// 'forgotten'). Fresh core-only installs created by 001 have no such column,
+/// so `forget` failed against a new schema. Idempotent: `IF NOT EXISTS` keeps
+/// a second run a no-op even if the ledger entry is missing.
+const MEMORY_CHUNKS_UPDATED_AT: &str = r#"
+ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -179,6 +187,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("003_token_bigint.sql", TOKEN_BIGINT),
     ("004_drop_messages_uuid_key.sql", DROP_UUID_ONLY_INDEX),
     ("005_message_token_bigint.sql", MSG_TOKEN_BIGINT),
+    ("006_memory_chunks_updated_at.sql", MEMORY_CHUNKS_UPDATED_AT),
 ];
 
 /// `migration_name` matches the Python package's `applied_migrations` table

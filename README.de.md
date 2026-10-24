@@ -233,7 +233,7 @@ Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkei
 
 Starte `throughline mcp` aus einem kompatiblen Client über stdio, mit den Datenbank-Variablen in dessen Prozess-Umgebung. Das Container-Pendant ist `docker compose run -i --rm mcp`.
 
-Der Rust-Server bietet `search`, `list_projects`, `stats`, `write` und `forget` an. **Bekannte Lücke bei frischem Schema:** `forget` schreibt `memory_chunks.updated_at`, eine Spalte, die die aktuelle Rust-Migration nicht anlegt. Verlass Dich nicht auf diese Aktion, bis Schema und Implementierung zusammenpassen. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
+Der Rust-Server bietet `search`, `list_projects`, `stats`, `write` und `forget` an. Alle fünf Aktionen laufen gegen ein frisches Schema. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
 
 ### Optionale Modelle
 

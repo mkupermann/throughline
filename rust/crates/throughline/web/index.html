@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Throughline — Memory</title>
+<title>Throughline - Memory</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <style>
 :root {
@@ -200,7 +200,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   font-size: 13px;
   line-height: 1;
   opacity: 0.75;
-  /* Force text presentation — avoid emoji glyph substitution in primary nav */
+  /* Force text presentation - avoid emoji glyph substitution in primary nav */
   font-family: "Segoe UI Symbol", "Segoe UI", system-ui, sans-serif;
   font-style: normal;
 }
@@ -717,7 +717,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   font-size: var(--text-sm);
 }
 
-/* Sessions data table — compact density */
+/* Sessions data table - compact density */
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--border-subtle);
@@ -1226,7 +1226,7 @@ table.sessions tr.active td { background: var(--accent-soft); }
   font-size: var(--text-sm);
 }
 
-/* Skip link — visible on keyboard focus */
+/* Skip link - visible on keyboard focus */
 #skip-link {
   position: absolute;
   left: -9999px;
@@ -1400,7 +1400,7 @@ html {
       <button type="button" data-view="memory"><span class="icon">✦</span>Agent Memory</button>
       <button type="button" data-view="find"><span class="icon">⌕</span>Find</button>
       <button type="button" data-view="projects"><span class="icon">▣</span>Projects</button>
-      <button type="button" data-view="timeline"><span class="icon">⌁</span>Timeline</button>
+      <button type="button" data-view="timeline"><span class="icon">⌁</span>Timeline</button>
       <button type="button" data-view="ask"><span class="icon">✦</span>Ask</button>
       <button type="button" data-view="operate"><span class="icon">⚙</span>Operate</button>
     </nav>
@@ -1417,7 +1417,7 @@ html {
     <div class="main-inner">
       <div class="topbar">
         <button class="search-pill" id="open-palette" type="button" aria-label="Open command palette">
-          <span>Search everything — sessions, messages, commands…</span>
+          <span>Search everything - sessions, messages, commands…</span>
           <kbd>⌁˜K</kbd>
         </button>
         <button class="btn btn-ghost" id="btn-hide-empty" type="button">Hide empty</button>
@@ -1430,26 +1430,26 @@ html {
         <div class="page-header">
           <div>
             <h1>Your work, remembered</h1>
-            <p>Throughline · Agent Memory — every coding session, searchable, local-first.</p>
+            <p>Throughline · Agent Memory - every coding session, searchable, local-first.</p>
           </div>
           <div class="meta" id="home-range"></div>
         </div>
 
         <div class="metrics" id="metrics">
           <button type="button" class="metric metric-click" data-drill="history" aria-label="Open conversation history">
-            <div class="metric-label">Conversations</div><div class="metric-value" id="m-conv">—</div><div class="metric-sub">ingested sessions</div>
+            <div class="metric-label">Conversations</div><div class="metric-value" id="m-conv">-</div><div class="metric-sub">ingested sessions</div>
           </button>
           <button type="button" class="metric metric-click" data-drill="history" aria-label="Open full corpus history">
-            <div class="metric-label">Messages</div><div class="metric-value" id="m-msg">—</div><div class="metric-sub">across all tools</div>
+            <div class="metric-label">Messages</div><div class="metric-value" id="m-msg">-</div><div class="metric-sub">across all tools</div>
           </button>
           <button type="button" class="metric metric-click" data-drill="memory" aria-label="Open agent memory">
-            <div class="metric-label">Memory</div><div class="metric-value" id="m-chunk">—</div><div class="metric-sub">extracted chunks</div>
+            <div class="metric-label">Memory</div><div class="metric-value" id="m-chunk">-</div><div class="metric-sub">extracted chunks</div>
           </button>
           <button type="button" class="metric metric-click" data-drill="find" aria-label="Open semantic find">
-            <div class="metric-label">Vectors</div><div class="metric-value" id="m-emb">—</div><div class="metric-sub">semantic index</div>
+            <div class="metric-label">Vectors</div><div class="metric-value" id="m-emb">-</div><div class="metric-sub">semantic index</div>
           </button>
           <button type="button" class="metric metric-click" data-drill="projects" aria-label="Open projects">
-            <div class="metric-label">Projects</div><div class="metric-value" id="m-proj">—</div><div class="metric-sub">workspaces seen</div>
+            <div class="metric-label">Projects</div><div class="metric-value" id="m-proj">-</div><div class="metric-sub">workspaces seen</div>
           </button>
         </div>
 
@@ -1490,7 +1490,7 @@ html {
         <div class="page-header">
           <div>
             <h1>History</h1>
-            <p>Every ingested conversation — filter, sort, page, open.</p>
+            <p>Every ingested conversation - filter, sort, page, open.</p>
           </div>
           <div class="meta" id="hist-count"></div>
         </div>
@@ -1540,13 +1540,13 @@ html {
           <table class="sessions" id="hist-table">
             <thead>
               <tr>
-                <th data-sort="id">ID <span class="sort-caret">â†•</span></th>
-                <th data-sort="started_at">Started <span class="sort-caret">â†•</span></th>
-                <th data-sort="ended_at">Ended <span class="sort-caret">â†•</span></th>
-                <th data-sort="project">Project <span class="sort-caret">â†•</span></th>
-                <th data-sort="tool">Tool <span class="sort-caret">â†•</span></th>
-                <th data-sort="model">Model <span class="sort-caret">â†•</span></th>
-                <th data-sort="message_count" class="td-num">Msgs <span class="sort-caret">â†•</span></th>
+                <th data-sort="id">ID <span class="sort-caret">↕</span></th>
+                <th data-sort="started_at">Started <span class="sort-caret">↕</span></th>
+                <th data-sort="ended_at">Ended <span class="sort-caret">↕</span></th>
+                <th data-sort="project">Project <span class="sort-caret">↕</span></th>
+                <th data-sort="tool">Tool <span class="sort-caret">↕</span></th>
+                <th data-sort="model">Model <span class="sort-caret">↕</span></th>
+                <th data-sort="message_count" class="td-num">Msgs <span class="sort-caret">↕</span></th>
                 <th>Preview</th>
               </tr>
             </thead>
@@ -1556,8 +1556,8 @@ html {
 
         <div class="history list-anim" id="hist-list" hidden></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="hist-prev" type="button">â† Prev</button>
-          <div id="hist-page-info">—</div>
+          <button class="btn btn-ghost" id="hist-prev" type="button">← Prev</button>
+          <div id="hist-page-info">-</div>
           <button class="btn btn-ghost" id="hist-next" type="button">Next →</button>
         </div>
       </section>
@@ -1568,7 +1568,7 @@ html {
         <div class="page-header">
           <div>
             <h1>Browse</h1>
-            <p>Every message and tool call in the store — searchable, filterable, paginated.</p>
+            <p>Every message and tool call in the store - searchable, filterable, paginated.</p>
           </div>
           <div class="meta" id="browse-count"></div>
         </div>
@@ -1603,8 +1603,8 @@ html {
 
         <div class="history list-anim" id="browse-list"></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="browse-prev" type="button">â† Prev</button>
-          <div id="browse-page-info">—</div>
+          <button class="btn btn-ghost" id="browse-prev" type="button">← Prev</button>
+          <div id="browse-page-info">-</div>
           <button class="btn btn-ghost" id="browse-next" type="button">Next →</button>
         </div>
       </section>
@@ -1613,7 +1613,7 @@ html {
       <section id="view-msg" hidden>
         <div class="eyebrow">Message</div>
         <div class="detail-hero">
-          <button class="btn btn-ghost" id="msg-back" type="button">â† Back</button>
+          <button class="btn btn-ghost" id="msg-back" type="button">← Back</button>
           <h1 id="msg-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em">Message</h1>
           <button class="btn btn-ghost" id="msg-copy" type="button">Copy JSON</button>
           <button class="btn btn-ghost" id="msg-open-conv" type="button">Open session</button>
@@ -1639,7 +1639,7 @@ html {
         <div class="page-header">
           <div>
             <h1>Agent Memory</h1>
-            <p>Durable agent memory from agent tools — decisions, rules, patterns, project context.</p>
+            <p>Durable agent memory from agent tools - decisions, rules, patterns, project context.</p>
           </div>
           <div class="meta" id="memory-count"></div>
         </div>
@@ -1666,8 +1666,8 @@ html {
         </div>
         <div class="history list-anim" id="memory-list"></div>
         <div class="pager">
-          <button class="btn btn-ghost" id="memory-prev" type="button">â† Prev</button>
-          <div id="memory-page-info">—</div>
+          <button class="btn btn-ghost" id="memory-prev" type="button">← Prev</button>
+          <div id="memory-page-info">-</div>
           <button class="btn btn-ghost" id="memory-next" type="button">Next →</button>
         </div>
       </section>
@@ -1685,7 +1685,7 @@ html {
         <div class="toolbar">
           <label class="field" style="flex:1">
             <span class="field-label">Query</span>
-            <input id="find-q" type="search" placeholder="Meaning or keywords — e.g. why we chose Postgres" />
+            <input id="find-q" type="search" placeholder="Meaning or keywords - e.g. why we chose Postgres" />
           </label>
           <label class="field">
             <span class="field-label">Mode</span>
@@ -1813,7 +1813,7 @@ html {
       <section id="view-detail" hidden>
         <div class="eyebrow">Session</div>
         <div class="detail-hero">
-          <button class="btn btn-ghost" id="back-btn" type="button">â† Back</button>
+          <button class="btn btn-ghost" id="back-btn" type="button">← Back</button>
           <h1 id="detail-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em">Conversation</h1>
           <button class="btn btn-ghost" id="detail-copy" type="button">Copy summary</button>
         </div>
@@ -1836,7 +1836,7 @@ html {
     <input id="palette-input" type="text" placeholder="Type a command, session, project, or query…" autocomplete="off"  aria-label="Command palette search" aria-controls="palette-list" />
     <div class="palette-list" id="palette-list"></div>
     <div class="palette-foot">
-      <span>↑↓ navigate</span><span>â†µ open</span><span>esc close</span>
+      <span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>
     </div>
   </div>
 </div>
@@ -1846,7 +1846,7 @@ html {
 (function () {
   "use strict";
 
-  // â”€â”€â”€ utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- utilities -----------------------------------------------
   const $ = (id) => document.getElementById(id);
   const views = {
     home: $("view-home"),
@@ -1891,15 +1891,19 @@ html {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-  function fmtDate(iso) {
-    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  const UI_LOCALE = "en-GB";
+  function fmtDateTime(iso) {
+    try { return new Date(iso).toLocaleString(UI_LOCALE); } catch { return iso; }
   }
-  function fmtShort(iso) {
+  function fmtDate(iso, opts) {
     try {
-      return new Date(iso).toLocaleDateString(undefined, {
+      return new Date(iso).toLocaleDateString(UI_LOCALE, opts || {
         month: "short", day: "numeric",
       });
     } catch { return iso; }
+  }
+  function plural(n, one, many) {
+    return Number(n) === 1 ? one : many;
   }
   function toast(msg) {
     const el = $("toast");
@@ -1931,7 +1935,7 @@ html {
       else b.removeAttribute("aria-current");
     });
     $("main").scrollTop = 0;
-    // Move keyboard/SR focus into the new view (no trap — main stays free)
+    // Move keyboard/SR focus into the new view (no trap - main stays free)
     const view = views[name];
     const heading = view && view.querySelector("h1");
     if (heading) {
@@ -1950,7 +1954,7 @@ html {
     setTimeout(() => { el.textContent = msg; }, 30);
   }
 
-  // â”€â”€â”€ chrome / health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- chrome / health -----------------------------------------
   async function loadHealth() {
     try {
       const h = await fetchJson("/api/health");
@@ -1972,7 +1976,7 @@ html {
       $("m-proj").textContent = (s.projects ?? 0).toLocaleString();
       if (s.first_started_at && s.last_started_at) {
         $("home-range").textContent =
-          "History range " + fmtShort(s.first_started_at) + " → " + fmtShort(s.last_started_at);
+          "History range " + fmtDate(s.first_started_at) + " → " + fmtDate(s.last_started_at);
       }
       const legend = $("tool-legend");
       legend.innerHTML = (s.tools || []).map((t) =>
@@ -2060,11 +2064,14 @@ html {
         series.push({ day: key, count: byDay.get(key) || 0 });
       }
       const max = Math.max(1, ...series.map((s) => s.count));
-      const barHtml = series.map((s) =>
-        '<button type="button" class="chart-bar chart-bar-click" data-day="' + s.day +
-        '" title="' + s.day + " · " + s.count + ' conversations" aria-label="' + s.day + ": " + s.count +
-        ' conversations" style="height:' + Math.max(3, Math.round((s.count / max) * 100)) + '%"></button>'
-      ).join("");
+      const barHtml = series.map((s) => {
+        const convLabel = s.count + " " + plural(s.count, "conversation", "conversations");
+        return (
+          '<button type="button" class="chart-bar chart-bar-click" data-day="' + s.day +
+          '" title="' + s.day + " · " + convLabel + '" aria-label="' + s.day + ": " + convLabel +
+          '" style="height:' + Math.max(3, Math.round((s.count / max) * 100)) + '%"></button>'
+        );
+      }).join("");
       $("activity-chart").innerHTML = barHtml;
       $("timeline-chart").innerHTML = barHtml;
       const wireBars = (root) => {
@@ -2090,7 +2097,7 @@ html {
     } catch {}
   }
 
-  // â”€â”€â”€ history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- history -------------------------------------------------
   function rowHtml(c, query) {
     const title = c.preview || "Untitled session";
     const mark = (text) => {
@@ -2109,7 +2116,7 @@ html {
       (c.project_name ? '<span class="chip">' + escapeHtml(c.project_name) + "</span>" : "") +
       "</div>" +
       '<div class="row-main"><div class="row-title">' + mark(title) + "</div>" +
-      '<div class="row-sub">' + fmtDate(c.started_at) + " · " + c.message_count + " msgs · " +
+      '<div class="row-sub">' + fmtDateTime(c.started_at) + " · " + c.message_count + " " + plural(c.message_count, "msg", "msgs") + " · " +
       escapeHtml(String(c.session_id || "").slice(0, 8)) + "…</div></div>" +
       '<div class="row-meta">' + (c.model ? escapeHtml(c.model) : "") + "</div>" +
       "</button>"
@@ -2146,7 +2153,7 @@ html {
           "Run throughline ingest to import transcripts, then reload."
         );
       bindRows(el);
-      announce(items.length ? items.length + " recent sessions" : "No sessions yet");
+      announce(items.length ? items.length + " " + plural(items.length, "recent session", "recent sessions") : "No sessions yet");
     } catch (e) {
       el.innerHTML = emptyBox(
         "Could not load sessions",
@@ -2233,17 +2240,17 @@ html {
             return (
               '<tr data-id="' + c.id + '">' +
               '<td class="td-id">#' + c.id + "</td>" +
-              '<td class="td-date">' + escapeHtml(fmtDate(c.started_at)) + "</td>" +
+              '<td class="td-date">' + escapeHtml(fmtDateTime(c.started_at)) + "</td>" +
               '<td class="td-date">' +
-              (c.ended_at ? escapeHtml(fmtDate(c.ended_at)) : "—") +
+              (c.ended_at ? escapeHtml(fmtDateTime(c.ended_at)) : "-") +
               (dur != null ? ' <span style="opacity:.55">' + dur + "s</span>" : "") +
               "</td>" +
-              '<td><span class="td-chip">' + escapeHtml(c.project_name || "—") + "</span></td>" +
-              '<td><span class="td-chip">' + escapeHtml(c.source_tool || "—") + "</span></td>" +
-              '<td><span class="td-chip">' + escapeHtml(c.model || "—") + "</span></td>" +
+              '<td><span class="td-chip" title="' + escapeHtml(c.project_name || "-") + '">' + escapeHtml(c.project_name || "-") + "</span></td>" +
+              '<td><span class="td-chip" title="' + escapeHtml(c.source_tool || "-") + '">' + escapeHtml(c.source_tool || "-") + "</span></td>" +
+              '<td><span class="td-chip" title="' + escapeHtml(c.model || "-") + '">' + escapeHtml(c.model || "-") + "</span></td>" +
               '<td class="td-num">' + Number(c.message_count || 0).toLocaleString() + "</td>" +
               '<td class="td-preview" title="' + escapeHtml(c.preview || "") + '">' +
-              escapeHtml(c.preview || "—") +
+              escapeHtml(c.preview || "-") +
               "</td></tr>"
             );
           }).join("");
@@ -2261,7 +2268,7 @@ html {
           } else {
             th.removeAttribute("aria-sort");
             const caret = th.querySelector(".sort-caret");
-            if (caret) caret.textContent = "â†•";
+            if (caret) caret.textContent = "↕";
           }
         });
       } else if (el) {
@@ -2273,19 +2280,19 @@ html {
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("hist-count").textContent =
-        from.toLocaleString() + "–" + to.toLocaleString() + " of " + data.total.toLocaleString() +
-        (useTable ? " sessions" : "");
+        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString() +
+        (useTable ? " " + plural(data.total, "session", "sessions") : "");
       // Filter stats (innovative: live aggregate for the current page slice + total)
       const statsEl = $("hist-stats");
       if (statsEl && items.length) {
         const msgs = items.reduce((s, c) => s + (c.message_count || 0), 0);
-        const models = new Set(items.map((c) => c.model || "—"));
-        const tools = new Set(items.map((c) => c.source_tool || "—"));
+        const models = new Set(items.map((c) => c.model || "-"));
+        const tools = new Set(items.map((c) => c.source_tool || "-"));
         statsEl.innerHTML =
-          "<strong>Filter</strong> · " + data.total.toLocaleString() + " sessions · " +
-          msgs.toLocaleString() + " msgs on this page · avg " +
+          "<strong>Filter</strong> · " + data.total.toLocaleString() + " " + plural(data.total, "session", "sessions") + " · " +
+          msgs.toLocaleString() + " " + plural(msgs, "msg", "msgs") + " on this page · avg " +
           Math.round(msgs / items.length) +
-          " · models " + models.size + " · tools " + tools.size +
+          " · " + models.size + " " + plural(models.size, "model", "models") + " · " + tools.size + " " + plural(tools.size, "tool", "tools") +
           (state.hist.from || state.hist.to
             ? " · range " + (state.hist.from || "…") + " → " + (state.hist.to || "…")
             : "");
@@ -2322,7 +2329,7 @@ html {
     } catch {}
   }
 
-  // â”€â”€â”€ browse: messages + tool calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- browse: messages + tool calls ---------------------------
   async function loadToolFilter() {
     try {
       const data = await fetchJson("/api/tools");
@@ -2352,7 +2359,7 @@ html {
       '<span class="chip">conv #' + m.conversation_id + "</span>" +
       "</div>" +
       '<div class="row-main"><div class="row-title">' + escapeHtml(m.preview || "(empty)") + "</div>" +
-      '<div class="row-sub">' + fmtDate(m.created_at) +
+      '<div class="row-sub">' + fmtDateTime(m.created_at) +
       " · " + m.content_len + " chars" +
       (m.token_count ? " · " + m.token_count + " tok" : "") +
       (m.model ? " · " + escapeHtml(m.model) : "") +
@@ -2380,14 +2387,14 @@ html {
       b.total = data.total || 0;
       const items = data.messages || [];
       el.innerHTML = items.map(msgRowHtml).join("") ||
-        emptyBox("No messages", "Loosen filters — the corpus has 164k+ rows.");
+        emptyBox("No messages", "Loosen filters - the corpus has 164k+ rows.");
       el.querySelectorAll("[data-msg]").forEach((row) => {
         row.addEventListener("click", () => openMessage(row.getAttribute("data-msg")));
       });
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("browse-count").textContent =
-        from.toLocaleString() + "–" + to.toLocaleString() + " of " + data.total.toLocaleString() + " rows";
+        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString() + " " + plural(data.total, "row", "rows");
       const page = Math.floor(data.offset / b.limit) + 1;
       const pages = Math.max(1, Math.ceil(data.total / b.limit));
       $("browse-page-info").textContent = "Page " + page + " / " + pages;
@@ -2421,7 +2428,7 @@ html {
       $("msg-meta").innerHTML =
         "<strong>" + escapeHtml(m.project_name || "project") + "</strong>" +
         " · conv #" + m.conversation_id +
-        " · " + fmtDate(m.created_at) +
+        " · " + fmtDateTime(m.created_at) +
         (m.model ? " · " + escapeHtml(m.model) : "") +
         (m.token_count != null ? " · " + m.token_count + " tok" : "") +
         (m.duration_ms != null ? " · " + m.duration_ms + " ms" : "");
@@ -2432,7 +2439,7 @@ html {
       if (hasTools) {
         $("msg-tool").textContent = prettyJson(m.tool_calls);
         $("msg-tool-kind").textContent = Array.isArray(m.tool_calls)
-          ? m.tool_calls.length + " call(s)"
+          ? m.tool_calls.length + " " + plural(m.tool_calls.length, "call", "calls")
           : typeof m.tool_calls;
       }
       const hasBlocks = m.content_blocks != null &&
@@ -2445,7 +2452,7 @@ html {
     }
   }
 
-  // â”€â”€â”€ detail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- detail --------------------------------------------------
   async function openDetail(id) {
     if (current !== "detail" && current !== "msg") previous = current;
     showView("detail");
@@ -2461,8 +2468,8 @@ html {
       $("detail-meta").innerHTML =
         "<strong>" + escapeHtml(c.source_tool || "tool") + "</strong>" +
         (c.model ? " · " + escapeHtml(c.model) : "") +
-        " · " + fmtDate(c.started_at) +
-        " · " + c.messages.length + " messages";
+        " · " + fmtDateTime(c.started_at) +
+        " · " + c.messages.length + " " + plural(c.messages.length, "message", "messages");
       renderMessages();
     } catch (e) {
       list.innerHTML = emptyBox(
@@ -2491,7 +2498,7 @@ html {
         '<div class="msg-head"><span class="role-pill role-' + escapeHtml(m.role.replace(/_/g, "-")) + '">' +
         escapeHtml(m.role) + "</span>" +
         (m.model ? escapeHtml(m.model) + " · " : "") +
-        fmtDate(m.created_at) +
+        fmtDateTime(m.created_at) +
         (text.length > 900 ? ' · <button class="btn btn-ghost" data-expand="1" style="min-height:28px;padding:0 10px;font-size:11px">Expand</button>' : "") +
         "</div><pre>" + escapeHtml(preview) + "</pre></article>"
       );
@@ -2511,7 +2518,7 @@ html {
     });
   }
 
-  // â”€â”€â”€ find / ask / projects / timeline / operate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- find / ask / projects / timeline / operate --------------
   async function runFind(q, mode) {
     const el = $("find-results");
     const m = mode || ($("find-mode") && $("find-mode").value) || "hybrid";
@@ -2555,10 +2562,10 @@ html {
           '<button class="row" data-id="' + h.conversation_id + '">' +
           '<div class="row-id">#' + h.conversation_id + "</div>" +
           '<div><span class="chip">' + escapeHtml(h.source_tool || "tool") + "</span>" +
-          ' <span class="chip">' + escapeHtml(h.project_name || "—") + "</span>" +
+          ' <span class="chip">' + escapeHtml(h.project_name || "-") + "</span>" +
           ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
           '<div class="row-main"><div class="row-title">' + escapeHtml(h.snippet || "") + "</div>" +
-          '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDate(h.created_at) + "</div></div>" +
+          '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
           '<div class="row-meta">' + escapeHtml(String(h.session_id || "").slice(0, 8)) + "</div>" +
           "</button>"
         );
@@ -2588,7 +2595,7 @@ html {
         "<h3>" + escapeHtml(p.name) + "</h3>" +
         "<p>" + escapeHtml(p.description || "No description") + "</p>" +
         '<div class="card-meta"><span>' + Number(p.conversations || 0).toLocaleString() +
-        " sessions</span><span>" + escapeHtml(p.status || "active") + "</span></div></button>"
+        " " + plural(p.conversations || 0, "session", "sessions") + "</span><span>" + escapeHtml(p.status || "active") + "</span></div></button>"
       ).join("") || emptyBox("No projects", "Projects appear after ingest.");
       el.querySelectorAll("[data-project]").forEach((b) => {
         b.addEventListener("click", () => {
@@ -2620,7 +2627,7 @@ html {
     if (!grid) return;
     const year = calMonth.getFullYear();
     const month = calMonth.getMonth();
-    const monthName = calMonth.toLocaleString(undefined, { month: "long", year: "numeric" });
+    const monthName = fmtDate(calMonth, { month: "long", year: "numeric" });
     if (label) label.textContent = monthName;
     const tlLabel = document.getElementById("timeline-cal-label");
     if (tlLabel) tlLabel.textContent = monthName;
@@ -2656,7 +2663,7 @@ html {
       const isToday = ds === todayStr ? " is-today" : "";
       html +=
         '<button type="button" class="cal-day ' + level + isToday + '" data-day="' + ds +
-        '" aria-label="' + ds + ": " + count + ' conversations">' +
+        '" aria-label="' + ds + ": " + count + " " + plural(count, "conversation", "conversations") + '">' +
         '<span class="cal-day-num">' + day + "</span>" +
         '<span class="cal-day-count">' + (count || "") + "</span></button>";
     }
@@ -2731,7 +2738,7 @@ html {
         '<div class="card-top" style="margin:0;gap:6px">' +
         r.tools.slice(0, 4).map((t) => '<span class="chip">' + escapeHtml(t) + "</span>").join("") +
         "</div>" +
-        '<div class="row-main"><div class="row-title">' + r.total + " conversations</div></div>" +
+        '<div class="row-main"><div class="row-title">' + r.total + " " + plural(r.total, "conversation", "conversations") + "</div></div>" +
         '<div class="row-meta">Open in History filter</div></button>'
       ).join("");
       // click a day row -> History filtered to that day
@@ -2782,7 +2789,7 @@ html {
         html +=
           '<button class="row" type="button" data-id="' + escapeHtml(String(s.conversation_id || s.id || "")) + '">' +
           '<div class="row-id">[' + (i + 1) + "]</div>" +
-          '<div><span class="chip">' + escapeHtml(s.project_name || "—") + "</span></div>" +
+          '<div><span class="chip">' + escapeHtml(s.project_name || "-") + "</span></div>" +
           '<div class="row-main"><div class="row-title">' + escapeHtml(s.snippet || "") + "</div></div>" +
           '<div class="row-meta"></div></button>';
       });
@@ -2834,7 +2841,7 @@ html {
       }
       if (job === "writeback") {
         const w = await fetchJson("/api/writeback");
-        el.innerHTML = '<div class="prose">Wrote ' + w.items_written + " items to " + escapeHtml(w.file) + "</div>";
+        el.innerHTML = '<div class="prose">Wrote ' + w.items_written + " " + plural(w.items_written, "item", "items") + " to " + escapeHtml(w.file) + "</div>";
         toast("writeback done");
         return;
       }
@@ -2894,12 +2901,12 @@ html {
           '<button class="row" data-ingest-tool="' + escapeHtml(p.source_tool) + '" style="cursor:pointer;text-align:left;width:100%"><div class="row-main"><div class="row-title">' +
           escapeHtml(p.source_tool) +
           ' <span class="chip">' + badge + '</span></div><div class="row-meta">' +
-          p.conversations + " conversations · " + p.messages + " messages" +
+          p.conversations + " " + plural(p.conversations, "conversation", "conversations") + " · " + p.messages + " " + plural(p.messages, "message", "messages") +
           (p.last_session ? " · last " + escapeHtml(String(p.last_session).slice(0, 10)) : "") +
           '</div></div></button>';
       });
       html += '<div class="row-meta" style="margin-top:8px">files logged: ' + (r.total_files_logged || 0) +
-        ' · totals: ' + (r.total_conversations || 0) + ' sessions / ' + (r.total_messages || 0) + ' messages</div>';
+        ' · totals: ' + (r.total_conversations || 0) + ' ' + plural(r.total_conversations || 0, 'session', 'sessions') + ' / ' + (r.total_messages || 0) + ' ' + plural(r.total_messages || 0, 'message', 'messages') + '</div>';
       el.innerHTML = html || '<div class="empty">No providers yet</div>';
     } catch (e) {
       el.innerHTML = emptyBox("Could not load ingest status", e.message);
@@ -2934,7 +2941,7 @@ html {
           escapeHtml(title) +
           '</div><div class="row-sub">' +
           escapeHtml(s.source_tool || "tool") +
-          " · " + Number(s.message_count || 0) + " msgs · open →" +
+          " · " + Number(s.message_count || 0) + " " + plural(s.message_count || 0, "msg", "msgs") + " · open →" +
           "</div></div></button>";
       });
       if ((b.decisions || []).length) {
@@ -2979,7 +2986,7 @@ html {
       if (extra) extra.hidden = true;
     }
   }
-  // â”€â”€â”€ command palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- command palette -----------------------------------------
   const commands = [
     { kind: "Go", label: "Home", hint: "dashboard", run: () => { showView("home"); loadHomeList(); loadStatus(); loadActivity(); } },
     { kind: "Go", label: "History", hint: "full corpus", run: () => { showView("history"); loadHistory(); loadProjectsFilter(); } },
@@ -2994,7 +3001,7 @@ html {
       showView("memory");
       try {
         const r = await fetchJson("/api/agent-memory/ingest");
-        toast("Agent memory: " + r.files_scanned + " files → " + r.chunks_upserted + " chunks");
+        toast("Agent memory: " + r.files_scanned + " " + plural(r.files_scanned, "file", "files") + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, "chunk", "chunks"));
         loadMemory();
       } catch (e) {
         toast("Ingest failed: " + e.message);
@@ -3014,7 +3021,7 @@ html {
       showView("find");
       if ($("find-mode")) $("find-mode").value = "semantic";
       $("find-q").focus();
-      toast("Semantic mode on — type a question");
+      toast("Semantic mode on - type a question");
     }},
     { kind: "Action", label: "Hybrid find…", hint: "keywords + meaning", run: () => {
       showView("find");
@@ -3105,7 +3112,7 @@ html {
       const extraSearch = {
         type: "search",
         kind: "Search",
-        label: "Semantic find “" + query + "”",
+        label: "Semantic find \"" + query + "\"",
         hint: "hybrid · enter",
         run: () => {
           state.hist.q = query;
@@ -3119,7 +3126,7 @@ html {
       const extraLex = {
         type: "search",
         kind: "Search",
-        label: "Keyword find “" + query + "”",
+        label: "Keyword find \"" + query + "\"",
         hint: "lexical",
         run: () => {
           showView("find");
@@ -3131,7 +3138,7 @@ html {
       const extraHist = {
         type: "search",
         kind: "Filter",
-        label: "Filter history for “" + query + "”",
+        label: "Filter history for \"" + query + "\"",
         hint: "sessions",
         run: () => {
           state.hist.q = query;
@@ -3248,7 +3255,7 @@ html {
     }
   });
 
-  // â”€â”€â”€ wire UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- wire UI -------------------------------------------------
   navBtns.forEach((b) => {
     b.addEventListener("click", () => {
       const v = b.dataset.view;
@@ -3350,7 +3357,7 @@ html {
     loadHistory();
   });
 
-  // CSV export — same filters, up to 50k rows
+  // CSV export - same filters, up to 50k rows
   (function wireCsv() {
     const btn = $("hist-csv");
     if (!btn) return;
@@ -3383,7 +3390,7 @@ html {
     });
   })();
 
-  // Saved filters (localStorage) — innovative quality-of-life
+  // Saved filters (localStorage) - innovative quality-of-life
   (function wireSavedFilters() {
     const saveBtn = $("hist-save-filter");
     const slot = $("hist-saved");
@@ -3415,7 +3422,7 @@ html {
           if ($("hist-from")) $("hist-from").value = f.from || "";
           if ($("hist-to")) $("hist-to").value = f.to || "";
           $("hist-apply").click();
-          toast("Loaded filter “" + f.name + "”");
+          toast("Loaded filter \"" + f.name + "\"");
         });
       });
       const clear = slot.querySelector("[data-clear]");
@@ -3442,7 +3449,7 @@ html {
         });
         localStorage.setItem("tl-saved-filters", JSON.stringify(list.slice(-8)));
         renderSaved();
-        toast("Saved “" + name + "”");
+        toast("Saved \"" + name + "\"");
       });
     }
     renderSaved();
@@ -3465,9 +3472,11 @@ html {
       el.innerHTML = items.map((c) => {
         const cat = escapeHtml(c.category || "insight");
         const proj = c.project_name ? '<span class="chip">' + escapeHtml(c.project_name) + "</span>" : "";
-        const date = escapeHtml(fmtDate(c.created_at));
-        const preview = escapeHtml((c.content || "").slice(0, 180));
-        const full = escapeHtml(c.content || "");
+        const date = escapeHtml(fmtDateTime(c.created_at));
+        const content = c.content || "";
+        const preview = escapeHtml(content.slice(0, 180));
+        const full = escapeHtml(content);
+        const same = preview === full;
         return (
           '<button type="button" class="card mem-card" data-mem-id="' + c.id + '" aria-expanded="false">' +
           '<div class="card-top" style="margin:0 0 8px">' +
@@ -3475,9 +3484,11 @@ html {
           '<span class="chip">#' + c.id + "</span>" +
           '<span class="chip">recorded ' + date + "</span>" +
           "</div>" +
-          '<p class="mem-preview" style="-webkit-line-clamp:4;margin:0">' + preview + "</p>" +
-          '<p class="mem-full" hidden style="margin:8px 0 0;white-space:pre-wrap">' + full + "</p>" +
-          '<div class="card-meta"><span>Click to expand full memory</span></div></button>'
+          (same
+            ? '<p class="mem-preview" style="-webkit-line-clamp:4;margin:0">' + preview + "</p>"
+            : '<p class="mem-preview" style="-webkit-line-clamp:4;margin:0">' + preview + "</p>" +
+              '<p class="mem-full" hidden style="margin:8px 0 0;white-space:pre-wrap">' + full + "</p>") +
+          '<div class="card-meta"><span>' + (same ? "Memory" : "Click to expand full memory") + "</span></div></button>"
         );
       }).join("") || emptyBox("No memory yet", "Ingest agent memory to pull durable notes.");
       el.querySelectorAll(".mem-card").forEach((btn) => {
@@ -3486,8 +3497,9 @@ html {
           btn.setAttribute("aria-expanded", open ? "false" : "true");
           const prev = btn.querySelector(".mem-preview");
           const full = btn.querySelector(".mem-full");
+          if (!full) return;
           if (prev) prev.hidden = !open;
-          if (full) full.hidden = open;
+          full.hidden = open;
           const meta = btn.querySelector(".card-meta span");
           if (meta) meta.textContent = open ? "Click to expand full memory" : "Click to collapse";
         });
@@ -3495,7 +3507,7 @@ html {
       const from = data.total ? data.offset + 1 : 0;
       const to = Math.min(data.offset + items.length, data.total);
       $("memory-count").textContent =
-        from.toLocaleString() + "–" + to.toLocaleString() + " of " + data.total.toLocaleString();
+        from.toLocaleString() + "-" + to.toLocaleString() + " of " + data.total.toLocaleString();
       const page = Math.floor(data.offset / state.memory.limit) + 1;
       const pages = Math.max(1, Math.ceil(data.total / state.memory.limit));
       $("memory-page-info").textContent = "Page " + page + " / " + pages;
@@ -3537,7 +3549,7 @@ html {
         ingest.textContent = "Ingesting…";
         try {
           const r = await fetchJson("/api/agent-memory/ingest");
-          toast("Ingested " + r.files_scanned + " files → " + r.chunks_upserted + " chunks");
+          toast("Ingested " + r.files_scanned + " " + plural(r.files_scanned, "file", "files") + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, "chunk", "chunks"));
           loadMemory();
           loadStatus();
         } catch (e) {

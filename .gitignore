@@ -107,6 +107,7 @@ build/
 
 # Intermediate recordings; publish reviewed MP4/GIF assets instead.
 docs/media/*.webm
+docs/media/**/*.webm
 
 # Autonomous-crew operational files. MISSIONS.md and AGENTS.md carry
 # machine-local paths and a database password; the dated rust/*.md files are
