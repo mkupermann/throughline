@@ -1,4 +1,4 @@
-//! Valid time of memory notes: parsing of reference dates.
+//! Valid time of memory notes: parsing of reference dates and the as-of predicate.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
@@ -19,6 +19,30 @@ pub fn parse_instant(s: &str) -> Option<DateTime<Utc>> {
         return Some(now);
     }
     Some(midnight)
+}
+
+/// SQL predicate (table alias `mc`) for "what was valid on `valid_at`, as known
+/// on `known_at`". The arguments are placeholders such as `"$6"` and `"$7"`,
+/// bound as `timestamptz`; either may be NULL (no restriction on that axis).
+///
+/// A note is visible at `known_at` from its creation until it is superseded.
+/// It holds on `valid_at` from `valid_from` (else `source_at`, else
+/// `created_at`) until the earliest of `valid_to` and `expires_at`. `valid_to`
+/// counts only once the replacement was known: before the supersession the old
+/// note was still open-ended.
+pub fn as_of_predicate(valid_at: &str, known_at: &str) -> String {
+    let (v, k) = (valid_at, known_at);
+    format!(
+        "COALESCE(mc.status, 'active') <> 'forgotten'
+         AND ({k}::timestamptz IS NULL
+              OR (mc.created_at <= {k} AND (mc.superseded_at IS NULL OR {k} < mc.superseded_at)))
+         AND ({v}::timestamptz IS NULL
+              OR (COALESCE(mc.valid_from, mc.source_at, mc.created_at) <= {v}
+                  AND {v} < COALESCE(LEAST(
+                        CASE WHEN mc.superseded_at IS NULL OR COALESCE({k}, now()) >= mc.superseded_at
+                             THEN mc.valid_to END,
+                        mc.expires_at), 'infinity')))"
+    )
 }
 
 #[cfg(test)]

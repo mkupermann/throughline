@@ -4,6 +4,7 @@
 //! whole corpus. Same posture as the Python server.
 
 use crate::search;
+use crate::temporal::as_of_predicate;
 use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -1044,6 +1045,36 @@ struct MemoryParams {
     /// Only favorited memory notes (`favorites=1`).
     #[serde(default, deserialize_with = "de_flag")]
     favorites: bool,
+    /// What was valid on this date (`YYYY-MM-DD` or RFC 3339).
+    valid_at: Option<String>,
+    /// What we knew on this date.
+    known_at: Option<String>,
+}
+
+/// Parse the `valid_at` / `known_at` query values; empty counts as absent.
+/// A date that cannot be read is a 422 naming the field.
+#[allow(clippy::type_complexity)]
+fn parse_as_of(
+    valid_at: Option<&str>,
+    known_at: Option<&str>,
+) -> std::result::Result<
+    (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ),
+    (StatusCode, &'static str, String),
+> {
+    let one = |name: &str, v: Option<&str>| match v.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(s) => crate::temporal::parse_instant(s).map(Some).ok_or_else(|| {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "validation_error",
+                format!("{name} must be YYYY-MM-DD or an RFC 3339 timestamp, got {s:?}"),
+            )
+        }),
+    };
+    Ok((one("valid_at", valid_at)?, one("known_at", known_at)?))
 }
 
 /// Map the UI/URL status filter onto a SQL predicate + bind.
@@ -1069,8 +1100,15 @@ async fn memory_handler(
     let status = params.status;
     let dir = order_dir(params.order.as_deref(), true);
     let favorites = params.favorites;
+    let (valid_at, known_at) =
+        match parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref()) {
+            Ok(v) => v,
+            Err((status, code, detail)) => return api_error(status, code, detail),
+        };
     match with_db(&state, move |client| {
-        list_memory_rows(client, q, cat, status, favorites, limit, offset, dir)
+        list_memory_rows(
+            client, q, cat, status, favorites, limit, offset, dir, valid_at, known_at,
+        )
     })
     .await
     {
@@ -1085,6 +1123,8 @@ async fn memory_handler(
                         "project_name": row.project_name,
                         "created_at": row.created_at,
                         "source_at": row.source_at,
+                        "valid_from": row.valid_from,
+                        "valid_to": row.valid_to,
                         "status": row.status,
                         "superseded_by": row.superseded_by,
                         "superseded_at": row.superseded_at,
@@ -1113,6 +1153,8 @@ struct MemoryRow {
     project_name: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     source_at: Option<chrono::DateTime<chrono::Utc>>,
+    valid_from: Option<chrono::DateTime<chrono::Utc>>,
+    valid_to: Option<chrono::DateTime<chrono::Utc>>,
     status: String,
     superseded_by: Option<i64>,
     superseded_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1124,6 +1166,7 @@ struct MemoryRow {
 /// List memory chunks with an optional status filter and chain links.
 /// Superseded notes stay out of the default (active) list; the History filter
 /// reaches them. `supersedes` points at the predecessor this note replaced.
+/// With `valid_at` or `known_at` the as-of predicate replaces the status filter.
 #[allow(clippy::too_many_arguments)]
 fn list_memory_rows<C: GenericClient>(
     client: &mut C,
@@ -1134,22 +1177,37 @@ fn list_memory_rows<C: GenericClient>(
     limit: i32,
     offset: i32,
     dir: &'static str,
+    valid_at: Option<chrono::DateTime<chrono::Utc>>,
+    known_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(i64, Vec<MemoryRow>)> {
     let q_pat = q.map(|s| format!("%{}%", s.replace('%', "\\%")));
+    let as_of = valid_at.is_some() || known_at.is_some();
     let (pred, _label) = memory_status_predicate(status.as_deref());
-    let sql_filter = format!(
-        "{pred}
+    // Every placeholder must appear in the statement, so without a reference
+    // date the as-of parameters are pinned to NULL instead of left out.
+    let base_filter = |v: &str, k: &str| {
+        let head = if as_of {
+            as_of_predicate(v, k)
+        } else {
+            format!("{pred} AND {v}::timestamptz IS NULL AND {k}::timestamptz IS NULL")
+        };
+        format!(
+            "{head}
          AND ($1::text IS NULL OR content ILIKE $1 OR COALESCE(project_name,'') ILIKE $1)
          AND ($2::text IS NULL OR category::text = $2)
          AND ($3::bool = false OR EXISTS (
              SELECT 1 FROM favorites f
              WHERE f.kind = 'memory' AND f.ref = mc.id::text
          ))"
-    );
+        )
+    };
+    // The count binds $1..$5 (limit and offset are not in it), the page $1..$7.
+    let count_filter = base_filter("$4", "$5");
+    let sql_filter = base_filter("$6", "$7");
     let total: i64 = client
         .query_one(
-            &format!("SELECT COUNT(*)::bigint FROM memory_chunks mc WHERE {sql_filter}"),
-            &[&q_pat, &category, &favorites],
+            &format!("SELECT COUNT(*)::bigint FROM memory_chunks mc WHERE {count_filter}"),
+            &[&q_pat, &category, &favorites, &valid_at, &known_at],
         )?
         .get(0);
     let rows = client.query(
@@ -1162,7 +1220,8 @@ fn list_memory_rows<C: GenericClient>(
                     mc.source_at,
                     EXISTS (SELECT 1 FROM favorites f
                             WHERE f.kind = 'memory'
-                              AND f.ref = mc.id::text) AS favorite
+                              AND f.ref = mc.id::text) AS favorite,
+                    mc.valid_from, mc.valid_to
              FROM memory_chunks mc
              WHERE {sql_filter}
              ORDER BY COALESCE(mc.source_at, mc.created_at) {dir}
@@ -1174,6 +1233,8 @@ fn list_memory_rows<C: GenericClient>(
             &favorites,
             &(limit as i64),
             &(offset as i64),
+            &valid_at,
+            &known_at,
         ],
     )?;
     let items = rows
@@ -1190,6 +1251,8 @@ fn list_memory_rows<C: GenericClient>(
             supersedes: r.get(8),
             source_at: r.get(9),
             favorite: r.get(10),
+            valid_from: r.get(11),
+            valid_to: r.get(12),
         })
         .collect();
     Ok((total, items))
@@ -1205,7 +1268,8 @@ async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Re
                       ORDER BY o.id DESC LIMIT 1) AS supersedes,
                     EXISTS (SELECT 1 FROM favorites f
                             WHERE f.kind = 'memory'
-                              AND f.ref = mc.id::text) AS favorite
+                              AND f.ref = mc.id::text) AS favorite,
+                    mc.source_at, mc.valid_from, mc.valid_to
              FROM memory_chunks mc WHERE mc.id = $1",
             &[&id],
         )?;
@@ -1215,9 +1279,9 @@ async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Re
             category: r.get(1),
             project_name: r.get(2),
             created_at: r.get(3),
-            // source_at is only surfaced by memory_handler; detail JSON stays
-            // as before and the field is unused here.
-            source_at: None,
+            source_at: r.get(9),
+            valid_from: r.get(10),
+            valid_to: r.get(11),
             status: r.get(4),
             superseded_by: r.get(5),
             superseded_at: r.get(6),
@@ -1233,6 +1297,9 @@ async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Re
             "category": row.category,
             "project_name": row.project_name,
             "created_at": row.created_at,
+            "source_at": row.source_at,
+            "valid_from": row.valid_from,
+            "valid_to": row.valid_to,
             "status": row.status,
             "superseded_by": row.superseded_by,
             "superseded_at": row.superseded_at,
@@ -3765,9 +3832,247 @@ mod tests {
             &[&long],
         )
         .expect("seed note");
-        let (_, rows) =
-            list_memory_rows(&mut tx, Some(tag), None, None, false, 10, 0, "DESC").expect("list");
+        let (_, rows) = list_memory_rows(
+            &mut tx,
+            Some(tag),
+            None,
+            None,
+            false,
+            10,
+            0,
+            "DESC",
+            None,
+            None,
+        )
+        .expect("list");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].content.len(), long.len());
+    }
+
+    // ─── as-of queries (valid time / known time) ───────────────────────────
+
+    /// Insert a note with a fixed valid_from; content is `{tag} {label}`.
+    fn seed_dated<C: GenericClient>(client: &mut C, tag: &str, label: &str, from: &str) -> i64 {
+        let category_type =
+            crate::extract_memory::category_column_type(client).expect("category_column_type");
+        let content = format!("{tag} {label}");
+        let from = at(from);
+        client
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, confidence, status, valid_from)
+                     VALUES ('manual', $1, 'decision'::text::{category_type}, 1.0, 'active', $2) RETURNING id"
+                ),
+                &[&content, &from],
+            )
+            .expect("seed dated note")
+            .get(0)
+    }
+
+    /// Ids that the list returns for `tag` at the given reference dates, sorted.
+    fn listed_ids<C: GenericClient>(
+        client: &mut C,
+        tag: &str,
+        valid_at: Instant,
+        known_at: Instant,
+    ) -> Vec<i64> {
+        let (_, rows) = list_memory_rows(
+            client,
+            Some(tag.to_string()),
+            None,
+            None,
+            false,
+            50,
+            0,
+            "DESC",
+            valid_at,
+            known_at,
+        )
+        .expect("list");
+        let mut ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        ids.sort();
+        ids
+    }
+
+    fn update_to<C: GenericClient>(client: &mut C, old: i64, label: &str, from: &str) -> i64 {
+        let tag_content = label.to_string();
+        let mut s = test_successor(&tag_content);
+        s.valid_from = Some(at(from));
+        supersede_memory(client, old, &s).expect("update").1
+    }
+
+    #[test]
+    fn as_of_update_chain() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping as_of_update_chain: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_dated(&mut tx, &tag, "A", "2026-01-01");
+        let b = update_to(&mut tx, a, &format!("{tag} B"), "2026-03-01");
+        assert_eq!(
+            listed_ids(&mut tx, &tag, Some(at("2026-02-15")), None),
+            vec![a]
+        );
+        assert_eq!(
+            listed_ids(&mut tx, &tag, Some(at("2026-03-15")), None),
+            vec![b]
+        );
+        assert_eq!(listed_ids(&mut tx, &tag, None, None), vec![b]);
+    }
+
+    #[test]
+    fn as_of_correction_chain() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping as_of_correction_chain: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_dated(&mut tx, &tag, "A", "2026-01-01");
+        let content = format!("{tag} B");
+        let mut s = test_successor(&content);
+        s.kind = SupersedeKind::Correction;
+        let b = supersede_memory(&mut tx, a, &s).expect("correct").1;
+        // inside one transaction now() is constant: set the order of events by hand
+        tx.execute(
+            "UPDATE memory_chunks SET created_at = '2026-01-01T00:00:00Z' WHERE id = $1",
+            &[&a],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET superseded_at = '2026-06-01T00:00:00Z' WHERE id = $1",
+            &[&a],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET created_at = '2026-06-01T00:00:00Z' WHERE id = $1",
+            &[&b],
+        )
+        .unwrap();
+        assert_eq!(
+            listed_ids(&mut tx, &tag, Some(at("2026-02-15")), None),
+            vec![b]
+        );
+        let before = Some(at("2026-03-01"));
+        assert_eq!(listed_ids(&mut tx, &tag, None, before), vec![a]);
+        // what we knew in March about February: the old note, still believed
+        assert_eq!(
+            listed_ids(&mut tx, &tag, Some(at("2026-02-15")), before),
+            vec![a]
+        );
+    }
+
+    #[test]
+    fn backdated_update_never_overlaps() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping backdated_update_never_overlaps: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_dated(&mut tx, &tag, "A", "2026-01-01");
+        let b = update_to(&mut tx, a, &format!("{tag} B"), "2026-02-01");
+        let mut day = at("2026-01-01");
+        let end = at("2026-04-30");
+        while day <= end {
+            let ids = listed_ids(&mut tx, &tag, Some(day), None);
+            assert!(ids.len() <= 1, "overlap on {day}: {ids:?}");
+            assert_eq!(
+                ids,
+                vec![if day < at("2026-02-01") { a } else { b }],
+                "{day}"
+            );
+            day += chrono::Duration::days(1);
+        }
+    }
+
+    #[test]
+    fn as_of_respects_expiry_and_forgetting() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping as_of_respects_expiry: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let c = seed_dated(&mut tx, &tag, "C", "2026-01-01");
+        let d = seed_dated(&mut tx, &tag, "D", "2026-01-01");
+        tx.execute(
+            "UPDATE memory_chunks SET expires_at = '2026-02-01T00:00:00Z' WHERE id = $1",
+            &[&c],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&d],
+        )
+        .unwrap();
+        assert_eq!(
+            listed_ids(&mut tx, &tag, Some(at("2026-01-15")), None),
+            vec![c]
+        );
+        assert!(listed_ids(&mut tx, &tag, Some(at("2026-02-15")), None).is_empty());
+        assert!(!listed_ids(&mut tx, &tag, None, Some(at("2026-09-01"))).contains(&d));
+        // without a reference date the list keeps its status filter: D is gone, C stays
+        assert_eq!(listed_ids(&mut tx, &tag, None, None), vec![c]);
+    }
+
+    #[test]
+    fn as_of_combines_with_filters() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping as_of_combines_with_filters: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let keep = seed_dated(&mut tx, &tag, "keep", "2026-01-01");
+        let other_cat = seed_dated(&mut tx, &tag, "other", "2026-01-01");
+        let not_fav = seed_dated(&mut tx, &tag, "plain", "2026-01-01");
+        let late = seed_dated(&mut tx, &tag, "late", "2026-05-01");
+        let category_type = crate::extract_memory::category_column_type(&mut tx).unwrap();
+        tx.execute(
+            &format!(
+                "UPDATE memory_chunks SET category = 'insight'::text::{category_type} WHERE id = $1"
+            ),
+            &[&other_cat],
+        )
+        .unwrap();
+        for id in [keep, other_cat, late] {
+            tx.execute(
+                "INSERT INTO favorites (kind, ref) VALUES ('memory', $1)",
+                &[&id.to_string()],
+            )
+            .unwrap();
+        }
+        let _ = not_fav;
+        let (_, rows) = list_memory_rows(
+            &mut tx,
+            Some(tag),
+            Some("decision".into()),
+            None,
+            true,
+            50,
+            0,
+            "DESC",
+            Some(at("2026-02-15")),
+            None,
+        )
+        .expect("list");
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![keep]);
+    }
+
+    #[test]
+    fn memory_list_rejects_bad_dates() {
+        let err = parse_as_of(Some("gestern"), None).expect_err("bad valid_at");
+        assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.1, "validation_error");
+        assert!(err.2.contains("valid_at"), "{}", err.2);
+        let err = parse_as_of(None, Some("2026-02-30")).expect_err("bad known_at");
+        assert_eq!(err.1, "validation_error");
+        assert!(err.2.contains("known_at"), "{}", err.2);
+        let ok = parse_as_of(Some("2026-03-01"), Some("  ")).expect("ok");
+        assert!(ok.0.is_some() && ok.1.is_none());
     }
 }
