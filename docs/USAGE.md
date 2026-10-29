@@ -175,6 +175,8 @@ Only replacing and merging end a validity. Forgotten and stale notes keep an ope
 
 The agent-memory import follows the same rules. A changed section becomes a successor through update, starting at the file's modification time (never later than now). A section that vanished from the file is marked superseded with an end date. Nothing is deleted.
 
+Replacing a forgotten note keeps it forgotten. It points at its successor and gets an end date, but it shows up neither in History nor in an answer about a date. The import leaves a forgotten note forgotten when its section vanishes.
+
 ## Leaving things out of the ingest
 
 Some paths and projects should never reach the corpus at all. The ingest

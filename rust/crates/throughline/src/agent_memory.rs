@@ -213,13 +213,14 @@ fn ingest_agent_memory_from<C: GenericClient>(
             upserted += 1;
         }
         // Sections that left the file: close their validity, keep the rows.
+        // A forgotten note stays forgotten.
         let vanished: Vec<i64> = previous.iter().map(|(id, ..)| *id).collect();
         if !vanished.is_empty() {
             tx.execute(
                 "UPDATE memory_chunks \
                     SET status = 'superseded', superseded_at = now(), updated_at = now(), \
                         valid_to = GREATEST(COALESCE(valid_from, source_at, created_at), $2) \
-                  WHERE id = ANY($1)",
+                  WHERE id = ANY($1) AND COALESCE(status, 'active') <> 'forgotten'",
                 &[&vanished, &mtime_clamped],
             )
             .context("close vanished agent memory chunks")?;
@@ -451,8 +452,10 @@ mod tests {
         let gone_status: String = gone.get(0);
         let gone_valid_to: Option<chrono::DateTime<chrono::Utc>> = gone.get(1);
         let gone_by: Option<i64> = gone.get(2);
-        assert_eq!(gone_status, "superseded");
-        assert!(gone_valid_to.is_some());
+        // The pattern note was forgotten: forgotten appears in no answer, so
+        // the vanished section must not bring it back as superseded history.
+        assert_eq!(gone_status, "forgotten");
+        assert_eq!(gone_valid_to, None);
         assert_eq!(gone_by, None);
     }
 }

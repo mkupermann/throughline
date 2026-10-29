@@ -1526,9 +1526,12 @@ pub fn supersede_memory<C: GenericClient>(
         SupersedeKind::Update => vf,
         SupersedeKind::Correction => old_vf,
     };
+    // A forgotten predecessor stays forgotten: forgotten appears in no answer,
+    // neither in History nor as of a date.
     tx.execute(
         "UPDATE memory_chunks
-         SET status = 'superseded', superseded_by = $2, superseded_at = now(), updated_at = now(),
+         SET status = CASE WHEN status = 'forgotten' THEN status ELSE 'superseded' END,
+             superseded_by = $2, superseded_at = now(), updated_at = now(),
              valid_to = CASE WHEN $4 THEN $3 ELSE LEAST(valid_to, $3) END
          WHERE id = $1",
         &[
@@ -4110,6 +4113,58 @@ mod tests {
         assert!(!listed_ids(&mut tx, &tag, None, Some(at("2026-09-01"))).contains(&d));
         // without a reference date the list keeps its status filter: D is gone, C stays
         assert_eq!(listed_ids(&mut tx, &tag, None, None), vec![c]);
+    }
+
+    #[test]
+    fn supersede_keeps_a_forgotten_note_forgotten() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping supersede_keeps_a_forgotten_note_forgotten: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_dated(&mut tx, &tag, "A", "2026-01-01");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&a],
+        )
+        .unwrap();
+        let b = update_to(&mut tx, a, &format!("{tag} B"), "2026-03-01");
+        let (st, _, to) = validity(&mut tx, a);
+        assert_eq!(st, "forgotten", "a forgotten predecessor stays forgotten");
+        assert_eq!(to, Some(at("2026-03-01")));
+        let by: Option<i64> = tx
+            .query_one(
+                "SELECT superseded_by FROM memory_chunks WHERE id = $1",
+                &[&a],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(by, Some(b));
+        assert_eq!(validity(&mut tx, b).0, "active");
+        let now = Some(chrono::Utc::now());
+        assert!(listed_ids(&mut tx, &tag, Some(at("2026-02-15")), None).is_empty());
+        assert_eq!(listed_ids(&mut tx, &tag, now, None), vec![b]);
+        assert_eq!(listed_ids(&mut tx, &tag, None, now), vec![b]);
+        let (_, history) = list_memory_rows(
+            &mut tx,
+            Some(tag),
+            None,
+            Some("history".into()),
+            false,
+            50,
+            0,
+            "DESC",
+            None,
+            None,
+        )
+        .expect("history");
+        assert!(
+            history.iter().all(|r| r.id != a),
+            "a forgotten note stays out of History"
+        );
     }
 
     #[test]
