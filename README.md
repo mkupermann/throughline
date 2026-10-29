@@ -183,6 +183,8 @@ Every assistant keeps its rules somewhere else: Claude Code in CLAUDE.md, `.clau
 
 The view reads the imported copy by default, with the time of the last import shown as "As of". Every `ingest` run and the job **Import AI configuration** on the Import and status page refresh that copy, keeping the masked content, a hash, the file's own modification time and files that have since disappeared. Switch to **Live** to read straight from disk. Search finds instructions, skills and agents and opens the entry.
 
+**Editing is opt-in.** With `THROUGHLINE_CONFIG_EDIT=1` (in Docker: add `docker-compose.edit.yml`, which also mounts the assistant folders and `~/Documents/GitHub` writable), the Live view offers **Edit** for listed files. A file that contains keys or tokens stays read-only. Before each save the previous text is copied to `config-edits/` in the backup folder, and a file that changed on disk since it was opened is not overwritten.
+
 ![AI configuration with the instructions tab of a fictional assistant](docs/media/rust/assistants.png)
 
 In Docker the container sees the assistant folders that `docker-compose.yml` mounts read-only (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` and the others). `THROUGHLINE_ASSISTANT_HOME` points the scan at another home, `THROUGHLINE_SCAN_ROOTS` at the project folders, and `THROUGHLINE_HOST_HOME` maps host paths in symlink targets onto the container home.

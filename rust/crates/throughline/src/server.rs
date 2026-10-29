@@ -2036,6 +2036,112 @@ struct AssistantsToolParams {
 #[derive(Deserialize)]
 struct AssistantsFileParams {
     id: String,
+    /// Unmasked content for the editor (`edit=1`); needs THROUGHLINE_CONFIG_EDIT.
+    #[serde(default, deserialize_with = "de_flag")]
+    edit: bool,
+}
+
+/// Editing assistant files is opt-in: `THROUGHLINE_CONFIG_EDIT=1` and, in
+/// Docker, writable mounts (`docker-compose.edit.yml`).
+fn config_edit_enabled() -> bool {
+    matches!(
+        std::env::var("THROUGHLINE_CONFIG_EDIT")
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// Where a file's previous text goes before an edit is saved.
+fn config_backup_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("THROUGHLINE_CONFIG_BACKUP_DIR") {
+        return dir.into();
+    }
+    for var in ["THROUGHLINE_BACKUP_DIR", "CLAUDE_MEMORY_BACKUP_DIR"] {
+        if let Ok(dir) = std::env::var(var) {
+            if !dir.trim().is_empty() {
+                return std::path::PathBuf::from(dir).join("config-edits");
+            }
+        }
+    }
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".local/share/throughline/config-edits")
+}
+
+fn save_error_response(e: crate::assistants::SaveError) -> Response {
+    use crate::assistants::SaveError;
+    match e {
+        SaveError::NotFound => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown configuration file",
+        ),
+        SaveError::HasSecrets => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "has_secrets",
+            "the file contains keys or tokens and stays read-only",
+        ),
+        SaveError::TooLarge => api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_large",
+            "files over 256 KB cannot be edited here",
+        ),
+        SaveError::Conflict => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "the file changed since it was opened",
+        ),
+        SaveError::Io(msg) => api_error(StatusCode::INTERNAL_SERVER_ERROR, "io_error", msg),
+    }
+}
+
+fn editing_disabled() -> Response {
+    api_error(
+        StatusCode::FORBIDDEN,
+        "editing_disabled",
+        "editing is off; set THROUGHLINE_CONFIG_EDIT=1 (in Docker: docker-compose.edit.yml)",
+    )
+}
+
+async fn assistant_entries(state: &AppState) -> Vec<crate::assistants::Entry> {
+    match with_db(state, |client| {
+        Ok(crate::assistants::inventory(Some(client)))
+    })
+    .await
+    {
+        Ok(e) => e,
+        Err(_) => crate::assistants::inventory(None),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AssistantsSaveBody {
+    id: String,
+    content: String,
+    sha256: String,
+}
+
+async fn assistants_save_handler(
+    State(state): State<AppState>,
+    Json(body): Json<AssistantsSaveBody>,
+) -> Response {
+    if !config_edit_enabled() {
+        return editing_disabled();
+    }
+    let entries = assistant_entries(&state).await;
+    match crate::assistants::save_entry(
+        &entries,
+        &body.id,
+        &body.content,
+        &body.sha256,
+        &config_backup_dir(),
+    ) {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(e) => save_error_response(e),
+    }
 }
 
 async fn assistants_handler(State(state): State<AppState>) -> Response {
@@ -2066,16 +2172,23 @@ async fn assistants_file_handler(
     State(state): State<AppState>,
     Query(params): Query<AssistantsFileParams>,
 ) -> Response {
-    let entries = match with_db(&state, |client| {
-        Ok(crate::assistants::inventory(Some(client)))
-    })
-    .await
-    {
-        Ok(e) => e,
-        Err(_) => crate::assistants::inventory(None),
-    };
+    let entries = assistant_entries(&state).await;
+    if params.edit {
+        if !config_edit_enabled() {
+            return editing_disabled();
+        }
+        return match crate::assistants::read_entry_raw(&entries, &params.id) {
+            Ok(raw) => Json(raw).into_response(),
+            Err(e) => save_error_response(e),
+        };
+    }
     match crate::assistants::read_entry(&entries, &params.id) {
-        Some(view) => Json(view).into_response(),
+        Some(mut view) => {
+            view.editable = config_edit_enabled()
+                && !view.truncated
+                && crate::assistants::read_entry_raw(&entries, &params.id).is_ok();
+            Json(view).into_response()
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "not found" })),
@@ -2412,7 +2525,10 @@ pub fn app(state: AppState) -> Router {
         .route("/api/writeback", get(writeback_handler))
         .route("/api/health-recovery", get(health_recovery_handler))
         .route("/api/assistants", get(assistants_handler))
-        .route("/api/assistants/file", get(assistants_file_handler))
+        .route(
+            "/api/assistants/file",
+            get(assistants_file_handler).put(assistants_save_handler),
+        )
         .route("/api/assistants/imported", get(assistants_imported_handler))
         .route(
             "/api/assistants/imported/{id}",

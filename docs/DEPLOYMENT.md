@@ -150,7 +150,9 @@ native installations. Use the corresponding `pg_restore` from `PATH`,
 `PG_RESTORE_BIN`, or `PG_BIN` for custom-format dumps made outside Throughline.
 Source session files
 remain owned by their respective tools; Throughline never modifies them
-(read-only mounts in Docker, read-only access natively).
+(read-only mounts in Docker, read-only access natively). The opt-in
+`docker-compose.edit.yml` mounts the assistant folders writable so the UI can
+edit listed configuration files; session files are still never written.
 
 ## Existing Compose volume: rotate a legacy password
 

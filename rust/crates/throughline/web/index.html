@@ -1796,6 +1796,21 @@ html {
   font-size: 0.8rem;
   word-break: break-all;
 }
+#asst-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 420px;
+  background: var(--bg-1, rgba(0,0,0,0.15));
+  color: inherit;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: monospace;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+.asst-editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 #asst-content {
   background: var(--bg-1, rgba(0,0,0,0.15));
   border: 1px solid var(--border-subtle);
@@ -2445,8 +2460,17 @@ html {
                 <code id="asst-content-path"></code>
                 <span class="chip" id="asst-chip-redacted" hidden data-i18n="asst.masked">redacted</span>
                 <span class="chip" id="asst-chip-truncated" hidden data-i18n="asst.truncated">truncated</span>
+                <button class="btn btn-ghost" id="asst-edit" type="button" hidden data-i18n="asst.edit">Edit</button>
               </div>
               <pre id="asst-content"></pre>
+              <div id="asst-editor-wrap" hidden>
+                <textarea id="asst-editor" spellcheck="false" data-i18n-attr="aria-label:asst.editorAria" aria-label="Edit file content"></textarea>
+                <div class="asst-editor-actions">
+                  <button class="btn btn-primary" id="asst-save" type="button" data-i18n="asst.save">Save</button>
+                  <button class="btn btn-ghost" id="asst-cancel" type="button" data-i18n="asst.cancel">Cancel</button>
+                  <span class="meta" data-i18n="asst.editNote">A copy of the current version is kept before saving.</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3187,6 +3211,14 @@ html {
       "asst.project": "Project: ",
       "asst.masked": "redacted",
       "asst.truncated": "truncated",
+      "asst.edit": "Edit",
+      "asst.save": "Save",
+      "asst.cancel": "Cancel",
+      "asst.editorAria": "Edit file content",
+      "asst.editNote": "A copy of the current version is kept before saving.",
+      "asst.saved": "Saved. Previous version: ",
+      "asst.conflict": "The file changed on disk since you opened it. Cancel, open the file again and redo the edit.",
+      "asst.saveFailed": "Could not save: ",
       "asst.instr": "instructions",
       "asst.skill": "skills",
       "asst.agent": "agents",
@@ -3795,6 +3827,14 @@ html {
       "asst.project": "Projekt: ",
       "asst.masked": "maskiert",
       "asst.truncated": "gekürzt",
+      "asst.edit": "Bearbeiten",
+      "asst.save": "Speichern",
+      "asst.cancel": "Abbrechen",
+      "asst.editorAria": "Dateiinhalt bearbeiten",
+      "asst.editNote": "Vor dem Speichern wird eine Kopie der aktuellen Fassung abgelegt.",
+      "asst.saved": "Gespeichert. Vorherige Fassung: ",
+      "asst.conflict": "Die Datei wurde inzwischen geändert. Abbrechen, Datei neu öffnen und die Änderung wiederholen.",
+      "asst.saveFailed": "Speichern fehlgeschlagen: ",
       "asst.instr": "Anweisungen",
       "asst.skill": "Skills",
       "asst.agent": "Agents",
@@ -6117,6 +6157,58 @@ html {
     });
   }
 
+  // Editor for live inventory files; the server decides what is editable.
+  let asstEditing = null;
+  function closeAsstEditor() {
+    asstEditing = null;
+    $("asst-editor-wrap").hidden = true;
+    $("asst-content").hidden = false;
+  }
+  async function openAsstEditor(id) {
+    try {
+      const raw = await fetchJson("/api/assistants/file?id=" + encodeURIComponent(id) + "&edit=1");
+      asstEditing = { id: id, sha256: raw.sha256 };
+      $("asst-editor").value = raw.content || "";
+      $("asst-content").hidden = true;
+      $("asst-edit").hidden = true;
+      $("asst-editor-wrap").hidden = false;
+      $("asst-editor").focus();
+    } catch (e) {
+      toast(t("asst.saveFailed") + (e.message || ""));
+    }
+  }
+  async function saveAsstEditor() {
+    if (!asstEditing) return;
+    const { id, sha256 } = asstEditing;
+    try {
+      const r = await fetch("/api/assistants/file", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id, content: $("asst-editor").value, sha256: sha256 }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 409) { toast(t("asst.conflict")); return; }
+      if (!r.ok) { toast(t("asst.saveFailed") + (body.detail || r.status)); return; }
+      toast(t("asst.saved") + (body.backup || ""));
+      closeAsstEditor();
+      loadAsstFile(id);
+    } catch (e) {
+      toast(t("asst.saveFailed") + (e.message || ""));
+    }
+  }
+  {
+    const editBtn = $("asst-edit");
+    if (editBtn) editBtn.addEventListener("click", () => { if (state.assistants.fileId) openAsstEditor(state.assistants.fileId); });
+    const saveBtn = $("asst-save");
+    if (saveBtn) saveBtn.addEventListener("click", saveAsstEditor);
+    const cancelBtn = $("asst-cancel");
+    if (cancelBtn) cancelBtn.addEventListener("click", () => { closeAsstEditor(); if (state.assistants.fileId) loadAsstFile(state.assistants.fileId); });
+    const area = $("asst-editor");
+    if (area) area.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveAsstEditor(); }
+    });
+  }
+
   async function loadAsstFile(id) {
     const wrap = $("asst-content-wrap");
     const contentEl = $("asst-content");
@@ -6131,12 +6223,16 @@ html {
       contentEl.textContent = fv.content || "";
       redChip.hidden = !fv.redacted;
       truncChip.hidden = !fv.truncated;
+      state.assistants.fileId = id;
+      closeAsstEditor();
+      $("asst-edit").hidden = !(state.assistants.source !== "imported" && fv.editable);
       wrap.hidden = false;
     } catch {
       pathEl.textContent = "";
       contentEl.textContent = "";
       redChip.hidden = true;
       truncChip.hidden = true;
+      $("asst-edit").hidden = true;
       wrap.hidden = false;
     }
   }
