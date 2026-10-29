@@ -1968,6 +1968,7 @@ html {
                   <option value="asc" data-i18n="sort.oldNew">Old to new</option>
                 </select>
               </label>
+              <button class="btn btn-ghost togglable fav-toggle" id="home-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
               <button class="btn btn-ghost" id="handoff-copy" type="button" data-i18n="home.handoff.copy">Copy handoff</button>
               <button class="btn btn-ghost" id="handoff-download" type="button" data-i18n="home.handoff.download">Save as Markdown</button>
             </div>
@@ -2323,6 +2324,7 @@ html {
               <option value="" data-i18n="tl.allProviders">All assistants</option>
             </select>
           </label>
+          <button class="btn btn-ghost togglable fav-toggle" id="timeline-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
           <div class="meta" id="timeline-cal-label"></div>
         </div>
         <div class="panel" id="timeline-chart-panel">
@@ -3203,6 +3205,7 @@ html {
       "fav.metric": "Favorites",
       "fav.paletteToggle": "Toggle favorites only",
       "fav.empty": "No favorites yet. Mark entries with the star.",
+      "fav.failed": "The favorite could not be saved. Try again.",
     },
     de: {
       "skip": "Zum Hauptinhalt springen",
@@ -3810,6 +3813,7 @@ html {
       "fav.metric": "Favoriten",
       "fav.paletteToggle": "Nur Favoriten umschalten",
       "fav.empty": "Noch keine Favoriten. Markieren Sie Einträge mit dem Stern.",
+      "fav.failed": "Der Favorit konnte nicht gespeichert werden. Bitte erneut versuchen.",
     },
   };
   let currentLang = "en";
@@ -3843,10 +3847,15 @@ html {
       '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' +
       (isOn ? "★" : "☆") + "</button>";
   }
+  // The favorites-only state lives in memory; localStorage only remembers it
+  // across reloads, so the toggle still works where storage is blocked.
+  const favOnlyState = {};
   function favOnlyOn(view) {
+    if (view in favOnlyState) return favOnlyState[view];
     try { return localStorage.getItem("th-fav-" + view) === "1"; } catch { return false; }
   }
   function setFavOnly(view, on) {
+    favOnlyState[view] = on;
     try { localStorage.setItem("th-fav-" + view, on ? "1" : "0"); } catch {}
     const btn = $(view + "-fav-only");
     if (btn) {
@@ -4172,32 +4181,44 @@ html {
     }
   });
 
-  // Delegated handler for favorite stars and favorites-only toggles
+  // Stars sit inside clickable rows. They are handled in the capture phase,
+  // before any row listener, so a click or Enter/Space on a star never opens
+  // the row as well.
+  document.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target && e.target.closest && e.target.closest(".fav-star")) {
+      e.stopPropagation();
+    }
+  }, true);
   document.addEventListener("click", (e) => {
     const star = e.target && e.target.closest && e.target.closest(".fav-star");
-    if (star) {
-      e.stopPropagation();
-      e.preventDefault();
-      const kind = star.getAttribute("data-fav-kind") || "";
-      const ref = star.getAttribute("data-fav-ref") || "";
-      const wasOn = star.getAttribute("aria-pressed") === "true";
-      star.setAttribute("aria-pressed", wasOn ? "false" : "true");
-      star.textContent = wasOn ? "☆" : "★";
-      const label = wasOn ? t("fav.mark") : t("fav.remove");
+    if (!star) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const kind = star.getAttribute("data-fav-kind") || "";
+    const ref = star.getAttribute("data-fav-ref") || "";
+    const wasOn = star.getAttribute("aria-pressed") === "true";
+    const show = (on) => {
+      star.setAttribute("aria-pressed", on ? "true" : "false");
+      star.textContent = on ? "★" : "☆";
+      const label = on ? t("fav.remove") : t("fav.mark");
       star.title = label;
       star.setAttribute("aria-label", label);
-      const url = "/api/favorites/" + encodeURIComponent(kind) + "/" + encodeURIComponent(ref);
-      if (wasOn) {
-        fetch(url, { method: "DELETE" }).catch(() => {});
-      } else {
-        fetch("/api/favorites", {
+    };
+    show(!wasOn);
+    const url = "/api/favorites/" + encodeURIComponent(kind) + "/" + encodeURIComponent(ref);
+    const req = wasOn
+      ? fetch(url, { method: "DELETE" })
+      : fetch("/api/favorites", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: kind, ref: ref }),
-        }).catch(() => {});
-      }
-      return;
-    }
+        });
+    req.then((r) => { if (!r.ok) throw new Error(String(r.status)); })
+      .catch(() => { show(wasOn); toast(t("fav.failed")); });
+  }, true);
+
+  // Delegated handler for favorites-only toggles
+  document.addEventListener("click", (e) => {
     const tog = e.target && e.target.closest && e.target.closest(".fav-toggle");
     if (tog) {
       e.stopPropagation();
@@ -4206,6 +4227,8 @@ html {
       const on = tog.getAttribute("aria-pressed") !== "true";
       setFavOnly(view, on);
       if (view === "history") { state.hist.offset = 0; loadHistory(); }
+      else if (view === "home") { loadHomeList(); loadActivity(); }
+      else if (view === "timeline") { timelineMonthCache.clear(); loadTimeline(); renderCalendar(); }
       else if (view === "browse") { state.browse.offset = 0; loadBrowse(); }
       else if (view === "memory") { state.memory.offset = 0; loadMemory(); }
       else if (view === "projects") { renderProjects(); }
@@ -4217,9 +4240,9 @@ html {
     }
   });
 
-  async function loadActivity() {
+  async function loadActivity(favView = "home") {
     try {
-      const data = await fetchJson("/api/timeline");
+      const data = await fetchJson("/api/timeline" + (favOnlyOn(favView) ? "?favorites=1" : ""));
       const days = data.days || [];
       const byDay = new Map();
       days.forEach((d) => {
@@ -4323,17 +4346,18 @@ html {
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     try {
       const data = await fetchJson(
-        "/api/conversations?limit=8&offset=0&all=1&hide_empty=1&sort=recent"
+        "/api/conversations?limit=8&offset=0&all=1&hide_empty=1&sort=recent" + favQuery("home")
       );
       const items = data.conversations || [];
-      if (quick) quick.hidden = items.length > 0;
+      const favOnly = favOnlyOn("home");
+      if (quick) quick.hidden = items.length > 0 || favOnly;
       el.innerHTML = items.map((c) => rowHtml(c, "")).join("") ||
-        emptyBox(
+        (favOnly ? emptyBox(t("fav.empty"), t("fav.empty")) : emptyBox(
           t("home.noSessions"),
           t("home.nothingIngested"),
           "",
           '<button type="button" class="btn btn-primary" data-drill="operate">' + t("home.quickstart.action") + '</button>'
-        );
+        ));
       bindRows(el);
       announce(items.length ? items.length + " " + plural(items.length, t("p.recentSession"), t("p.recentSessions")) : t("home.noSessions"));
     } catch (e) {
@@ -4810,14 +4834,22 @@ html {
       const findSortVal = findSortEl ? findSortEl.value : "relevance";
       if (findSortVal === "desc") hits.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       else if (findSortVal === "asc") hits.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      let favSet = new Set();
+      // A memory hit carries a note id and an instruction hit a prompt id in
+      // message_id, so each hit is starred under its own kind; prompts have none.
+      const favSet = new Set();
       try {
-        const favRes = await fetchJson("/api/favorites?kind=message");
-        favSet = new Set((favRes.favorites || []).map((f) => String(f.ref)));
+        const [favMsg, favMem] = await Promise.all([
+          fetchJson("/api/favorites?kind=message"),
+          fetchJson("/api/favorites?kind=memory"),
+        ]);
+        (favMsg.favorites || []).forEach((f) => favSet.add("message:" + f.ref));
+        (favMem.favorites || []).forEach((f) => favSet.add("memory:" + f.ref));
       } catch {}
+      const hitFavKind = (h) => (h.kind === "memory" ? "memory" : h.kind === "instruction" ? "" : "message");
+      const hitIsFav = (h) => !!hitFavKind(h) && favSet.has(hitFavKind(h) + ":" + h.message_id);
       let filteredHits = hits;
       if (favOnlyOn("find")) {
-        filteredHits = hits.filter((h) => h.kind !== "config" && favSet.has(String(h.message_id)));
+        filteredHits = hits.filter((h) => h.kind !== "config" && hitIsFav(h));
       }
       if (!filteredHits.length) {
         el.setAttribute("aria-busy", "false");
@@ -4877,12 +4909,16 @@ html {
           project_name: h.project_name || "",
         }));
         return (
-          '<div class="row" data-id="' + h.conversation_id + '" data-created-at="' + escapeHtml(h.created_at || "") + '" role="button" tabindex="0">' +
-          '<div class="row-id">#' + h.conversation_id + "</div>" +
+          // Notes and instructions without a source session open nothing.
+          (h.conversation_id > 0
+            ? '<div class="row" data-id="' + h.conversation_id + '" data-created-at="' + escapeHtml(h.created_at || "") + '" role="button" tabindex="0">' +
+              '<div class="row-id">#' + h.conversation_id + "</div>"
+            : '<div class="row" data-created-at="' + escapeHtml(h.created_at || "") + '">' +
+              '<div class="row-id">–</div>') +
           '<div><span class="chip">' + escapeHtml(h.source_tool || "tool") + "</span>" +
           ' <span class="chip">' + escapeHtml(h.project_name || "-") + "</span>" +
           ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
-          '<div class="row-main"><div class="row-title">' + favStar("message", h.message_id, favSet.has(String(h.message_id))) + escapeHtml(h.snippet || "") + "</div>" +
+          '<div class="row-main"><div class="row-title">' + (hitFavKind(h) ? favStar(hitFavKind(h), h.message_id, hitIsFav(h)) : "") + escapeHtml(h.snippet || "") + "</div>" +
           '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
           '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-pin="' + pinData + '" aria-label="' + t("find.pinAria") + '">' + t("msg.pin") + '</button></div>' +
           "</div>"
@@ -5036,7 +5072,7 @@ html {
     const since = key + "-01";
     const lastDay = new Date(year, month + 1, 0).getDate();
     const until = key + "-" + String(lastDay).padStart(2, "0");
-    fetchJson("/api/timeline?since=" + encodeURIComponent(since) + "&until=" + encodeURIComponent(until))
+    fetchJson("/api/timeline?since=" + encodeURIComponent(since) + "&until=" + encodeURIComponent(until) + favQuery("timeline"))
       .then((data) => {
         timelineMonthCache.set(key, { days: data.days || [] });
         if (timelineMonthKey(calMonth.getFullYear(), calMonth.getMonth()) === key) renderCalendar();
@@ -5148,7 +5184,7 @@ html {
   }
 
   async function loadTimeline() {
-    await loadActivity();
+    await loadActivity("timeline");
     const el = $("timeline-list");
     el.innerHTML = '<div class="skeleton"></div>';
     try {
@@ -5183,7 +5219,10 @@ html {
       } else {
         since = isoDateDaysAgo(Number(range) || 90);
       }
-      const data = await fetchJson(since ? "/api/timeline?since=" + encodeURIComponent(since) : "/api/timeline");
+      const tlParams = new URLSearchParams();
+      if (since) tlParams.set("since", since);
+      if (favOnlyOn("timeline")) tlParams.set("favorites", "1");
+      const data = await fetchJson("/api/timeline" + (tlParams.toString() ? "?" + tlParams : ""));
       const days = data.days || [];
       timelineDays = days;
       const tool = timelineToolFilter();
@@ -7079,7 +7118,7 @@ html {
     renderProjects();
   });
   // Restore favorites-only toggle state from localStorage for each list view
-  ["history", "browse", "memory", "projects", "assistants", "find"].forEach((v) => {
+  ["home", "history", "browse", "memory", "projects", "timeline", "assistants", "find"].forEach((v) => {
     setFavOnly(v, favOnlyOn(v));
   });
   renderAsstSourceToggle();
