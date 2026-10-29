@@ -98,6 +98,61 @@ fn project_from_path(path: &Path) -> Option<String> {
         .cloned()
 }
 
+/// A note an earlier import of this file produced, with the live end of its
+/// supersession chain (the row without `superseded_by`).
+struct Produced {
+    id: i64,
+    content: String,
+    category: String,
+    /// Replaced by another note (UI, MCP, reflect or a later import).
+    replaced: bool,
+    end_id: i64,
+    end_status: String,
+    end_from: chrono::DateTime<chrono::Utc>,
+}
+
+/// The notes this file produced, one per chain: the newest file row in it,
+/// so an older text the file has since replaced does not count. A chain that
+/// ends in a closed file row (a vanished section) is left out; that section
+/// comes back as a new note.
+fn produced_notes<C: GenericClient>(client: &mut C, file_tag: &str) -> Result<Vec<Produced>> {
+    let rows = client.query(
+        "WITH RECURSIVE chain AS ( \
+             SELECT id AS root, id, superseded_by, 0 AS depth FROM memory_chunks \
+              WHERE source_type = 'manual' AND $1 = ANY(tags) \
+             UNION ALL \
+             SELECT c.root, m.id, m.superseded_by, c.depth + 1 \
+               FROM chain c JOIN memory_chunks m ON m.id = c.superseded_by \
+              WHERE c.depth < 1000) \
+         SELECT f.id, f.content, f.category::text, f.superseded_by IS NOT NULL, \
+                e.id, COALESCE(e.status, 'active'), \
+                COALESCE(e.valid_from, e.source_at, e.created_at) \
+           FROM chain c \
+           JOIN memory_chunks f ON f.id = c.root \
+           JOIN memory_chunks e ON e.id = c.id \
+          WHERE c.superseded_by IS NULL \
+          ORDER BY f.id",
+        &[&file_tag],
+    )?;
+    let mut out: Vec<Produced> = Vec::new();
+    for r in rows {
+        let p = Produced {
+            id: r.get(0),
+            content: r.get(1),
+            category: r.get(2),
+            replaced: r.get(3),
+            end_id: r.get(4),
+            end_status: r.get(5),
+            end_from: r.get(6),
+        };
+        // Rows come by id: a later file row of the same chain is newer.
+        out.retain(|o| o.end_id != p.end_id);
+        out.push(p);
+    }
+    out.retain(|p| p.replaced || !matches!(p.end_status.as_str(), "superseded" | "merged"));
+    Ok(out)
+}
+
 /// Ingest every Agent memory markdown file. Returns (files_scanned, chunks_upserted).
 pub fn ingest_agent_memory<C: GenericClient>(client: &mut C) -> Result<(usize, usize)> {
     ingest_agent_memory_from(client, &memory_root())
@@ -139,31 +194,21 @@ fn ingest_agent_memory_from<C: GenericClient>(
             .map(chrono::DateTime::<chrono::Utc>::from)
             .unwrap_or_else(|_| chrono::Utc::now());
 
-        // Match each section to the live note it produced last time (by
-        // heading, oldest first). An unchanged section is left alone, a
-        // changed one is replaced by a successor (the old note stays as
-        // history, its star moves along), a new one is inserted and a vanished
-        // one is closed, never deleted. All in one transaction per file.
+        // Match each section to the note it produced last time (by heading:
+        // the same text first, then the oldest live note, then the newest
+        // replaced one). An unchanged section is left alone, even when the
+        // note was replaced in the UI or over MCP since. A changed one
+        // replaces the live end of the chain (the old notes stay as history,
+        // a star moves along): the newer change wins. A new one is inserted
+        // and a vanished one is closed, never deleted. All in one transaction
+        // per file.
         let mut tx = client.transaction().context("begin agent memory file")?;
         let category_type =
             crate::extract_memory::category_column_type(&mut tx).context("category_column_type")?;
         // A file's mtime can lie in the future (clock skew, copied files).
         let now = chrono::Utc::now();
         let mtime_clamped = mtime.min(now);
-        let mut previous: Vec<(i64, String, String, chrono::DateTime<chrono::Utc>)> = tx
-            .query(
-                "SELECT id, content, category::text, COALESCE(valid_from, source_at, created_at) \
-                 FROM memory_chunks \
-                 WHERE source_type = 'manual' AND $1 = ANY(tags) \
-                   AND superseded_by IS NULL \
-                   AND COALESCE(status, 'active') NOT IN ('superseded', 'merged') \
-                 ORDER BY id",
-                &[&file_tag],
-            )
-            .context("load agent memory notes")?
-            .iter()
-            .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)))
-            .collect();
+        let mut previous = produced_notes(&mut tx, &file_tag).context("load agent memory notes")?;
         for (heading, body) in sections(&text) {
             if body.len() < 40 {
                 continue;
@@ -172,16 +217,32 @@ fn ingest_agent_memory_from<C: GenericClient>(
             let prefix = format!("[{file_stem}] {heading}\n");
             let content = format!("{prefix}{body}");
             let tags = vec![TAG.to_string(), file_stem.clone(), file_tag.clone()];
-            match previous
+            let pick = previous
                 .iter()
-                .position(|(_, c, _, _)| c.starts_with(&prefix))
-            {
-                Some(i) => {
-                    let (id, old_content, old_category, old_from) = previous.remove(i);
-                    if old_content == content && old_category == category {
-                        upserted += 1;
-                        continue;
-                    }
+                .position(|p| p.content == content)
+                .or_else(|| {
+                    previous
+                        .iter()
+                        .position(|p| !p.replaced && p.content.starts_with(&prefix))
+                })
+                .or_else(|| {
+                    previous
+                        .iter()
+                        .rposition(|p| p.replaced && p.content.starts_with(&prefix))
+                });
+            let live_end = match pick.map(|i| previous.remove(i)) {
+                Some(p) if p.content == content && (p.replaced || p.category == category) => {
+                    upserted += 1;
+                    continue;
+                }
+                // A chain closed without a successor cannot be replaced.
+                Some(p) if !matches!(p.end_status.as_str(), "superseded" | "merged") => {
+                    Some((p.end_id, p.end_from))
+                }
+                _ => None,
+            };
+            match live_end {
+                Some((id, old_from)) => {
                     let successor = crate::server::Successor {
                         content: &content,
                         category: Some(category),
@@ -213,8 +274,14 @@ fn ingest_agent_memory_from<C: GenericClient>(
             upserted += 1;
         }
         // Sections that left the file: close their validity, keep the rows.
-        // A forgotten note stays forgotten.
-        let vanished: Vec<i64> = previous.iter().map(|(id, ..)| *id).collect();
+        // Only a file note that is still the live end of its chain is closed;
+        // a replacement from the UI or MCP stays. A forgotten note stays
+        // forgotten.
+        let vanished: Vec<i64> = previous
+            .iter()
+            .filter(|p| !p.replaced)
+            .map(|p| p.id)
+            .collect();
         if !vanished.is_empty() {
             tx.execute(
                 "UPDATE memory_chunks \
@@ -457,5 +524,140 @@ mod tests {
         assert_eq!(gone_status, "forgotten");
         assert_eq!(gone_valid_to, None);
         assert_eq!(gone_by, None);
+    }
+
+    /// Active rows among this file's notes plus `extra` (a successor without
+    /// the file tag), sorted.
+    fn active_ids<C: GenericClient>(client: &mut C, file: &Path, extra: i64) -> Vec<i64> {
+        let tag = format!("file:{}", file.display());
+        client
+            .query(
+                "SELECT id FROM memory_chunks \
+                 WHERE ($1 = ANY(tags) OR id = $2) AND status = 'active' ORDER BY id",
+                &[&tag, &extra],
+            )
+            .unwrap()
+            .iter()
+            .map(|r| r.get(0))
+            .collect()
+    }
+
+    #[test]
+    fn re_import_keeps_a_ui_replacement_until_the_file_changes() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping re_import_keeps_a_ui_replacement_until_the_file_changes: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("project").join("atlas").join("notes.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let decision = "# Decision\nUse PostgreSQL with pgvector for every project store.\n";
+        std::fs::write(&file, decision).unwrap();
+        ingest_agent_memory_from(&mut tx, dir.path()).expect("first import");
+        let imported = notes(&mut tx, &file)[0].0;
+        let ui_text = "Use SQLite for the local store, PostgreSQL only on the server.";
+        let (_, ui) = crate::server::supersede_memory(
+            &mut tx,
+            imported,
+            &crate::server::Successor {
+                content: ui_text,
+                category: None,
+                source_type: "ui_pin",
+                kind: crate::server::SupersedeKind::Update,
+                valid_from: None,
+                confidence: 1.0,
+                tags: Vec::new(),
+                source_at: None,
+            },
+        )
+        .expect("replace in the UI");
+
+        // (a) The file did not change: the UI replacement stays the answer.
+        ingest_agent_memory_from(&mut tx, dir.path()).expect("re-import, file unchanged");
+        assert_eq!(notes(&mut tx, &file).len(), 1, "no new row from the file");
+        assert_eq!(active_ids(&mut tx, &file, ui), vec![ui]);
+
+        // (b) The file changed: the newer file text replaces the UI note.
+        let decision2 = "# Decision\nUse PostgreSQL 16 with pgvector for every project store.\n";
+        std::fs::write(&file, decision2).unwrap();
+        ingest_agent_memory_from(&mut tx, dir.path()).expect("re-import, file changed");
+        let row = tx
+            .query_one(
+                "SELECT status, superseded_by FROM memory_chunks WHERE id = $1",
+                &[&ui],
+            )
+            .unwrap();
+        assert_eq!(row.get::<_, String>(0), "superseded");
+        let successor: i64 = row
+            .get::<_, Option<i64>>(1)
+            .expect("the UI note points at the file's new text");
+        let new = tx
+            .query_one(
+                "SELECT source_type, content, status FROM memory_chunks WHERE id = $1",
+                &[&successor],
+            )
+            .unwrap();
+        assert_eq!(new.get::<_, String>(0), "manual");
+        assert!(new.get::<_, String>(1).contains("PostgreSQL 16"));
+        assert_eq!(new.get::<_, String>(2), "active");
+        assert_eq!(
+            active_ids(&mut tx, &file, ui),
+            vec![successor],
+            "exactly one active row for the section"
+        );
+    }
+
+    /// The newest text the file produced counts, not an older identical one,
+    /// and a section that comes back after it vanished is live again.
+    #[test]
+    fn re_import_follows_a_section_back_and_forth() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping re_import_follows_a_section_back_and_forth: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("project").join("atlas").join("notes.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let v1 = "# Decision\nUse PostgreSQL with pgvector for every project store.\n";
+        let v2 = "# Decision\nUse PostgreSQL 16 with pgvector for every project store.\n";
+        let other = "# Pattern\nWrite the failing test first, then the smallest change.\n";
+        let active_text = |tx: &mut postgres::Transaction<'_>| -> Vec<String> {
+            notes(tx, &file)
+                .into_iter()
+                .filter(|n| n.1 == "active")
+                .map(|n| n.2)
+                .collect()
+        };
+        for (step, text, want) in [
+            ("v1", format!("{v1}{other}"), Some("pgvector for")),
+            ("v2", format!("{v2}{other}"), Some("PostgreSQL 16")),
+            (
+                "back to v1",
+                format!("{v1}{other}"),
+                Some("PostgreSQL with"),
+            ),
+            ("removed", other.to_string(), None),
+            ("re-added", format!("{v1}{other}"), Some("PostgreSQL with")),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            ingest_agent_memory_from(&mut tx, dir.path()).expect(step);
+            let decisions: Vec<String> = active_text(&mut tx)
+                .into_iter()
+                .filter(|c| c.contains("] Decision"))
+                .collect();
+            match want {
+                Some(w) => {
+                    assert_eq!(decisions.len(), 1, "{step}: {decisions:?}");
+                    assert!(decisions[0].contains(w), "{step}: {decisions:?}");
+                }
+                None => assert!(decisions.is_empty(), "{step}: {decisions:?}"),
+            }
+        }
     }
 }
