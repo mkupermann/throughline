@@ -302,10 +302,10 @@ pub fn insert_memory<C: GenericClient>(
             r#"
         INSERT INTO memory_chunks
             (source_type, source_id, content, category, project_name,
-             confidence, tags, status, source_at)
+             confidence, tags, status, source_at, valid_from)
         VALUES ('conversation', $1, $2, $3::text::{category_type},
                 (SELECT project_name FROM conversations WHERE id = $1),
-                $4::float8, $5, 'active', $6)
+                $4::float8, $5, 'active', $6, $6)
         "#
         ),
         &[
@@ -569,13 +569,17 @@ mod tests {
         insert_memory(&mut tx, conv, &item, ts(T0)).expect("insert memory");
         let row = tx
             .query_one(
-                "SELECT category::text, confidence::float8 FROM memory_chunks \
+                "SELECT category::text, confidence::float8, valid_from, source_at \
+                 FROM memory_chunks \
                  WHERE source_type = 'conversation' AND source_id = $1",
                 &[&conv],
             )
             .expect("read memory");
         assert_eq!(row.get::<_, String>(0), "decision");
         assert!((row.get::<_, f64>(1) - 0.9).abs() < 1e-6);
+        let valid_from: DateTime<Utc> = row.get(2);
+        let source_at: DateTime<Utc> = row.get(3);
+        assert_eq!(valid_from, source_at);
         // Drop tx → rollback, nothing left behind.
     }
 
