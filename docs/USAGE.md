@@ -158,6 +158,23 @@ embeddings, repairs dangling `superseded_by` references, and writes an audit
 row to `memory_reflections` with your reason — so what was removed, and why,
 stays answerable afterwards.
 
+## Notes and the time they were valid
+
+A note has two clocks. `created_at` says when Throughline recorded it. `valid_from` and `valid_to` say when the statement was true. A new note is valid from the moment it is written. Notes that existed before migration 012 start at their source date, or at their creation date. `valid_to` stays empty until something ends it.
+
+Replacing a note (`POST /api/memory/{id}/supersede`, or the MCP `supersede` tool) takes two optional fields:
+
+- `kind`: `update` (the default) means the old note was right until now. It stays valid until the new one starts, and the new one starts now unless you give a date. `correction` means the old note was wrong from the beginning. Its interval is emptied, and the new note starts where the old one started.
+- `valid_from`: the start of the new note, as RFC 3339 or `YYYY-MM-DD`.
+
+A start in the future is refused with 422 `valid_from_in_future`. A start before the note being replaced is refused with 422 `valid_from_before_predecessor`. A star on the old note moves to the new one.
+
+To ask what held on a given day, use `GET /api/memory?valid_at=2026-01-15`. To ask what Throughline knew on that day, use `known_at`. Both take RFC 3339 or `YYYY-MM-DD`, and either one replaces the `status` filter. A note counts as valid until the earlier of `valid_to` and `expires_at`. Forgotten notes never appear in these answers. A date that does not parse gives 422 `validation_error` and names the field.
+
+Only replacing and merging end a validity. Forgotten and stale notes keep an open `valid_to`, because nobody said the statement stopped being true. `POST /api/memory/{id}/keep` brings such a note back and clears `expires_at`. If the note has a successor, keep answers 409 `has_successor`, since reviving it would put two answers side by side.
+
+The agent-memory import follows the same rules. A changed section becomes a successor through update, starting at the file's modification time (never later than now). A section that vanished from the file is marked superseded with an end date. Nothing is deleted.
+
 ## Leaving things out of the ingest
 
 Some paths and projects should never reach the corpus at all. The ingest

@@ -50,6 +50,8 @@ Message detail shows full content and available structured tool calls/content bl
 
 Search durable notes, filter category, page results and expand individual cards. The categories are decision, preference, pattern, insight, error_solution, project_context and workflow. Ingest agent memory scans configured Markdown files and upserts notes tagged `agent-memory`. Set `THROUGHLINE_AGENT_MEMORY_DIR` to select that source tree. This action changes the database; it is not a read-only refresh.
 
+Each card shows when the note became valid ("valid since") and, once something replaced it, when it stopped ("valid until"). The source chip reads "source from" when the conversation date is known. The "As of" filter takes a date and a choice: "was valid" lists the notes that held on that day, "was known" lists what Throughline had recorded by then. While a date is set, the status filter is disabled. The replace dialog has two more fields. "Valid from" is the start of the new note and stays empty for today. The choice between Update and Correction says whether the old note was right until then or never right. A start date in the future is refused and the dialog stays open.
+
 ![Memory](media/rust/memory.png)
 
 ## Search
