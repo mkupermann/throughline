@@ -152,11 +152,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_conversation_uuid
 DROP INDEX IF EXISTS messages_uuid_key;
 "#;
 
-/// Migrations the Rust CLI owns. The Python package has its own numbered
-/// files; both share `applied_migrations` so a mixed-history database works.
+/// Databases created from the Python `sql/schema.sql` have the view
+/// `v_conversation_stats` on these columns, and ALTER COLUMN TYPE refuses to
+/// run under a view. Drop it and re-create it only where it existed.
 const TOKEN_BIGINT: &str = r#"
-ALTER TABLE conversations ALTER COLUMN token_count_in TYPE BIGINT;
-ALTER TABLE conversations ALTER COLUMN token_count_out TYPE BIGINT;
+DO $$
+DECLARE
+    had_view boolean := to_regclass('public.v_conversation_stats') IS NOT NULL;
+BEGIN
+    DROP VIEW IF EXISTS public.v_conversation_stats;
+    ALTER TABLE conversations ALTER COLUMN token_count_in TYPE BIGINT;
+    ALTER TABLE conversations ALTER COLUMN token_count_out TYPE BIGINT;
+    IF had_view THEN
+        CREATE VIEW public.v_conversation_stats AS
+        SELECT project_name,
+               count(*) AS sessions,
+               sum(message_count) AS total_messages,
+               round(avg(token_count_in + token_count_out)) AS avg_tokens,
+               sum(cost_usd) AS total_cost
+        FROM public.conversations
+        GROUP BY project_name
+        ORDER BY count(*) DESC;
+    END IF;
+END $$;
 "#;
 
 /// Migrations the Rust CLI owns. The Python package has its own numbered

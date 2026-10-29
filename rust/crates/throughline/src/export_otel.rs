@@ -86,6 +86,7 @@ fn opt_attr_string(key: &str, value: Option<&str>) -> Option<Value> {
 }
 
 /// Build one message child-span (parent = conversation root span).
+#[allow(clippy::too_many_arguments)]
 fn message_span(
     conv: &OtelConversation,
     msg: &OtelMessage,

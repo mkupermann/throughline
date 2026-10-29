@@ -3041,7 +3041,7 @@ mod tests {
         for row in &jan {
             let day = row["day"].as_str().unwrap();
             assert!(
-                day >= "2026-01-01" && day <= "2026-01-31",
+                ("2026-01-01"..="2026-01-31").contains(&day),
                 "day {day} is outside January 2026"
             );
         }

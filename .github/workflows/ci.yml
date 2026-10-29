@@ -7,6 +7,71 @@ on:
     branches: [main]
 
 jobs:
+  rust:
+    name: Rust fmt, clippy and tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      CARGO_TERM_COLOR: always
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      # Same toolchain as Dockerfile.rust, so a new clippy lint never turns
+      # CI red without a code change.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: clippy without default features
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      # Two databases: a fresh Rust install, and one created from the Python
+      # sql/schema.sql and then upgraded, which is how older installs arrive.
+      - name: Prepare test databases
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE throughline;" -d postgres
+          psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE throughline_legacy;" -d postgres
+          psql -v ON_ERROR_STOP=1 -q -d throughline_legacy -f ../sql/schema.sql
+          PGDATABASE=throughline cargo run -q -p throughline -- migrate
+          PGDATABASE=throughline_legacy cargo run -q -p throughline -- migrate
+      # Database tests skip themselves when no server answers. Here one must
+      # answer, so a skip is a failure.
+      - name: Tests on both schemas
+        run: |
+          set -o pipefail
+          for db in throughline throughline_legacy; do
+            echo "::group::cargo test against $db"
+            PGDATABASE=$db cargo test --workspace -- --nocapture 2>&1 | tee "/tmp/rust-test-$db.log"
+            echo "::endgroup::"
+            if grep -q "no PostgreSQL reachable" "/tmp/rust-test-$db.log"; then
+              echo "::error::database tests were skipped against $db"
+              exit 1
+            fi
+          done
+
   python-quality:
     name: Python lint, format, and syntax
     runs-on: ubuntu-latest

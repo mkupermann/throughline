@@ -2,13 +2,12 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use throughline::adapters::{sha256_file, Adapter};
 use throughline::types::IngestSummary;
 use throughline::{
     adapters, answer_eval, ask, audit, config, conflicts, costs, decisions, doctor, embedding,
     export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles, handoff,
     ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions,
-    reflect_memory, repair, retention, search, server, stale_digest, types, writer,
+    reflect_memory, repair, retention, search, server, stale_digest, types,
 };
 
 #[derive(Parser)]
@@ -423,11 +422,10 @@ fn main() -> Result<()> {
                 )?;
                 let messages: Vec<types::NormalisedMessage> = msgs
                     .into_iter()
-                    .map(|r| {
-                        let mut m = types::NormalisedMessage::default();
-                        m.role = r.get(0);
-                        m.content = r.get(1);
-                        m
+                    .map(|r| types::NormalisedMessage {
+                        role: r.get(0),
+                        content: r.get(1),
+                        ..Default::default()
                     })
                     .collect();
                 let title = generate_titles::title_messages(&messages)
