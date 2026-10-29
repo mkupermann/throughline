@@ -1444,6 +1444,7 @@ table.sessions tr.active td { background: var(--accent-soft); }
   margin: var(--space-3) 0 4px;
 }
 .pin-dialog select,
+.pin-dialog input[type="date"],
 .pin-dialog textarea {
   width: 100%;
   border-radius: var(--radius-sm);
@@ -2216,6 +2217,16 @@ html {
             </select>
           </label>
           <label class="field">
+            <span class="field-label" data-i18n="mem.asof">As of</span>
+            <span style="display:flex;gap:6px">
+              <input id="memory-asof" type="date" />
+              <select id="memory-asof-kind">
+                <option value="valid" data-i18n="mem.asof.valid">was valid</option>
+                <option value="known" data-i18n="mem.asof.known">was known</option>
+              </select>
+            </span>
+          </label>
+          <label class="field">
             <span class="field-label" data-i18n="sort.label">Sort</span>
             <select id="memory-sort">
               <option value="desc" data-i18n="sort.newOld">New to old</option>
@@ -2529,6 +2540,15 @@ html {
       <option value="project_context" data-i18n="cat.project_context">project_context</option>
       <option value="workflow" data-i18n="cat.workflow">workflow</option>
     </select>
+    <div id="pin-valid-box" hidden>
+      <label for="pin-kind" data-i18n="supersede.kind">Kind</label>
+      <select id="pin-kind">
+        <option value="update" data-i18n="supersede.kind.update">Update (the old note was true until then)</option>
+        <option value="correction" data-i18n="supersede.kind.correction">Correction (the old note was never right)</option>
+      </select>
+      <label for="pin-valid-from" data-i18n="supersede.validFrom">Valid from</label>
+      <input id="pin-valid-from" type="date" />
+    </div>
     <label for="pin-content" data-i18n="pin.content">Content</label>
     <textarea id="pin-content" data-i18n-attr="aria-label:pin.contentAria" aria-label="Note content"></textarea>
     <div class="pin-actions">
@@ -2782,6 +2802,16 @@ html {
       "mem.runIngest": "Run import",
       "mem.couldNotLoad": "Could not load memory",
       "mem.recorded": "recorded ",
+      "mem.validSince": "valid since ",
+      "mem.validUntil": "valid until ",
+      "mem.sourceAt": "source from ",
+      "mem.asof": "As of",
+      "mem.asof.valid": "was valid",
+      "mem.asof.known": "was known",
+      "supersede.kind": "Kind",
+      "supersede.validFrom": "Valid from",
+      "supersede.kind.update": "Update (the old note was true until then)",
+      "supersede.kind.correction": "Correction (the old note was never right)",
       "mem.extracted": "extracted ",
       "mem.label": "Memory",
       "mem.expand": "Click to expand full memory",
@@ -3416,6 +3446,16 @@ html {
       "mem.runIngest": "Import starten",
       "mem.couldNotLoad": "Memory konnte nicht geladen werden",
       "mem.recorded": "erfasst ",
+      "mem.validSince": "gilt seit ",
+      "mem.validUntil": "galt bis ",
+      "mem.sourceAt": "Quelle vom ",
+      "mem.asof": "Stand am",
+      "mem.asof.valid": "galt",
+      "mem.asof.known": "war bekannt",
+      "supersede.kind": "Art",
+      "supersede.validFrom": "Gilt ab",
+      "supersede.kind.update": "Aktualisierung (die alte Notiz galt bis dahin)",
+      "supersede.kind.correction": "Korrektur (die alte Notiz war nie richtig)",
       "mem.extracted": "extrahiert ",
       "mem.label": "Memory",
       "mem.expand": "Klicken, um den vollen Eintrag zu zeigen",
@@ -6494,7 +6534,14 @@ html {
     p.set("offset", String(state.memory.offset));
     if (state.memory.q) p.set("q", state.memory.q);
     if (state.memory.category) p.set("category", state.memory.category);
-    if (state.memory.status) p.set("status", state.memory.status);
+    // A date replaces the status filter (the server ignores status then); show it disabled.
+    const asofEl = $("memory-asof");
+    const asof = asofEl ? asofEl.value : "";
+    const asofKind = $("memory-asof-kind");
+    const statusEl = $("memory-status");
+    if (statusEl) statusEl.disabled = !!asof;
+    if (asof) p.set(asofKind && asofKind.value === "known" ? "known_at" : "valid_at", asof);
+    else if (state.memory.status) p.set("status", state.memory.status);
     if (favOnlyOn("memory")) p.set("favorites", "1");
     const memorySort = $("memory-sort");
     if (memorySort) p.set("order", memorySort.value);
@@ -6511,6 +6558,10 @@ html {
           Math.abs(new Date(c.source_at) - new Date(c.created_at)) > 60000
           ? '<span class="chip">' + t("mem.extracted") + escapeHtml(fmtDateTime(c.created_at)) + "</span>"
           : "";
+        const dayFmt = { day: "numeric", month: "numeric", year: "numeric" };
+        const validChips =
+          (c.valid_from ? '<span class="chip" data-mem-valid="from">' + t("mem.validSince") + escapeHtml(fmtDate(c.valid_from, dayFmt)) + "</span>" : "") +
+          (c.valid_to ? '<span class="chip" data-mem-valid="to">' + t("mem.validUntil") + escapeHtml(fmtDate(c.valid_to, dayFmt)) + "</span>" : "");
         const content = c.content || "";
         const preview = escapeHtml(content.slice(0, 180));
         const full = escapeHtml(content);
@@ -6548,7 +6599,8 @@ html {
           favStar("memory", c.id, c.favorite) +
           '<span class="chip">' + cat + "</span>" + proj +
           '<span class="chip">#' + c.id + "</span>" +
-          '<span class="chip">' + t("mem.recorded") + date + "</span>" + extracted +
+          validChips +
+          '<span class="chip">' + (c.source_at ? t("mem.sourceAt") : t("mem.recorded")) + date + "</span>" + extracted +
           (isActive ? "" : '<span class="chip">' + escapeHtml(c.status || "") + "</span>") +
           "</div>" +
           '<button type="button" class="mem-card-toggle" aria-expanded="false">' +
@@ -6636,6 +6688,8 @@ html {
     if (qEl) qEl.value = "";
     const stEl = $("memory-status");
     if (stEl) stEl.value = "all";
+    const asofEl = $("memory-asof");
+    if (asofEl) asofEl.value = "";
     loadMemory().then(() => {
       const el = document.querySelector('#memory-list [data-mem-id="' + id + '"]');
       if (el) {
@@ -6674,6 +6728,10 @@ html {
       if (e.key === "Enter") { e.preventDefault(); apply(); }
     });
     if (status) status.addEventListener("change", apply);
+    const asof = $("memory-asof");
+    const asofKind = $("memory-asof-kind");
+    if (asof) asof.addEventListener("change", apply);
+    if (asofKind) asofKind.addEventListener("change", () => { if (asof && asof.value) apply(); });
     if (cat) cat.addEventListener("change", apply);
     if (prev) prev.addEventListener("click", () => {
       state.memory.offset = Math.max(0, state.memory.offset - state.memory.limit);
@@ -6719,6 +6777,11 @@ html {
     }
     $("pin-category").value = opts.category || "insight";
     $("pin-content").value = opts.content || "";
+    // Valid-time fields only make sense when replacing; an empty date lets the server pick.
+    const vbox = $("pin-valid-box");
+    if (vbox) vbox.hidden = pinMode !== "supersede";
+    $("pin-kind").value = "update";
+    $("pin-valid-from").value = "";
     const save = $("pin-save");
     if (save) save.textContent = pinMode === "supersede" ? t("supersede.save") : t("pin.save");
     dlg.hidden = false;
@@ -6758,7 +6821,10 @@ html {
       save.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + t("op.spinnerRunning");
       try {
         if (pinMode === "supersede" && pinOldId != null) {
-          const r = await postJson("/api/memory/" + pinOldId + "/supersede", { content, category });
+          const body = { content, category, kind: $("pin-kind").value };
+          const validFrom = $("pin-valid-from").value;
+          if (validFrom) body.valid_from = validFrom;
+          const r = await postJson("/api/memory/" + pinOldId + "/supersede", body);
           closePinDialog();
           toast(t("supersede.done") + pinOldId + t("supersede.done2") + r.new_id);
           loadMemory();
