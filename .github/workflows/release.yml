@@ -1,0 +1,99 @@
+name: Release
+
+# Build and publish a multi-arch Docker image to GitHub Container Registry on
+# every version tag (v0.x.y / vX.Y.Z). Docker Compose is the supported path
+# because it supplies PostgreSQL, migrations, credentials and a loopback-only
+# host mapping. Advanced standalone-image use must supply a reachable database
+# and explicitly opt into the container's non-loopback bind:
+#
+#   docker run --rm -p 127.0.0.1:8787:8787 \
+#     -e THROUGHLINE_HOST=0.0.0.0 -e THROUGHLINE_ALLOW_REMOTE=1 \
+#     -e PGHOST=host.docker.internal -e PGPORT=5432 \
+#     -e PGDATABASE=throughline -e PGUSER=throughline -e PGPASSWORD=... \
+#     ghcr.io/mkupermann/throughline:v0.3.0
+#
+# Without those explicit overrides the image binds to 127.0.0.1 inside the
+# container and remains local-safe by default.
+#
+# Manual dispatch is also supported for ad-hoc rebuilds.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build (e.g. v0.3.0). Defaults to the current ref if empty."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Validate immutable version tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=$(git describe --tags --exact-match HEAD)
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release builds require an exact version tag (vX.Y.Z or prerelease)."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == *-* ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.tag }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
+          labels: |
+            org.opencontainers.image.title=throughline
+            org.opencontainers.image.description=Persistent long-term memory across AI coding tools (web UI + MCP server).
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

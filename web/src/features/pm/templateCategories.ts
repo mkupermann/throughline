@@ -1,0 +1,17 @@
+export const TEMPLATE_CATEGORIES: [string, string, string][] = [
+  ["general", "General", "Allgemein"],
+  ["finance", "Finance", "Finanzen"],
+  ["science", "Science", "Wissenschaft"],
+  ["education", "Education", "Bildung"],
+  ["enterprise", "Enterprise", "Großunternehmen"],
+  ["mid-size", "Mid-size business", "Mittelstand"],
+  ["startup", "Startups", "Start-ups"],
+  ["engineering", "Engineering", "Softwareentwicklung"],
+  ["product-design", "Product & design", "Produkt und Design"],
+  ["marketing", "Marketing", "Marketing"],
+  ["operations", "Operations", "Betrieb"],
+  ["security", "Security", "Sicherheit"],
+  ["legal-compliance", "Legal & compliance", "Recht und Compliance"],
+  ["healthcare", "Healthcare", "Gesundheitswesen"],
+  ["nonprofit", "Nonprofit", "Gemeinnützigkeit"],
+];

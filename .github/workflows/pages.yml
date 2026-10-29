@@ -1,0 +1,15 @@
+name: Deploy Landing Page
+on:
+  push:
+    branches: [main]
+    paths: ['docs/landing/**']
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/landing
+      - uses: actions/deploy-pages@v4

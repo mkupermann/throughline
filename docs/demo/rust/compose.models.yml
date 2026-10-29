@@ -1,0 +1,44 @@
+# Optional model overlay for the README demo. Merged ON TOP of compose.yml:
+#   docker compose -f docs/demo/rust/compose.yml -f docs/demo/rust/compose.models.yml up -d --build
+# Without this file the demo stays model-free (web targets unreachable loopback).
+# Adds a local Ollama service (embeddings + small instruct model). No host port:
+# only the compose network needs to reach it.
+#
+# Instruct model default: qwen2.5:1.5b-instruct (small, answer latency first).
+# Override with THROUGHLINE_DEMO_ANSWER_MODEL to try another tag.
+
+x-instruct-model: &instruct-model ${THROUGHLINE_DEMO_ANSWER_MODEL:-qwen2.5:1.5b-instruct}
+
+services:
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  models-pull:
+    image: ollama/ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - ollama pull nomic-embed-text && ollama pull "${THROUGHLINE_DEMO_ANSWER_MODEL:-qwen2.5:1.5b-instruct}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    environment:
+      # Embeddings (embedding.rs) and generation (llm.rs resolve_backend).
+      OLLAMA_HOST: http://ollama:11434
+      THROUGHLINE_ANSWER_BACKEND: ollama
+      THROUGHLINE_ANSWER_MODEL: *instruct-model
+
+volumes:
+  ollama_models:

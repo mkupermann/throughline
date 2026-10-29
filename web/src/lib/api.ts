@@ -1,0 +1,1033 @@
+import { sessionToken } from "./session";
+/** Typed client for the Throughline API.
+ *
+ * Hand-written for Phase 1 while the surface is one endpoint. Phase 2
+ * replaces this with a client generated from /api/openapi.json so the
+ * contract cannot drift silently.
+ */
+
+export type Severity = "critical" | "warning" | "info";
+export type Verdict = "ok" | "degraded" | "broken";
+
+export interface AttentionItem {
+  id: string;
+  severity: Severity;
+  title: string;
+  detail: string;
+  count: number | null;
+  action: string | null;
+  action_label: string | null;
+}
+
+export interface Overview {
+  headline: { label: string; value: number; sublabel: string };
+  verdict: Verdict;
+  verdict_reason: string;
+  attention: AttentionItem[];
+  activity: { day: string; n: number }[];
+  totals: Record<string, number>;
+  /** Chunk counts per memory category, already sorted descending by the API. */
+  categories: { category: string; n: number }[];
+}
+
+/** An API error carrying the server's structured payload, not just a status. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly hint?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    // `...init` spreads first so a caller's own keys (method, body) apply,
+    // and `headers` is assigned after the spread so the merged object wins.
+    // The other order silently dropped Accept the moment any caller passed a
+    // header of its own — which nothing did until /ask needed content-type.
+    res = await fetch(`/api${path}`, {
+      ...init,
+      headers: { Accept: "application/json", "X-Throughline-Request":"1", ...(sessionToken()?{"X-CSRF-Token":sessionToken()}:{}), ...(init?.headers ?? {}) },
+    });
+  } catch (cause) {
+    // Server not running at all — distinct from a server that answered.
+    throw new ApiError(
+      0,
+      "unreachable",
+      "Cannot reach the Throughline server.",
+      "Is `throughline serve` still running?",
+    );
+  }
+
+  if (res.status === 401 && path !== "/auth/login") window.dispatchEvent(new Event("throughline-session-expired"));
+  if (!res.ok) {
+    let code = "http_error";
+    let detail = res.statusText;
+    let hint: string | undefined;
+    try {
+      const body = await res.json();
+      code = body.error ?? code;
+      detail = body.detail ?? detail;
+      hint = body.hint;
+    } catch {
+      /* non-JSON error body — keep the status text */
+    }
+    throw new ApiError(res.status, code, detail, hint);
+  }
+
+  return (await res.json()) as T;
+}
+
+export const api = {
+  health: () => request<{ status: string; version: string }>("/health"),
+  overview: () => request<Overview>("/overview"),
+};
+
+
+// ── Providers ────────────────────────────────────────────────────────────
+
+export interface ProviderCoverage {
+  name: string;
+  label: string;
+  chart_slot: number;
+  on_disk: number;
+  pending: number;
+  excluded: number;
+  ingested: number;
+  last_run: string | null;
+  status: "ok" | "pending" | "not_ingested" | "no_data" | "unknown";
+}
+
+export const providersApi = {
+  list: () => request<{ providers: ProviderCoverage[] }>("/providers"),
+};
+
+
+// ── Find ─────────────────────────────────────────────────────────────────
+
+export type Kind = "conversation" | "message" | "memory" | "skill" | "project" | "prompt";
+
+export interface FindItem {
+  project_label?: string | null;
+  kind: Kind;
+  id: number;
+  title: string | null;
+  snippet: string | null;
+  project: string | null;
+  occurred_at: string | null;
+  category: string | null;
+  status: string | null;
+  confidence: number | null;
+  conversation_id: number | null;
+  score: number;
+  retrievers: number;
+}
+
+export interface FindResponse {
+  query: string;
+  items: FindItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  modes: string[];
+  notes: string[];
+  backend: { available: boolean; label: string };
+}
+
+export interface FacetValue {
+  label?: string | null;
+  value: string;
+  n: number;
+}
+
+export interface Facets {
+  kinds: FacetValue[];
+  categories: FacetValue[];
+  statuses: FacetValue[];
+  projects: FacetValue[];
+  tags: FacetValue[];
+}
+
+export interface DetailResponse {
+  kind: string;
+  record: Record<string, unknown>;
+  related: Record<string, Record<string, unknown>[]>;
+}
+
+export interface GraphNodeDTO {
+  id: number;
+  name: string;
+  entity_type: string;
+  project_name: string | null;
+  mention_count: number;
+  confidence: number | null;
+  hits_in_results: number;
+}
+export interface GraphEdgeDTO {
+  from_entity: number;
+  to_entity: number;
+  relation_type: string;
+  confidence: number | null;
+}
+
+export interface AskSource {
+  n: number;
+  kind: string;
+  id: number;
+  ref: string;
+  project: string | null;
+  category: string | null;
+  conversation_id: number | null;
+  distance: number | null;
+  excerpt: string;
+}
+
+export interface AskResponse {
+  question: string;
+  answer: string;
+  sources: AskSource[];
+  cited: number[];
+  degraded: string | null;
+  backend: string;
+  model: string;
+  /** True when the model ran on this machine and no excerpt left it. */
+  local: boolean;
+}
+
+export interface ProjectSummary {
+  is_curated?: boolean;
+  display_name?: string | null; context_label?: string | null; name_origin?: "user" | "folder" | "model";
+  project: string;
+  sessions: number;
+  messages: number;
+  first_active: string | null;
+  last_active: string | null;
+  tools: number;
+  tool_names: string[];
+}
+
+export interface ProjectSession {
+  id: number;
+  session_id: string;
+  title: string | null;
+  message_count: number;
+  started_at: string | null;
+  ended_at: string | null;
+  source_tool: string | null;
+  model: string | null;
+  git_branch: string | null;
+  generated_by: string | null;
+}
+
+export interface ProjectSessions {
+  project: string;
+  order: string;
+  q: string | null;
+  sessions: ProjectSession[];
+  total: number;
+  offset: number;
+  has_more: boolean;
+  include_generated: boolean;
+  /** Machine-generated sessions withheld from the list but still stored. */
+  hidden_generated: number;
+}
+
+export interface ProjectContextMessage {
+  id: number; role: string; content: string | null;
+  content_blocks?: unknown; tool_calls?: unknown; tool_name?: string | null; model?: string | null;
+  created_at: string;
+  conversation_id: number; conversation_title: string | null;
+  conversation_started_at: string | null; generated_by: string | null;
+}
+export interface ProjectContext {
+  display_name?: string | null; context_label?: string | null;
+  project: string; summary: string; knowledge: { id: number; type: "memory"; category: string; content: string; confidence: number; source_type: string; source_id: number | null }[];
+  messages: ProjectContextMessage[]; sessionCount: number; messageCount: number;
+  total: number; offset: number; limit: number; complete: boolean; order: "oldest" | "newest"; includeGenerated: boolean;
+}
+
+export const projectsApi = {
+  rename: (project: string, display_name: string) => request<{display_name: string}>(`/projects/${encodeURIComponent(project)}/name`, {method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({display_name})}),
+  all: (providers: string[] = []) => request<{ projects: ProjectSummary[] }>(`/projects/all?${new URLSearchParams(providers.map(p => ["provider", p]))}`),
+  recent: (days = 7) =>
+    request<{ days: number; projects: ProjectSummary[] }>(`/projects/recent?days=${days}`),
+  sessions: (
+    project: string,
+    opts: {
+      order?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+      includeGenerated?: boolean;
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    if (opts.order) p.set("order", opts.order);
+    if (opts.q) p.set("q", opts.q);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.includeGenerated) p.set("include_generated", "true");
+    // The name is a path segment and may contain spaces or dots — "The
+    // FireScore Website" is a real project here.
+    return request<ProjectSessions>(
+      `/projects/${encodeURIComponent(project)}/sessions?${p.toString()}`,
+    );
+  },
+  context: (project: string, opts: { order?: "oldest" | "newest"; offset?: number; limit?: number; includeGenerated?: boolean } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.order) p.set("order", opts.order);
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.includeGenerated) p.set("includeGenerated", "true");
+    return request<ProjectContext>(`/projects/${encodeURIComponent(project)}/context?${p.toString()}`);
+  },
+};
+
+export const askApi = {
+  // POST, not GET: a question is prose, and keeping it out of the URL keeps it
+  // out of access logs and browser history — this tool's whole subject is the
+  // user's private working history.
+  ask: (body: { question: string; top_k?: number; project?: string | null }) =>
+    request<AskResponse>("/ask", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+};
+
+export const findApi = {
+  search: (params: URLSearchParams) => request<FindResponse>(`/find?${params.toString()}`),
+  facets: () => request<Facets>("/find/facets"),
+  graph: (sources: [string, number][]) =>
+    request<{ nodes: GraphNodeDTO[]; edges: GraphEdgeDTO[] }>("/find/graph", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources }),
+    }),
+  detail: (kind: string, id: number | string, page?: { offset: number; limit: number }) =>
+    request<DetailResponse>(
+      page
+        ? `/detail/${kind}/${id}?msg_offset=${page.offset}&msg_limit=${page.limit}`
+        : `/detail/${kind}/${id}`,
+    ),
+  projectByName: (name: string) =>
+    request<DetailResponse>(`/detail/project/by-name/${encodeURIComponent(name)}`),
+};
+
+
+// ── Curate ───────────────────────────────────────────────────────────────
+
+export interface QueueSummary {
+  name: string;
+  title: string;
+  description: string;
+  count: number;
+  severity: string;
+  actions: string[];
+}
+
+export interface CurateItem {
+  id: number;
+  category?: string | null;
+  content?: string | null;
+  confidence?: number | null;
+  project_name?: string | null;
+  created_at?: string | null;
+  status?: string | null;
+  access_count?: number | null;
+  expires_at?: string | null;
+  reasoning?: string | null;
+  action_taken?: string | null;
+  superseded_by?: number | null;
+}
+
+export interface ActResult {
+  changed: number;
+  undo_token: string | null;
+  message: string;
+  affected_ids: number[];
+}
+
+export interface AuditStatus {
+  last_run: {
+    id: number;
+    created_at: string;
+    sampled: number;
+    drifted: number;
+    state: "findings" | "clear" | "no-samples";
+    findings_available?: boolean;
+  } | null;
+  job: JobSummary | null;
+}
+
+export const curateApi = {
+  queues: () => request<{ queues: QueueSummary[]; total: number }>("/curate/queues"),
+  queue: (name: string) =>
+    request<QueueSummary & { items: CurateItem[] }>(`/curate/queue/${name}`),
+  audit: () => request<AuditStatus>("/curate/audit"),
+  act: (body: { action: string; ids: number[]; reason?: string; value?: number }) =>
+    request<ActResult>("/curate/act", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // One key per submission, so a retried or double-clicked request
+        // applies once rather than stacking two inverses.
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify(body),
+    }),
+  createChunk: (body: {
+    content: string;
+    category: string;
+    project_name?: string | null;
+    tags?: string[];
+    confidence?: number;
+  }) =>
+    request<{ id: number; undo_token: string | null; message: string }>("/curate/chunk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  categories: () => request<{ categories: string[] }>("/curate/categories"),
+  undo: (token: string) =>
+    request<{ changed: number; message: string }>("/curate/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }),
+};
+
+// ── Operate ──────────────────────────────────────────────────────────────
+
+export interface JobSummary {
+  name: string;
+  title: string;
+  description: string;
+  danger: string | null;
+  running: boolean;
+  job_id: string | null;
+  unavailable: string | null;
+}
+
+export type PipelineStageState = "healthy" | "due" | "running" | "failed" | "blocked";
+
+export interface PipelineStage {
+  key: "discover" | "ingest" | "extract" | "embed" | "review";
+  label: string;
+  state: PipelineStageState;
+  detail: string;
+  last_success: string | null;
+  blocked_reason: string | null;
+  job_name: string | null;
+  job_id: string | null;
+  action_label: string | null;
+  action_href: string | null;
+}
+
+export interface OperateStatus {
+  counts: Record<string, number>;
+  database: Record<string, unknown> & { reachable: boolean; tables: Record<string, number> };
+  extensions: { pgvector_usable: boolean; note: string | null };
+  embedding: {
+    backend: string;
+    available: boolean;
+    reason: string | null;
+    coverage: { total: number; embedded: number };
+    by_model: Record<string, unknown>[];
+  };
+  /** Which model generates — extraction, titles, reflection, answers. */
+  generation: {
+    available: boolean;
+    backend: string;
+    model: string;
+    local: boolean;
+    detail: string;
+  };
+  pending: { extraction: number; titles: number };
+  ingestion: Record<string, unknown>[];
+  providers: ProviderCoverage[];
+  pipeline: PipelineStage[];
+  jobs: JobSummary[];
+  history: Record<string, unknown>[];
+}
+
+export const operateApi = {
+  status: () => request<OperateStatus>("/operate/status"),
+  run: (name: string) =>
+    request<{ job_id: string; name: string; running: boolean }>(`/operate/run/${name}`, {
+      method: "POST",
+    }),
+  stop: (jobId: string) =>
+    request<{ stopped: string }>(`/operate/stop/${jobId}`, { method: "POST" }),
+  job: (jobId: string) =>
+    request<{ id: string; running: boolean; returncode: number | null; lines: string[]; duration_s: number }>(
+      `/operate/job/${jobId}`,
+    ),
+};
+
+
+// ── Console ──────────────────────────────────────────────────────────────
+
+export interface ConsoleResult {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+  duration_ms: number;
+  notices: string[];
+  error: string | null;
+  error_hint: string | null;
+}
+
+export interface SchemaTable {
+  name: string;
+  columns: { name: string; type: string }[];
+}
+
+export const consoleApi = {
+  query: (sql: string, maxRows = 1000) =>
+    request<ConsoleResult>("/console/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql, max_rows: maxRows }),
+    }),
+  schema: () =>
+    request<{
+      tables: SchemaTable[];
+      enums: { name: string; values: string[] }[];
+      snippets: { title: string; sql: string }[];
+    }>("/console/schema"),
+};
+
+
+// ── Timeline ─────────────────────────────────────────────────────────────
+
+/**
+ * The Timeline's kind vocabulary is wider than Find's. `Kind` has six values
+ * and drives an exhaustive `Record<Kind, string>` in ResultList.tsx — Find's
+ * search endpoint can never return more than that. `/api/timeline` reads
+ * nine tables (throughline/queries/timeline.py's `_SOURCES`), three of which
+ * — entity, reflection, ingestion — Find never surfaces. Widening `Kind`
+ * itself would force every exhaustive switch/map keyed on it to grow branches
+ * Find can never hit, so the Timeline gets its own, wider union instead.
+ */
+export type TimelineKind = Kind | "entity" | "reflection" | "ingestion";
+
+export interface TimelineCell {
+  bucket: string;
+  /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */
+  provider: string;
+  kind: TimelineKind;
+  n: number;
+}
+
+export interface TimelineRange {
+  since: string;
+  until: string;
+  bucket: "day" | "week" | "month";
+  cells: TimelineCell[];
+}
+
+/**
+ * One row from `GET /timeline/day/{date}` — verified against
+ * `_detail_columns()` and the SELECT built in `day_detail()` in
+ * throughline/queries/timeline.py, which every kind's branch of that query
+ * aliases to exactly these five columns. This is NOT a `FindItem`: the
+ * declaration `items: FindItem[]` that used to sit on `timelineApi.day()`
+ * was wrong in the same way `TimelineCell.kind: Kind` was — a shape
+ * TypeScript could not check because JSON arrives as strings.
+ */
+export interface TimelineDayItem {
+  project?: string | null;
+  display_name?: string | null; context_label?: string | null;
+  name_origin?: "user" | "folder" | "model";
+  id: number;
+  kind: TimelineKind;
+  /** A provider name, `"unattributed"`, or `"not_tool_specific"` (§5.3). */
+  provider: string;
+  ts: string;
+  title: string;
+  /** The conversation this row belongs to, or null when it belongs to none.
+   *  Needed because `id` on a message row is the MESSAGE id — routing a
+   *  message by its own id would open an unrelated conversation. */
+  conversation_id: number | null;
+}
+
+export const timelineApi = {
+  range: (qs: URLSearchParams) => request<TimelineRange>(`/timeline?${qs}`),
+  day: (day: string, qs: URLSearchParams) =>
+    request<{ day: string; items: TimelineDayItem[] }>(`/timeline/day/${day}?${qs}`),
+};
+
+
+// ── Export ───────────────────────────────────────────────────────────────
+
+export interface ExportOptions {
+  /** The directory the export is confined to. */
+  root: string;
+  /** A destination inside the root, offered so nobody has to invent one. */
+  suggested: string;
+  /** Where `root` is on the machine the person is using. Differs in a container. */
+  hostPath: string;
+  job: string;
+  defaults: { includeGenerated: boolean; redact: boolean; toolOutput: number; memory: boolean };
+}
+
+export interface ExportRequest {
+  out: string;
+  project?: string | null;
+  since?: string | null;
+  includeGenerated?: boolean;
+  redact?: boolean;
+  toolOutput?: number;
+  memory?: boolean;
+}
+
+export interface ExportStarted {
+  out: string;
+  job: { id: string; name: string; running: boolean };
+}
+
+export interface BrowseDir {
+  name: string;
+  path: string;
+}
+
+export interface BrowseResult {
+  /** The directory currently being shown. */
+  path: string;
+  /** The boundary browsing cannot go outside of — matches ExportOptions.root. */
+  root: string;
+  /** null at the root itself — nowhere further up to go. */
+  parent: string | null;
+  dirs: BrowseDir[];
+}
+
+export const exportApi = {
+  options: () => request<ExportOptions>("/export/markdown"),
+  start: (body: ExportRequest) =>
+    request<ExportStarted>("/export/markdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  // In-app folder browser, not a native OS dialog: the server may be running
+  // inside a container with no display at all, where nothing server-side
+  // can ever open the host's real file picker. `path` omitted browses the
+  // export root itself.
+  browse: (path?: string) =>
+    request<BrowseResult>(`/export/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+};
+
+
+// ── PM (Virtual Team Ops) ───────────────────────────────────────────────────
+
+export interface PmRole {
+  id: number;
+  name: string;
+  description: string | null;
+  default_ai_tool: string | null;
+  default_ai_model: string | null;
+  skill_refs: number[];
+  instructions: string | null;
+  document_refs: string[];
+  token_budget: number | null;
+}
+
+export interface PmMember {
+  id: number;
+  name: string;
+  member_type: "human" | "agent";
+  contact_info: Record<string, unknown>;
+  skill_refs: number[];
+  instructions: string | null;
+  document_refs: string[];
+  token_budget: number | null;
+}
+
+export interface PmTeam {
+  id: number;
+  name: string;
+  description: string | null;
+  token_budget: number | null;
+  roles?: PmRole[];
+}
+
+export interface PmProject {
+  id: number;
+  name: string;
+  description: string | null;
+  status: "active" | "paused" | "completed" | "archived";
+  token_budget: number | null;
+}
+
+export type PmTaskStatus =
+  | "pending" | "running" | "pass" | "fail" | "budget_exceeded" | "crashed" | "stopped";
+
+export interface PmTask {
+  id: number;
+  pm_project_id: number;
+  team_id: number;
+  title: string;
+  status: PmTaskStatus;
+  run_id: string;
+  repo_path: string;
+  log_dir: string;
+  pid: number | null;
+  tokens_used: number;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface PmTaskEvent {
+  id: number;
+  task_id: number;
+  step: "analyst" | "executor" | "tester";
+  iteration: number | null;
+  event_type: "started" | "log_update" | "verdict" | "error";
+  message: string | null;
+  tokens_used: number | null;
+  created_at: string;
+}
+
+/** One project's aggregates on the /pm dashboard (GET /pm/overview). */
+export interface PmOverviewProject {
+  id: number;
+  name: string;
+  status: PmProject["status"];
+  token_budget: number | null;
+  tokens_used: number;
+  teams: number;
+  tasks: Record<PmTaskStatus, number>;
+  last_activity: string | null;
+}
+
+export interface PmOverview {
+  projects: PmOverviewProject[];
+  counts: { roles: number; members: number; teams: number; models: number };
+}
+
+export interface PmSkill {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+export interface PmIterationLog {
+  iteration: number;
+  log_tail: string;
+  verdict: string | null;
+}
+
+export interface PmAssignment {
+  id: number;
+  team_id: number;
+  role_id: number;
+  member_id: number;
+  ai_tool: string | null;
+  ai_model: string | null;
+  role_name: string;
+  member_name: string;
+}
+
+/** One AI tool the launch pipeline understands, with the models it can
+ *  currently be pointed at, resolved server-side at request time (GET
+ *  /pm/ai-catalog). `unavailable` means the source behind this tool's
+ *  models (e.g. the local Ollama daemon) could not be reached. A
+ *  user-defined provider (Welle D) shows up here too, as `tool: "provider:
+ *  <id>"` with `provider_id` set. */
+export interface PmAiCatalogTool {
+  tool: string;
+  label: string;
+  models: string[];
+  unavailable: boolean;
+  provider_id?: number;
+}
+
+export interface PmAiCatalog {
+  tools: PmAiCatalogTool[];
+}
+
+// ── AI providers (Welle D: user-managed providers & models) ────────────────
+
+export type PmAiProviderType =
+  | "openai" | "anthropic" | "mistral" | "google" | "openrouter" | "ollama" | "openai_compatible";
+
+/** A user-configured AI provider. `api_key` is never sent by the server —
+ *  `api_key_set` reports whether one is stored, without ever exposing it. */
+export interface PmAiProvider {
+  id: number;
+  name: string;
+  provider_type: PmAiProviderType;
+  base_url: string | null;
+  api_key_set: boolean;
+  custom_models: string[];
+  enabled: boolean;
+}
+
+/** POST /pm/ai-providers/{id}/models/refresh — a live fetch, not a stored
+ *  list. `unavailable` + `error` describe why `models` may be empty rather
+ *  than failing the request outright. */
+export interface PmAiProviderModelsRefresh {
+  models: string[];
+  unavailable: boolean;
+  error: string | null;
+}
+
+/** One `projects` (memory-layer) row enriched with its conversations
+ *  aggregates and (if any) its pm_project_repos link — GET /pm/repo-projects
+ *  and GET /pm/projects/{id}/repos share this shape. `repo_path` is the
+ *  project_path of the most recent conversation and may be null (a project
+ *  with a registry row but no sessions yet). */
+export interface PmRepoProject {
+  id: number;
+  name: string;
+  description: string | null;
+  status: PmProject["status"];
+  sessions: number;
+  last_active: string | null;
+  repo_path: string | null;
+  linked_pm_project_id: number | null;
+  linked_pm_project_name: string | null;
+}
+
+export const pmApi = {
+  overview: () => request<PmOverview>("/pm/overview"),
+  listSkills: () => request<{ skills: PmSkill[] }>("/pm/skills"),
+  aiCatalog: () => request<PmAiCatalog>("/pm/ai-catalog"),
+
+  patchRole: (id: number, body: Partial<PmRole>) =>
+    request<PmRole>(`/pm/roles/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchMember: (id: number, body: Partial<PmMember>) =>
+    request<PmMember>(`/pm/members/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchTeam: (id: number, body: Partial<PmTeam>) =>
+    request<PmTeam>(`/pm/teams/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchProject: (id: number, body: Partial<PmProject>) =>
+    request<PmProject>(`/pm/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /** Last N lines of one iteration's executor log, plus its verdict text.
+   *  Fetched on demand when a timeline card is expanded — never eagerly for
+   *  all iterations, which would be 30+ file reads per page view. */
+  iterationLog: (taskId: number, iteration: number, tail = 200) =>
+    request<PmIterationLog>(`/pm/tasks/${taskId}/iterations/${iteration}/log?tail=${tail}`),
+
+  /** Existing assignments for one project, with role/member names joined
+   *  in server-side for the Zuordnungs-Matrix to render. */
+  listAssignments: (projectId: number) =>
+    request<{ assignments: PmAssignment[] }>(`/pm/projects/${projectId}/assignments`),
+
+  deleteAssignment: (assignmentId: number) =>
+    request<{ deleted: boolean }>(`/pm/assignments/${assignmentId}`, { method: "DELETE" }),
+
+  deleteProject: (projectId: number) =>
+    request<{ deleted: boolean }>(`/pm/projects/${projectId}`, { method: "DELETE" }),
+  deleteTeam: (teamId: number) =>
+    request<{ deleted: boolean }>(`/pm/teams/${teamId}`, { method: "DELETE" }),
+  deleteRole: (roleId: number) =>
+    request<{ deleted: boolean }>(`/pm/roles/${roleId}`, { method: "DELETE" }),
+  deleteMember: (memberId: number) =>
+    request<{ deleted: boolean }>(`/pm/members/${memberId}`, { method: "DELETE" }),
+  deleteTask: (taskId: number) =>
+    request<{ deleted: boolean }>(`/pm/tasks/${taskId}`, { method: "DELETE" }),
+
+  createRole: (body: Partial<PmRole> & { name: string }) =>
+    request<PmRole>("/pm/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listRoles: () => request<{ roles: PmRole[] }>("/pm/roles"),
+
+  createMember: (body: Partial<PmMember> & { name: string; member_type: string }) =>
+    request<PmMember>("/pm/members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listMembers: () => request<{ members: PmMember[] }>("/pm/members"),
+
+  createTeam: (body: Partial<PmTeam> & { name: string }) =>
+    request<PmTeam>("/pm/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listTeams: () => request<{ teams: PmTeam[] }>("/pm/teams"),
+
+  createProject: (body: Partial<PmProject> & { name: string }) =>
+    request<PmProject>("/pm/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listProjects: () => request<{ projects: PmProject[] }>("/pm/projects"),
+  projectTeams: (projectId: number) =>
+    request<{ teams: PmTeam[] }>(`/pm/projects/${projectId}/teams`),
+  linkProjectTeam: (projectId: number, teamId: number) =>
+    request<{ linked: boolean }>(`/pm/projects/${projectId}/teams/${teamId}`, { method: "POST" }),
+  linkTeamRole: (teamId: number, roleId: number) =>
+    request<{ linked: boolean }>(`/pm/teams/${teamId}/roles/${roleId}`, { method: "POST" }),
+
+  createAssignment: (body: {
+    pm_project_id: number;
+    team_id: number;
+    role_id: number;
+    member_id: number;
+    ai_tool?: string | null;
+    ai_model?: string | null;
+  }) =>
+    request<{ id: number }>("/pm/assignments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  projectTasks: (projectId: number) => request<{ tasks: PmTask[] }>(`/pm/projects/${projectId}/tasks`),
+  getTask: (taskId: number) => request<PmTask>(`/pm/tasks/${taskId}`),
+  taskEvents: (taskId: number) => request<{ events: PmTaskEvent[] }>(`/pm/tasks/${taskId}/events`),
+  executionReadiness: () => request<{ available: boolean; checks: { id: "bash" | "pipeline"; available: boolean; path: string | null }[] }>("/pm/execution/readiness"),
+  launch: (body: { pm_project_id: number; team_id: number; title: string; repo_path: string }) =>
+    request<PmTask>("/pm/tasks/launch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  stop: (taskId: number) => request<PmTask>(`/pm/tasks/${taskId}/stop`, { method: "POST" }),
+  register: (body: {
+    pm_project_id: number;
+    team_id: number;
+    title: string;
+    repo_path: string;
+    run_id: string;
+  }) =>
+    request<PmTask>("/pm/tasks/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /** Every existing memory-layer project, enriched with session
+   *  aggregates and (if any) its pm_project link — the dashboard's
+   *  "repository projects" section and the cockpit's link picker. */
+  listRepoProjects: () => request<{ repo_projects: PmRepoProject[] }>("/pm/repo-projects"),
+  /** Repo projects already linked to one pm_project, in the same shape. */
+  projectRepos: (pmProjectId: number) =>
+    request<{ repo_projects: PmRepoProject[] }>(`/pm/projects/${pmProjectId}/repos`),
+  /** Creates a pm_project named after the repo project and links it in one
+   *  step. 409 if that repo project is already linked to some pm_project. */
+  adoptRepoProject: (projectId: number) =>
+    request<PmProject>(`/pm/repo-projects/${projectId}/adopt`, { method: "POST" }),
+  linkProjectRepo: (pmProjectId: number, projectId: number) =>
+    request<{ linked: boolean }>(`/pm/projects/${pmProjectId}/repos/${projectId}`, {
+      method: "POST",
+    }),
+  unlinkProjectRepo: (pmProjectId: number, projectId: number) =>
+    request<{ deleted: boolean }>(`/pm/projects/${pmProjectId}/repos/${projectId}`, {
+      method: "DELETE",
+    }),
+
+  // ── AI providers (Welle D) ──────────────────────────────────────────────
+
+  listAiProviders: () => request<{ providers: PmAiProvider[] }>("/pm/ai-providers"),
+  createAiProvider: (body: {
+    name: string;
+    provider_type: PmAiProviderType;
+    base_url?: string | null;
+    api_key?: string | null;
+    custom_models?: string[];
+    enabled?: boolean;
+  }) =>
+    request<PmAiProvider>("/pm/ai-providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** `api_key` omitted leaves the stored key untouched; `api_key: null`
+   *  clears it; a non-empty string replaces it. */
+  patchAiProvider: (
+    id: number,
+    body: Partial<{
+      name: string;
+      provider_type: PmAiProviderType;
+      base_url: string | null;
+      api_key: string | null;
+      custom_models: string[];
+      enabled: boolean;
+    }>,
+  ) =>
+    request<PmAiProvider>(`/pm/ai-providers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteAiProvider: (id: number) =>
+    request<{ deleted: boolean }>(`/pm/ai-providers/${id}`, { method: "DELETE" }),
+  /** Live-fetches the provider's model list server-side — never a stored
+   *  value, so nothing here is cached beyond the request itself. */
+  refreshAiProviderModels: (id: number) =>
+    request<PmAiProviderModelsRefresh>(`/pm/ai-providers/${id}/models/refresh`, { method: "POST" }),
+};
+
+export interface StoryCheckpoint {
+  source_in_scope?: boolean;
+  id: number; kind: "goal" | "status" | "blocker" | "next"; content: string;
+  created_at: string; source_conversation_id: number | null; source_message_id: number | null;
+  source_session_id: string; source_excerpt: string; source_available: boolean;
+  message_available: boolean; source_changed: boolean; recorded_by: string;
+}
+export interface StorySession extends ProjectSession {
+  prompt_id?: number | null; answer_id?: number | null;
+  latest_request?: string | null; latest_request_id?: number | null; latest_request_at?: string | null; awaiting_answer?: boolean;
+  file_count?: number; file_at?: string | null; prompt_at?: string | null; answer?: string | null; answer_at?: string | null; result?: string | null; result_at?: string | null;
+  opening: string | null; project_path: string | null; knowledge_count: number;
+}
+export interface StoryHistory {
+  identity?: {is_curated?: boolean; context_label?: string | null; project: string; display_name: string | null; name_origin: "user" | "folder" | "model"; source_conversation_ids?: number[]};
+  recovery?: StorySession | null;
+  project: string; path: string | null; paths: { path: string | null; sessions: number }[];
+  coverage: { sessions: number; messages: number; refreshed_at: string | null; unattributed: number };
+  sessions: StorySession[]; total: number; offset: number; has_more: boolean;
+  checkpoints: StoryCheckpoint[]; latest_checkpoints: StoryCheckpoint[]; hidden_generated: number; query: string; order: string;
+}
+export interface StoryDetail {
+  artifacts?: {label: string; path: string; message_id: number; created_at: string; availability: "available" | "unavailable"}[];
+  messages: { id: number; uuid: string | null; content: string | null; content_blocks?: unknown; tool_calls?: unknown; role: string; created_at: string;
+    model: string | null; tool_name: string | null; matches: boolean }[];
+  knowledge: { id: number; content: string; category: string; status: string | null;
+    confidence: number | null; superseded_by: number | null; replacement_conversation_id?: number | null; created_at: string }[];
+  relations: {kind: string; target_id: number | null; title: string | null; reference: string; source_field: string; resolution: string}[];
+  knowledge_total: number; matches: { id: number; excerpt: string }[];
+  total: number; offset: number; has_more: boolean;
+}
+export const storyApi = {
+  history: (project: string, params: URLSearchParams) =>
+    request<StoryHistory>(`/story/${encodeURIComponent(project)}/history?${params}`),
+  session: (project: string, id: number, params: URLSearchParams) =>
+    request<StoryDetail>(`/story/${encodeURIComponent(project)}/session/${id}?${params}`),
+  checkpoint: (project: string, body: { path: string | null; kind: StoryCheckpoint["kind"];
+    content: string; conversation_id: number; message_id: number | null }) =>
+    request<{ id: number }>(`/story/${encodeURIComponent(project)}/checkpoints`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }),
+};

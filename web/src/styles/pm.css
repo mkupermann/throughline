@@ -1,0 +1,1537 @@
+/* Project Management (Virtual Team Ops) — "Leitstand" rebuild.
+ *
+ * Every colour is a token from tokens.css; the PM surface must feel native
+ * to the host app. The one deliberate signature is the team pipeline row:
+ * seats in team order with a step-hued keyline (the same three chart hues
+ * the task drill-down uses for analyst/executor/tester), arrow connectors,
+ * a live dot and a budget gauge. Everything else stays quiet.
+ */
+
+.pm-page {
+  max-width: 1100px;
+}
+
+/* ── Breadcrumbs ─────────────────────────────────────────────────────── */
+.pm-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.pm-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.pm-crumb a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.pm-crumb a:hover {
+  color: var(--accent);
+}
+.pm-crumb [aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.pm-crumb-sep {
+  color: var(--text-muted);
+  margin-inline: 2px;
+}
+
+/* ── Header bar (breadcrumbs + language toggle) ─────────────────────── */
+.pm-headerbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+/* The dashboard's header bar has no breadcrumb (see DashboardPage.tsx) —
+   just the language toggle, which without this would sit flush left under
+   space-between's single-child behavior. */
+.pm-headerbar-end {
+  justify-content: flex-end;
+}
+.pm-headerbar .pm-crumbs {
+  margin-bottom: 0;
+}
+.pm-lang-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.pm-lang-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.pm-lang-toggle-sep {
+  color: var(--text-muted);
+}
+.pm-lang-toggle .is-active {
+  color: var(--accent);
+}
+
+.pm-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+/* Archive + Delete as one flex sub-group after the title, so `.pm-header-row`'s
+ * `justify-content: space-between` has exactly two children (title, actions)
+ * instead of three — with three direct children, Archive floated alone in
+ * the middle of the header, disconnected from both the title and Delete
+ * (UI audit PM C1). */
+.pm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.pm-cockpit-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pm-cockpit-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.pm-cockpit-budgetbar {
+  margin-top: var(--space-3);
+  max-width: 460px;
+}
+
+.pm-section {
+  margin-top: var(--space-6);
+}
+
+/* ── Status pills ────────────────────────────────────────────────────────
+   Shared by project status (aktiv/pausiert/…) and task status (läuft/
+   bestanden/…). Colour reinforces the text, which always says the state. */
+.pm-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+.pm-status-active,
+.pm-status-running {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.pm-status-pass,
+.pm-status-completed {
+  background: var(--status-good-wash);
+  color: var(--status-good);
+}
+.pm-status-fail,
+.pm-status-crashed {
+  background: var(--surface-base);
+  color: var(--status-critical);
+}
+.pm-status-budget_exceeded {
+  background: var(--status-serious-wash);
+  color: var(--status-serious);
+}
+.pm-status-pending {
+  background: var(--surface-base);
+  color: var(--status-warning);
+}
+.pm-status-paused,
+.pm-status-stopped,
+.pm-status-archived {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+/* ── Budget gauge ────────────────────────────────────────────────────── */
+.pm-budget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+.pm-budget-track {
+  height: 6px;
+  width: 100%;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  overflow: hidden;
+}
+.pm-budget-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--dur-base) var(--ease-out);
+}
+.pm-budget[data-tone="serious"] .pm-budget-fill,
+.pm-budget-track[data-tone="serious"] .pm-budget-fill {
+  background: var(--status-serious);
+}
+.pm-budget[data-tone="critical"] .pm-budget-fill,
+.pm-budget-track[data-tone="critical"] .pm-budget-fill {
+  background: var(--status-critical);
+}
+.pm-budget-figures {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-budget-unbounded .pm-budget-figures {
+  color: var(--text-muted);
+}
+
+.pm-inline-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pm-inline-budget-value {
+  color: var(--text-secondary);
+}
+
+/* ── Forms ───────────────────────────────────────────────────────────── */
+.pm-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.pm-field-inline {
+  flex-direction: column;
+}
+.pm-field-grow {
+  flex: 1 1 220px;
+}
+.pm-field-submit {
+  justify-content: flex-end;
+}
+.pm-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-input {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  min-height: 32px;
+}
+.pm-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.pm-input-number {
+  width: 16ch;
+}
+/* One width for every token-budget field — the project header's inline
+   editor and the role/member/team editors used to diverge (12ch vs 16ch)
+   for no reason tied to their content; both hold the same kind of number. */
+.pm-budget-input {
+  width: 14ch;
+}
+.pm-input-compact {
+  min-height: 26px;
+  padding: 2px var(--space-2);
+  font-size: var(--text-sm);
+}
+.pm-status-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+.pm-textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  resize: vertical;
+}
+.pm-field-error {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--status-critical);
+}
+.pm-field-hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+/* Inside .pm-editor-grid, a hint/error following the AI tool+model selects
+   should run the full row width rather than sit in one grid cell. */
+.pm-editor-grid .pm-field-span {
+  grid-column: 1 / -1;
+}
+.pm-linklike {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.pm-linklike:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+/* .button carries a margin-top for empty states; forms need it flush. */
+.pm-button-flush {
+  margin-top: 0;
+}
+/* Modeled on the host app's own `.button` (overview.css): a visible resting
+ * border, not just a colour shift on hover. Before this fix the button had
+ * `border-color: transparent; background: transparent` at rest, which read
+ * as plain unstyled text with no boundary at all — failing WCAG 1.4.11
+ * (a UI component needs >=3:1 non-text contrast to be perceivable as
+ * interactive) and leaving Archive/Cancel-style actions the least-affordant
+ * controls on the page (UI audit PM C1/M1). */
+.pm-button-quiet {
+  border-color: var(--border-muted);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.pm-button-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+.pm-button-danger {
+  margin-top: 0;
+  border-color: var(--status-critical);
+  color: var(--status-critical);
+  background: transparent;
+}
+.pm-button-danger:hover:not(:disabled) {
+  background: var(--status-critical-wash);
+  border-color: var(--status-critical);
+}
+.pm-button-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pm-linklike-danger {
+  color: var(--status-critical);
+}
+.pm-linklike-danger:hover {
+  color: var(--status-critical);
+}
+
+/* ── Inline confirm (two-step buttons, no window.confirm/modal) ─────── */
+.pm-inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pm-inline-confirm-yes {
+  margin-top: 0;
+  border-color: var(--status-critical);
+  color: var(--status-critical-fg, #fff);
+  background: var(--status-critical);
+}
+.pm-inline-confirm-yes:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pm-inline-confirm-yes:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pm-inline-confirm-no {
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.pm-inline-confirm-no:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+/* A seat's unassign confirm pair sits in a tight 18px-tall row — shrink the
+   buttons to match rather than blowing out the seat card's layout. */
+.pm-seat-member-row .pm-inline-confirm {
+  gap: var(--space-1);
+}
+.pm-seat-member-row .pm-inline-confirm-yes,
+.pm-seat-member-row .pm-inline-confirm-no {
+  padding: 1px var(--space-1);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+}
+
+.pm-inline-form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-inline-form-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.pm-inline-form-actions .button {
+  margin-top: 0;
+}
+
+/* ── Dashboard: catalog links ────────────────────────────────────────── */
+.pm-catalog-links {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+}
+.pm-catalog-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+a.pm-catalog-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.pm-catalog-count {
+  color: var(--text-muted);
+}
+
+/* ── Dashboard: project cards ────────────────────────────────────────── */
+.pm-card-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+.pm-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: stretch;
+  height: 100%;
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.pm-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+.pm-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.pm-card-name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+.pm-card-meta {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.pm-card-tasks {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.pm-card-quiet {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.pm-card .pm-budget {
+  margin-top: auto;
+}
+
+/* ── Pipeline rows (signature element) ───────────────────────────────── */
+.pm-pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.pm-pipeline {
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-pipeline-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pm-pipeline-name {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-pipeline-budget {
+  margin-left: auto;
+  font-size: var(--text-sm);
+}
+.pm-pipeline-gauge {
+  margin-top: var(--space-2);
+  max-width: 380px;
+}
+.pm-pipeline-empty {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-base);
+  color: var(--text-muted);
+}
+
+.pm-pipeline-seats {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
+}
+/* Below 720px a wrapped pipeline row turns into a stack of near-full-width
+   cards — the actual pipeline order (Analyst → Executor → Tester) gets
+   lost between rows. A horizontally scrollable single row keeps that order
+   readable at any width, at the cost of a scroll gesture instead of a
+   glance. */
+@media (max-width: 720px) {
+  .pm-pipeline-seats {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+  }
+  .pm-seat {
+    min-width: 140px;
+  }
+}
+.pm-seat-slot {
+  display: flex;
+  align-items: center;
+}
+.pm-seat-arrow {
+  display: grid;
+  place-items: center;
+  padding-inline: var(--space-2);
+  color: var(--text-muted);
+}
+
+/* Seat hues: the same three chart tokens the drill-down's step accents use,
+   assigned by position in the team's pipeline order. */
+.pm-seat-hue-0 { --seat-hue: var(--chart-5); }
+.pm-seat-hue-1 { --seat-hue: var(--chart-1); }
+.pm-seat-hue-2 { --seat-hue: var(--chart-3); }
+
+.pm-seat {
+  min-width: 180px;
+  padding: var(--space-3);
+  background: var(--surface-base);
+  border: 1px solid var(--border-muted);
+  border-top: 2px solid var(--seat-hue, var(--border-strong));
+  border-radius: var(--radius-sm);
+}
+.pm-seat-empty {
+  border-style: dashed;
+  border-top-style: solid;
+  background: transparent;
+}
+.pm-seat-role {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.pm-seat-member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.pm-seat-member {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-seat-empty .pm-seat-member {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.pm-seat-unassign {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.pm-seat-unassign:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--status-bad, var(--accent));
+  background: var(--surface-hover);
+}
+.pm-seat-unassign:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.pm-seat-ai {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-seat-ai code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.pm-seat-ai-none {
+  color: var(--text-muted);
+}
+.pm-seat-assign {
+  margin-top: var(--space-2);
+}
+.pm-seat-assign .pm-input {
+  width: 100%;
+}
+
+.pm-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  animation: pm-pulse 1.6s var(--ease-out) infinite;
+  flex-shrink: 0;
+}
+@keyframes pm-pulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-wash-strong); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.pm-pipeline-foot {
+  margin-top: var(--space-3);
+}
+.pm-linkrole {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.pm-linkteam {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+/* ── Tasks (cockpit) ─────────────────────────────────────────────────── */
+.pm-launch {
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+.pm-launch-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pm-launch .button,
+.pm-register .button {
+  margin-top: 0;
+}
+
+.pm-register {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-register summary {
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-register summary:hover {
+  color: var(--text-primary);
+}
+.pm-register-body {
+  margin-top: var(--space-3);
+}
+.pm-register-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 70ch;
+}
+.pm-register-hint code {
+  font-family: var(--font-mono);
+}
+
+.pm-filter {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.pm-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.pm-filter-chip:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.pm-filter-chip.is-active {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pm-task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pm-task-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+  flex-wrap: wrap;
+}
+.pm-task-row-title {
+  flex: 1 1 240px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pm-task-row-title:hover {
+  color: var(--accent);
+}
+.pm-task-row-tokens {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.pm-task-row-time {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.pm-task-row .pm-field-error {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+.pm-task-list-none {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  list-style: none;
+}
+
+/* ── Dashboard: repository projects (existing memory-layer projects) ────── */
+.pm-repo-section {
+  margin-top: var(--space-5);
+}
+.pm-repo-section > summary {
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-repo-section > summary:hover {
+  color: var(--text-primary);
+}
+.pm-repo-section-body {
+  margin-top: var(--space-3);
+}
+.pm-repo-filter {
+  margin-bottom: var(--space-2);
+  max-width: 360px;
+}
+.pm-repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.pm-repo-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-muted);
+  flex-wrap: wrap;
+}
+.pm-repo-row:last-child {
+  border-bottom: none;
+}
+.pm-repo-row-name {
+  flex: 1 1 200px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pm-repo-row-meta {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-repo-row-linked {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: none;
+}
+.pm-repo-row-linked:hover {
+  text-decoration: underline;
+}
+
+/* ── Cockpit: linked repository chips ────────────────────────────────── */
+.pm-repo-links {
+  margin: var(--space-4) 0;
+}
+.pm-repo-chips {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pm-repo-chip {
+  cursor: default;
+}
+.pm-repo-chip-sessions {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.pm-repo-chip-remove {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.pm-repo-chip-remove:hover {
+  opacity: 1;
+}
+.pm-repo-link-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* ── Task drill-down ─────────────────────────────────────────────────── */
+.pm-task-runid code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.pm-spec {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-spec summary {
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pm-spec summary:hover {
+  color: var(--text-primary);
+}
+.pm-spec-body {
+  margin-top: var(--space-3);
+  max-width: 76ch;
+}
+
+.pm-md {
+  font-size: var(--text-md);
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+.pm-md p {
+  margin: 0 0 var(--space-3);
+}
+.pm-md-h {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--text-primary);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+.pm-md-h1 { font-size: var(--text-lg); font-weight: 700; }
+.pm-md-h2 { font-size: var(--text-md); font-weight: 700; }
+.pm-md-h3, .pm-md-h4 { font-size: var(--text-base); font-weight: 600; }
+.pm-md-list {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.pm-md code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 0 3px;
+}
+.pm-md-code {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.pm-md-code code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.pm-task-errors {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--status-serious-wash);
+  border: 1px solid var(--status-serious);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+.pm-task-errors p {
+  margin: 0;
+}
+.pm-task-errors p + p {
+  margin-top: var(--space-2);
+}
+
+/* Iteration timeline: a spine with one node per iteration, newest first.
+   The node takes the verdict's colour — text badges beside it always say
+   the same thing in words. */
+.pm-iter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+.pm-iter-list::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 5px;
+  width: 2px;
+  background: var(--border-muted);
+}
+.pm-iter {
+  position: relative;
+  padding: 0 0 var(--space-3) var(--space-5);
+}
+.pm-iter-node {
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--surface-base);
+  border: 2px solid var(--border-strong);
+}
+.pm-iter[data-verdict="pass"] .pm-iter-node {
+  border-color: var(--status-good);
+  background: var(--status-good);
+}
+.pm-iter[data-verdict="fail"] .pm-iter-node {
+  border-color: var(--status-critical);
+  background: var(--status-critical);
+}
+.pm-iter[data-live="true"] .pm-iter-node {
+  border-color: var(--accent);
+  background: var(--accent);
+  animation: pm-pulse 1.6s var(--ease-out) infinite;
+}
+
+.pm-iter-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-iter-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pm-iter-n {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-iter-tokens {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-verdict {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.pm-verdict-pass {
+  background: var(--status-good-wash);
+  color: var(--status-good);
+  border: 1px solid var(--status-good);
+}
+.pm-verdict-fail {
+  background: var(--status-critical-wash);
+  color: var(--status-critical);
+  border: 1px solid var(--status-critical);
+}
+.pm-iter-reason {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  max-width: 80ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pm-iter-reason-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.pm-iter-logtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.pm-iter-logtoggle:hover {
+  color: var(--accent-hover);
+}
+
+.pm-log {
+  margin-top: var(--space-2);
+}
+.pm-log-caption {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-bottom: var(--space-1);
+}
+.pm-log-pre {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.pm-log-skeleton {
+  height: 80px;
+  margin-top: var(--space-2);
+}
+.pm-log-error {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--status-critical-wash);
+  border: 1px solid var(--status-critical);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+.pm-log-error p {
+  margin: 0 0 var(--space-1);
+}
+
+/* ── Catalog pages (Rollen / Mitglieder) ─────────────────────────────── */
+.pm-cat-create {
+  margin-bottom: var(--space-4);
+}
+.pm-cat-filter {
+  width: 100%;
+  max-width: 360px;
+  margin-bottom: var(--space-3);
+}
+.pm-cat-filter-none {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.pm-cat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pm-cat-row {
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-cat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.pm-cat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.pm-cat-name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+.pm-cat-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pm-cat-desc {
+  color: var(--text-secondary);
+}
+.pm-cat-ai {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+}
+.pm-cat-fact {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pm-cat-none {
+  color: var(--text-muted);
+}
+
+.pm-editor {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-base);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+}
+.pm-cat-create .pm-editor {
+  margin-top: 0;
+  background: var(--surface-raised);
+}
+.pm-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.pm-editor-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.pm-editor-actions .button {
+  margin-top: 0;
+}
+
+/* ── Skill picker ────────────────────────────────────────────────────── */
+.pm-skillpicker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+.pm-skillpicker-chips {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.pm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-full);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.pm-chip:hover {
+  background: var(--accent-wash-strong);
+}
+.pm-skillpicker-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+}
+.pm-skillpicker-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.pm-skillpicker-option:hover {
+  background: var(--surface-hover);
+}
+.pm-skillpicker-none {
+  padding: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.pm-skillpicker-more {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.pm-skillpicker-skeleton {
+  height: 120px;
+}
+
+/* ── Document list editor ────────────────────────────────────────────── */
+.pm-doclist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+.pm-doclist-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.pm-doclist-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+}
+.pm-doclist-items code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.pm-doclist-add {
+  display: flex;
+  gap: var(--space-2);
+}
+.pm-doclist-add .pm-input {
+  flex: 1;
+}
+
+/* ── AI providers page (/pm/models, Welle D) ────────────────────────────── */
+.pm-provider-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+/* Inside .pm-editor-grid, the enabled checkbox sits alongside label+input
+   fields — align it to their bottom edge rather than stretching to fill
+   the grid cell's full height. */
+.pm-provider-toggle-field {
+  align-self: end;
+  min-height: 32px;
+}
+.pm-provider-badge {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-muted);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pm-provider-badge.is-set {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+.pm-provider-models {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pm-provider-models-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pm-provider-models-list li {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+}
+
+/* Operations: a quiet overview above the configured resource catalogs. */
+.pm-ops-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-muted);
+  margin-top: var(--space-5);
+}
+.pm-ops-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--space-2) 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.pm-ops-nav a[aria-current="page"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.pm-ops-nav a:hover { color: var(--accent); }
+.pm-template-invitation {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.pm-template-invitation > svg { color: var(--accent); flex-shrink: 0; }
+.pm-template-invitation > div { flex: 1; min-width: 0; }
+.pm-template-invitation h2, .pm-attention h2, .pm-ops-heading {
+  font-size: var(--text-xl);
+  line-height: var(--leading-tight);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+.pm-template-invitation p, .pm-attention p, .pm-resources > p, .pm-ops-context {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 76ch;
+}
+.pm-template-invitation .button { margin: 0; flex-shrink: 0; gap: var(--space-2); }
+.pm-ops-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--space-5) 0;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-muted);
+  gap: var(--space-4);
+}
+.pm-ops-metrics dt { font-size: var(--text-sm); color: var(--text-secondary); }
+.pm-ops-metrics dd { margin: var(--space-2) 0 0; font-size: var(--text-xl); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pm-attention { border-left: 3px solid var(--status-serious); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
+.pm-attention ul { list-style: none; padding: 0; margin: var(--space-2) 0 0; }
+.pm-attention li a { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; overflow-wrap: anywhere; }
+.pm-resources { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border-muted); scroll-margin-top: var(--space-4); }
+.pm-resources .pm-catalog-links { margin-top: var(--space-3); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pm-resources .pm-catalog-link { min-height: 52px; border-radius: var(--radius-md); padding: var(--space-3); flex-wrap: wrap; }
+.pm-resources .pm-catalog-count { margin-left: auto; }
+.pm-page .pm-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.pm-page .pm-card-name { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 768px) {
+  .pm-template-invitation { flex-wrap: wrap; padding: var(--space-4); }
+  .pm-template-invitation > svg { display: none; }
+  .pm-template-invitation > div { flex-basis: 100%; }
+  .pm-ops-metrics { gap: var(--space-2); }
+  .pm-resources .pm-catalog-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+.pm-project-brief { padding: var(--space-4); border: 1px solid var(--border-muted); border-radius: var(--radius-md); background: var(--surface-raised); }
+.pm-project-brief-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.pm-project-brief h2 { margin: 0; font-size: var(--text-xl); }
+.pm-project-brief .button { margin-top: 0; }
+.pm-project-brief summary { cursor: pointer; color: var(--text-secondary); min-height: 32px; }
+.pm-project-brief-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; max-width: 85ch; }
+.pm-project-brief textarea { width: 100%; resize: vertical; min-height: 180px; }
+.pm-project-brief .pm-header-actions { margin-top: var(--space-3); }
+.pm-project-brief-status { color: var(--text-secondary); font-size: var(--text-sm); }
+.pm-project-brief-status:empty { display: none; }
+/* Keep status washes while ensuring small labels remain legible on cards. */
+.pm-status-pass, .pm-status-completed, .pm-status-budget_exceeded {
+  color: var(--text-primary);
+}
+
+/* Keep prerequisite guidance readable alongside the launch form. */
+.pm-runtime { display: grid; gap: 12px; padding: 20px; }
+.pm-runtime h3 { font-weight: 600; }
+.pm-runtime ul { display: grid; gap: 16px; margin-block: 12px; }
+.pm-runtime li p { margin-block: 6px; }
+.pm-runtime code { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
+.pm-runtime > button { justify-self: start; }
+
+.continuation-panel, .processing-workbench { margin-block: var(--space-5, 20px); padding: var(--space-4, 16px); border: 1px solid var(--border); border-radius: 8px; }
+.continuation-panel p, .processing-workbench p { margin-block: 12px; }
+.continuation-text { width: 100%; max-width: 100%; margin-block: 12px; background: var(--surface-base); color: var(--text-primary); font-family: var(--font-mono); }
+.processing-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.processing-controls label { display: grid; gap: 6px; max-width: 100%; }
+.processing-controls select { max-width: 100%; }
+.processing-workbench details { margin-top: 16px; }
+.data-counts { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; margin-block: 12px; }
+@media (max-width: 600px) { .processing-controls { display: grid; } .processing-controls select { width: 100%; min-width: 0; } }

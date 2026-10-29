@@ -1,0 +1,30 @@
+# Runtime dependencies for Throughline.
+# Use `>=` bounds so consumers can pick up security patches.
+
+# Required — core DB driver (all scripts, the query layer, the API)
+psycopg2-binary>=2.9.9
+
+# Required — the web UI and its JSON API (`throughline serve`).
+# The built frontend ships inside the package (throughline/web), so nothing
+# here needs Node.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# Required — config and pipeline scripts
+pyyaml>=6.0
+
+# Required — MCP server (memory_mcp/server.py, `claude-memory-mcp` entry point)
+# Pinned to 1.x: the 2.0 SDK removed mcp.server.fastmcp
+mcp>=1.2.0,<2.0
+
+# Required — Virtual Team Ops watcher (throughline/jobs/pm_watch.py) uses
+# this for PID-liveness checks (crash detection on pipeline.sh runs)
+psutil>=5.9
+
+# Optional — semantic search via OpenAI or local Ollama
+# The scripts fall back gracefully if these are missing. Uncomment to install:
+# openai>=1.30.0
+# ollama>=0.3.0
+
+# Optional — Anthropic SDK (only if you run extract_memory via API instead of `claude -p`)
+# anthropic>=0.40.0

@@ -1,0 +1,307 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-quality:
+    name: Python lint, format, and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install quality tools
+        run: pip install -r requirements-dev.txt
+      - name: Ruff
+        run: ruff check throughline memory_mcp scripts skill/scripts evals tests
+      - name: Black
+        run: black --check throughline memory_mcp scripts skill/scripts evals tests
+      - name: Compile every maintained Python path
+        run: |
+          python -m compileall -q \
+            throughline memory_mcp scripts skill/scripts evals tests
+
+  frontend:
+    name: Frontend build is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm --prefix web ci
+      - name: Typecheck
+        run: npm --prefix web run typecheck
+      - name: Unit tests
+        run: npm --prefix web run test
+      # throughline/web/ is committed so `pip install throughline` never needs
+      # Node. The cost of committing build output is that a source-only commit
+      # silently ships the previous UI — so rebuild and fail if the result
+      # differs from what is checked in.
+      - name: Production build
+        run: npm --prefix web run build
+      - name: Fail if the committed build is stale
+        run: |
+          if ! git diff --quiet -- throughline/web; then
+            echo "::error::throughline/web/ is out of date with web/src/."
+            echo "Run: npm --prefix web run build && git add throughline/web"
+            git diff --stat -- throughline/web
+            exit 1
+          fi
+          echo "Committed frontend matches source."
+
+  wheel-smoke:
+    name: Clean wheel smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install wheel build tools
+        run: pip install "setuptools>=68" wheel
+      - name: Build wheel without importing the checkout
+        run: python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+      - name: Install into a clean environment
+        run: |
+          python -m venv /tmp/throughline-wheel-smoke
+          /tmp/throughline-wheel-smoke/bin/pip install --no-deps dist/*.whl
+      - name: Exercise installed entry points outside the checkout
+        working-directory: /tmp
+        run: |
+          /tmp/throughline-wheel-smoke/bin/throughline --help
+          /tmp/throughline-wheel-smoke/bin/claude-memory-mcp --help
+
+  unit-tests:
+    name: Unit tests (no DB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install -r requirements-dev.txt
+      - name: Run unit tests with runtime coverage floor
+        run: |
+          pytest tests/ -v --tb=short \
+            -m "not integration" --ignore=tests/integration \
+            --cov=throughline --cov=memory_mcp \
+            --cov-report=term-missing:skip-covered --cov-fail-under=47.5
+
+  integration-tests:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGADMINDB: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install -r requirements-dev.txt
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U postgres && exit 0
+            sleep 1
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
+      - name: Validate migration discovery and a fresh upgrade
+        run: |
+          set -o pipefail
+          python -c "from throughline.jobs.migrate import discover_migrations; print(*(p.name for p in discover_migrations()), sep='\n')"
+          psql -c "CREATE DATABASE throughline_migration_smoke;"
+          PGDATABASE=throughline_migration_smoke throughline migrate
+          PGDATABASE=throughline_migration_smoke throughline migrate \
+            | tee /tmp/migration-second-run.txt
+          grep -Fxq "Nothing to do. Database is up to date." \
+            /tmp/migration-second-run.txt
+          PGDATABASE=throughline_migration_smoke throughline migrate --status \
+            | tee /tmp/migration-status.txt
+          grep -Eq "^[0-9]+ total, 0 pending$" /tmp/migration-status.txt
+      - name: Run every integration test
+        run: |
+          pytest tests/ -v --tb=short -m integration \
+            --junitxml=/tmp/integration-results.xml
+          python -c "import xml.etree.ElementTree as E; r=E.parse('/tmp/integration-results.xml').getroot(); n=sum(int(x.get('skipped', 0)) for x in r.findall('.//testsuite')); assert n == 0, f'{n} integration tests skipped'"
+
+  browser-smoke:
+    name: Browser flows and accessibility
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: throughline_browser_demo
+      THROUGHLINE_DEMO_URL: http://127.0.0.1:8795
+      # The smoke run drives /pm/templates, and Project Management is opt-in.
+      THROUGHLINE_ENABLE_PM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install packaged application and browser
+        run: |
+          pip wheel --no-deps --wheel-dir /tmp/throughline-browser-wheel .
+          pip install /tmp/throughline-browser-wheel/*.whl
+          npm --prefix web ci
+          cd web && npx playwright install --with-deps chromium
+      - name: Seed fictional corpus and exercise shipped UI
+        run: |
+          python scripts/seed_demo_data.py --dbname throughline_browser_demo
+          (cd /tmp && exec throughline serve --host 127.0.0.1 --port 8795) > /tmp/throughline-browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$THROUGHLINE_DEMO_URL/api/health"; then break; fi
+            sleep 1
+          done
+          npm --prefix web run test:browser
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: |
+            /tmp/throughline-browser-results
+            /tmp/throughline-browser-server.log
+
+  shell-syntax:
+    name: Bash syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on every shell script
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            echo "→ $f"
+            bash -n "$f"
+          done < <(git ls-files '*.sh')
+
+  schema-validation:
+    name: Fresh schema validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE claude_memory;"
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres \
+            -d claude_memory -f sql/schema.sql
+
+  eval-smoke:
+    name: Eval harness + status (no DB, no API)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+      - name: throughline status --json (DB-unreachable, must still parse)
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "1"
+          PGUSER: nobody
+          PGCONNECT_TIMEOUT: "1"
+        run: |
+          set -e
+          python3 -m throughline status --json --pretty | tee /tmp/status.json
+          python3 -c "import json,sys; d=json.load(open('/tmp/status.json'));\
+            assert d['db_reachable'] is False, d;\
+            assert 'table_row_counts' in d;\
+            assert 'chunks_by_category' in d;\
+            print('status payload shape OK')"
+      - name: evals --dry-run (parses 30 questions, no DB, no LLM)
+        run: python3 evals/run_eval.py --dry-run
+      - name: evals --offline-stub (deterministic, no DB, no LLM)
+        run: |
+          python3 evals/run_eval.py --offline-stub --report /tmp/eval_smoke.md
+          test -s /tmp/eval_smoke.md
+          grep -q "with-memory recall" /tmp/eval_smoke.md
+
+  markdown-lint:
+    name: Markdown links and formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"

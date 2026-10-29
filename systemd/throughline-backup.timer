@@ -1,0 +1,12 @@
+[Unit]
+Description=Throughline - daily database backup at 03:00
+Documentation=https://github.com/mkupermann/Throughline
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=throughline-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Concept C — "Sessions fade, memory persists"
+  Time runs left-to-right along a horizontal axis (Mon → Sun). Above
+  the axis: session bubbles appear, briefly glow with their tool's
+  colour, then fade. Below the axis: the memory store grows — chunks
+  accumulate persistently in a horizontal stack. Visual argument:
+  the agents forget; Throughline remembers.
+  Pure SVG <animate>, no JS.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500"
+     role="img" aria-label="Throughline — sessions fade but memory persists">
+  <title>Throughline — Concept C — Sessions fade, memory persists</title>
+
+  <defs>
+    <linearGradient id="bgC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#0D1117"/>
+      <stop offset="100%" stop-color="#0A0E14"/>
+    </linearGradient>
+    <pattern id="gridC" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1F2630"/>
+    </pattern>
+    <linearGradient id="axisC" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#21262D" stop-opacity="0"/>
+      <stop offset="10%" stop-color="#21262D"/>
+      <stop offset="90%" stop-color="#21262D"/>
+      <stop offset="100%" stop-color="#21262D" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="500" fill="url(#bgC)"/>
+  <rect width="1200" height="500" fill="url(#gridC)" opacity="0.5"/>
+
+  <!-- Title -->
+  <g font-family="-apple-system, BlinkMacSystemFont, system-ui, sans-serif">
+    <text x="600" y="60" text-anchor="middle" font-size="40" font-weight="700"
+          fill="#C9D1D9" letter-spacing="-1">
+      The agents forget. Throughline remembers.
+    </text>
+    <text x="600" y="90" text-anchor="middle" font-size="15" fill="#8B949E">
+      Sessions come and go. Decisions, contacts and gotchas stay searchable.
+    </text>
+  </g>
+
+  <!-- Time axis -->
+  <line x1="100" y1="270" x2="1100" y2="270" stroke="url(#axisC)" stroke-width="1"/>
+  <g font-family="ui-monospace, monospace" font-size="11" fill="#6E7681" letter-spacing="2">
+    <text x="160"  y="294" text-anchor="middle">MON</text>
+    <text x="304"  y="294" text-anchor="middle">TUE</text>
+    <text x="448"  y="294" text-anchor="middle">WED</text>
+    <text x="592"  y="294" text-anchor="middle">THU</text>
+    <text x="736"  y="294" text-anchor="middle">FRI</text>
+    <text x="880"  y="294" text-anchor="middle">SAT</text>
+    <text x="1024" y="294" text-anchor="middle">SUN</text>
+  </g>
+
+  <!-- ABOVE THE AXIS: session bubbles light up day-by-day, then fade.
+       7-second cycle, one day per second-ish, looping. -->
+  <g font-family="ui-monospace, monospace" font-size="11">
+    <!-- MON: Claude Code -->
+    <g transform="translate(160 200)">
+      <circle r="22" fill="#161B22" stroke="#58A6FF" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 1; 0.4; 0.4; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.05; 0.16; 0.30; 0.45; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#58A6FF" opacity="0">
+        <animate attributeName="opacity" values="0; 1; 0.4; 0.4; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.05; 0.16; 0.30; 0.45; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>cc</text>
+    </g>
+    <!-- TUE: Codex -->
+    <g transform="translate(304 200)">
+      <circle r="22" fill="#161B22" stroke="#79C0FF" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 1; 0.4; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.10; 0.20; 0.32; 0.45; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#79C0FF" opacity="0">
+        <animate attributeName="opacity" values="0; 0; 1; 0.4; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.10; 0.20; 0.32; 0.45; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>cx</text>
+    </g>
+    <!-- WED: Hermes -->
+    <g transform="translate(448 200)">
+      <circle r="22" fill="#161B22" stroke="#D2A8FF" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 0; 1; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.30; 0.36; 0.50; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#D2A8FF" opacity="0">
+        <animate attributeName="opacity" values="0; 0; 0; 1; 0.4; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.30; 0.36; 0.50; 0.60; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>hr</text>
+    </g>
+    <!-- THU: Continue -->
+    <g transform="translate(592 200)">
+      <circle r="22" fill="#161B22" stroke="#FFA657" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 0; 0; 1; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.52; 0.62; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#FFA657" opacity="0">
+        <animate attributeName="opacity" values="0; 0; 0; 0; 1; 0.4; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.52; 0.62; 0.75; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>co</text>
+    </g>
+    <!-- FRI: Windsurf -->
+    <g transform="translate(736 200)">
+      <circle r="22" fill="#161B22" stroke="#F97583" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 0; 0; 0; 1; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.58; 0.66; 0.78; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#F97583" opacity="0">
+        <animate attributeName="opacity" values="0; 0; 0; 0; 0; 1; 0.4; 0.4; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.58; 0.66; 0.78; 0.90; 1"
+                 dur="7s" repeatCount="indefinite"/>ws</text>
+    </g>
+    <!-- SAT: idle (no session) -->
+    <!-- SUN: Cline -->
+    <g transform="translate(1024 200)">
+      <circle r="22" fill="#161B22" stroke="#7EE787" stroke-width="2" opacity="0">
+        <animate attributeName="opacity"
+                 values="0; 0; 0; 0; 0; 0; 0; 1; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.58; 0.70; 0.80; 0.86; 1"
+                 dur="7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="4" text-anchor="middle" fill="#7EE787" opacity="0">
+        <animate attributeName="opacity" values="0; 0; 0; 0; 0; 0; 0; 1; 0"
+                 keyTimes="0; 0.20; 0.36; 0.46; 0.58; 0.70; 0.80; 0.86; 1"
+                 dur="7s" repeatCount="indefinite"/>cl</text>
+    </g>
+  </g>
+
+  <!-- BELOW THE AXIS: memory chunks accumulate persistently (one per day-event).
+       width grows as more chunks land — visual argument: memory is monotonic. -->
+  <g>
+    <rect x="100" y="330" width="0" height="36" rx="6" fill="#7EE787" opacity="0.4">
+      <animate attributeName="width"
+               values="0; 130; 260; 390; 520; 650; 650; 780; 780"
+               keyTimes="0; 0.10; 0.20; 0.32; 0.46; 0.62; 0.78; 0.90; 1"
+               dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="100" y="330" width="0" height="36" rx="6" fill="none" stroke="#7EE787" stroke-width="1.5">
+      <animate attributeName="width"
+               values="0; 130; 260; 390; 520; 650; 650; 780; 780"
+               keyTimes="0; 0.10; 0.20; 0.32; 0.46; 0.62; 0.78; 0.90; 1"
+               dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <text x="110" y="354" font-family="ui-monospace, monospace" font-size="13"
+          fill="#0D1117" font-weight="700">memory_chunks ─ growing</text>
+  </g>
+
+  <!-- Footer -->
+  <g font-family="ui-monospace, monospace" font-size="12" fill="#6E7681">
+    <text x="64" y="455">Sessions: ephemeral · Memory: persistent · Postgres + pgvector</text>
+    <text x="1136" y="455" text-anchor="end">github.com/mkupermann/throughline</text>
+  </g>
+  <rect x="64" y="470" width="1072" height="2" fill="#21262D"/>
+  <rect x="64" y="470" width="220" height="2" fill="#7EE787"/>
+</svg>

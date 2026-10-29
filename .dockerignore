@@ -1,0 +1,103 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+/tests
+.pytest_cache/
+.pytest-tmp*/
+.superpowers/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Git
+.git
+.gitignore
+.github/
+
+# Documentation
+docs/screenshots
+docs/internal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories (mounted from host)
+.claude/
+.cursor/
+.zed/
+.codex/
+.hermes/
+.continue/
+.cline/
+.windsurf/
+.vibe/
+
+# Database
+postgres_data/
+
+# Docker
+Dockerfile
+docker-compose*
+.dockerignore
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local config
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Frontend source and toolchain.
+# The image serves the *built* frontend from throughline/web/, which is
+# committed. The source tree and its 135 MB of node_modules are build-time
+# only and must not enter the build context.
+web/
+
+# Project specific
+.k2a/
+sql/migrations/
+
+rust/target
+web/node_modules
+web/output
+.playwright-cli
+.agents
+
+.worktrees
+-worktrees
+backups
+exports
+*.png

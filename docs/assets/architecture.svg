@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880" viewBox="0 0 1200 880" role="img" aria-label="Throughline architecture: nine AI CLI adapters feed normalised conversations into PostgreSQL with pgvector, consumed by GUI, MCP server, CLI and automation">
+  <title>Throughline architecture</title>
+  <desc>Four layers: nine source adapters, the ingestion pipeline that normalises conversations, PostgreSQL 16 with pgvector storage, and the consumers that read memory back.</desc>
+  <defs>
+    <style>
+      .title   { font: 700 20px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .subtitle{ font: 400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .band    { font: 700 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: 1.6px; }
+      .bandsub { font: 400 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #7E8FA8; }
+      .cardh   { font: 600 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .cardv   { font: 400 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .cardp   { font: 400 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #64748B; }
+      .step    { font: 600 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .stepsub { font: 400 10.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .chip    { font: 500 11.5px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #C9B8FF; }
+      .info    { font: 400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .badge   { font: 600 10.5px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: #F0B44C; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5E7290"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="880" fill="#0D1524"/>
+  <text x="40" y="38" class="title">Throughline architecture</text>
+  <text x="330" y="38" class="subtitle">nine AI CLIs · one adapter contract · one queryable memory</text>
+
+  <!-- ══════════ BAND 1 · SOURCES ══════════ -->
+  <rect x="40" y="60" width="1120" height="220" rx="10" fill="#121D31" stroke="#24344E"/>
+  <text x="62" y="88" class="band" fill="#5CA8FF">SOURCES</text>
+  <text x="150" y="88" class="bandsub">nine AI CLI adapters — each knows one tool's on-disk session format</text>
+
+  <g>
+    <!-- row 1 -->
+    <g transform="translate(60,104)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Claude Code</text>
+      <text x="12" y="39" class="cardv">Anthropic · JSONL</text>
+      <text x="12" y="58" class="cardp">~/.claude/projects</text>
+    </g>
+    <g transform="translate(282,104)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Codex CLI</text>
+      <text x="12" y="39" class="cardv">OpenAI · JSONL rollouts</text>
+      <text x="12" y="58" class="cardp">~/.codex/sessions</text>
+    </g>
+    <g transform="translate(504,104)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Cursor</text>
+      <text x="12" y="39" class="cardv">Anysphere · JSONL</text>
+      <text x="12" y="58" class="cardp">~/.cursor/sessions</text>
+    </g>
+    <g transform="translate(726,104)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Zed</text>
+      <text x="12" y="39" class="cardv">Zed Industries · JSON</text>
+      <text x="12" y="58" class="cardp">~/.zed/data/sessions</text>
+    </g>
+    <g transform="translate(948,104)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Vibe</text>
+      <text x="12" y="39" class="cardv">Mistral AI · session logs</text>
+      <text x="12" y="58" class="cardp">~/.vibe/logs/session</text>
+    </g>
+    <!-- row 2 -->
+    <g transform="translate(163,190)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Hermes</text>
+      <text x="12" y="39" class="cardv">agent sessions · JSON + DB</text>
+      <text x="12" y="58" class="cardp">~/.hermes/sessions</text>
+    </g>
+    <g transform="translate(385,190)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Continue.dev</text>
+      <text x="12" y="39" class="cardv">Continue · JSON</text>
+      <text x="12" y="58" class="cardp">~/.continue/sessions</text>
+    </g>
+    <g transform="translate(607,190)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Cline</text>
+      <text x="12" y="39" class="cardv">VS Code extension · per-task files</text>
+      <text x="12" y="58" class="cardp">VS Code globalStorage</text>
+    </g>
+    <g transform="translate(829,190)">
+      <rect width="208" height="72" rx="8" fill="#1A2942" stroke="#31517E"/>
+      <text x="12" y="22" class="cardh">Windsurf</text>
+      <text x="12" y="39" class="cardv">Cognition · plan documents</text>
+      <text x="12" y="58" class="cardp">~/.windsurf/plans</text>
+    </g>
+  </g>
+
+  <line x1="600" y1="280" x2="600" y2="306" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ══════════ BAND 2 · INGESTION ══════════ -->
+  <rect x="40" y="310" width="1120" height="122" rx="10" fill="#121D31" stroke="#24344E"/>
+  <text x="62" y="338" class="band" fill="#35C4A5">INGESTION PIPELINE</text>
+  <text x="230" y="338" class="bandsub">throughline ingest --all · adapters stay tiny, the shared writer does the heavy lifting</text>
+
+  <g>
+    <rect x="64" y="354" width="240" height="58" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+    <text x="184" y="378" class="step" text-anchor="middle">Adapter Registry</text>
+    <text x="184" y="396" class="stepsub" text-anchor="middle">built-ins + plug-in entry points</text>
+
+    <line x1="304" y1="383" x2="340" y2="383" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+    <rect x="344" y="354" width="190" height="58" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+    <text x="439" y="378" class="step" text-anchor="middle">discover() · parse()</text>
+    <text x="439" y="396" class="stepsub" text-anchor="middle">per-tool file formats</text>
+
+    <line x1="534" y1="383" x2="570" y2="383" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+    <rect x="574" y="354" width="270" height="58" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+    <text x="709" y="378" class="step" text-anchor="middle">NormalisedConversation</text>
+    <text x="709" y="396" class="stepsub" text-anchor="middle">roles · tool calls · token counts</text>
+
+    <line x1="844" y1="383" x2="880" y2="383" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+    <rect x="884" y="354" width="250" height="58" rx="8" fill="#152B2B" stroke="#2A6B5C"/>
+    <text x="1009" y="378" class="step" text-anchor="middle">Shared Writer</text>
+    <text x="1009" y="396" class="stepsub" text-anchor="middle">idempotent · hash-checked re-runs</text>
+  </g>
+
+  <line x1="600" y1="432" x2="600" y2="458" stroke="#5E7290" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ══════════ BAND 3 · STORAGE ══════════ -->
+  <rect x="40" y="462" width="1120" height="188" rx="10" fill="#121D31" stroke="#24344E"/>
+  <text x="62" y="490" class="band" fill="#9D8CFF">STORAGE</text>
+  <text x="150" y="490" class="bandsub">PostgreSQL 16 + pgvector — everything stays on your machine</text>
+
+  <rect x="60" y="504" width="256" height="128" rx="8" fill="#1C2340" stroke="#4B4585"/>
+  <text x="76" y="528" class="cardh">Search engines</text>
+  <text x="76" y="550" class="info">HNSW vector indexes · cosine</text>
+  <text x="76" y="568" class="info">1536-d OpenAI · 768-d Ollama</text>
+  <text x="76" y="586" class="info">pg_trgm full-text search</text>
+  <text x="76" y="604" class="info">entity/relationship graph</text>
+
+  <g>
+    <g transform="translate(342,504)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">conversations</text>
+    </g>
+    <g transform="translate(504,504)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">messages</text>
+    </g>
+    <g transform="translate(666,504)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">memory_chunks</text>
+    </g>
+    <g transform="translate(828,504)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">embeddings</text>
+    </g>
+    <g transform="translate(990,504)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">entities</text>
+    </g>
+    <g transform="translate(342,552)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">relationships</text>
+    </g>
+    <g transform="translate(504,552)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">prompts</text>
+    </g>
+    <g transform="translate(666,552)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">skills</text>
+    </g>
+    <g transform="translate(828,552)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">projects</text>
+    </g>
+    <g transform="translate(990,552)">
+      <rect width="150" height="34" rx="7" fill="#1C2340" stroke="#4B4585"/>
+      <text x="75" y="22" class="chip" text-anchor="middle">ingestion_log</text>
+    </g>
+    <text x="741" y="614" class="stepsub" text-anchor="middle">schema snapshot in sql/schema.sql · packaged migrations in throughline/migrations/</text>
+  </g>
+
+  <g stroke="#5E7290" stroke-width="1.6">
+    <line x1="300" y1="650" x2="300" y2="676" marker-end="url(#arr)" marker-start="url(#arr)"/>
+    <line x1="600" y1="650" x2="600" y2="676" marker-end="url(#arr)" marker-start="url(#arr)"/>
+    <line x1="900" y1="650" x2="900" y2="676" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  </g>
+
+  <!-- ══════════ BAND 4 · CONSUMERS ══════════ -->
+  <rect x="40" y="680" width="1120" height="176" rx="10" fill="#121D31" stroke="#24344E"/>
+  <text x="62" y="708" class="band" fill="#F0B44C">CONSUMERS</text>
+  <text x="180" y="708" class="bandsub">the same memory, read back from wherever you work</text>
+
+  <g>
+    <g transform="translate(50,722)">
+      <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
+      <text x="14" y="26" class="cardh">FastAPI + React UI</text>
+      <text x="196" y="26" class="badge">:8790</text>
+      <text x="14" y="50" class="cardv">8 routes — overview, find, timeline,</text>
+      <text x="14" y="68" class="cardv">curate, project, detail, operate,</text>
+      <text x="14" y="86" class="cardv">console · one packaged process</text>
+    </g>
+    <g transform="translate(330,722)">
+      <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
+      <text x="14" y="26" class="cardh">MCP Server</text>
+      <text x="196" y="26" class="badge">stdio</text>
+      <text x="14" y="50" class="cardv">search · recall_entity · write ·</text>
+      <text x="14" y="68" class="cardv">supersede · forget · stats …</text>
+      <text x="14" y="86" class="cardv">callable from any MCP client</text>
+    </g>
+    <g transform="translate(610,722)">
+      <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
+      <text x="14" y="26" class="cardh">CLI</text>
+      <text x="150" y="26" class="badge">throughline</text>
+      <text x="14" y="50" class="cardv">17 subcommands — ingest, search,</text>
+      <text x="14" y="68" class="cardv">extract-memory, reflect, conflicts,</text>
+      <text x="14" y="86" class="cardv">status, doctor, backup …</text>
+    </g>
+    <g transform="translate(890,722)">
+      <rect width="260" height="118" rx="8" fill="#2A2314" stroke="#8A6A2B"/>
+      <text x="14" y="26" class="cardh">Automation</text>
+      <text x="14" y="50" class="cardv">SessionStart context preload</text>
+      <text x="14" y="68" class="cardv">systemd / launchd timers for</text>
+      <text x="14" y="86" class="cardv">scheduled ingest + extraction</text>
+    </g>
+  </g>
+</svg>

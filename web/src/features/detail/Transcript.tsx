@@ -1,0 +1,285 @@
+import { OutputDisclosure } from "./OutputDisclosure";
+import { t } from "@/lib/ui";
+import { getLang, useLanguage } from "@/lib/language";
+import { useState } from "react";
+import { ChevronRight, Terminal, User, Bot, CornerUpRight } from "lucide-react";
+
+/**
+ * A conversation as it actually happened — prose, commands, and their output.
+ *
+ * The detail view used to render `content` and truncate it at 400 characters.
+ * On a real session that showed the model's prose and silently dropped
+ * everything it did: measured on one 5,560-message transcript, 772 assistant
+ * messages have an EMPTY `content` because they are pure tool calls, and 1,853
+ * carry `tool_calls`. A reader saw "Read" where a file had been opened and
+ * nothing at all where a command had run — which is why the history looked
+ * like fragments rather than work.
+ *
+ * The substance lives in `content_blocks`: a `tool_use` block holds the tool's
+ * name and its input (the bash command, the file path, the patch), and a
+ * `tool_result` block holds what came back. Both are rendered here.
+ *
+ * Tool-call details can be expanded. Recorded output starts collapsed; its
+ * label and the message timestamp remain visible.
+ * Keeping the full stored content available lets the reader inspect the work.
+ */
+
+export interface TranscriptMessage {
+  id: number;
+  role: string;
+  content: string | null;
+  content_blocks?: unknown;
+  tool_calls?: unknown;
+  tool_name?: string | null;
+  model?: string | null;
+  created_at?: string | null;
+}
+
+interface Block {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  content?: unknown;
+  path?: string; file_path?: string; filename?: string; file_id?: string; url?: string;
+}
+
+interface StoredToolCall {
+  tool_name?: unknown;
+  name?: unknown;
+  input?: unknown;
+  arguments?: unknown;
+  function?: unknown;
+}
+
+function blocksOf(m: TranscriptMessage): Block[] {
+  const raw = m.content_blocks;
+  if (Array.isArray(raw)) return raw as Block[];
+  // A few adapters store a single block rather than a list.
+  if (raw && typeof raw === "object") return [raw as Block];
+  return [];
+}
+
+function inputOf(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // A plain command is still a useful argument even when it is not JSON.
+    }
+    return { value };
+  }
+  return value == null ? {} : { value };
+}
+
+/** Older adapters persist normalised tool calls beside, rather than inside,
+ * ``content_blocks``. Turn that shape into the same blocks the UI already
+ * renders, without duplicating calls when richer blocks are present. */
+function storedToolCallsOf(value: unknown): Block[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): Block[] => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const call = raw as StoredToolCall;
+    const nested =
+      call.function && typeof call.function === "object" && !Array.isArray(call.function)
+        ? (call.function as Record<string, unknown>)
+        : undefined;
+    const name = call.tool_name ?? call.name ?? nested?.name;
+    const input = call.input ?? call.arguments ?? nested?.arguments;
+    return [
+      {
+        type: "tool_use",
+        name: typeof name === "string" && name ? name : "tool",
+        input: inputOf(input),
+      },
+    ];
+  });
+}
+
+/** The one field of a tool's input worth showing first. */
+function primaryArg(input: Record<string, unknown> | undefined): string {
+  if (!input) return "";
+  for (const key of ["command", "file_path", "path", "query", "url", "pattern", "prompt"]) {
+    const v = input[key];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  const first = Object.values(input)[0];
+  if (typeof first === "string") return first;
+  return first === undefined ? "" : JSON.stringify(first);
+}
+
+function textOf(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((b) => (typeof b === "string" ? b : typeof (b as Block)?.text === "string" ? (b as Block).text! : b == null ? "" : JSON.stringify(b, null, 2)))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return value != null ? JSON.stringify(value, null, 2) : "";
+}
+
+function when(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return `${t("Invalid recorded time")}: ${iso}`;
+  // Date AND time: a transcript without timestamps cannot be placed against
+  // anything else that happened that day.
+  return new Intl.DateTimeFormat(getLang() === "de" ? "de-DE" : "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "longOffset",
+    hour12: false,
+  }).format(d);
+}
+
+/** Who spoke, in words rather than the raw role identifier ("tool_result"
+ *  is a column value, "Tool result" is a label). Unknown roles fall back to
+ *  the same sentence-case humanisation the rest of the detail pages use. */
+function roleLabel(role: string): string {
+  switch (role) {
+    case "user":
+      return "Prompt";
+    case "assistant":
+      return t("Answer");
+    case "tool_result":
+      return t("Result / tool output");
+    case "system":
+      return "System";
+    default: {
+      const words = role.replace(/_/g, " ");
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    }
+  }
+}
+
+/** Output collapsed behind its own first line. */
+function Collapsible({ label, body }: { label: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  const lines = body.split("\n");
+  const long = lines.length > 3 || body.length > 400;
+  if (!body.trim()) return null;
+  if (!long) return <pre className="tx-out">{body}</pre>;
+  return (
+    <div className="tx-collapse">
+      <button type="button" className="tx-toggle" onClick={() => setOpen((o) => !o)}>
+        <ChevronRight size={13} aria-hidden className={open ? "tx-caret is-open" : "tx-caret"} />
+        {open ? "Hide" : label.replace("{n}", String(lines.length))}
+      </button>
+      {open && <pre className="tx-out">{body}</pre>}
+    </div>
+  );
+}
+
+function ToolCall({ block }: { block: Block }) {
+  const arg = primaryArg(block.input);
+  const extra = Object.entries(block.input ?? {}).filter(
+    ([, v]) => typeof v !== "string" || v !== arg,
+  );
+  return (
+    <details className="tx-tool">
+      <summary>{t("Tool action")}: {block.name ?? "tool"}</summary>
+      <div className="tx-tool-head">
+        <Terminal size={13} aria-hidden />
+        <span className="tx-tool-name">{block.name ?? "tool"}</span>
+      </div>
+      {arg && <pre className="tx-arg">{arg}</pre>}
+      {extra.length > 0 && (
+        <Collapsible label="Show {n} more argument lines" body={JSON.stringify(Object.fromEntries(extra), null, 2)} />
+      )}
+    </details>
+  );
+}
+
+/**
+ * `targetId` is a message anchor ("m390596") from the URL hash: Find's
+ * message results link to `/c/{conversation}#m{id}`, so the linked message
+ * must exist as a real element id and be visibly the one the reader was
+ * sent to. `tabIndex={-1}` lets the page move keyboard focus there after
+ * scrolling, so Tab continues from the message, not from the page top.
+ */
+export function Transcript({
+  messages,
+  targetId,
+}: {
+  messages: TranscriptMessage[];
+  targetId?: string | null;
+}) {
+  useLanguage();
+  return (
+    <ol className="tx">
+      {messages.map((m) => {
+        const blocks = blocksOf(m);
+        const blockTools = blocks.filter((b) => b.type === "tool_use");
+        const tools = blockTools.length ? blockTools : storedToolCallsOf(m.tool_calls);
+        const results = blocks.filter((b) => b.type === "tool_result");
+        const files = blocks.filter(b => ["file", "output_file", "image", "output_image"].includes(b.type ?? ""));
+        const rawProse =
+          blocks
+            .filter((b) => b.type === "text")
+            .map((b) => b.text ?? "")
+            .join("\n\n") || (blockTools.length || results.length ? "" : (m.content ?? ""));
+
+        const cleaned = m.role === "user" ? rawProse
+          .replace(/<(recommended_plugins|environment_context|in-app-browser-context)\b[^>]*>[\s\S]*?<\/\1>/g, "")
+          .replace(/^\s*## My request:\s*/, "").trim() : rawProse;
+        const isToolAction = tools.length > 0 && (!rawProse.trim() || rawProse.trimStart().startsWith("[Tool:"));
+        const prose = isToolAction ? "" : cleaned;
+        const hasEnvelope = cleaned !== rawProse;
+        const Icon = m.role === "user" ? User : m.role === "tool_result" ? CornerUpRight : Bot;
+
+        const anchor = `m${m.id}`;
+        const isTarget = targetId === anchor;
+
+        return (
+          <li
+            key={m.id}
+            id={anchor}
+            tabIndex={isTarget ? -1 : undefined}
+            className={`tx-msg tx-${m.role}${isTarget ? " is-target" : ""}`}
+          >
+            <div className="tx-meta">
+              <Icon size={13} aria-hidden />
+              <span className="tx-role">{isToolAction ? t("Tool action") : hasEnvelope && !prose ? t("Source context") : results.length && !prose ? t("Result / tool output") : roleLabel(m.role)}</span>
+              {m.model && <span className="tx-model">{m.model}</span>}
+              {m.created_at && (Number.isFinite(Date.parse(m.created_at)) ? (
+                <time className="tx-time" dateTime={m.created_at}>{when(m.created_at)}</time>
+              ) : <span className="tx-time">{when(m.created_at)}</span>)}
+            </div>
+
+            {prose && (m.role === "tool_result" || m.role === "tool" ? <OutputDisclosure body={prose} /> : <div className="tx-prose">{prose}</div>)}
+
+            {hasEnvelope && <details className="output-disclosure"><summary>{t("Original message with source context")}</summary><pre>{rawProse}</pre></details>}
+            {tools.map((b, i) => (
+              <ToolCall key={i} block={b} />
+            ))}
+
+            {results.map((b, i) => (
+              <section className="tx-result" key={i}><OutputDisclosure body={textOf(b.content)} /></section>
+            ))}
+            {files.map((b, i) => (
+              <section className="tx-result" key={`file-${i}`}><strong>{m.role === "user" ? t("Input file") : t("Result / file")}</strong><p>{t("File reference from source data; availability has not been verified.")}</p><pre>{[b.filename, b.path, b.file_path, b.file_id, b.url && !b.url.startsWith("data:") ? b.url : null].filter(Boolean).join("\n") || t("File reference without a recorded path")}</pre></section>
+            ))}
+
+            {/* A message with neither prose nor blocks is a real thing in the
+                data — a system marker, or a shape no adapter maps yet. Saying
+                so beats an empty row the reader cannot account for. */}
+            {!prose && !hasEnvelope && tools.length === 0 && results.length === 0 && files.length === 0 && (
+              <div className="tx-empty">({m.tool_name ? `${m.tool_name} — no recorded content` : "no recorded content"})</div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

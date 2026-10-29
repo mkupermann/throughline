@@ -1,0 +1,204 @@
+"""Projects, and the sessions inside them.
+
+Three levels — project, session, message — because the flat alternative does
+not survive the data: one project holds 7,284 messages and a single session
+holds 5,560. A project view lists its sessions; opening a session lists its
+messages, which is already paginated.
+
+Everything here shows what a person did. Machine-generated conversations are
+excluded by default and counted separately, so the omission is visible rather
+than silent: on the corpus this was built against, 3,017 of 3,606 stored
+conversations were the tool's own `claude -p` calls.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
+
+from throughline.queries import conversations as Conversations
+from throughline.queries import memory as Memory
+from throughline.queries import project_names as Names
+from throughline.queries import projects as Q
+
+from ..deps import connection
+from ..settings import Settings
+from .common import get_settings
+
+router = APIRouter(tags=["projects"])
+
+#: Sessions per page. Large enough that most projects fit in one request —
+#: the busiest on this corpus has 36 in a week — small enough that a project
+#: with years of history does not arrive in one payload.
+PAGE = 50
+CONTEXT_PAGE = 500
+
+
+@router.get("/projects/all")
+def all_projects(provider: list[str] = Query(default=[]), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Every observed project, including projects inactive for years."""
+    with connection(settings) as conn:
+        projects = Q.recent(conn, days=None, providers=provider)
+        if not provider:
+            from throughline.queries._exec import rows
+
+            known = {p["project"] for p in projects}
+            for row in rows(
+                conn, "SELECT project_key AS project FROM project_names WHERE is_curated ORDER BY updated_at DESC"
+            ):
+                if row["project"] not in known:
+                    projects.append(
+                        {
+                            **row,
+                            "sessions": 0,
+                            "messages": 0,
+                            "first_active": None,
+                            "last_active": None,
+                            "tools": 0,
+                            "tool_names": [],
+                        }
+                    )
+        return {"projects": Names.attach(conn, projects)}
+
+
+@router.get("/projects/recent")
+def recent(
+    days: int = Query(7, ge=1, le=365),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Projects touched in the last *days*, busiest first."""
+    with connection(settings) as conn:
+        return {"days": days, "projects": Names.attach(conn, Q.recent(conn, days=days))}
+
+
+@router.get("/projects/{name:path}/context")
+def context(
+    name: str,
+    order: Literal["oldest", "newest"] = "oldest",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(CONTEXT_PAGE, ge=1, le=CONTEXT_PAGE),
+    include_generated: bool = Query(False, alias="includeGenerated"),
+    legacy_include_generated: bool = Query(False, alias="include_generated", include_in_schema=False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """The source-linked knowledge and transcript for one project."""
+    show_generated = include_generated or legacy_include_generated
+    with connection(settings) as conn:
+        totals = Conversations.project_context_totals(conn, name, include_generated=show_generated)
+        messages = Conversations.project_context_messages(
+            conn,
+            name,
+            ascending=order == "oldest",
+            limit=limit,
+            offset=offset,
+            include_generated=show_generated,
+        )
+        message_total = int(totals["messages"])
+        session_total = int(totals["sessions"])
+        knowledge = [
+            {
+                **item,
+                # PostgreSQL numeric is Decimal. The API contract is a JSON
+                # number so clients can sort or format confidence directly.
+                "confidence": float(item["confidence"]),
+            }
+            for item in Memory.project_context_knowledge(conn, name, include_generated=show_generated)
+        ]
+        return {
+            "display_name": Names.attach(conn, [{"project": name}])[0]["display_name"],
+            "project": name,
+            "summary": f"{session_total} session{'s' if session_total != 1 else ''}, {message_total} message{'s' if message_total != 1 else ''}",
+            "knowledge": knowledge,
+            "messages": messages,
+            "sessionCount": session_total,
+            "messageCount": message_total,
+            "total": message_total,
+            "offset": offset,
+            "limit": limit,
+            "complete": offset + len(messages) >= message_total,
+            "order": order,
+            "includeGenerated": show_generated,
+        }
+
+
+@router.get("/projects/{name:path}/sessions")
+def sessions(
+    name: str,
+    order: Literal["newest", "oldest"] = "newest",
+    q: str | None = Query(None, max_length=200, description="Search within this project."),
+    limit: int = Query(PAGE, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    include_generated: bool = Query(
+        False,
+        description="Also list sessions a script produced. Off by default; the user decides, the interface does not.",
+    ),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """One page of sessions, ordered and optionally filtered by a search term.
+
+    `{name:path}` because a project name is the last segment of a working
+    directory and can contain characters — spaces, dots — that a stricter
+    converter would reject. "The FireScore Website" is a real project on this
+    corpus.
+    """
+    term = (q or "").strip() or None
+    with connection(settings) as conn:
+        rows = Q.sessions(
+            conn,
+            name,
+            order=order,
+            q=term,
+            limit=limit,
+            offset=offset,
+            include_generated=include_generated,
+        )
+        total = Q.session_count(conn, name, q=term, include_generated=include_generated)
+        return {
+            "display_name": Names.attach(conn, [{"project": name}])[0]["display_name"],
+            "project": name,
+            "order": order,
+            "q": term,
+            "include_generated": include_generated,
+            "sessions": rows,
+            "total": total,
+            "offset": offset,
+            "has_more": offset + len(rows) < total,
+            # Stated rather than silently dropped: a project whose list shows
+            # 28 sessions out of 660 stored rows needs to say where the rest
+            # went, or the interface is lying about how much is kept.
+            "hidden_generated": Q.hidden_count(conn, name),
+        }
+
+
+class ProjectName(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def clean(cls, value):
+        value = value.strip()
+        if not value or any(ord(char) < 32 for char in value):
+            raise ValueError("Use a non-empty, single-line project name.")
+        return value
+
+
+@router.put("/projects/{name:path}/name")
+def rename_project(name: str, body: ProjectName, settings: Settings = Depends(get_settings)):
+    with connection(settings) as conn:
+        result = Names.save(conn, name, body.display_name)
+        if result is None:
+            raise HTTPException(404, "Project folder group not found.")
+        conn.commit()
+    return result
+
+
+@router.get("/projects/{name:path}/continue")
+def continue_project(
+    name: str, max_chars: int = Query(12000, ge=2000, le=30000), settings: Settings = Depends(get_settings)
+):
+    from throughline.queries.continuation import build
+
+    with connection(settings) as conn:
+        return build(conn, name, max_chars)

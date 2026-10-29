@@ -1,0 +1,3 @@
+model = "demo-model"
+api_key = "sk-demo-0000000000000000000000"
+approval = "on-request"

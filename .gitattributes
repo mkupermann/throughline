@@ -1,0 +1,7 @@
+# Force LF everywhere, regardless of the checkout platform's core.autocrlf.
+# Without this, a Windows commit of throughline/web (built by `npm run build`,
+# then compared byte-for-byte by CI's "Frontend build is current" check) picks
+# up CRLF from `core.autocrlf=true`, and a fresh Linux build in CI emits LF for
+# the same file, which reads as the committed build being stale even when it
+# is not.
+* text=auto eol=lf

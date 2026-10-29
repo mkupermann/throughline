@@ -1,0 +1,325 @@
+"""Text generation, from whichever model you point it at.
+
+Throughline's claim is that it is vendor-neutral and that nothing leaves your
+machine unless you say so. The first version of `ask` broke both halves of
+that in one line: it shelled out to Anthropic's `claude` CLI, so the answer
+feature required one specific vendor's tool and sent excerpts of the corpus to
+one specific vendor's API — inside a product whose pitch is the opposite. The
+mistake came from copying the extraction scripts' assumption rather than
+questioning it.
+
+So: a backend is chosen the same way the embedding backend already is —
+probed, environment-driven, no new config format to learn — and the probe
+order puts local models first, because that is what the product promises.
+
+    THROUGHLINE_ANSWER_BACKEND   auto | ollama | compatible   (default: auto)
+    THROUGHLINE_ANSWER_MODEL     model name for that backend
+    THROUGHLINE_ANSWER_BASE_URL  OpenAI-compatible endpoint (Xiaomi MiMo,
+                                 LM Studio, vLLM, llama.cpp, LiteLLM…)
+    THROUGHLINE_API_KEY          bearer token for that endpoint (never OpenAI)
+
+`auto` tries Ollama, then any OpenAI-compatible server named by BASE_URL.
+Hosted OpenAI is not a fallback. A machine with Ollama running never
+reaches a network call, and never had to be configured to avoid one.
+
+The `claude` CLI was a backend here and is not one any more. It was the last
+route by which generation could reach one specific vendor without anyone
+choosing that — the CLI is simply present on a developer's PATH, so `auto`
+found it and sent transcripts to Anthropic on a machine whose owner had
+configured nothing. An OpenAI-compatible endpoint at least has to be named
+before it is used. Point BASE_URL at any server, including one that fronts
+Anthropic, if that is what you want.
+
+Only stdlib: this module must not add a dependency to answer a question, and
+every backend here speaks plain HTTP or a subprocess.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, replace
+
+from throughline.ai_errors import AIConnectionError
+
+#: Where Ollama listens unless told otherwise.
+_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+
+#: LM Studio's default. Probed only when the user named it in BASE_URL — this
+#: module does not scan ports looking for servers.
+_DEFAULT_OPENAI_COMPAT = "http://localhost:1234/v1"
+
+#: Sensible per-backend defaults. Small instruct models are the right size for
+#: this job: read twelve short excerpts, answer, cite. A frontier model is not
+#: what makes the answer good here — the retrieval is.
+_DEFAULT_MODEL = {
+    "ollama": "qwen3.5:9b",
+    "compatible": "mimo-v2.6-flash",
+}
+
+
+@dataclass
+class LLMInfo:
+    available: bool
+    backend: str = ""
+    model: str = ""
+    detail: str = ""
+    #: True when the prompt stays on this machine. Surfaced so the UI can say
+    #: so plainly rather than leaving the user to infer it.
+    local: bool = False
+
+    def __str__(self) -> str:  # pragma: no cover - display only
+        if not self.available:
+            return f"unavailable ({self.detail})"
+        where = "local" if self.local else "remote"
+        return f"{self.backend}/{self.model} ({where})"
+
+
+def _http_json(url: str, payload: dict, *, timeout: float, headers: dict | None = None) -> dict:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"content-type": "application/json", **(headers or {})},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+#: Substrings that mark an Ollama model as embedding-only. Such a model cannot
+#: generate text, and picking one would fail at the first question with an
+#: opaque error from the server rather than an honest "nothing here can answer".
+#: A machine set up for Throughline's semantic search has exactly one of these
+#: pulled and nothing else, which is the common case, not an edge case.
+_EMBEDDING_ONLY = ("embed", "bge-", "gte-", "e5-")
+
+
+def _ollama_chat_models() -> list[str]:
+    """Generation-capable models Ollama actually has pulled.
+
+    Asks rather than assumes. The first version of this defaulted to
+    `llama3.1:8b` and reported Ollama as available on a machine whose only
+    model was `nomic-embed-text` — a confident default that would have failed
+    on the first real question.
+    """
+    try:
+        with urllib.request.urlopen(f"{_OLLAMA_URL}/api/tags", timeout=1.5) as resp:
+            if resp.status != 200:
+                return []
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return []
+    names = [str(m.get("name", "")) for m in data.get("models", [])]
+    return [n for n in names if n and not any(mark in n.lower() for mark in _EMBEDDING_ONLY)]
+
+
+def _openai_compat_base() -> str | None:
+    """An OpenAI-compatible endpoint the user has named, or None.
+
+    Only what BASE_URL says. Probing localhost:1234 uninvited would mean a
+    question silently going to whatever happens to be listening there.
+    """
+    base = os.environ.get("THROUGHLINE_ANSWER_BASE_URL", "").strip()
+    return base.rstrip("/") if base else None
+
+
+def backend_info(purpose: str | None = None) -> LLMInfo:
+    """Which model will answer, and whether it runs on this machine."""
+    if purpose:
+        try:
+            from throughline.ai_runtime import info
+
+            selected = info(purpose)
+            if selected is not None:
+                return selected
+        except Exception as exc:
+            return LLMInfo(False, detail=f"AI settings unavailable: {type(exc).__name__}")
+    preferred = os.environ.get("THROUGHLINE_ANSWER_BACKEND", "auto").strip().lower() or "auto"
+    model = os.environ.get("THROUGHLINE_ANSWER_MODEL", "").strip()
+    base = _openai_compat_base()
+
+    def pick(backend: str, *, local: bool, detail: str = "") -> LLMInfo:
+        chosen = model
+        if not chosen and backend == "ollama":
+            # Prefer the model this project is tuned against when the machine
+            # has it, and otherwise use what it does have. Taking Ollama's
+            # first entry alone looked fine and was luck: that list is ordered
+            # by modification date, so pulling any unrelated model silently
+            # changed which one answered, and the default named in the docs was
+            # never the one that ran. A hardcoded name alone is no better — it
+            # would report a model the machine may not have.
+            pulled = _ollama_chat_models()
+            wanted = _DEFAULT_MODEL.get(backend, "")
+            preferred = next((n for n in pulled if n == wanted or n.startswith(f"{wanted}-")), "")
+            chosen = preferred or (pulled[0] if pulled else "")
+        return LLMInfo(
+            available=True,
+            backend=backend,
+            model=chosen or _DEFAULT_MODEL.get(backend, ""),
+            local=local,
+            detail=detail,
+        )
+
+    if preferred == "ollama":
+        chat = _ollama_chat_models()
+        if not chat:
+            return LLMInfo(
+                False,
+                detail=(
+                    f"Ollama at {_OLLAMA_URL} has no generation model pulled "
+                    "(an embedding model cannot answer). Try: ollama pull llama3.1:8b"
+                ),
+            )
+        # An explicitly named model wins even if it is not in the list — the
+        # user may be pulling it right now, and second-guessing them here would
+        # be worse than letting the call report the real error.
+        return pick("ollama", local=True, detail=", ".join(chat[:3]))
+
+    if preferred in ("openai", "compatible", "xiaomi", "mimo"):
+        if not base:
+            return LLMInfo(
+                False,
+                detail=(
+                    "Hosted OpenAI is disabled. Set THROUGHLINE_ANSWER_BASE_URL " "to a local or Xiaomi MiMo endpoint."
+                ),
+            )
+        return pick("compatible", local=_is_loopback(base), detail=base)
+
+    if preferred == "claude":
+        return LLMInfo(
+            False,
+            detail=(
+                "The `claude` CLI is no longer a generation backend. Use "
+                "`ollama`, or point THROUGHLINE_ANSWER_BASE_URL at an "
+                "OpenAI-compatible endpoint."
+            ),
+        )
+
+    # auto — local first, then an explicitly named non-OpenAI endpoint.
+    chat = _ollama_chat_models()
+    if chat:
+        return pick("ollama", local=True, detail=", ".join(chat[:3]))
+    if base:
+        return pick("compatible", local=_is_loopback(base), detail=base)
+    return LLMInfo(
+        False,
+        detail=(
+            "No model available. Start Ollama (`ollama serve`) and pull a "
+            "generation model, or set THROUGHLINE_ANSWER_BASE_URL to a "
+            "non-OpenAI endpoint (e.g. Xiaomi MiMo)."
+        ),
+    )
+
+
+def _is_loopback(url: str) -> bool:
+    return any(h in url for h in ("localhost", "127.0.0.1", "[::1]", "0.0.0.0"))
+
+
+def complete(
+    prompt: str,
+    *,
+    timeout: float = 180.0,
+    cwd: str | None = None,
+    model: str | None = None,
+    schema: dict | None = None,
+    purpose: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Run *prompt* through the configured model. Returns (text, error).
+
+    `model` overrides the resolved model for this one call — what
+    `throughline ask --model` is for — while the backend stays whatever the
+    probe found. The backend is a property of the machine; the model is a
+    per-question choice.
+
+    Never raises: a question that cannot be answered has to degrade to "here
+    are the records I found", which is still more than the user had before.
+    """
+    if purpose:
+        try:
+            from throughline.ai_runtime import generate, route
+
+            selected = route(purpose)
+            if selected is not None:
+                return generate(selected, prompt, schema, timeout), None
+        except AIConnectionError as exc:
+            return None, f"Selected AI failed [{exc.code}]: {exc}"
+        except Exception as exc:
+            return None, f"Selected AI failed ({type(exc).__name__}). Check its configuration and login."
+    info = backend_info()
+    if not info.available:
+        return None, info.detail
+    if model:
+        info = replace(info, model=model)
+
+    try:
+        if info.backend == "ollama":
+            body: dict = {"model": info.model, "prompt": prompt, "stream": False}
+            if schema:
+                # Ollama constrains generation to the schema, so the model can
+                # only emit tokens that fit it. Malformed JSON stops being a
+                # possibility rather than something to parse defensively —
+                # which is what made small local models unusable for
+                # extraction: a 3B model produced usable output for one
+                # conversation in twenty, mostly by answering in the wrong
+                # shape.
+                body["format"] = schema
+                # Thinking has to go with it. A reasoning model given a schema
+                # emits the constrained JSON into `thinking` and leaves
+                # `response` empty, so the caller sees nothing at all — the
+                # same twenty conversations came back blank, this time without
+                # a single error to explain it.
+                body["think"] = False
+            data = _http_json(f"{_OLLAMA_URL}/api/generate", body, timeout=timeout)
+            if data.get("done_reason") == "length":
+                return None, "Model output reached its token limit; incomplete output was rejected."
+            if schema and not (data.get("response") or "").strip():
+                return None, "Model returned no final structured response; reasoning was not accepted as data."
+            # Unstructured callers retain compatibility with thinking-only models.
+            answer = (data.get("response") or "").strip() or (data.get("thinking") or "").strip()
+            return answer, None
+
+        if info.backend in ("openai", "compatible"):
+            base = _openai_compat_base()
+            if not base:
+                return None, "THROUGHLINE_ANSWER_BASE_URL is not set (hosted OpenAI is disabled)."
+            headers = {}
+            key = (
+                os.environ.get("THROUGHLINE_API_KEY", "").strip()
+                or os.environ.get("THROUGHLINE_ANSWER_API_KEY", "").strip()
+            )
+            # A local server usually wants no key; Xiaomi MiMo always does.
+            if key:
+                headers["authorization"] = f"Bearer {key}"
+            data = _http_json(
+                f"{base}/chat/completions",
+                {
+                    "model": info.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2,
+                    # OpenAI-compatible servers vary in how much of a schema
+                    # they honour; json_object is the part they all implement.
+                    **({"response_format": {"type": "json_object"}} if schema else {}),
+                },
+                timeout=timeout,
+                headers=headers,
+            )
+            choice = data["choices"][0]
+            if choice.get("finish_reason") == "length":
+                return None, "Model output reached its token limit; incomplete output was rejected."
+            return (choice["message"]["content"] or "").strip(), None
+
+        return None, f"Unknown backend {info.backend!r}"
+
+    except subprocess.TimeoutExpired:
+        return None, f"{info.backend} timed out after {timeout:.0f}s"
+    except urllib.error.HTTPError as e:
+        return None, f"{info.backend} returned HTTP {e.code}"
+    except urllib.error.URLError as e:
+        return None, f"{info.backend} unreachable: {e.reason}"
+    except (KeyError, IndexError, json.JSONDecodeError):
+        return None, f"{info.backend} returned an unexpected response shape"
+    except Exception as e:  # noqa: BLE001
+        return None, f"{type(e).__name__}: {e}"

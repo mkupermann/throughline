@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Throughline — one memory layer for every AI CLI on your laptop">
+  <title>Throughline — one memory layer for every AI CLI on your laptop</title>
+  <desc>Nine labelled lines, one per supported AI CLI, converge into a single memory node next to the Throughline wordmark.</desc>
+  <defs>
+    <style>
+      .lbl { font: 500 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .word { font: 700 44px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; letter-spacing: 0.5px; }
+      .tag { font: 400 16px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+      .chip { font: 600 11px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #8FB8F2; letter-spacing: 0.3px; }
+      .node { font: 600 12px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #EAF1FA; }
+      .nodesub { font: 400 10.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #9FB0C7; }
+    </style>
+    <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1524"/>
+      <stop offset="1" stop-color="#101B30"/>
+    </linearGradient>
+    <linearGradient id="lineFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5CA8FF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#5CA8FF" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" rx="12" fill="url(#heroBg)"/>
+  <rect x="0.5" y="0.5" width="1199" height="299" rx="12" fill="none" stroke="#24344E"/>
+
+  <!-- Nine source lines converging into one node -->
+  <g fill="none" stroke="url(#lineFade)" stroke-width="1.6">
+    <path d="M 150 40  C 330 40,  420 138, 528 146"/>
+    <path d="M 150 66  C 330 66,  420 140, 528 147"/>
+    <path d="M 150 92  C 330 92,  420 142, 528 148"/>
+    <path d="M 150 118 C 330 118, 420 145, 528 149"/>
+    <path d="M 150 144 C 330 144, 420 148, 528 150"/>
+    <path d="M 150 170 C 330 170, 420 153, 528 151"/>
+    <path d="M 150 196 C 330 196, 420 156, 528 152"/>
+    <path d="M 150 222 C 330 222, 420 159, 528 153"/>
+    <path d="M 150 248 C 330 248, 420 161, 528 154"/>
+  </g>
+
+  <!-- Source labels -->
+  <g class="lbl" text-anchor="end">
+    <text x="142" y="44">Claude Code</text>
+    <text x="142" y="70">Codex CLI</text>
+    <text x="142" y="96">Cursor</text>
+    <text x="142" y="122">Zed</text>
+    <text x="142" y="148">Vibe</text>
+    <text x="142" y="174">Hermes</text>
+    <text x="142" y="200">Continue</text>
+    <text x="142" y="226">Cline</text>
+    <text x="142" y="252">Windsurf</text>
+  </g>
+
+  <!-- Convergence node -->
+  <circle cx="548" cy="150" r="17" fill="#0D1524" stroke="#5CA8FF" stroke-width="2"/>
+  <circle cx="548" cy="150" r="6" fill="#5CA8FF"/>
+  <text x="548" y="192" class="node" text-anchor="middle">one memory</text>
+  <text x="548" y="208" class="nodesub" text-anchor="middle">PostgreSQL + pgvector</text>
+
+  <!-- Wordmark block -->
+  <g>
+    <text x="660" y="140" class="word">Throughline</text>
+    <text x="662" y="176" class="tag">One memory layer for every AI CLI on your laptop.</text>
+    <g>
+      <rect x="662" y="200" width="118" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="721" y="217" class="chip" text-anchor="middle">9 CLI ADAPTERS</text>
+      <rect x="790" y="200" width="130" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="855" y="217" class="chip" text-anchor="middle">SEMANTIC SEARCH</text>
+      <rect x="930" y="200" width="110" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="985" y="217" class="chip" text-anchor="middle">100% LOCAL</text>
+      <rect x="1050" y="200" width="70" height="26" rx="13" fill="#16233B" stroke="#2E4266"/>
+      <text x="1085" y="217" class="chip" text-anchor="middle">MIT</text>
+    </g>
+  </g>
+</svg>

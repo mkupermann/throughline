@@ -1,0 +1,5 @@
+Use TypeScript strict mode.
+
+Prefer named exports over default exports.
+
+No console.log in production code paths.

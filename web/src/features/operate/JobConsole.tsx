@@ -1,0 +1,82 @@
+import { useEffect, useRef, useState } from "react";
+
+export interface JobCompletion {
+  ok: boolean;
+  returncode: number | null;
+  summary: string;
+}
+
+/** Decode the stable final line emitted by the server's SSE job stream. */
+export function parseJobCompletion(summary: string): JobCompletion {
+  const match = summary.match(/(?:^|\s)exit=(-?\d+|none|null)(?:\s|$)/i);
+  const returncode = match && /^-?\d+$/.test(match[1]) ? Number(match[1]) : null;
+  return { ok: returncode === 0, returncode, summary };
+}
+
+/**
+ * Live job output.
+ *
+ * EventSource rather than polling: a job emits output in bursts and long
+ * quiet stretches, and polling either lags the bursts or hammers the server
+ * through the quiet. The stream replays the retained buffer on connect, so
+ * opening this panel mid-run shows the whole run so far.
+ */
+export function JobConsole({
+  jobId,
+  onFinished,
+}: {
+  jobId: string;
+  onFinished: (completion: JobCompletion) => void;
+}) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [done, setDone] = useState<string | null>(null);
+  const boxRef = useRef<HTMLPreElement>(null);
+  const pinned = useRef(true);
+  const onFinishedRef = useRef(onFinished);
+
+  useEffect(() => {
+    onFinishedRef.current = onFinished;
+  }, [onFinished]);
+
+  useEffect(() => {
+    setLines([]);
+    setDone(null);
+    pinned.current = true;
+    const es = new EventSource(`/api/operate/job/${jobId}/stream`);
+    es.addEventListener("line", (e) => setLines((l) => [...l, (e as MessageEvent).data].slice(-500)));
+    es.addEventListener("done", (e) => {
+      const summary = String((e as MessageEvent).data);
+      setDone(summary);
+      es.close();
+      onFinishedRef.current(parseJobCompletion(summary));
+    });
+    // EventSource reconnects by itself after a transient network error. Closing
+    // here loses the eventual `done` event and leaves the parent stuck in its
+    // running state even though the server-side job has already finished.
+    return () => es.close();
+  }, [jobId]);
+
+  // Follow the tail, but stop fighting the user the moment they scroll up.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  return (
+    <div className="console">
+      <pre
+        ref={boxRef}
+        className="console-out"
+        tabIndex={0}
+        aria-label="Job output"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
+        {lines.join("\n")}
+        {done && `\n\n— ${done}`}
+      </pre>
+    </div>
+  );
+}

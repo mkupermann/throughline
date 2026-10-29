@@ -1,0 +1,220 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ThemeProvider } from "@/lib/theme";
+import { clearFeatures, setFeatures } from "@/lib/features";
+import { Shell } from "./Shell";
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, ScrollRestoration: () => null };
+});
+vi.mock("./ProviderBar", () => ({ ProviderBar: () => null }));
+vi.mock("./CommandPalette", () => ({ CommandPalette: () => null }));
+
+let mobileViewport = false;
+afterEach(() => { mobileViewport = false; });
+
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: query === "(max-width: 768px)" && mobileViewport,
+  media: query,
+  addEventListener() {},
+  removeEventListener() {},
+}));
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.pathname}{location.search}</output>;
+}
+
+function renderShell(path = "/curate?provider=hermes") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <ThemeProvider>
+        <Shell />
+        <LocationProbe />
+      </ThemeProvider>
+    </MemoryRouter>,
+  );
+}
+
+describe("Shell", () => {
+  afterEach(() => {
+    clearFeatures();
+  });
+
+  it("groups task navigation, names Review, and retains provider scope", () => {
+    renderShell();
+
+    for (const group of ["Work", "Trust", "System"]) {
+      expect(screen.getByRole("navigation", { name: group })).toBeTruthy();
+    }
+
+    const review = screen.getByRole("link", { name: /^Review/ });
+    expect(review.getAttribute("href")).toBe("/curate?provider=hermes");
+    expect(review.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("link", { name: "Curate" })).toBeNull();
+    expect(screen.getByRole("link", { name: /^Find/ }).getAttribute("href")).toBe("/find?provider=hermes");
+  });
+
+  it("keeps every navigation link named when its visible text is collapsed", () => {
+    renderShell();
+
+    for (const name of [
+      "Projects",
+      "Conversations",
+      "Find",
+      "Timeline",
+      "Review",
+      "Operate",
+      "Console",
+      "AI team operations",
+    ]) {
+      const link = screen.getByRole("link", { name });
+      expect(link.getAttribute("aria-label")).toBe(name);
+    }
+  });
+
+  it("opens keyboard help with the command palette and every go chord", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: /keyboard shortcuts/i }));
+
+    const help = screen.getByRole("dialog", { name: /keyboard shortcuts/i });
+    expect(within(help).getByText(/Cmd\/Ctrl\+K/)).toBeTruthy();
+    for (const chord of ["g o", "g f", "g t", "g c", "g p", "g s", "g m"]) {
+      expect(within(help).getByText(chord)).toBeTruthy();
+    }
+  });
+
+  it("shows the platform shortcut once in the command-palette nudge", () => {
+    renderShell();
+
+    const nudge = screen.getByText(/Press/).closest(".palette-nudge");
+    expect(nudge?.textContent).toContain("Ctrl+K");
+    expect(nudge?.querySelector("svg")).toBeNull();
+  });
+
+  it("moves focus into keyboard help and contains tab navigation", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close keyboard shortcuts" }));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close keyboard shortcuts" }));
+  });
+
+  it("closes keyboard help with Escape and restores focus to its trigger", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Keyboard shortcuts" });
+
+    await user.click(trigger);
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes keyboard help when its backdrop is pressed", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    await user.click(screen.getByTestId("keyboard-help-backdrop"));
+
+    expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).toBeNull();
+  });
+
+  it("does not run global go chords while keyboard help is modal", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    await user.keyboard("gf");
+
+    expect(screen.getByTestId("location").textContent).toBe("/curate?provider=hermes");
+    expect(screen.getByRole("dialog", { name: /keyboard shortcuts/i })).toBeTruthy();
+  });
+
+  it("persists a compact density preference without changing navigation", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Compact density" }));
+
+    expect(document.documentElement.dataset.density).toBe("compact");
+    expect(localStorage.getItem("throughline-density")).toBe("compact");
+    expect(screen.getByTestId("location").textContent).toBe("/curate?provider=hermes");
+  });
+
+  it("hides AI team operations and its go chord when the surface is fenced off", async () => {
+    setFeatures({ pm: false });
+    const user = userEvent.setup();
+    renderShell();
+
+    expect(screen.queryByRole("link", { name: "AI team operations" })).toBeNull();
+    // The knowledge pipeline stays. These surfaces are not admin-gated, so
+    // they are present regardless of the access level the shell renders with.
+    for (const name of ["Projects", "Conversations", "Find", "Timeline", "Review"]) {
+      expect(screen.getByRole("link", { name })).toBeTruthy();
+    }
+
+    await user.click(screen.getByRole("button", { name: /keyboard shortcuts/i }));
+    const help = screen.getByRole("dialog", { name: /keyboard shortcuts/i });
+    expect(within(help).queryByText("g m")).toBeNull();
+    expect(within(help).getByText("g f")).toBeTruthy();
+  });
+});
+
+it("shows the active interface language and switches navigation without leaving the route", async () => {
+  renderShell("/conversations");
+  await userEvent.click(screen.getByRole("button", { name: "Use German" }));
+  expect(screen.getByRole("button", { name: "Deutsch verwenden" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("link", { name: "Gespräche" }).getAttribute("aria-current")).toBe("page");
+  expect(document.documentElement.lang).toBe("de");
+  await userEvent.click(screen.getByRole("button", { name: "Englisch verwenden" }));
+  expect(screen.getByRole("button", { name: "Use English" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByTestId("location").textContent).toBe("/conversations");
+});
+
+
+describe("mobile navigation", () => {
+  it("keeps navigation hidden until opened, contains focus and restores it on Escape", async () => {
+    mobileViewport = true;
+    const user = userEvent.setup();
+    renderShell();
+    expect(screen.queryByRole("navigation", { name: "Work" })).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Menu" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Navigation" });
+    const close = within(dialog).getByRole("button", { name: "Close menu" });
+    expect(document.activeElement).toBe(close);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Compact density" }));
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("closes after navigation while carrying provider scope", async () => {
+    mobileViewport = true;
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Menu" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("link", { name: "Find" }));
+    expect(screen.getByTestId("location").textContent).toBe("/find?provider=hermes");
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+});

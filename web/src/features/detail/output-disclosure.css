@@ -1,0 +1,4 @@
+.output-disclosure { min-width: 0; }
+.output-disclosure > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.output-disclosure > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 3px; }
+.output-disclosure > pre { max-height: 250px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: inherit; margin: 8px 0; }

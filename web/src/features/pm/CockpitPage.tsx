@@ -1,0 +1,465 @@
+/** /pm/projects/:id — Projekt-Cockpit: header with editable status/budget,
+ *  team pipeline rows (the signature element; seats double as the
+ *  assignment UI) and tasks. */
+
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { X } from "lucide-react";
+
+import { pmApi, type PmProject } from "@/lib/api";
+import { useLang } from "./i18n";
+import {
+  BudgetBar,
+  ErrorState,
+  InlineConfirmButton,
+  PmHeaderBar,
+  ProjectStatusChip,
+  SkeletonRows,
+  fmtInt,
+} from "./shared";
+import { TeamsSection } from "./TeamsSection";
+import { TasksSection } from "./TasksSection";
+import "@/styles/pm.css";
+
+/** Linked repo projects as chips, plus a select to link another unlinked
+ *  one — the cockpit's half of the repo <-> pm_project bridge
+ *  (pm_project_repos). Candidates offered by the select are repo projects
+ *  not currently linked to *any* pm_project: a repo already adopted
+ *  elsewhere isn't offered a second time. */
+function RepoLinksSection({ projectId }: { projectId: number }) {
+  const { t } = useLang();
+  const queryClient = useQueryClient();
+  const [pickId, setPickId] = useState<number | "">("");
+
+  const linkedQuery = useQuery({
+    queryKey: ["pm-project-repos", projectId],
+    queryFn: () => pmApi.projectRepos(projectId),
+  });
+  const allQuery = useQuery({
+    queryKey: ["pm-repo-projects"],
+    queryFn: pmApi.listRepoProjects,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["pm-project-repos", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["pm-repo-projects"] });
+  };
+
+  const link = useMutation({
+    mutationFn: (repoProjectId: number) => pmApi.linkProjectRepo(projectId, repoProjectId),
+    onSuccess: () => {
+      setPickId("");
+      invalidate();
+    },
+  });
+
+  const unlink = useMutation({
+    mutationFn: (repoProjectId: number) => pmApi.unlinkProjectRepo(projectId, repoProjectId),
+    onSuccess: invalidate,
+  });
+
+  if (linkedQuery.isPending) return null;
+
+  const linked = linkedQuery.data?.repo_projects ?? [];
+  const linkedIds = new Set(linked.map((r) => r.id));
+  const candidates = (allQuery.data?.repo_projects ?? []).filter(
+    (r) => r.linked_pm_project_id === null && !linkedIds.has(r.id),
+  );
+
+  if (linked.length === 0 && candidates.length === 0) return null;
+
+  return (
+    <div className="pm-repo-links">
+      <h2 className="section-label">{t.cockpit.repos.h2}</h2>
+      {linked.length === 0 ? (
+        <p className="pm-card-quiet">{t.cockpit.repos.none}</p>
+      ) : (
+        <ul className="pm-repo-chips">
+          {linked.map((r) => (
+            <li key={r.id} className="pm-chip pm-repo-chip">
+              <Link to={`/project/${encodeURIComponent(r.name)}`}>{r.name} · Open conversations</Link>
+              <span className="pm-repo-chip-sessions tabular">{fmtInt(r.sessions)}</span>
+              <InlineConfirmButton
+                className="pm-repo-chip-remove"
+                ariaLabel={t.cockpit.repos.unlinkAria(r.name)}
+                title={t.cockpit.repos.unlinkTitle(r.name)}
+                pending={unlink.isPending}
+                onConfirm={() => unlink.mutate(r.id)}
+              >
+                <X size={12} aria-hidden />
+              </InlineConfirmButton>
+            </li>
+          ))}
+        </ul>
+      )}
+      {candidates.length > 0 && (
+        <form
+          className="pm-repo-link-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (pickId !== "") link.mutate(pickId);
+          }}
+        >
+          <select
+            className="pm-input pm-input-compact"
+            value={pickId}
+            disabled={link.isPending}
+            onChange={(e) => setPickId(e.target.value ? Number(e.target.value) : "")}
+            aria-label={t.cockpit.repos.linkAria}
+          >
+            <option value="">{t.cockpit.repos.linkPlaceholder}</option>
+            {candidates.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="button pm-button-flush" disabled={pickId === "" || link.isPending}>
+            {t.cockpit.repos.linkSubmit}
+          </button>
+        </form>
+      )}
+      {link.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.cockpit.repos.linkFailed((link.error as Error).message)}
+        </p>
+      )}
+      {unlink.isError && (
+        <p className="pm-field-error" role="alert">
+          {t.cockpit.repos.unlinkFailed((unlink.error as Error).message)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Click-to-edit token budget, shared by the project header and team rows. */
+export function InlineBudget({
+  value,
+  onSave,
+  saving,
+  label,
+}: {
+  value: number | null;
+  onSave: (budget: number | null) => void;
+  saving: boolean;
+  label?: string;
+}) {
+  const { t } = useLang();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const shownLabel = label ?? t.budget.label;
+
+  if (!editing) {
+    return (
+      <span className="pm-inline-budget">
+        <span className="pm-inline-budget-value tabular">
+          {shownLabel}: {value === null ? t.common.unlimited : `${fmtInt(value)} ${t.common.tokens}`}
+        </span>
+        <button
+          type="button"
+          className="pm-linklike"
+          onClick={() => {
+            setDraft(value === null ? "" : String(value));
+            setEditing(true);
+          }}
+          // `InlineBudget` is reused by the project header AND every team's
+          // pipeline row — a screen-reader user tabbing button-by-button hit
+          // several identically-named "Edit" controls per page with no way
+          // to tell them apart (UI audit PM M5). The label passed in by the
+          // caller (project name / team name) disambiguates it, the same
+          // way the input right beside it already does.
+          aria-label={t.budget.editAria(shownLabel)}
+        >
+          {t.common.edit}
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <form
+      className="pm-inline-budget pm-inline-budget-editing"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(draft.trim() === "" ? null : Number(draft));
+        setEditing(false);
+      }}
+    >
+      <input
+        className="pm-input pm-budget-input"
+        type="number"
+        min={0}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={t.common.unlimited}
+        aria-label={`${shownLabel} ${t.cockpit.budgetAriaSuffix}`}
+        autoFocus
+      />
+      <button type="submit" className="button pm-button-flush" disabled={saving}>
+        {t.common.save}
+      </button>
+      <button
+        type="button"
+        className="button pm-button-flush pm-button-quiet"
+        onClick={() => setEditing(false)}
+      >
+        {t.common.cancel}
+      </button>
+    </form>
+  );
+}
+
+function StatusSelect({
+  project,
+  onChange,
+  saving,
+}: {
+  project: PmProject;
+  onChange: (status: PmProject["status"]) => void;
+  saving: boolean;
+}) {
+  const { t } = useLang();
+  const statuses: PmProject["status"][] = ["active", "paused", "completed", "archived"];
+  return (
+    <label className="pm-status-select">
+      <span>{t.cockpit.statusLabel}</span>
+      <select
+        className="pm-input pm-input-compact"
+        value={project.status}
+        disabled={saving}
+        onChange={(e) => onChange(e.target.value as PmProject["status"])}
+      >
+        {statuses.map((s) => (
+          <option key={s} value={s}>
+            {t.status.project[s]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** The instance brief is editable independently of its source template. */
+function ProjectBrief({ project }: { project: PmProject }) {
+  const { t, lang } = useLang();
+  const de = lang === "de";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(project.description ?? "");
+  const editButton = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: () => pmApi.patchProject(project.id, { description: draft }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ projects: PmProject[] }>(["pm-projects"], (old) =>
+        old ? { projects: old.projects.map(item => item.id === updated.id ? updated : item) } : old,
+      );
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+      setEditing(false);
+      requestAnimationFrame(() => editButton.current?.focus());
+    },
+  });
+  useEffect(() => { if (editing) input.current?.focus(); }, [editing]);
+  const title = de ? "Projektauftrag" : "Project brief";
+  const editLabel = de ? "Projektauftrag bearbeiten" : "Edit project brief";
+  return <section className="pm-project-brief" aria-labelledby="pm-brief-h">
+    <div className="pm-project-brief-header">
+      <h2 id="pm-brief-h">{title}</h2>
+      {!editing && <button ref={editButton} type="button" className="button pm-button-quiet"
+        onClick={() => { setDraft(project.description ?? ""); save.reset(); setEditing(true); }}>{editLabel}</button>}
+    </div>
+    {editing ? <form onSubmit={event => { event.preventDefault(); if (!save.isPending) save.mutate(); }}>
+      <label className="pm-field"><span className="pm-label">{title}</span>
+        <textarea aria-label={title} ref={input} className="pm-input" rows={12} value={draft} disabled={save.isPending}
+          onChange={event => setDraft(event.target.value)} />
+      </label>
+      <div className="pm-header-actions">
+        <button className="button" disabled={save.isPending}>{save.isPending ? t.common.saving : t.common.save}</button>
+        <button type="button" className="button pm-button-quiet" disabled={save.isPending}
+          onClick={() => { setEditing(false); requestAnimationFrame(() => editButton.current?.focus()); }}>{t.common.cancel}</button>
+      </div>
+      {save.isError && <p className="pm-field-error" role="alert">{t.forms.saveFailed(save.error.message)}</p>}
+    </form> : project.description ? <details open={project.description.length <= 600}>
+      <summary>{de ? "Auftrag und Abnahmekriterien anzeigen" : "View brief and acceptance criteria"}</summary>
+      <p className="pm-project-brief-text">{project.description}</p>
+    </details> : <p>{de ? "Halte Ziel, Ergebnisse und Abnahmekriterien für dein Team fest." : "Record the objective, deliverables and acceptance criteria for your team."}</p>}
+    <p role="status" className="pm-project-brief-status">{save.isSuccess && !editing ? (de ? "Projektauftrag gespeichert." : "Project brief saved.") : ""}</p>
+  </section>;
+}
+
+export function CockpitPage() {
+  const { t } = useLang();
+  const { id } = useParams<{ id: string }>();
+  const projectId = Number(id);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const projects = useQuery({ queryKey: ["pm-projects"], queryFn: pmApi.listProjects });
+  const teams = useQuery({
+    queryKey: ["pm-project-teams", projectId],
+    queryFn: () => pmApi.projectTeams(projectId),
+  });
+  const tasks = useQuery({
+    queryKey: ["pm-project-tasks", projectId],
+    queryFn: () => pmApi.projectTasks(projectId),
+    // New launches/registrations start "running"; an ambient refresh notices
+    // them. Tight per-task polling lives on the drill-down page.
+    refetchInterval: 8000,
+  });
+  const assignments = useQuery({
+    queryKey: ["pm-assignments", projectId],
+    queryFn: () => pmApi.listAssignments(projectId),
+  });
+  const members = useQuery({ queryKey: ["pm-members"], queryFn: pmApi.listMembers });
+
+  const patchProject = useMutation({
+    mutationFn: (body: Partial<PmProject>) => pmApi.patchProject(projectId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+    },
+  });
+
+  const deleteProject = useMutation({
+    mutationFn: () => pmApi.deleteProject(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pm-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["pm-overview"] });
+      navigate("/pm");
+    },
+  });
+
+  const project = projects.data?.projects.find((p) => p.id === projectId);
+
+  if (projects.isPending) {
+    return (
+      <section className="pm-page">
+        <header className="page-header">
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
+        </header>
+        <SkeletonRows n={4} header />
+      </section>
+    );
+  }
+
+  if (projects.error) {
+    return (
+      <section className="pm-page">
+        <header className="page-header">
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
+        </header>
+        <ErrorState
+          title={t.cockpit.errorTitle}
+          error={projects.error}
+          onRetry={projects.refetch}
+        />
+      </section>
+    );
+  }
+
+  if (!project) {
+    return (
+      <section className="pm-page">
+        <header className="page-header">
+          <PmHeaderBar items={[{ label: t.common.projectManagement, to: "/pm" }, { label: t.cockpit.breadcrumbFallback }]} />
+          <h1 className="page-title">{t.cockpit.notFoundTitle}</h1>
+          <p className="page-subtitle">{t.cockpit.notFoundBody}</p>
+        </header>
+      </section>
+    );
+  }
+
+  const taskList = tasks.data?.tasks ?? [];
+  const running = taskList.filter((tk) => tk.status === "running").length;
+  const tokensUsed = taskList.reduce((sum, tk) => sum + tk.tokens_used, 0);
+  const teamCount = teams.data?.teams.length ?? 0;
+
+  return (
+    <section className="pm-page">
+      <header className="page-header">
+        <PmHeaderBar
+          items={[{ label: t.common.projectManagement, to: "/pm" }, { label: project.name }]}
+        />
+        <div className="page-header-row pm-header-row">
+          <div className="pm-cockpit-title">
+            <h1 className="page-title">{project.name}</h1>
+            <ProjectStatusChip status={project.status} />
+          </div>
+          <div className="pm-header-actions">
+            <InlineConfirmButton
+              className="button pm-button-quiet"
+              disabled={patchProject.isPending}
+              pending={patchProject.isPending}
+              onConfirm={() =>
+                patchProject.mutate({ status: project.status === "archived" ? "active" : "archived" })
+              }
+            >
+              {project.status === "archived" ? t.cockpit.reactivateProject : t.cockpit.archiveProject}
+            </InlineConfirmButton>
+            <InlineConfirmButton
+              className="button pm-button-danger"
+              disabled={deleteProject.isPending}
+              pending={deleteProject.isPending}
+              onConfirm={() => deleteProject.mutate()}
+            >
+              {deleteProject.isPending ? t.cockpit.deleting : t.cockpit.deleteProject}
+            </InlineConfirmButton>
+          </div>
+        </div>
+        {patchProject.isError && (
+          <p className="pm-field-error" role="alert">
+            {t.cockpit.archiveFailed((patchProject.error as Error).message)}
+          </p>
+        )}
+        {deleteProject.isError && (
+          <p className="pm-field-error" role="alert">
+            {t.cockpit.deleteFailed((deleteProject.error as Error).message)}
+          </p>
+        )}
+        <div className="pm-cockpit-meta">
+          <StatusSelect
+            project={project}
+            saving={patchProject.isPending}
+            onChange={(status) => patchProject.mutate({ status })}
+          />
+          <span aria-hidden>·</span>
+          <span className="tabular">
+            {fmtInt(teamCount)} {teamCount === 1 ? t.cockpit.teamOne : t.cockpit.teamMany}
+          </span>
+          <span aria-hidden>·</span>
+          <span className="tabular">
+            {fmtInt(taskList.length)} {taskList.length === 1 ? t.cockpit.taskOne : t.cockpit.taskMany}
+            {running > 0 && `, ${fmtInt(running)} ${t.status.task.running}`}
+          </span>
+          <span aria-hidden>·</span>
+          <InlineBudget
+            value={project.token_budget}
+            saving={patchProject.isPending}
+            onSave={(token_budget) => patchProject.mutate({ token_budget })}
+          />
+        </div>
+        {project.token_budget !== null && (
+          <div className="pm-cockpit-budgetbar">
+            <BudgetBar used={tokensUsed} budget={project.token_budget} />
+          </div>
+        )}
+      </header>
+
+      <ProjectBrief key={project.id} project={project} />
+      <RepoLinksSection projectId={projectId} />
+
+      <TeamsSection
+        projectId={projectId}
+        teams={teams}
+        assignments={assignments}
+        members={members}
+        tasks={taskList}
+      />
+
+      <TasksSection projectId={projectId} teams={teams.data?.teams ?? []} tasks={tasks} />
+    </section>
+  );
+}

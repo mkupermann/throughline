@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Concept A — "The Thread"
+  Pure-SVG animated hero. Six tool labels sit on a horizontal axis; a
+  glowing thread weaves through them, dashing forward to suggest motion
+  from session-to-session. The wordmark and tagline anchor the right.
+  Closest in spirit to the static hero already in docs/assets/hero.svg —
+  intended as the "low-risk evolution" of the current visual.
+  Loops every 6 seconds. Pure SVG <animate>, no JS, no GIF.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500"
+     role="img" aria-label="Throughline — the thread weaving through six AI tools">
+  <title>Throughline — Concept A — The Thread</title>
+  <defs>
+    <linearGradient id="bgA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#0D1117"/>
+      <stop offset="100%" stop-color="#0A0E14"/>
+    </linearGradient>
+    <linearGradient id="thrA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#58A6FF"/>
+      <stop offset="55%" stop-color="#79C0FF"/>
+      <stop offset="100%" stop-color="#7EE787"/>
+    </linearGradient>
+    <filter id="glowA" x="-10%" y="-40%" width="120%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="gridA" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1F2630"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="500" fill="url(#bgA)"/>
+  <rect width="1200" height="500" fill="url(#gridA)" opacity="0.5"/>
+
+  <!-- The thread, weaving up-and-down across six nodes -->
+  <g filter="url(#glowA)">
+    <path d="M 80 320 C 200 220, 320 420, 440 320 S 680 220, 800 320 S 1040 420, 1160 320"
+          fill="none" stroke="url(#thrA)" stroke-width="5" stroke-linecap="round"
+          stroke-dasharray="14 6">
+      <animate attributeName="stroke-dashoffset" from="120" to="0" dur="6s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <!-- Six tool-anchor dots + labels -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#8B949E">
+    <g transform="translate(80 320)">
+      <circle r="9" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Claude Code</text>
+    </g>
+    <g transform="translate(296 320)">
+      <circle r="9" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Codex</text>
+    </g>
+    <g transform="translate(512 320)">
+      <circle r="9" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Hermes</text>
+    </g>
+    <g transform="translate(728 320)">
+      <circle r="9" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Continue</text>
+    </g>
+    <g transform="translate(944 320)">
+      <circle r="9" fill="#161B22" stroke="#7EE787" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Windsurf</text>
+    </g>
+    <g transform="translate(1160 320)">
+      <circle r="9" fill="#161B22" stroke="#7EE787" stroke-width="2"/>
+      <text x="0" y="32" text-anchor="middle">Cline</text>
+    </g>
+  </g>
+
+  <!-- Wordmark + tagline -->
+  <g font-family="-apple-system, BlinkMacSystemFont, system-ui, sans-serif">
+    <text x="72" y="160" font-size="92" font-weight="700" fill="#C9D1D9" letter-spacing="-2">
+      Throughline
+    </text>
+    <text x="76" y="205" font-size="22" fill="#8B949E" letter-spacing="0.3">
+      The thread that survives every session.
+    </text>
+    <text x="76" y="232" font-size="14" font-family="ui-monospace, monospace" fill="#6E7681" letter-spacing="2">
+      ONE MEMORY · EVERY AI CLI ON YOUR LAPTOP
+    </text>
+  </g>
+
+  <!-- Footer -->
+  <g font-family="ui-monospace, monospace" font-size="12" fill="#6E7681">
+    <text x="64" y="455">Postgres · pgvector · local-first · MIT</text>
+    <text x="1136" y="455" text-anchor="end">github.com/mkupermann/throughline</text>
+  </g>
+  <rect x="64" y="470" width="1072" height="2" fill="#21262D"/>
+  <rect x="64" y="470" width="220" height="2" fill="#58A6FF"/>
+</svg>
