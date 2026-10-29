@@ -3,7 +3,8 @@
 //! Default is dry-run: the report shows what a policy would hit and touches
 //! nothing. `--apply` requires `--archive-dir`: every affected conversation is
 //! exported as Markdown plus `evidence-manifest.json` first (same shape as
-//! `export-markdown --evidence`), then rows are deleted in one transaction.
+//! `export-markdown --evidence`), the notes extracted from them go into
+//! `memory-chunks.json`, then rows are deleted in one transaction.
 //!
 //! Windows shorter than [`MIN_RETENTION_DAYS`] are refused unless
 //! `--allow-short-retention` is passed explicitly (EU AI Act Art. 19 works with
@@ -272,6 +273,22 @@ pub fn archive_targets<C: GenericClient>(
             targets.len()
         );
     }
+    // Notes extracted from these conversations are deleted with them, so
+    // their full rows go into the archive as well.
+    let notes: Vec<serde_json::Value> = client
+        .query(
+            "SELECT row_to_json(mc) FROM memory_chunks mc
+             WHERE source_type = 'conversation' AND source_id = ANY($1)
+             ORDER BY id",
+            &[&ids],
+        )
+        .context("read notes for the archive")?
+        .into_iter()
+        .map(|r| r.get(0))
+        .collect();
+    let path = archive_dir.join("memory-chunks.json");
+    std::fs::write(&path, serde_json::to_string_pretty(&notes)? + "\n")
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -749,6 +766,63 @@ mod tests {
             .get(0);
         assert_eq!(before, after, "dry-run must not change any row count");
         // Drop tx → rollback, nothing left behind.
+    }
+
+    #[test]
+    fn apply_archives_the_notes_it_deletes() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping apply_archives_the_notes_it_deletes: no PostgreSQL reachable");
+            return;
+        };
+        // Never committed. The project filter keeps every other row out of reach.
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("ret-{tag}");
+        let session = uuid::Uuid::new_v4();
+        let conv_id: i64 = tx
+            .query_one(
+                &format!(
+                    "INSERT INTO conversations (session_id, project_path, started_at, ended_at, message_count)
+                     VALUES ('{session}', '/fictional/{project}',
+                             now() - interval '300 days', now() - interval '290 days', 1)
+                     RETURNING id"
+                ),
+                &[],
+            )
+            .expect("seed conversation")
+            .get(0);
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at)
+             VALUES ($1, 'user', 'hello', now() - interval '295 days')",
+            &[&conv_id],
+        )
+        .expect("seed message");
+        let note = format!("a decision only the note knows {tag}");
+        tx.execute(
+            "INSERT INTO memory_chunks (source_type, source_id, content, category, project_name, status)
+             VALUES ('conversation', $1, $2, 'decision', $3, 'active')",
+            &[&conv_id, &note, &project],
+        )
+        .expect("seed note");
+
+        let archive = tempfile::tempdir().unwrap();
+        let report = run_retention(
+            &mut tx,
+            200,
+            Some(&project),
+            Some(archive.path()),
+            true,
+            false,
+        )
+        .expect("apply");
+        assert_eq!(report.outcome.as_ref().unwrap().memory_chunks_deleted, 1);
+
+        let archived = walkdir::WalkDir::new(archive.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains(&note)));
+        assert!(archived, "deleted note is not in the archive");
     }
 
     #[test]

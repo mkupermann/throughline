@@ -356,8 +356,9 @@ touched. Embeddings of deleted messages are cleaned up with them.
 
 `--apply` without `--archive-dir` aborts before anything runs. The archive is
 written first — one Markdown file per session plus `evidence-manifest.json`, the
-same shape as `export-markdown --evidence` — and only then does a single
-transaction delete the rows. Windows under 180 days need
+same shape as `export-markdown --evidence`, and `memory-chunks.json` with the
+full rows of the linked notes — and only then does a single transaction delete
+the rows. Windows under 180 days need
 `--allow-short-retention`; the report records when that override was used. Each
 applied run writes one summary line into `memory_reflections` (policy, counters,
 archive path) so the deletion stays reviewable.

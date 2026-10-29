@@ -1154,7 +1154,7 @@ fn list_memory_rows<C: GenericClient>(
         .get(0);
     let rows = client.query(
         &format!(
-            "SELECT mc.id, left(mc.content, 280), mc.category::text, mc.project_name, mc.created_at,
+            "SELECT mc.id, mc.content, mc.category::text, mc.project_name, mc.created_at,
                     mc.status, mc.superseded_by, mc.superseded_at,
                     (SELECT o.id FROM memory_chunks o
                       WHERE o.superseded_by = mc.id
@@ -3441,5 +3441,28 @@ mod tests {
         let id: i64 = row.get(0);
         assert!(id > 0, "inserted row must have an id");
         // Drop tx → rollback, nothing left behind.
+    }
+
+    /// The UI pre-fills "Replace" from the list. A shortened list text would
+    /// replace a long note with its first lines.
+    #[test]
+    fn memory_list_returns_the_whole_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping memory_list_returns_the_whole_note: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let long = format!("{tag} {}", "a long note line. ".repeat(40));
+        tx.execute(
+            "INSERT INTO memory_chunks (source_type, content, category, status)
+             VALUES ('manual', $1, 'decision', 'active')",
+            &[&long],
+        )
+        .expect("seed note");
+        let (_, rows) =
+            list_memory_rows(&mut tx, Some(tag), None, None, false, 10, 0, "DESC").expect("list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].content.len(), long.len());
     }
 }
