@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Stars and favorites filters work everywhere
+
+- Clicking a star, or pressing Enter or Space on it, no longer opens the row it sits in. A star that the server refuses switches back and says so.
+- In search, a memory hit is starred as a memory note. Instruction hits have no star and no longer open a missing session.
+- Overview and Timeline get the "Favorites only" filter. `/api/timeline` accepts `favorites=1`.
+- "Favorites only" also works when the browser blocks local storage.
+- Importing agent memory updates the notes of a changed file in place, so their ids, stars and a forgotten status survive. Each file is imported in one transaction.
+
 ### Model replies are read completely, and a misread reply no longer loses a window
 
 The extraction parser tried five fixed shapes in turn. Its first step took the text from the first `[` to the last `]`, so a single memory with `"tags": []` read as an empty result. With the per-window watermark that empty result was committed and the memory was lost for good. Objects separated only by newlines failed, and a reply cut off by the context limit failed on every run, so its window never advanced. The parser now scans the reply for JSON values and takes every memory object it finds: in an array, alone, separated by commas or newlines, inside a wrapper object, or before the point where a reply was cut off. An empty result counts as success only when the reply contains JSON and no `"content"` key. Otherwise the window fails and stays pending.

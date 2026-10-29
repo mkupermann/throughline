@@ -1653,6 +1653,9 @@ async fn projects_handler(
 struct TimelineParams {
     since: Option<String>,
     until: Option<String>,
+    /// Only favorited conversations (`favorites=1`).
+    #[serde(default, deserialize_with = "de_flag")]
+    favorites: bool,
 }
 
 /// Parse the optional `since`/`until` query bounds (`YYYY-MM-DD`).
@@ -1690,6 +1693,7 @@ fn timeline_day_rows<C: GenericClient>(
     client: &mut C,
     since: Option<chrono::NaiveDate>,
     until: Option<chrono::NaiveDate>,
+    favorites_only: bool,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let rows = match (since, until) {
         (None, None) => client.query(
@@ -1697,14 +1701,18 @@ fn timeline_day_rows<C: GenericClient>(
             SELECT date_trunc('day', started_at)::date AS day,
                    source_tool,
                    COUNT(*)
-            FROM conversations
+            FROM conversations c
             WHERE generated_by IS NULL
               AND started_at > now() - interval '90 days'
+              AND ($1::bool = false OR EXISTS (
+                SELECT 1 FROM favorites f
+                WHERE f.kind = 'conversation' AND f.ref = c.id::text
+              ))
             GROUP BY 1, 2
             ORDER BY 1 DESC
             LIMIT 5000
             "#,
-            &[],
+            &[&favorites_only],
         )?,
         (since, until) => {
             let since = since
@@ -1717,15 +1725,19 @@ fn timeline_day_rows<C: GenericClient>(
                 SELECT date_trunc('day', started_at)::date AS day,
                        source_tool,
                        COUNT(*)
-                FROM conversations
+                FROM conversations c
                 WHERE generated_by IS NULL
                   AND started_at >= $1::date
                   AND started_at < ($2::date + 1)
+                  AND ($3::bool = false OR EXISTS (
+                    SELECT 1 FROM favorites f
+                    WHERE f.kind = 'conversation' AND f.ref = c.id::text
+                  ))
                 GROUP BY 1, 2
                 ORDER BY 1 DESC
                 LIMIT 5000
                 "#,
-                &[&since, &until],
+                &[&since, &until, &favorites_only],
             )?
         }
     };
@@ -1756,8 +1768,9 @@ async fn timeline_handler(
                     .into_response();
             }
         };
+    let favorites = params.favorites;
     match with_db(&state, move |client| {
-        timeline_day_rows(client, since, until)
+        timeline_day_rows(client, since, until, favorites)
     })
     .await
     {
@@ -2784,10 +2797,12 @@ mod tests {
             TimelineParams {
                 since: Some("kaputt".into()),
                 until: None,
+                favorites: false,
             },
             TimelineParams {
                 since: Some("2026-02-01".into()),
                 until: Some("2026-01-01".into()),
+                favorites: false,
             },
         ] {
             let resp = rt.block_on(timeline_handler(State(state.clone()), Query(params)));
@@ -2820,6 +2835,44 @@ mod tests {
                 &[&project_path, &stamp, &tool],
             )
             .expect("seed conversation");
+    }
+
+    #[test]
+    fn timeline_day_rows_can_keep_only_favorite_conversations() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping timeline favorites test: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let day = chrono::NaiveDate::from_ymd_opt(2031, 3, 3).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id: i64 = tx
+                .query_one(
+                    "INSERT INTO conversations (session_id, project_path, started_at, source_tool) \
+                     VALUES (gen_random_uuid(), '/fictional/tl-fav', '2031-03-03 12:00:00+00', 'fav-probe') \
+                     RETURNING id",
+                    &[],
+                )
+                .expect("seed conversation")
+                .get(0);
+            ids.push(id);
+        }
+        tx.execute(
+            "INSERT INTO favorites (kind, ref) VALUES ('conversation', $1)",
+            &[&ids[0].to_string()],
+        )
+        .expect("favorite one");
+        let count = |rows: &[serde_json::Value]| -> i64 {
+            rows.iter()
+                .filter(|r| r["source_tool"] == "fav-probe")
+                .map(|r| r["count"].as_i64().unwrap())
+                .sum()
+        };
+        let all = timeline_day_rows(&mut tx, Some(day), Some(day), false).expect("all");
+        let favs = timeline_day_rows(&mut tx, Some(day), Some(day), true).expect("favorites");
+        assert_eq!(count(&all), 2);
+        assert_eq!(count(&favs), 1, "only the starred conversation counts");
     }
 
     #[test]
@@ -2866,6 +2919,7 @@ mod tests {
             &mut tx,
             Some(chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
             Some(chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap()),
+            false,
         )
         .expect("jan range");
         for row in &jan {
@@ -2885,7 +2939,7 @@ mod tests {
         );
 
         // No bounds: the classic rolling 90-day window.
-        let default_rows = timeline_day_rows(&mut tx, None, None).expect("default window");
+        let default_rows = timeline_day_rows(&mut tx, None, None, false).expect("default window");
         assert!(
             default_rows.iter().any(|r| r["day"] == recent_day.as_str()),
             "10-day-old conversation belongs to the 90-day window"
@@ -2921,6 +2975,7 @@ mod tests {
             &mut tx,
             Some(chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
             Some(chrono::NaiveDate::from_ymd_opt(2021, 12, 31).unwrap()),
+            false,
         )
         .expect("full window");
         let expected_days: Vec<String> = tx
