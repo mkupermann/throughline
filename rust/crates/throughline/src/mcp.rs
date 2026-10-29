@@ -1,7 +1,9 @@
 //! Minimal MCP stdio server (JSON-RPC 2.0) exposing memory tools.
 
 use crate::search;
-use crate::server::{supersede_memory, validate_supersede, SupersedeError};
+use crate::server::{
+    supersede_memory, validate_supersede, Successor, SupersedeError, SupersedeKind,
+};
 use anyhow::Result;
 use postgres::GenericClient;
 use serde_json::{json, Value};
@@ -110,7 +112,9 @@ fn tools_list() -> Value {
                     "properties": {
                         "id": { "type": "integer" },
                         "content": { "type": "string" },
-                        "category": { "type": "string" }
+                        "category": { "type": "string" },
+                        "valid_from": { "type": "string" },
+                        "kind": { "type": "string", "enum": ["update", "correction"] }
                     },
                     "required": ["id", "content"]
                 }
@@ -242,7 +246,45 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             if let Err(e) = validate_supersede(&content, category.as_deref()) {
                 return Err(json!({ "code": -32602, "message": e.to_string() }));
             }
-            match supersede_memory(client, id, &content, category.as_deref(), "mcp_write") {
+            let kind = match args.get("kind").and_then(|k| k.as_str()).map(str::trim) {
+                None | Some("") => SupersedeKind::Update,
+                Some(k) => match SupersedeKind::parse(k) {
+                    Some(k) => k,
+                    None => {
+                        return Err(json!({
+                            "code": -32602,
+                            "message": "kind must be update or correction"
+                        }))
+                    }
+                },
+            };
+            let valid_from = match args
+                .get("valid_from")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+            {
+                None | Some("") => None,
+                Some(v) => match crate::temporal::parse_instant(v) {
+                    Some(t) => Some(t),
+                    None => {
+                        return Err(json!({
+                            "code": -32602,
+                            "message": "valid_from must be an RFC 3339 timestamp or a YYYY-MM-DD date"
+                        }))
+                    }
+                },
+            };
+            let successor = Successor {
+                content: &content,
+                category: category.as_deref(),
+                source_type: "mcp_write",
+                kind,
+                valid_from,
+                confidence: 1.0,
+                tags: Vec::new(),
+                source_at: None,
+            };
+            match supersede_memory(client, id, &successor) {
                 Ok((old_id, new_id)) => Ok(text_result(format!(
                     "{{\"old_id\":{old_id},\"new_id\":{new_id}}}"
                 ))),
@@ -252,6 +294,10 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 Err(SupersedeError::AlreadySuperseded) => {
                     Err(json!({ "code": -32000, "message": "memory chunk already superseded" }))
                 }
+                Err(
+                    e @ (SupersedeError::ValidFromInFuture
+                    | SupersedeError::ValidFromBeforePredecessor),
+                ) => Err(json!({ "code": -32602, "message": e.to_string() })),
                 Err(e) => Err(json!({ "code": -32000, "message": e.to_string() })),
             }
         }
@@ -312,6 +358,11 @@ mod tests {
         assert!(props.contains_key("id"), "{props:?}");
         assert!(props.contains_key("content"), "{props:?}");
         assert!(props.contains_key("category"), "{props:?}");
+        assert_eq!(props["valid_from"]["type"], "string");
+        assert_eq!(
+            props["kind"]["enum"],
+            serde_json::json!(["update", "correction"])
+        );
     }
 
     #[test]
