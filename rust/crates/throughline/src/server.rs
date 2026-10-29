@@ -1449,6 +1449,9 @@ pub struct Successor<'a> {
     pub kind: SupersedeKind,
     /// `None`: an update starts now, a correction starts where the old note began.
     pub valid_from: Option<chrono::DateTime<chrono::Utc>>,
+    /// `valid_from` came from a plain `YYYY-MM-DD` (midnight UTC). On the day
+    /// the old note began it means the old note's start.
+    pub valid_from_is_date: bool,
     pub confidence: f64,
     pub tags: Vec<String>,
     /// `None`: now().
@@ -1491,7 +1494,13 @@ pub fn supersede_memory<C: GenericClient>(
             if v > now {
                 return Err(SupersedeError::ValidFromInFuture);
             }
-            v
+            // A plain date on the day the old note began means "from its
+            // start": the date's midnight would lie before it.
+            if new.valid_from_is_date && v < old_vf && v.date_naive() == old_vf.date_naive() {
+                old_vf
+            } else {
+                v
+            }
         }
         (None, SupersedeKind::Update) => now.max(old_vf),
         (None, SupersedeKind::Correction) => old_vf,
@@ -1634,6 +1643,10 @@ async fn memory_supersede(
             }
         },
     };
+    let valid_from_is_date = body
+        .valid_from
+        .as_deref()
+        .is_some_and(crate::temporal::is_plain_date);
     let valid_from = match body
         .valid_from
         .as_deref()
@@ -1664,6 +1677,7 @@ async fn memory_supersede(
                 source_type: "ui_pin",
                 kind,
                 valid_from,
+                valid_from_is_date,
                 confidence: 1.0,
                 tags: Vec::new(),
                 source_at: None,
@@ -3587,6 +3601,7 @@ mod tests {
             source_type: "ui_pin",
             kind: SupersedeKind::Update,
             valid_from: None,
+            valid_from_is_date: false,
             confidence: 1.0,
             tags: Vec::new(),
             source_at: None,
@@ -3694,6 +3709,35 @@ mod tests {
             .expect("count")
             .get(0);
         assert_eq!(n, 0, "nothing may be written");
+    }
+
+    #[test]
+    fn supersede_from_the_old_notes_first_day_starts_at_its_start() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_from_the_old_notes_first_day: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let today = chrono::Utc::now().date_naive();
+        let start = today.and_hms_opt(10, 0, 0).unwrap().and_utc();
+        let a = seed_valid_from(&mut tx, Some(&start.to_rfc3339()));
+        let day = today.format("%Y-%m-%d").to_string();
+        let mut s = test_successor("same-day successor");
+        s.valid_from = crate::temporal::parse_instant(&day);
+        // Control: the bare midnight lies before the old start and is refused.
+        let err = supersede_memory(&mut tx, a, &s).expect_err("midnight before the start");
+        assert!(
+            matches!(err, SupersedeError::ValidFromBeforePredecessor),
+            "{err:?}"
+        );
+        s.valid_from_is_date = crate::temporal::is_plain_date(&day);
+        let (_, b) = supersede_memory(&mut tx, a, &s).expect("a plain date on the first day");
+        assert_eq!(
+            validity(&mut tx, b).1,
+            Some(start),
+            "starts at the old start"
+        );
+        assert_eq!(validity(&mut tx, a).2, Some(start));
     }
 
     #[test]

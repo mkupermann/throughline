@@ -167,7 +167,7 @@ Replacing a note (`POST /api/memory/{id}/supersede`, or the MCP `supersede` tool
 - `kind`: `update` (the default) means the old note was right until now. It stays valid until the new one starts, and the new one starts now unless you give a date. `correction` means the old note was wrong from the beginning. Its interval is emptied, and the new note starts where the old one started.
 - `valid_from`: the start of the new note, as RFC 3339 or `YYYY-MM-DD`.
 
-A start in the future is refused with 422 `valid_from_in_future`. A start before the note being replaced is refused with 422 `valid_from_before_predecessor`. A star on the old note moves to the new one.
+A start in the future is refused with 422 `valid_from_in_future`. A start before the note being replaced is refused with 422 `valid_from_before_predecessor`. A plain date on the day the old note began counts as that note's start, so "from today" works for a note made today. A star on the old note moves to the new one.
 
 To ask what held on a given day, use `GET /api/memory?valid_at=2026-01-15`. To ask what Throughline knew on that day, use `known_at`. Both take RFC 3339 or `YYYY-MM-DD`, and either one replaces the `status` filter. A plain date means the end of that day in UTC (at most now), so a question about today includes what changed today. A note counts as valid until the earlier of `valid_to` and `expires_at`. Forgotten notes never appear in these answers. A date that does not parse gives 422 `validation_error` and names the field.
 
