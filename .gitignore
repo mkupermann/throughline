@@ -53,8 +53,8 @@ MEMORY_CONTEXT.md
 .k2a/
 
 # Frontend build tooling. The built assets in throughline/web/ ARE committed
-# (see docs/UI_REDESIGN_PLAN.md §9: `pip install throughline` must never
-# require Node), but the dependency tree and local caches are not.
+# (`pip install throughline` must never require Node), but the dependency
+# tree and local caches are not.
 web/node_modules/
 web/.vite/
 web/dist/

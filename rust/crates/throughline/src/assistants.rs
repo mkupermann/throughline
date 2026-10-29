@@ -1339,18 +1339,18 @@ mod tests {
     fn map_host_prefix_maps_host_paths_and_leaves_unknown() {
         let home = PathBuf::from("/home/throughline");
         let prefixes = vec![
-            "C:\\Users\\nicet".to_string(),
-            "/mnt/host/c/Users/nicet".to_string(),
+            "C:\\Users\\alice".to_string(),
+            "/mnt/host/c/Users/alice".to_string(),
         ];
 
         let expected = home.join("x").join("y");
 
         // Windows-style target
-        let t1 = Path::new("C:\\Users\\nicet\\x\\y");
+        let t1 = Path::new("C:\\Users\\alice\\x\\y");
         assert_eq!(map_host_prefix(t1, &prefixes, &home), expected);
 
         // Unix-style target (Docker Desktop host mapping)
-        let t2 = Path::new("/mnt/host/c/Users/nicet/x/y");
+        let t2 = Path::new("/mnt/host/c/Users/alice/x/y");
         assert_eq!(map_host_prefix(t2, &prefixes, &home), expected);
 
         // Unknown target stays unchanged

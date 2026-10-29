@@ -5,6 +5,9 @@ on:
     paths: ['docs/landing/**']
 jobs:
   deploy:
+    # Skipped until GitHub Pages is enabled for the repository and the
+    # repository variable PAGES_ENABLED is set to true.
+    if: vars.PAGES_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
