@@ -2804,6 +2804,7 @@ html {
       "mem.recorded": "recorded ",
       "mem.validSince": "valid since ",
       "mem.validUntil": "valid until ",
+      "mem.neverValid": "never valid (correction)",
       "mem.sourceAt": "source from ",
       "mem.asof": "As of",
       "mem.asof.valid": "was valid",
@@ -3448,6 +3449,7 @@ html {
       "mem.recorded": "erfasst ",
       "mem.validSince": "gilt seit ",
       "mem.validUntil": "galt bis ",
+      "mem.neverValid": "nie gültig (Korrektur)",
       "mem.sourceAt": "Quelle vom ",
       "mem.asof": "Stand am",
       "mem.asof.valid": "galt",
@@ -6559,9 +6561,13 @@ html {
           ? '<span class="chip">' + t("mem.extracted") + escapeHtml(fmtDateTime(c.created_at)) + "</span>"
           : "";
         const dayFmt = { day: "numeric", month: "numeric", year: "numeric" };
-        const validChips =
-          (c.valid_from ? '<span class="chip" data-mem-valid="from">' + t("mem.validSince") + escapeHtml(fmtDate(c.valid_from, dayFmt)) + "</span>" : "") +
-          (c.valid_to ? '<span class="chip" data-mem-valid="to">' + t("mem.validUntil") + escapeHtml(fmtDate(c.valid_to, dayFmt)) + "</span>" : "");
+        // A correction empties the old interval (valid_to = valid_from): one chip, not two equal dates.
+        const neverValid = c.valid_from && c.valid_to &&
+          new Date(c.valid_from).getTime() === new Date(c.valid_to).getTime();
+        const validChips = neverValid
+          ? '<span class="chip" data-mem-valid="never">' + escapeHtml(t("mem.neverValid")) + "</span>"
+          : (c.valid_from ? '<span class="chip" data-mem-valid="from">' + t("mem.validSince") + escapeHtml(fmtDate(c.valid_from, dayFmt)) + "</span>" : "") +
+            (c.valid_to ? '<span class="chip" data-mem-valid="to">' + t("mem.validUntil") + escapeHtml(fmtDate(c.valid_to, dayFmt)) + "</span>" : "");
         const content = c.content || "";
         const preview = escapeHtml(content.slice(0, 180));
         const full = escapeHtml(content);
