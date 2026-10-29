@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Edit assistant configuration from the UI (opt-in)
+
+The AI configuration view can edit the files it lists: instructions, skills, agents and config files. Editing is off unless the server runs with `THROUGHLINE_CONFIG_EDIT=1`. In Docker, `docker-compose.edit.yml` sets the variable and mounts the assistant folders and `~/Documents/GitHub` writable; without that file every source folder stays read-only.
+
+- The editor loads the unmasked text with a checksum (`GET /api/assistants/file?id=…&edit=1`) and saves with `PUT /api/assistants/file`. A file that changed on disk since it was opened is not overwritten (409).
+- Files that contain keys or tokens stay read-only, so their secrets never reach the browser (422).
+- Before each save the previous text is copied to `config-edits/` in the backup folder. The new text replaces the file atomically with its permissions, and a symlinked entry is written to the file it points at.
+- Only files from the inventory can be written, never a path sent by the browser.
+
 ### Stars and favorites filters work everywhere
 
 - Clicking a star, or pressing Enter or Space on it, no longer opens the row it sits in. A star that the server refuses switches back and says so.

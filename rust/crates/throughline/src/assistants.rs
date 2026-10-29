@@ -79,6 +79,8 @@ pub struct FileView {
     pub content: String,
     pub redacted: bool,
     pub truncated: bool,
+    /// Set by the server when the file may be edited in the UI.
+    pub editable: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -929,6 +931,134 @@ pub fn read_entry(entries: &[Entry], id: &str) -> Option<FileView> {
         content: redacted,
         redacted: mask_n > 0 || pii_n > 0,
         truncated,
+        editable: false,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Edit entry
+// ---------------------------------------------------------------------------
+
+/// Unmasked content of an inventory file for the editor, with its checksum.
+#[derive(Debug, serde::Serialize)]
+pub struct RawView {
+    pub id: String,
+    pub path: String,
+    pub content: String,
+    pub sha256: String,
+}
+
+/// Result of saving an edited file.
+#[derive(Debug, serde::Serialize)]
+pub struct SaveOutcome {
+    pub id: String,
+    pub path: String,
+    pub sha256: String,
+    pub backup: String,
+}
+
+/// Why a file cannot be edited or saved.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SaveError {
+    NotFound,
+    HasSecrets,
+    TooLarge,
+    Conflict,
+    Io(String),
+}
+
+/// Hex SHA-256 of a text.
+pub fn content_sha256(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The inventory entry for `id` and the file to read and write. A symlinked
+/// entry is written through to the file it points at, so the link stays.
+fn entry_file<'a>(entries: &'a [Entry], id: &str) -> Result<(&'a Entry, PathBuf), SaveError> {
+    let entry = entries
+        .iter()
+        .find(|e| e.id == id)
+        .ok_or(SaveError::NotFound)?;
+    let file = entry
+        .target
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| entry.path.clone());
+    Ok((entry, file))
+}
+
+/// Current text of a file that may be edited. A file with secrets stays
+/// read-only, so its keys never travel to the browser unmasked.
+fn editable_text(file: &Path) -> Result<String, SaveError> {
+    let text = std::fs::read_to_string(file).map_err(|e| SaveError::Io(e.to_string()))?;
+    if text.len() > MAX_CONTENT {
+        return Err(SaveError::TooLarge);
+    }
+    if mask_secrets(&text).1 > 0 {
+        return Err(SaveError::HasSecrets);
+    }
+    Ok(text)
+}
+
+/// Read an inventory file unmasked for editing, with the checksum a save
+/// must present.
+pub fn read_entry_raw(entries: &[Entry], id: &str) -> Result<RawView, SaveError> {
+    let (entry, file) = entry_file(entries, id)?;
+    let content = editable_text(&file)?;
+    Ok(RawView {
+        id: entry.id.clone(),
+        path: entry.path.to_string_lossy().to_string(),
+        sha256: content_sha256(&content),
+        content,
+    })
+}
+
+/// Save edited content over an inventory file. Refuses when the file changed
+/// since it was read (`base_sha256`), copies the current text to
+/// `backup_dir` first, and replaces the file atomically with its permissions.
+pub fn save_entry(
+    entries: &[Entry],
+    id: &str,
+    content: &str,
+    base_sha256: &str,
+    backup_dir: &Path,
+) -> Result<SaveOutcome, SaveError> {
+    let io = |e: std::io::Error| SaveError::Io(e.to_string());
+    let (entry, file) = entry_file(entries, id)?;
+    let current = editable_text(&file)?;
+    if content.len() > MAX_CONTENT {
+        return Err(SaveError::TooLarge);
+    }
+    if content_sha256(&current) != base_sha256 {
+        return Err(SaveError::Conflict);
+    }
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    std::fs::create_dir_all(backup_dir).map_err(io)?;
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S-%3f");
+    let backup = backup_dir.join(format!("{stamp}-{}-{name}", entry.id));
+    std::fs::write(&backup, &current).map_err(io)?;
+
+    let perms = std::fs::metadata(&file).map_err(io)?.permissions();
+    let tmp = file.with_file_name(format!(".{name}.throughline-edit"));
+    let replaced = std::fs::write(&tmp, content)
+        .and_then(|_| std::fs::set_permissions(&tmp, perms))
+        .and_then(|_| std::fs::rename(&tmp, &file));
+    if let Err(e) = replaced {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io(e));
+    }
+    Ok(SaveOutcome {
+        id: entry.id.clone(),
+        path: entry.path.to_string_lossy().to_string(),
+        sha256: content_sha256(content),
+        backup: backup.to_string_lossy().to_string(),
     })
 }
 
@@ -1135,6 +1265,109 @@ mod tests {
         assert!(out.contains("model = \"gpt-5\""), "{out}");
         assert!(!out.contains("sk-abc"), "{out}");
         assert_eq!(n, 3, "three replacements expected, got {n}");
+    }
+
+    // (g) editing: save keeps a backup, refuses conflicts and secret files
+    fn claude_md_entry(h: &Path, text: &str) -> (Vec<Entry>, String) {
+        std::fs::create_dir_all(h.join(".claude")).unwrap();
+        std::fs::write(h.join(".claude/CLAUDE.md"), text).unwrap();
+        let entries = inventory(None);
+        let id = entries
+            .iter()
+            .find(|e| e.path.ends_with(".claude/CLAUDE.md"))
+            .unwrap()
+            .id
+            .clone();
+        (entries, id)
+    }
+
+    #[test]
+    fn save_entry_writes_content_and_keeps_a_backup() {
+        let (tmp, guard) = setup_home();
+        let h = tmp.path().to_path_buf();
+        let (entries, id) = claude_md_entry(&h, "old rules\n");
+        let raw = read_entry_raw(&entries, &id).unwrap();
+        assert_eq!(raw.content, "old rules\n");
+        let out = save_entry(
+            &entries,
+            &id,
+            "new rules\n",
+            &raw.sha256,
+            &h.join("backups"),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(h.join(".claude/CLAUDE.md")).unwrap(),
+            "new rules\n"
+        );
+        assert_eq!(std::fs::read_to_string(&out.backup).unwrap(), "old rules\n");
+        assert_eq!(out.sha256, content_sha256("new rules\n"));
+        teardown(tmp, guard);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_entry_keeps_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let (tmp, guard) = setup_home();
+        let h = tmp.path().to_path_buf();
+        let (entries, id) = claude_md_entry(&h, "rules\n");
+        let file = h.join(".claude/CLAUDE.md");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let raw = read_entry_raw(&entries, &id).unwrap();
+        save_entry(&entries, &id, "rules v2\n", &raw.sha256, &h.join("backups")).unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+        teardown(tmp, guard);
+    }
+
+    #[test]
+    fn save_entry_refuses_a_file_changed_since_it_was_opened() {
+        let (tmp, guard) = setup_home();
+        let h = tmp.path().to_path_buf();
+        let (entries, id) = claude_md_entry(&h, "v1\n");
+        let raw = read_entry_raw(&entries, &id).unwrap();
+        std::fs::write(h.join(".claude/CLAUDE.md"), "changed elsewhere\n").unwrap();
+        let err = save_entry(&entries, &id, "mine\n", &raw.sha256, &h.join("backups")).unwrap_err();
+        assert_eq!(err, SaveError::Conflict);
+        assert_eq!(
+            std::fs::read_to_string(h.join(".claude/CLAUDE.md")).unwrap(),
+            "changed elsewhere\n"
+        );
+        teardown(tmp, guard);
+    }
+
+    #[test]
+    fn files_with_secrets_stay_read_only() {
+        let (tmp, guard) = setup_home();
+        let h = tmp.path().to_path_buf();
+        let secret = "# Rules\napi_key = \"sk-abc123def456ghi\"\n";
+        let (entries, id) = claude_md_entry(&h, secret);
+        assert_eq!(
+            read_entry_raw(&entries, &id).unwrap_err(),
+            SaveError::HasSecrets
+        );
+        let err = save_entry(
+            &entries,
+            &id,
+            "# Rules\n",
+            &content_sha256(secret),
+            &h.join("backups"),
+        )
+        .unwrap_err();
+        assert_eq!(err, SaveError::HasSecrets);
+        assert_eq!(
+            std::fs::read_to_string(h.join(".claude/CLAUDE.md")).unwrap(),
+            secret
+        );
+        teardown(tmp, guard);
+    }
+
+    #[test]
+    fn save_entry_unknown_id_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = save_entry(&[], "deadbeefdeadbeef", "x", "y", dir.path()).unwrap_err();
+        assert_eq!(err, SaveError::NotFound);
     }
 
     // (d) read_entry with unknown id

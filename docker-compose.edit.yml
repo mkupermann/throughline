@@ -1,0 +1,26 @@
+# Opt-in: lets the web UI edit assistant instructions, skills, agents and
+# config files (AI configuration -> Edit). Without this file every source
+# folder stays mounted read-only.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.edit.yml up -d
+#
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.edit.yml in .env.
+#
+# Only files listed in the AI configuration view can be written. Files that
+# contain keys or tokens stay read-only. Before each save the previous text
+# is copied to the backup volume (config-edits/), and a file changed on disk
+# since it was opened is not overwritten.
+services:
+  web:
+    environment:
+      THROUGHLINE_CONFIG_EDIT: "1"
+    volumes:
+      - ~/.claude:/home/throughline/.claude
+      - ~/.cursor:/home/throughline/.cursor
+      - ~/.zed:/home/throughline/.zed
+      - ~/.codex:/home/throughline/.codex
+      - ~/.hermes:/home/throughline/.hermes
+      - ~/.continue:/home/throughline/.continue
+      - ~/.windsurf:/home/throughline/.windsurf
+      - ~/.vibe:/home/throughline/.vibe
+      - ${THROUGHLINE_PROJECTS_DIR:-~/Documents/GitHub}:/home/throughline/Documents/GitHub

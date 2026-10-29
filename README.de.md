@@ -183,6 +183,8 @@ Jeder Assistent hält seine Regeln woanders: Claude Code in CLAUDE.md, `.claude/
 
 Die Ansicht zeigt standardmäßig den importierten Stand mit der Zeit des letzten Imports als „Stand". Jeder Import-Lauf und der Job **KI-Konfiguration importieren** unter Import und Status erneuern diesen Stand, mit maskiertem Inhalt, Hash, der Änderungszeit der Datei und Dateien, die inzwischen verschwunden sind. **Live** liest direkt von der Platte. Die Suche findet Anweisungen, Skills und Agents und öffnet den Eintrag.
 
+**Bearbeiten ist abschaltbar und standardmäßig aus.** Mit `THROUGHLINE_CONFIG_EDIT=1` (in Docker zusätzlich `docker-compose.edit.yml`, die die Assistenten-Ordner und `~/Documents/GitHub` beschreibbar einhängt) bietet die Live-Ansicht **Bearbeiten** für gelistete Dateien. Eine Datei mit Schlüsseln oder Tokens bleibt schreibgeschützt. Vor jedem Speichern wird die bisherige Fassung nach `config-edits/` im Backup-Ordner kopiert, und eine Datei, die seit dem Öffnen auf der Platte geändert wurde, wird nicht überschrieben.
+
 ![KI-Konfiguration mit dem Reiter Anweisungen eines fiktiven Assistenten](docs/media/rust/de/assistants.png)
 
 In Docker sieht der Container die Assistenten-Ordner, die `docker-compose.yml` read-only einbindet (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` und die anderen). `THROUGHLINE_ASSISTANT_HOME` lenkt die Suche auf ein anderes Home, `THROUGHLINE_SCAN_ROOTS` auf die Projektordner, und `THROUGHLINE_HOST_HOME` bildet Host-Pfade in Symlink-Zielen auf das Container-Home ab.
