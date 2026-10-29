@@ -186,8 +186,8 @@ fn ingest_agent_memory_from<C: GenericClient>(
                         &format!(
                             r#"
                         INSERT INTO memory_chunks
-                            (source_type, content, category, project_name, tags, confidence, status, source_at)
-                        VALUES ('manual', $1, $2::text::{category_type}, $3, $4::text[], 0.85, 'active', $5)
+                            (source_type, content, category, project_name, tags, confidence, status, source_at, valid_from)
+                        VALUES ('manual', $1, $2::text::{category_type}, $3, $4::text[], 0.85, 'active', $5, $5)
                         "#
                         ),
                         &[&content, &category, &project, &tags, &mtime],

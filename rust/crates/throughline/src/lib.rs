@@ -36,6 +36,7 @@ pub mod search;
 pub mod self_referential;
 pub mod server;
 pub mod stale_digest;
+pub mod temporal;
 pub mod types;
 pub mod writer;
 

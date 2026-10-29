@@ -177,6 +177,52 @@ BEGIN
 END $$;
 "#;
 
+/// Valid time of memory notes: `valid_from` / `valid_to` (half-open interval).
+/// The backfill lives in its own constant so a test can run it alone.
+macro_rules! valid_time_columns {
+    () => {
+        r#"
+ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS valid_from TIMESTAMPTZ;
+ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS valid_to TIMESTAMPTZ;
+ALTER TABLE memory_chunks ALTER COLUMN valid_from SET DEFAULT now();
+"#
+    };
+}
+
+/// Fills `valid_from` and closes the interval of superseded and merged notes.
+/// UPDATEs only and repeatable: a second run changes nothing.
+macro_rules! valid_time_backfill {
+    () => {
+        r#"
+UPDATE memory_chunks SET valid_from = COALESCE(source_at, created_at, now()) WHERE valid_from IS NULL;
+UPDATE memory_chunks o
+   SET valid_to = GREATEST(o.valid_from, COALESCE(
+         (SELECT n.valid_from FROM memory_chunks n WHERE n.id = o.superseded_by),
+         o.superseded_at, o.valid_from))
+ WHERE o.status IN ('superseded', 'merged') AND o.valid_to IS NULL;
+"#
+    };
+}
+pub const VALID_TIME_BACKFILL: &str = valid_time_backfill!();
+
+/// Indexes reuse the names of older databases so nothing is created twice.
+macro_rules! valid_time_indexes {
+    () => {
+        r#"
+CREATE INDEX IF NOT EXISTS idx_chunks_status ON memory_chunks (status);
+CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_chunks (project_name);
+CREATE INDEX IF NOT EXISTS idx_memory_valid_from ON memory_chunks (valid_from);
+"#
+    };
+}
+
+/// Migration 012: columns, then the backfill, then the indexes.
+const MEMORY_VALID_TIME: &str = concat!(
+    valid_time_columns!(),
+    valid_time_backfill!(),
+    valid_time_indexes!()
+);
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 /// Re-drop the legacy uuid-only index for DBs that already recorded 002
@@ -289,6 +335,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("009_favorites.sql", FAVORITES),
     ("010_memory_extracted_until.sql", MEMORY_EXTRACTED_UNTIL),
     ("011_memory_source_ui_pin.sql", MEMORY_SOURCE_UI_PIN),
+    ("012_memory_valid_time.sql", MEMORY_VALID_TIME),
 ];
 
 /// `migration_name` matches the Python package's `applied_migrations` table
@@ -346,4 +393,141 @@ pub fn status(client: &mut Client) -> Result<Vec<(String, bool)>> {
         out.push((name.to_string(), already > 0));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Option<Client> {
+        use postgres::NoTls;
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(NoTls).ok()
+    }
+
+    #[test]
+    fn valid_time_backfill_closes_chains() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping valid_time_backfill_closes_chains: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let category_type = crate::extract_memory::category_column_type(&mut tx).expect("type");
+        let tag = uuid::Uuid::new_v4().to_string();
+        let ts = |s: &str| -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::parse_from_rfc3339(s).unwrap().into()
+        };
+        // Insert a row with valid_from = NULL so the backfill has work to do.
+        let mut insert = |name: &str,
+                          status: &str,
+                          source_at: &str,
+                          superseded_by: Option<i64>,
+                          superseded_at: Option<&str>,
+                          valid_from: Option<&str>|
+         -> i64 {
+            tx.query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, confidence, \
+                         status, source_at, superseded_by, superseded_at, valid_from) \
+                     VALUES ('manual', $1, 'insight'::text::{category_type}, 0.5::float8, $2, $3, \
+                         $4, $5, $6) RETURNING id"
+                ),
+                &[
+                    &format!("{name} {tag}"),
+                    &status,
+                    &ts(source_at),
+                    &superseded_by,
+                    &superseded_at.map(ts),
+                    &valid_from.map(ts),
+                ],
+            )
+            .expect("insert chunk")
+            .get(0)
+        };
+        let d = insert("D", "active", "2026-01-01T00:00:00Z", None, None, None);
+        let b = insert(
+            "B",
+            "active",
+            "2026-03-01T00:00:00Z",
+            None,
+            None,
+            Some("2026-03-01T00:00:00Z"),
+        );
+        let a = insert(
+            "A",
+            "superseded",
+            "2026-01-01T00:00:00Z",
+            Some(b),
+            None,
+            None,
+        );
+        let c = insert("C", "merged", "2026-02-01T00:00:00Z", Some(d), None, None);
+        let e = insert(
+            "E",
+            "superseded",
+            "2026-02-01T00:00:00Z",
+            None,
+            Some("2026-05-01T00:00:00Z"),
+            None,
+        );
+
+        // Compare as instants, independent of the session time zone.
+        let instant = |tx: &mut postgres::Transaction, id: i64| -> (i64, Option<i64>) {
+            let row = tx
+                .query_one(
+                    "SELECT extract(epoch FROM valid_from)::int8, \
+                            extract(epoch FROM valid_to)::int8 FROM memory_chunks WHERE id = $1",
+                    &[&id],
+                )
+                .expect("read chunk");
+            (row.get(0), row.get(1))
+        };
+
+        tx.batch_execute(VALID_TIME_BACKFILL).expect("backfill");
+        let first: Vec<_> = [a, b, c, d, e]
+            .iter()
+            .map(|i| instant(&mut tx, *i))
+            .collect();
+        let at = |s: &str| ts(s).timestamp();
+        assert_eq!(
+            first[0],
+            (at("2026-01-01T00:00:00Z"), Some(at("2026-03-01T00:00:00Z")))
+        );
+        assert_eq!(first[1], (at("2026-03-01T00:00:00Z"), None));
+        // merged into an older note: empty interval
+        assert_eq!(
+            first[2],
+            (at("2026-02-01T00:00:00Z"), Some(at("2026-02-01T00:00:00Z")))
+        );
+        assert_eq!(first[3], (at("2026-01-01T00:00:00Z"), None));
+        assert_eq!(
+            first[4],
+            (at("2026-02-01T00:00:00Z"), Some(at("2026-05-01T00:00:00Z")))
+        );
+
+        // Second run changes nothing.
+        tx.batch_execute(VALID_TIME_BACKFILL)
+            .expect("second backfill");
+        let second: Vec<_> = [a, b, c, d, e]
+            .iter()
+            .map(|i| instant(&mut tx, *i))
+            .collect();
+        assert_eq!(first, second);
+    }
 }
