@@ -21,6 +21,19 @@ pub fn parse_instant(s: &str) -> Option<DateTime<Utc>> {
     Some(midnight)
 }
 
+/// Parse the reference date of an as-of question (`valid_at`, `known_at`).
+/// RFC 3339 passes through unchanged. A plain `YYYY-MM-DD` means the end of
+/// that day in UTC, capped at now, so "as of today" includes today's changes.
+pub fn parse_as_of_instant(s: &str) -> Option<DateTime<Utc>> {
+    let s = s.trim();
+    if let Ok(t) = DateTime::parse_from_rfc3339(s) {
+        return Some(t.with_timezone(&Utc));
+    }
+    let date = NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()?;
+    let end = date.succ_opt()?.and_hms_opt(0, 0, 0)?.and_utc() - Duration::microseconds(1);
+    Some(end.min(Utc::now()))
+}
+
 /// SQL predicate (table alias `mc`) for "what was valid on `valid_at`, as known
 /// on `known_at`". The arguments are placeholders such as `"$6"` and `"$7"`,
 /// bound as `timestamptz`; either may be NULL (no restriction on that axis).
@@ -58,6 +71,32 @@ mod tests {
         assert!(parse_instant("2026-03-01T10:00:00+01:00").is_some());
         assert!(parse_instant("gestern").is_none());
         assert!(parse_instant("2026-02-30").is_none());
+    }
+
+    #[test]
+    fn as_of_plain_date_is_the_end_of_that_day() {
+        assert_eq!(
+            parse_as_of_instant("2026-03-01").unwrap().to_rfc3339(),
+            "2026-03-01T23:59:59.999999+00:00"
+        );
+        assert_eq!(
+            parse_as_of_instant("2026-03-01T10:00:00+01:00")
+                .unwrap()
+                .to_rfc3339(),
+            "2026-03-01T09:00:00+00:00",
+            "RFC 3339 passes through unchanged"
+        );
+        assert!(parse_as_of_instant("gestern").is_none());
+        assert!(parse_as_of_instant("2026-02-30").is_none());
+        let now = chrono::Utc::now();
+        let today = parse_as_of_instant(&now.format("%Y-%m-%d").to_string()).unwrap();
+        assert!(today >= now, "today includes the time up to now");
+        assert!(today <= chrono::Utc::now(), "capped at now");
+        // supersede keeps the start of the day
+        assert_eq!(
+            parse_instant("2026-03-01").unwrap().to_rfc3339(),
+            "2026-03-01T00:00:00+00:00"
+        );
     }
 
     #[test]

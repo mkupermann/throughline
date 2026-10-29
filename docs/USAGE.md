@@ -169,7 +169,7 @@ Replacing a note (`POST /api/memory/{id}/supersede`, or the MCP `supersede` tool
 
 A start in the future is refused with 422 `valid_from_in_future`. A start before the note being replaced is refused with 422 `valid_from_before_predecessor`. A star on the old note moves to the new one.
 
-To ask what held on a given day, use `GET /api/memory?valid_at=2026-01-15`. To ask what Throughline knew on that day, use `known_at`. Both take RFC 3339 or `YYYY-MM-DD`, and either one replaces the `status` filter. A note counts as valid until the earlier of `valid_to` and `expires_at`. Forgotten notes never appear in these answers. A date that does not parse gives 422 `validation_error` and names the field.
+To ask what held on a given day, use `GET /api/memory?valid_at=2026-01-15`. To ask what Throughline knew on that day, use `known_at`. Both take RFC 3339 or `YYYY-MM-DD`, and either one replaces the `status` filter. A plain date means the end of that day in UTC (at most now), so a question about today includes what changed today. A note counts as valid until the earlier of `valid_to` and `expires_at`. Forgotten notes never appear in these answers. A date that does not parse gives 422 `validation_error` and names the field.
 
 Only replacing and merging end a validity. Forgotten and stale notes keep an open `valid_to`, because nobody said the statement stopped being true. `POST /api/memory/{id}/keep` brings such a note back and clears `expires_at`. If the note has a successor, keep answers 409 `has_successor`, since reviving it would put two answers side by side.
 

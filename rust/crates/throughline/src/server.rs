@@ -1052,7 +1052,8 @@ struct MemoryParams {
 }
 
 /// Parse the `valid_at` / `known_at` query values; empty counts as absent.
-/// A date that cannot be read is a 422 naming the field.
+/// A plain date means the end of that day (UTC). A date that cannot be read
+/// is a 422 naming the field.
 #[allow(clippy::type_complexity)]
 fn parse_as_of(
     valid_at: Option<&str>,
@@ -1066,13 +1067,15 @@ fn parse_as_of(
 > {
     let one = |name: &str, v: Option<&str>| match v.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),
-        Some(s) => crate::temporal::parse_instant(s).map(Some).ok_or_else(|| {
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "validation_error",
-                format!("{name} must be YYYY-MM-DD or an RFC 3339 timestamp, got {s:?}"),
-            )
-        }),
+        Some(s) => crate::temporal::parse_as_of_instant(s)
+            .map(Some)
+            .ok_or_else(|| {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "validation_error",
+                    format!("{name} must be YYYY-MM-DD or an RFC 3339 timestamp, got {s:?}"),
+                )
+            }),
     };
     Ok((one("valid_at", valid_at)?, one("known_at", known_at)?))
 }
@@ -4113,6 +4116,33 @@ mod tests {
         assert!(!listed_ids(&mut tx, &tag, None, Some(at("2026-09-01"))).contains(&d));
         // without a reference date the list keeps its status filter: D is gone, C stays
         assert_eq!(listed_ids(&mut tx, &tag, None, None), vec![c]);
+    }
+
+    #[test]
+    fn as_of_a_plain_date_covers_the_whole_day() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping as_of_a_plain_date_covers_the_whole_day: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_dated(&mut tx, &tag, "A", "2026-01-01");
+        let b = update_to(&mut tx, a, &format!("{tag} B"), "2026-03-01");
+        let day = |s: &str| parse_as_of(Some(s), None).expect("valid_at").0;
+        assert_eq!(listed_ids(&mut tx, &tag, day("2026-02-15"), None), vec![a]);
+        assert_eq!(listed_ids(&mut tx, &tag, day("2026-03-15"), None), vec![b]);
+        // A note made now counts for today, on both axes.
+        let fresh = seed_note(&mut tx, &format!("{tag} fresh"), "decision");
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let (valid_at, known_at) = parse_as_of(Some(&today), Some(&today)).expect("today");
+        assert!(
+            listed_ids(&mut tx, &tag, valid_at, None).contains(&fresh),
+            "valid_at={today} must include a note made today"
+        );
+        assert!(
+            listed_ids(&mut tx, &tag, None, known_at).contains(&fresh),
+            "known_at={today} must include a note made today"
+        );
     }
 
     #[test]
