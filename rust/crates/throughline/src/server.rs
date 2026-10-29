@@ -1300,6 +1300,8 @@ pub enum SupersedeError {
     InvalidCategory(String),
     NotFound,
     AlreadySuperseded,
+    ValidFromInFuture,
+    ValidFromBeforePredecessor,
     Db(anyhow::Error),
 }
 
@@ -1310,6 +1312,10 @@ impl std::fmt::Display for SupersedeError {
             SupersedeError::InvalidCategory(c) => write!(f, "unknown category: {c}"),
             SupersedeError::NotFound => write!(f, "memory chunk not found"),
             SupersedeError::AlreadySuperseded => write!(f, "memory chunk already superseded"),
+            SupersedeError::ValidFromInFuture => write!(f, "valid_from lies in the future"),
+            SupersedeError::ValidFromBeforePredecessor => {
+                write!(f, "valid_from lies before the start of the replaced note")
+            }
             SupersedeError::Db(e) => write!(f, "{e}"),
         }
     }
@@ -1344,22 +1350,57 @@ pub fn validate_supersede(
     Ok(())
 }
 
-/// Replace `id` with a new active note. One transaction: insert the successor
-/// and mark the predecessor (`superseded_by`, `superseded_at`, `status`).
-/// Category defaults to the old note's category. `source_type` tags the write
-/// (`ui_pin` from the GUI, `mcp_write` from MCP).
+/// Why a note is replaced: the fact changed (`Update`) or the old note was
+/// wrong from the start (`Correction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupersedeKind {
+    Update,
+    Correction,
+}
+
+impl SupersedeKind {
+    /// `"update"` | `"correction"`; anything else is `None`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "update" => Some(Self::Update),
+            "correction" => Some(Self::Correction),
+            _ => None,
+        }
+    }
+}
+
+/// The note that replaces another one. `source_type` tags the write (`ui_pin`
+/// from the GUI, `mcp_write` from MCP, `manual` from the agent-memory import).
+pub struct Successor<'a> {
+    pub content: &'a str,
+    /// `None`: the old note's category.
+    pub category: Option<&'a str>,
+    pub source_type: &'a str,
+    pub kind: SupersedeKind,
+    /// `None`: an update starts now, a correction starts where the old note began.
+    pub valid_from: Option<chrono::DateTime<chrono::Utc>>,
+    pub confidence: f64,
+    pub tags: Vec<String>,
+    /// `None`: now().
+    pub source_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Replace `id` with a new active note. One transaction: insert the successor,
+/// mark the predecessor (`superseded_by`, `superseded_at`, `status`), close its
+/// validity interval and move a star from the old note to the new one.
+/// An update ends the old interval where the new one starts; a correction
+/// empties it, because the old note was never true.
 pub fn supersede_memory<C: GenericClient>(
     client: &mut C,
     id: i64,
-    content: &str,
-    category: Option<&str>,
-    source_type: &str,
+    new: &Successor,
 ) -> std::result::Result<(i64, i64), SupersedeError> {
-    validate_supersede(content, category)?;
-    let content = content.trim().to_string();
+    validate_supersede(new.content, new.category)?;
+    let content = new.content.trim().to_string();
     let mut tx = client.transaction()?;
     let old = tx.query_opt(
-        "SELECT category::text, project_name, status, superseded_by
+        "SELECT category::text, project_name, status, superseded_by,
+                COALESCE(valid_from, source_at, created_at)
          FROM memory_chunks WHERE id = $1 FOR UPDATE",
         &[&id],
     )?;
@@ -1370,10 +1411,26 @@ pub fn supersede_memory<C: GenericClient>(
     let old_project: Option<String> = old.get(1);
     let old_status: String = old.get(2);
     let old_superseded_by: Option<i64> = old.get(3);
-    if old_superseded_by.is_some() || old_status == "superseded" {
+    let old_vf: chrono::DateTime<chrono::Utc> = old.get(4);
+    if old_superseded_by.is_some() || old_status == "superseded" || old_status == "merged" {
         return Err(SupersedeError::AlreadySuperseded);
     }
-    let cat = category
+    let now = chrono::Utc::now();
+    let vf = match (new.valid_from, new.kind) {
+        (Some(v), _) => {
+            if v > now {
+                return Err(SupersedeError::ValidFromInFuture);
+            }
+            v
+        }
+        (None, SupersedeKind::Update) => now.max(old_vf),
+        (None, SupersedeKind::Correction) => old_vf,
+    };
+    if vf < old_vf {
+        return Err(SupersedeError::ValidFromBeforePredecessor);
+    }
+    let cat = new
+        .category
         .map(|c| c.trim().to_string())
         .unwrap_or(old_category);
     let category_type = crate::extract_memory::category_column_type(&mut tx)?;
@@ -1381,19 +1438,42 @@ pub fn supersede_memory<C: GenericClient>(
         .query_one(
             &format!(
                 r#"
-            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at)
-            VALUES ($1, $2, $3::text::{category_type}, $4, 1.0, 'active', now())
+            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at, valid_from, tags)
+            VALUES ($1, $2, $3::text::{category_type}, $4, $5::float8, 'active', COALESCE($6, now()), $7, $8::text[])
             RETURNING id
             "#
             ),
-            &[&source_type, &content, &cat, &old_project],
+            &[
+                &new.source_type,
+                &content,
+                &cat,
+                &old_project,
+                &new.confidence,
+                &new.source_at,
+                &vf,
+                &new.tags,
+            ],
         )?
         .get(0);
+    let closes_at = match new.kind {
+        SupersedeKind::Update => vf,
+        SupersedeKind::Correction => old_vf,
+    };
     tx.execute(
         "UPDATE memory_chunks
-         SET status = 'superseded', superseded_by = $2, superseded_at = now(), updated_at = now()
+         SET status = 'superseded', superseded_by = $2, superseded_at = now(), updated_at = now(),
+             valid_to = CASE WHEN $4 THEN $3 ELSE LEAST(valid_to, $3) END
          WHERE id = $1",
-        &[&id, &new_id],
+        &[
+            &id,
+            &new_id,
+            &closes_at,
+            &(new.kind == SupersedeKind::Correction),
+        ],
+    )?;
+    tx.execute(
+        "UPDATE favorites SET ref = $2::text WHERE kind = 'memory' AND ref = $1::text",
+        &[&id.to_string(), &new_id.to_string()],
     )?;
     tx.commit()?;
     Ok((id, new_id))
@@ -1420,6 +1500,16 @@ fn supersede_error_response(e: SupersedeError) -> Response {
             "already_superseded",
             "memory chunk already superseded",
         ),
+        SupersedeError::ValidFromInFuture => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "valid_from_in_future",
+            "valid_from lies in the future",
+        ),
+        SupersedeError::ValidFromBeforePredecessor => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "valid_from_before_predecessor",
+            "valid_from lies before the start of the replaced note",
+        ),
         SupersedeError::Db(err) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "query_failed",
@@ -1434,10 +1524,15 @@ struct MemorySupersede {
     content: String,
     #[serde(default)]
     category: Option<String>,
+    #[serde(default)]
+    valid_from: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
-/// `POST /api/memory/{id}/supersede` — body `{content, category?}` → `{old_id, new_id}`.
-/// 422 empty content / unknown category, 404 unknown id, 409 already superseded.
+/// `POST /api/memory/{id}/supersede` — body `{content, category?, valid_from?, kind?}`
+/// → `{old_id, new_id}`. 422 empty content / unknown category / unknown kind /
+/// unparsable or out-of-range valid_from, 404 unknown id, 409 already superseded.
 async fn memory_supersede(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1448,15 +1543,58 @@ async fn memory_supersede(
         .category
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty());
+    let kind = match body
+        .kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    {
+        None => SupersedeKind::Update,
+        Some(k) => match SupersedeKind::parse(k) {
+            Some(k) => k,
+            None => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "validation_error",
+                    "kind must be update or correction",
+                )
+            }
+        },
+    };
+    let valid_from = match body
+        .valid_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        None => None,
+        Some(v) => match crate::temporal::parse_instant(v) {
+            Some(t) => Some(t),
+            None => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "validation_error",
+                    "valid_from must be an RFC 3339 timestamp or a YYYY-MM-DD date",
+                )
+            }
+        },
+    };
     // Carry SupersedeError as Ok(payload) so with_db keeps 500 only for real
     // connection failures and the typed codes stay exact.
     let outcome = with_db(&state, move |client| {
         Ok(supersede_memory(
             client,
             id,
-            &content,
-            category.as_deref(),
-            "ui_pin",
+            &Successor {
+                content: &content,
+                category: category.as_deref(),
+                source_type: "ui_pin",
+                kind,
+                valid_from,
+                confidence: 1.0,
+                tags: Vec::new(),
+                source_at: None,
+            },
         ))
     })
     .await;
@@ -3275,6 +3413,181 @@ mod tests {
             .get(0)
     }
 
+    fn test_successor(content: &str) -> Successor<'_> {
+        Successor {
+            content,
+            category: None,
+            source_type: "ui_pin",
+            kind: SupersedeKind::Update,
+            valid_from: None,
+            confidence: 1.0,
+            tags: Vec::new(),
+            source_at: None,
+        }
+    }
+
+    fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
+        crate::temporal::parse_instant(s).expect("test instant")
+    }
+
+    type Instant = Option<chrono::DateTime<chrono::Utc>>;
+
+    /// (status, valid_from, valid_to) of one note.
+    fn validity<C: GenericClient>(c: &mut C, id: i64) -> (String, Instant, Instant) {
+        let r = c
+            .query_one(
+                "SELECT status, valid_from, valid_to FROM memory_chunks WHERE id = $1",
+                &[&id],
+            )
+            .expect("validity row");
+        (r.get(0), r.get(1), r.get(2))
+    }
+
+    fn seed_valid_from<C: GenericClient>(c: &mut C, from: Option<&str>) -> i64 {
+        let id = seed_note(c, "valid-time seed note", "decision");
+        let vf = from.map(at);
+        c.execute(
+            "UPDATE memory_chunks SET valid_from = $2, source_at = $3 WHERE id = $1",
+            &[&id, &vf, &at("2026-01-01T00:00:00Z")],
+        )
+        .expect("set valid_from");
+        id
+    }
+
+    #[test]
+    fn supersede_update_closes_the_old_note_at_the_new_start() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_update_closes: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
+        let mut s = test_successor("update successor");
+        s.valid_from = Some(at("2026-03-01T00:00:00Z"));
+        let (_, b) = supersede_memory(&mut tx, a, &s).expect("update");
+        let (st, _, to) = validity(&mut tx, a);
+        assert_eq!(st, "superseded");
+        assert_eq!(to, Some(at("2026-03-01T00:00:00Z")));
+        let (_, from, to) = validity(&mut tx, b);
+        assert_eq!(from, Some(at("2026-03-01T00:00:00Z")));
+        assert_eq!(to, None);
+    }
+
+    #[test]
+    fn supersede_correction_empties_the_old_interval() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_correction: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
+        let mut s = test_successor("correction successor");
+        s.kind = SupersedeKind::Correction;
+        let (_, b) = supersede_memory(&mut tx, a, &s).expect("correction");
+        let (_, from, _) = validity(&mut tx, b);
+        assert_eq!(from, Some(at("2026-01-01T00:00:00Z")));
+        let (_, a_from, a_to) = validity(&mut tx, a);
+        assert_eq!(a_to, a_from, "old interval must be empty");
+    }
+
+    #[test]
+    fn supersede_rejects_future_and_too_early_starts() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_rejects: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
+        let mut s = test_successor("rejected successor");
+        s.valid_from = Some(chrono::Utc::now() + chrono::Duration::days(1));
+        let err = supersede_memory(&mut tx, a, &s).expect_err("future");
+        assert!(matches!(err, SupersedeError::ValidFromInFuture), "{err:?}");
+        assert_eq!(
+            supersede_error_response(err).status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        s.valid_from = Some(at("2025-12-31T00:00:00Z"));
+        let err = supersede_memory(&mut tx, a, &s).expect_err("too early");
+        assert!(
+            matches!(err, SupersedeError::ValidFromBeforePredecessor),
+            "{err:?}"
+        );
+        assert_eq!(
+            supersede_error_response(err).status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let (st, _, to) = validity(&mut tx, a);
+        assert_eq!(st, "active");
+        assert_eq!(to, None);
+        let n: i64 = tx
+            .query_one(
+                "SELECT COUNT(*)::bigint FROM memory_chunks WHERE content = 'rejected successor'",
+                &[],
+            )
+            .expect("count")
+            .get(0);
+        assert_eq!(n, 0, "nothing may be written");
+    }
+
+    #[test]
+    fn supersede_note_without_valid_from() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_note_without_valid_from: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, None);
+        let (_, b) = supersede_memory(&mut tx, a, &test_successor("successor of undated"))
+            .expect("update of a note without valid_from");
+        let (_, _, to) = validity(&mut tx, a);
+        assert!(to.is_some(), "old note must be closed");
+        assert!(validity(&mut tx, b).1.is_some());
+    }
+
+    #[test]
+    fn supersede_moves_the_star() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_moves_the_star: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
+        tx.execute(
+            "INSERT INTO favorites (kind, ref) VALUES ('memory', $1)",
+            &[&a.to_string()],
+        )
+        .expect("star");
+        let (_, b) =
+            supersede_memory(&mut tx, a, &test_successor("starred successor")).expect("supersede");
+        let n = |tx: &mut postgres::Transaction<'_>, id: i64| -> i64 {
+            tx.query_one(
+                "SELECT COUNT(*)::bigint FROM favorites WHERE kind = 'memory' AND ref = $1",
+                &[&id.to_string()],
+            )
+            .expect("count")
+            .get(0)
+        };
+        assert_eq!(n(&mut tx, b), 1);
+        assert_eq!(n(&mut tx, a), 0);
+    }
+
+    #[test]
+    fn supersede_treats_merged_as_superseded() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_treats_merged: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'merged' WHERE id = $1",
+            &[&a],
+        )
+        .expect("merge");
+        let err = supersede_memory(&mut tx, a, &test_successor("after merge")).expect_err("merged");
+        assert!(matches!(err, SupersedeError::AlreadySuperseded), "{err:?}");
+    }
+
     #[test]
     fn supersede_happy_path_updates_both_rows_in_one_transaction() {
         let Some(mut client) = test_db() else {
@@ -3290,9 +3603,7 @@ mod tests {
         let (got_old, new_id) = supersede_memory(
             &mut tx,
             old_id,
-            "m10 supersede new: hybrid retrieval is the baseline now.",
-            None,
-            "ui_pin",
+            &test_successor("m10 supersede new: hybrid retrieval is the baseline now."),
         )
         .expect("supersede happy path");
         assert_eq!(got_old, old_id, "old_id must round-trip");
@@ -3360,9 +3671,7 @@ mod tests {
         let err = supersede_memory(
             &mut client,
             999_999_999,
-            "orphan replacement",
-            None,
-            "ui_pin",
+            &test_successor("orphan replacement"),
         )
         .expect_err("unknown id must fail");
         assert!(matches!(err, SupersedeError::NotFound), "{err:?}");
@@ -3387,9 +3696,7 @@ mod tests {
         let (got_old, _new_id) = supersede_memory(
             &mut tx,
             old_id,
-            "m10 double-supersede: second version of the fact.",
-            None,
-            "ui_pin",
+            &test_successor("m10 double-supersede: second version of the fact."),
         )
         .expect("first supersede");
         assert_eq!(got_old, old_id);
@@ -3397,9 +3704,7 @@ mod tests {
         let err = supersede_memory(
             &mut tx,
             old_id,
-            "m10 double-supersede: third version of the fact.",
-            None,
-            "ui_pin",
+            &test_successor("m10 double-supersede: third version of the fact."),
         )
         .expect_err("second supersede must be rejected");
         assert!(matches!(err, SupersedeError::AlreadySuperseded), "{err:?}");
