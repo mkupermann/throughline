@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Memory notes know when they were valid
 
-Every note now carries the time it was true, apart from the time it was recorded. Migration 012 adds `valid_from` and `valid_to` to `memory_chunks`. Existing notes start at their source date, or at their creation date, and superseded or merged notes end where their successor begins.
+Every note now carries the time it was true, apart from the time it was recorded. Migration 012 adds `valid_from` and `valid_to` to `memory_chunks`. Notes from before the migration start at their source date, or at their creation date. New notes start when they were pinned or written, at the source date for extracted notes, and at the file's modification time for agent memory. Superseded or merged notes end where their successor begins.
 
 - **Update or correction.** Replacing a note takes `kind`: `update` (the default) keeps the old note valid until the new one starts, `correction` empties the old interval because the old text was never right. An optional `valid_from` (RFC 3339 or `YYYY-MM-DD`) sets the start. A date in the future, or one before the note it replaces, is refused with 422 (`valid_from_in_future`, `valid_from_before_predecessor`). A star moves to the successor.
 - **Questions about a date.** `GET /api/memory` accepts `valid_at` ("was valid on") and `known_at` ("was known on"). Either one replaces the status filter, and forgotten notes never appear. A date that does not parse gives 422.
