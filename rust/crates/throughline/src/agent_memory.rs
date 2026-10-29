@@ -139,22 +139,30 @@ fn ingest_agent_memory_from<C: GenericClient>(
             .map(chrono::DateTime::<chrono::Utc>::from)
             .unwrap_or_else(|_| chrono::Utc::now());
 
-        // Match each section to the note it produced last time (by heading,
-        // oldest first) and update that row, so its id, status and stars
-        // survive. New sections are inserted, vanished ones deleted, all in
-        // one transaction per file.
+        // Match each section to the live note it produced last time (by
+        // heading, oldest first). An unchanged section is left alone, a
+        // changed one is replaced by a successor (the old note stays as
+        // history, its star moves along), a new one is inserted and a vanished
+        // one is closed, never deleted. All in one transaction per file.
         let mut tx = client.transaction().context("begin agent memory file")?;
         let category_type =
             crate::extract_memory::category_column_type(&mut tx).context("category_column_type")?;
-        let mut previous: Vec<(i64, String)> = tx
+        // A file's mtime can lie in the future (clock skew, copied files).
+        let now = chrono::Utc::now();
+        let mtime_clamped = mtime.min(now);
+        let mut previous: Vec<(i64, String, String, chrono::DateTime<chrono::Utc>)> = tx
             .query(
-                "SELECT id, content FROM memory_chunks \
-                 WHERE source_type = 'manual' AND $1 = ANY(tags) ORDER BY id",
+                "SELECT id, content, category::text, COALESCE(valid_from, source_at, created_at) \
+                 FROM memory_chunks \
+                 WHERE source_type = 'manual' AND $1 = ANY(tags) \
+                   AND superseded_by IS NULL \
+                   AND COALESCE(status, 'active') NOT IN ('superseded', 'merged') \
+                 ORDER BY id",
                 &[&file_tag],
             )
             .context("load agent memory notes")?
             .iter()
-            .map(|r| (r.get(0), r.get(1)))
+            .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)))
             .collect();
         for (heading, body) in sections(&text) {
             if body.len() < 40 {
@@ -164,22 +172,29 @@ fn ingest_agent_memory_from<C: GenericClient>(
             let prefix = format!("[{file_stem}] {heading}\n");
             let content = format!("{prefix}{body}");
             let tags = vec![TAG.to_string(), file_stem.clone(), file_tag.clone()];
-            match previous.iter().position(|(_, c)| c.starts_with(&prefix)) {
+            match previous
+                .iter()
+                .position(|(_, c, _, _)| c.starts_with(&prefix))
+            {
                 Some(i) => {
-                    let (id, _) = previous.remove(i);
-                    tx.execute(
-                        &format!(
-                            r#"
-                        UPDATE memory_chunks
-                           SET content = $2, category = $3::text::{category_type},
-                               project_name = $4, tags = $5::text[], source_at = $6,
-                               updated_at = now()
-                         WHERE id = $1
-                        "#
-                        ),
-                        &[&id, &content, &category, &project, &tags, &mtime],
-                    )
-                    .context("update agent memory chunk")?;
+                    let (id, old_content, old_category, old_from) = previous.remove(i);
+                    if old_content == content && old_category == category {
+                        upserted += 1;
+                        continue;
+                    }
+                    let successor = crate::server::Successor {
+                        content: &content,
+                        category: Some(category),
+                        source_type: "manual",
+                        kind: crate::server::SupersedeKind::Update,
+                        valid_from: Some(mtime.max(old_from).min(now)),
+                        confidence: 0.85,
+                        tags,
+                        source_at: Some(mtime),
+                    };
+                    crate::server::supersede_memory(&mut tx, id, &successor)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .context("supersede agent memory chunk")?;
                 }
                 None => {
                     tx.execute(
@@ -187,19 +202,27 @@ fn ingest_agent_memory_from<C: GenericClient>(
                             r#"
                         INSERT INTO memory_chunks
                             (source_type, content, category, project_name, tags, confidence, status, source_at, valid_from)
-                        VALUES ('manual', $1, $2::text::{category_type}, $3, $4::text[], 0.85, 'active', $5, $5)
+                        VALUES ('manual', $1, $2::text::{category_type}, $3, $4::text[], 0.85, 'active', $5, $6)
                         "#
                         ),
-                        &[&content, &category, &project, &tags, &mtime],
+                        &[&content, &category, &project, &tags, &mtime, &mtime_clamped],
                     )
                     .context("insert agent memory chunk")?;
                 }
             }
             upserted += 1;
         }
-        for (id, _) in previous {
-            tx.execute("DELETE FROM memory_chunks WHERE id = $1", &[&id])
-                .context("drop vanished agent memory chunk")?;
+        // Sections that left the file: close their validity, keep the rows.
+        let vanished: Vec<i64> = previous.iter().map(|(id, ..)| *id).collect();
+        if !vanished.is_empty() {
+            tx.execute(
+                "UPDATE memory_chunks \
+                    SET status = 'superseded', superseded_at = now(), updated_at = now(), \
+                        valid_to = GREATEST(COALESCE(valid_from, source_at, created_at), $2) \
+                  WHERE id = ANY($1)",
+                &[&vanished, &mtime_clamped],
+            )
+            .context("close vanished agent memory chunks")?;
         }
         tx.commit().context("commit agent memory file")?;
     }
@@ -318,9 +341,11 @@ mod tests {
     }
 
     #[test]
-    fn re_import_keeps_note_ids_and_status() {
+    fn re_import_supersedes_changed_sections_and_keeps_history() {
         let Some(mut client) = test_db() else {
-            eprintln!("skipping re_import_keeps_note_ids_and_status: no PostgreSQL reachable");
+            eprintln!(
+                "skipping re_import_supersedes_changed_sections_and_keeps_history: no PostgreSQL reachable"
+            );
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
@@ -333,32 +358,101 @@ mod tests {
         ingest_agent_memory_from(&mut tx, dir.path()).expect("first import");
         let first = notes(&mut tx, &file);
         assert_eq!(first.len(), 2);
+        let (decision_id, pattern_id) = (first[0].0, first[1].0);
         tx.execute(
-            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
-            &[&first[1].0],
+            "INSERT INTO favorites (kind, ref) VALUES ('memory', $1::bigint::text)",
+            &[&decision_id],
         )
         .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&pattern_id],
+        )
+        .unwrap();
+        let pattern_updated: chrono::DateTime<chrono::Utc> = tx
+            .query_one(
+                "SELECT updated_at FROM memory_chunks WHERE id = $1",
+                &[&pattern_id],
+            )
+            .unwrap()
+            .get(0);
 
         // The decision gets a new body; the pattern stays.
         let decision2 = "# Decision\nUse PostgreSQL 16 with pgvector for every project store.\n";
         std::fs::write(&file, format!("{decision2}{pattern}")).unwrap();
         ingest_agent_memory_from(&mut tx, dir.path()).expect("second import");
         let second = notes(&mut tx, &file);
-        let ids = |v: &[(i64, String, String)]| v.iter().map(|n| n.0).collect::<Vec<_>>();
+        assert_eq!(second.len(), 3, "the changed section adds a row");
+        let pattern_row = second.iter().find(|n| n.0 == pattern_id).unwrap();
         assert_eq!(
-            ids(&second),
-            ids(&first),
-            "notes keep their ids, so stars stay attached"
+            pattern_row.1, "forgotten",
+            "an unchanged note stays untouched"
         );
-        assert!(
-            second[0].2.contains("PostgreSQL 16"),
-            "the changed section is updated"
+        let pattern_updated2: chrono::DateTime<chrono::Utc> = tx
+            .query_one(
+                "SELECT updated_at FROM memory_chunks WHERE id = $1",
+                &[&pattern_id],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(
+            pattern_updated2, pattern_updated,
+            "no UPDATE for unchanged rows"
         );
-        assert_eq!(second[1].1, "forgotten", "a forgotten note stays forgotten");
+        let old = tx
+            .query_one(
+                "SELECT status, superseded_by, valid_to FROM memory_chunks WHERE id = $1",
+                &[&decision_id],
+            )
+            .unwrap();
+        let old_status: String = old.get(0);
+        let successor_id: Option<i64> = old.get(1);
+        let old_valid_to: Option<chrono::DateTime<chrono::Utc>> = old.get(2);
+        assert_eq!(old_status, "superseded");
+        let successor_id = successor_id.expect("old decision points at its successor");
+        let new = tx
+            .query_one(
+                "SELECT content, status, valid_from, tags FROM memory_chunks WHERE id = $1",
+                &[&successor_id],
+            )
+            .unwrap();
+        let new_content: String = new.get(0);
+        let new_status: String = new.get(1);
+        let new_valid_from: chrono::DateTime<chrono::Utc> = new.get(2);
+        let new_tags: Vec<String> = new.get(3);
+        assert!(new_content.contains("PostgreSQL 16"));
+        assert_eq!(new_status, "active");
+        assert_eq!(
+            old_valid_to,
+            Some(new_valid_from),
+            "old interval ends where the new starts"
+        );
+        assert!(new_tags.contains(&format!("file:{}", file.display())));
+        let star: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM favorites WHERE kind = 'memory' AND ref = $1::bigint::text",
+                &[&successor_id],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(star, 1, "the star moved to the successor");
 
-        // A section removed from the file goes away.
+        // A section removed from the file stays as history.
         std::fs::write(&file, decision2).unwrap();
         ingest_agent_memory_from(&mut tx, dir.path()).expect("third import");
-        assert_eq!(ids(&notes(&mut tx, &file)), vec![first[0].0]);
+        let third = notes(&mut tx, &file);
+        assert!(third.len() >= second.len(), "no row is deleted");
+        let gone = tx
+            .query_one(
+                "SELECT status, valid_to, superseded_by FROM memory_chunks WHERE id = $1",
+                &[&pattern_id],
+            )
+            .unwrap();
+        let gone_status: String = gone.get(0);
+        let gone_valid_to: Option<chrono::DateTime<chrono::Utc>> = gone.get(1);
+        let gone_by: Option<i64> = gone.get(2);
+        assert_eq!(gone_status, "superseded");
+        assert!(gone_valid_to.is_some());
+        assert_eq!(gone_by, None);
     }
 }
