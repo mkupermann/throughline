@@ -123,6 +123,16 @@ fn tools_list() -> Value {
     })
 }
 
+/// An optional string argument, trimmed. Absent or null is `None`; any other
+/// non-string is -32602 with `message`, never a silent default.
+fn optional_str<'a>(args: &'a Value, name: &str, message: &str) -> Result<Option<&'a str>, Value> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.trim())),
+        Some(_) => Err(json!({ "code": -32602, "message": message })),
+    }
+}
+
 fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, Value> {
     let name = params
         .get("name")
@@ -246,36 +256,22 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             if let Err(e) = validate_supersede(&content, category.as_deref()) {
                 return Err(json!({ "code": -32602, "message": e.to_string() }));
             }
-            let kind = match args.get("kind").and_then(|k| k.as_str()).map(str::trim) {
+            let kind_error = "kind must be update or correction";
+            let kind = match optional_str(&args, "kind", kind_error)? {
                 None | Some("") => SupersedeKind::Update,
                 Some(k) => match SupersedeKind::parse(k) {
                     Some(k) => k,
-                    None => {
-                        return Err(json!({
-                            "code": -32602,
-                            "message": "kind must be update or correction"
-                        }))
-                    }
+                    None => return Err(json!({ "code": -32602, "message": kind_error })),
                 },
             };
-            let valid_from_is_date = args
-                .get("valid_from")
-                .and_then(|v| v.as_str())
-                .is_some_and(crate::temporal::is_plain_date);
-            let valid_from = match args
-                .get("valid_from")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-            {
+            let from_error = "valid_from must be an RFC 3339 timestamp or a YYYY-MM-DD date";
+            let valid_from_raw = optional_str(&args, "valid_from", from_error)?;
+            let valid_from_is_date = valid_from_raw.is_some_and(crate::temporal::is_plain_date);
+            let valid_from = match valid_from_raw {
                 None | Some("") => None,
                 Some(v) => match crate::temporal::parse_instant(v) {
                     Some(t) => Some(t),
-                    None => {
-                        return Err(json!({
-                            "code": -32602,
-                            "message": "valid_from must be an RFC 3339 timestamp or a YYYY-MM-DD date"
-                        }))
-                    }
+                    None => return Err(json!({ "code": -32602, "message": from_error })),
                 },
             };
             let successor = Successor {
@@ -445,6 +441,48 @@ mod tests {
             .expect("successor")
             .get(0);
         assert_eq!(from, start, "the successor starts at the old note's start");
+    }
+
+    #[test]
+    fn supersede_rejects_non_string_kind_and_valid_from() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_rejects_non_string_kind: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let old = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        for (field, value) in [
+            ("kind", json!(5)),
+            ("kind", json!(["correction"])),
+            ("valid_from", json!(20260301)),
+            ("valid_from", json!({ "date": "2026-03-01" })),
+        ] {
+            let mut args = json!({ "id": old, "content": "mcp typed successor" });
+            args[field] = value.clone();
+            let err = call_tool(&mut tx, &supersede_call(args))
+                .expect_err("a non-string must not fall back to the default");
+            assert_eq!(err["code"], -32602, "{field}={value}: {err}");
+            assert!(
+                err["message"].as_str().unwrap_or_default().contains(field),
+                "{field}={value}: {err}"
+            );
+        }
+        let by: Option<i64> = tx
+            .query_one(
+                "SELECT superseded_by FROM memory_chunks WHERE id = $1",
+                &[&old],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(by, None, "nothing was replaced");
+        // null counts as absent
+        call_tool(
+            &mut tx,
+            &supersede_call(json!({
+                "id": old, "content": "mcp typed successor", "kind": null, "valid_from": null,
+            })),
+        )
+        .expect("null means the default");
     }
 
     #[test]
