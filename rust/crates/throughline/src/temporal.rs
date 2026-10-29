@@ -39,6 +39,12 @@ pub fn parse_as_of_instant(s: &str) -> Option<DateTime<Utc>> {
     Some(end.min(Utc::now()))
 }
 
+/// `$` followed by one or more ASCII digits.
+fn is_placeholder(p: &str) -> bool {
+    p.strip_prefix('$')
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// SQL predicate (table alias `mc`) for "what was valid on `valid_at`, as known
 /// on `known_at`". The arguments are placeholders such as `"$6"` and `"$7"`,
 /// bound as `timestamptz`; either may be NULL (no restriction on that axis).
@@ -49,6 +55,11 @@ pub fn parse_as_of_instant(s: &str) -> Option<DateTime<Utc>> {
 /// counts only once the replacement was known: before the supersession the old
 /// note was still open-ended.
 pub fn as_of_predicate(valid_at: &str, known_at: &str) -> String {
+    // The arguments are spliced into SQL: only `$n` placeholders belong here.
+    debug_assert!(
+        is_placeholder(valid_at) && is_placeholder(known_at),
+        "as_of_predicate takes $n placeholders, got {valid_at:?}, {known_at:?}"
+    );
     let (v, k) = (valid_at, known_at);
     format!(
         "COALESCE(mc.status, 'active') <> 'forgotten'
@@ -102,6 +113,23 @@ mod tests {
             parse_instant("2026-03-01").unwrap().to_rfc3339(),
             "2026-03-01T00:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn placeholders_are_dollar_and_digits() {
+        assert!(as_of_predicate("$6", "$12").contains("$12"));
+        assert!(is_placeholder("$1") && is_placeholder("$12"));
+        for bad in ["now()", "$", "$2a", "1", "", " $1", "$1 "] {
+            assert!(!is_placeholder(bad), "{bad:?}");
+        }
+    }
+
+    /// The one expected panic of the suite: the assertion is wired in.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "as_of_predicate takes $n placeholders")]
+    fn as_of_predicate_refuses_anything_but_placeholders() {
+        as_of_predicate("now()", "$2");
     }
 
     #[test]
