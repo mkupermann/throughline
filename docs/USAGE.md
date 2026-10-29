@@ -173,7 +173,7 @@ To ask what held on a given day, use `GET /api/memory?valid_at=2026-01-15`. To a
 
 Only replacing and merging end a validity. Forgotten and stale notes keep an open `valid_to`, because nobody said the statement stopped being true. `POST /api/memory/{id}/keep` brings such a note back and clears `expires_at`. If the note has a successor, keep answers 409 `has_successor`, since reviving it would put two answers side by side.
 
-The agent-memory import follows the same rules. A changed section becomes a successor through update, starting at the file's modification time (never later than now). A section that vanished from the file is marked superseded with an end date. Nothing is deleted.
+The agent-memory import follows the same rules. A changed section becomes a successor through update, starting at the file's modification time (never later than now). A section that vanished from the file is marked superseded with an end date. Nothing is deleted. If you replaced an imported note in the UI or over MCP, the import keeps your version as long as the file section stays as it was. Once the section changes, its new text replaces your version, because the newer change wins.
 
 Replacing a forgotten note keeps it forgotten. It points at its successor and gets an end date, but it shows up neither in History nor in an answer about a date. The import leaves a forgotten note forgotten when its section vanishes.
 
