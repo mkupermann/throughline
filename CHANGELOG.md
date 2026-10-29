@@ -15,7 +15,7 @@ Every note now carries the time it was true, apart from the time it was recorded
 - **Questions about a date.** `GET /api/memory` accepts `valid_at` ("was valid on") and `known_at` ("was known on"). Either one replaces the status filter, and forgotten notes never appear. A plain date means the end of that day in UTC, so "as of today" includes today's changes. A date that does not parse gives 422.
 - **Keep refuses a replaced note.** `POST /api/memory/{id}/keep` answers 409 `has_successor` when the note has a successor, instead of reviving it next to its replacement. Otherwise it restores the note, also a forgotten one, and clears `expires_at`.
 - **Agent-memory import no longer deletes.** An unchanged section is left alone. A changed section becomes a successor through update, starting at the file's modification time. A section that vanished from the file is marked superseded with an end date. No row is removed. A note you replaced in the UI or over MCP stays until the file section changes.
-- **Memory view.** Cards show "valid since", "valid until" and "source from". The new "As of" filter takes a date and a choice between "was valid" and "was known". The replace dialog has "Valid from" and Update or Correction.
+- **Memory view.** Cards show "valid since", "valid until" and "source from"; a note replaced by a correction shows "never valid (correction)". The new "As of" filter takes a date and a choice between "was valid" and "was known". The replace dialog has "Valid from" and Update or Correction.
 
 ### Four ways to lose data are closed, and CI checks the Rust crate
 
