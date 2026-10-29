@@ -58,7 +58,7 @@ pub fn session_relevance_score(s: &SessionNote) -> i32 {
     score += 10;
     // Longer (but not spammy) first_user is more informative.
     let len = fu.chars().count();
-    if len >= 20 && len <= 200 {
+    if (20..=200).contains(&len) {
         score += 5;
     } else if len > 200 {
         score += 2;
@@ -93,7 +93,7 @@ pub fn decision_relevance_score(d: &DecisionNote) -> i32 {
     }
     // Content quality: longer content is usually more specific.
     let len = d.content.chars().count();
-    if len >= 30 && len <= 300 {
+    if (30..=300).contains(&len) {
         score += 3;
     }
     // Decisions with an explicit project are more actionable.

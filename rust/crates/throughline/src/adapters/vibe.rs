@@ -146,10 +146,9 @@ impl Adapter for VibeAdapter {
                 _ => "user",
             };
             let content = clean_ansi(
-                &msg.get("content")
+                msg.get("content")
                     .and_then(|c| c.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
+                    .unwrap_or_default(),
             );
             let uuid = stable_uuid_str(
                 &NS,

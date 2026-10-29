@@ -359,10 +359,7 @@ impl Adapter for CodexAdapter {
             started_at: started,
             ended_at: Some(ended),
             messages,
-            token_count_in: meta_event
-                .get("tokens_used")
-                .and_then(|v| v.as_i64())
-                .map(|v| v as i64),
+            token_count_in: meta_event.get("tokens_used").and_then(|v| v.as_i64()),
             token_count_out: None,
             summary: None,
             metadata: json!({"source": "codex"}),

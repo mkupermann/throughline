@@ -41,8 +41,7 @@ fn extract_title(content: &str, filename: &str) -> String {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
     let cleaned: String = stem
-        .replace('-', " ")
-        .replace('_', " ")
+        .replace(['-', '_'], " ")
         .split_whitespace()
         .map(|w| {
             let mut c = w.chars();

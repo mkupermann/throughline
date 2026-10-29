@@ -14,9 +14,8 @@ use std::process::Command;
 
 fn connect() -> Option<postgres::Client> {
     let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
-    let user = std::env::var("PGUSER").unwrap_or_else(|_| {
-        std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into())
-    });
+    let user = std::env::var("PGUSER")
+        .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
     let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
     let mut cfg = postgres::Config::new();
     cfg.host(&host)
@@ -86,8 +85,9 @@ fn migrate_ingest_and_search_roundtrip() {
         "ingest should not error: {stdout}"
     );
 
-    let hits = throughline::search_module::search(&mut client, &format!("rust e2e needle {session}"), 10)
-        .expect("search");
+    let hits =
+        throughline::search_module::search(&mut client, &format!("rust e2e needle {session}"), 10)
+            .expect("search");
     assert!(
         hits.iter().any(|h| h.snippet.contains("rust e2e needle")),
         "expected a hit, got {hits:?}"

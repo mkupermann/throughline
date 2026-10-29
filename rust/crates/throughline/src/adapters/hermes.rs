@@ -219,6 +219,7 @@ fn parse_state_db_all(path: &Path) -> Result<Vec<NormalisedConversation>> {
 /// Parse Hermes `state.db` (SQLite). One conversation per session row.
 /// Schema mismatch returns Ok(None) so a stale Hermes install never crashes ingest.
 #[cfg(feature = "hermes-sqlite")]
+#[allow(clippy::type_complexity)]
 fn parse_state_db(path: &Path) -> Result<Option<NormalisedConversation>> {
     use rusqlite::Connection;
 
@@ -406,11 +407,6 @@ fn remaining_state_db_sessions(
     // the db once; a full multi-conversation parse is a follow-up. Returning
     // empty keeps the first session and does not crash ingest.
     Vec::new()
-}
-
-#[cfg(not(feature = "hermes-sqlite"))]
-fn parse_state_db(_path: &Path) -> Result<Option<NormalisedConversation>> {
-    Ok(None)
 }
 
 #[cfg(not(feature = "hermes-sqlite"))]

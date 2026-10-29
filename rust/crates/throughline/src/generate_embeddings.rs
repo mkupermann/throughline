@@ -22,8 +22,7 @@ pub fn embed_pending<C: GenericClient>(
 
     // Messages without a vector in this backend's column.
     let rows = client.query(
-        &format!(
-            r#"
+        r#"
             SELECT m.id, left(COALESCE(m.content, ''), 4000)
             FROM messages m
             WHERE COALESCE(m.content, '') <> ''
@@ -35,8 +34,7 @@ pub fn embed_pending<C: GenericClient>(
               )
             ORDER BY m.id DESC
             LIMIT $2::bigint
-            "#
-        ),
+            "#,
         &[&backend.model, &(limit as i64)],
     );
 

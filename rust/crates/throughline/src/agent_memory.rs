@@ -207,6 +207,7 @@ fn ingest_agent_memory_from<C: GenericClient>(
 }
 
 /// List agent-memory (and other) chunks for the GUI.
+#[allow(clippy::type_complexity)]
 pub fn list_memory<C: GenericClient>(
     client: &mut C,
     q: Option<String>,
@@ -251,6 +252,7 @@ pub fn list_memory<C: GenericClient>(
 }
 
 /// Full chunk body for detail view.
+#[allow(clippy::type_complexity)]
 pub fn get_memory<C: GenericClient>(
     client: &mut C,
     id: i64,
