@@ -51,6 +51,7 @@ ALLOWED: frozenset[str] = frozenset(
         "SECURITY.md",
         "config.example.yaml",
         "docker-compose.e2e.yml",
+        "docker-compose.edit.yml",
         "docker-compose.yml",
         "docs",
         "evals",
