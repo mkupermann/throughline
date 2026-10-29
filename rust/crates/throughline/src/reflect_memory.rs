@@ -79,8 +79,15 @@ pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectS
             &[&keep, &merged, &ids],
         )?;
         if ids.len() > 1 {
+            // Close the validity like VALID_TIME_BACKFILL does: the duplicate
+            // ends where the kept note starts, never before its own start.
             client.execute(
-                "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2, superseded_at = now() WHERE id = ANY($1) AND id <> $2",
+                "UPDATE memory_chunks
+                 SET status = 'superseded', superseded_by = $2, superseded_at = now(),
+                     valid_to = GREATEST(COALESCE(valid_from, source_at, created_at),
+                         (SELECT COALESCE(n.valid_from, n.source_at, n.created_at)
+                          FROM memory_chunks n WHERE n.id = $2))
+                 WHERE id = ANY($1) AND id <> $2",
                 &[&ids, &keep],
             )?;
         }
@@ -178,5 +185,91 @@ mod tests {
     #[test]
     fn is_contradiction_handles_short_y() {
         assert!(is_contradiction("Y"));
+    }
+
+    /// Connect to the database (`PG*` env). Skip when unreachable so offline
+    /// `cargo test --lib` stays green. Mirrors the server.rs test helper.
+    fn test_db() -> Option<postgres::Client> {
+        use postgres::NoTls;
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(NoTls).ok()
+    }
+
+    #[test]
+    fn dedup_closes_the_validity_of_the_replaced_duplicate() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping dedup_closes_the_validity_of_the_replaced_duplicate: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let category_type =
+            crate::extract_memory::category_column_type(&mut tx).expect("category_column_type");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let head = format!("{tag} the project store runs on PostgreSQL with pgvector, always");
+        let mut seed = |tail: &str, from: &str| -> i64 {
+            let from: chrono::DateTime<chrono::Utc> = from.parse().expect("instant");
+            tx.query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, confidence, status, valid_from)
+                     VALUES ('manual', $1, 'decision'::text::{category_type}, 1.0, 'active', $2) RETURNING id"
+                ),
+                &[&format!("{head} {tail}"), &from],
+            )
+            .expect("seed duplicate")
+            .get(0)
+        };
+        let kept = seed("(first)", "2026-01-01T00:00:00Z");
+        let dup = seed("(second)", "2026-02-01T00:00:00Z");
+        dedup(&mut tx, false).expect("dedup");
+
+        let row = tx
+            .query_one(
+                "SELECT status, superseded_by, valid_to FROM memory_chunks WHERE id = $1",
+                &[&dup],
+            )
+            .expect("duplicate row");
+        assert_eq!(row.get::<_, String>(0), "superseded");
+        assert_eq!(row.get::<_, Option<i64>>(1), Some(kept));
+        assert_eq!(
+            row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(2),
+            Some("2026-02-01T00:00:00Z".parse().unwrap()),
+            "the replaced duplicate needs an end of validity"
+        );
+        let pattern = format!("{tag}%");
+        let valid_now: Vec<i64> = tx
+            .query(
+                &format!(
+                    "SELECT mc.id FROM memory_chunks mc WHERE {} AND mc.content LIKE $1 ORDER BY mc.id",
+                    crate::temporal::as_of_predicate("$2", "$3")
+                ),
+                &[
+                    &pattern,
+                    &Some(chrono::Utc::now()),
+                    &None::<chrono::DateTime<chrono::Utc>>,
+                ],
+            )
+            .expect("as-of query")
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(valid_now, vec![kept], "only the kept note is valid now");
     }
 }
