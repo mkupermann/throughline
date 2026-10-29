@@ -21,6 +21,11 @@ pub fn parse_instant(s: &str) -> Option<DateTime<Utc>> {
     Some(midnight)
 }
 
+/// `true` for a plain `YYYY-MM-DD` without a time of day.
+pub fn is_plain_date(s: &str) -> bool {
+    NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").is_ok()
+}
+
 /// Parse the reference date of an as-of question (`valid_at`, `known_at`).
 /// RFC 3339 passes through unchanged. A plain `YYYY-MM-DD` means the end of
 /// that day in UTC, capped at now, so "as of today" includes today's changes.
@@ -97,6 +102,15 @@ mod tests {
             parse_instant("2026-03-01").unwrap().to_rfc3339(),
             "2026-03-01T00:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn tells_a_plain_date_from_a_timestamp() {
+        assert!(is_plain_date("2026-03-01"));
+        assert!(is_plain_date(" 2026-03-01 "));
+        assert!(!is_plain_date("2026-03-01T00:00:00Z"));
+        assert!(!is_plain_date("2026-02-30"));
+        assert!(!is_plain_date("gestern"));
     }
 
     #[test]

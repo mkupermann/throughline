@@ -258,6 +258,10 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                     }
                 },
             };
+            let valid_from_is_date = args
+                .get("valid_from")
+                .and_then(|v| v.as_str())
+                .is_some_and(crate::temporal::is_plain_date);
             let valid_from = match args
                 .get("valid_from")
                 .and_then(|v| v.as_str())
@@ -280,6 +284,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 source_type: "mcp_write",
                 kind,
                 valid_from,
+                valid_from_is_date,
                 confidence: 1.0,
                 tags: Vec::new(),
                 source_at: None,
@@ -363,6 +368,83 @@ mod tests {
             props["kind"]["enum"],
             serde_json::json!(["update", "correction"])
         );
+    }
+
+    /// Connect to the database (`PG*` env). Skip when unreachable so offline
+    /// `cargo test --lib` stays green. Mirrors the server.rs test helper.
+    fn test_db() -> Option<postgres::Client> {
+        use postgres::NoTls;
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(NoTls).ok()
+    }
+
+    /// One active note that starts at `from`.
+    fn seed_note<C: GenericClient>(client: &mut C, from: chrono::DateTime<chrono::Utc>) -> i64 {
+        let category_type =
+            crate::extract_memory::category_column_type(client).expect("category_column_type");
+        client
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, confidence, status, valid_from)
+                     VALUES ('manual', 'mcp supersede seed note', 'decision'::text::{category_type}, 1.0, 'active', $1)
+                     RETURNING id"
+                ),
+                &[&from],
+            )
+            .expect("seed note")
+            .get(0)
+    }
+
+    fn supersede_call(args: Value) -> Value {
+        json!({ "name": "supersede", "arguments": args })
+    }
+
+    #[test]
+    fn supersede_from_today_on_a_note_of_today_starts_at_its_start() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping supersede_from_today_on_a_note_of_today: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let today = chrono::Utc::now().date_naive();
+        let start = today.and_hms_opt(10, 0, 0).unwrap().and_utc();
+        let old = seed_note(&mut tx, start);
+        let out = call_tool(
+            &mut tx,
+            &supersede_call(json!({
+                "id": old,
+                "content": "mcp same-day successor",
+                "valid_from": today.format("%Y-%m-%d").to_string(),
+            })),
+        )
+        .expect("a plain date on the old note's first day is accepted");
+        let text = out["content"][0]["text"].as_str().expect("text");
+        let ids: Value = serde_json::from_str(text).expect("ids json");
+        let new_id = ids["new_id"].as_i64().expect("new_id");
+        let from: chrono::DateTime<chrono::Utc> = tx
+            .query_one(
+                "SELECT valid_from FROM memory_chunks WHERE id = $1",
+                &[&new_id],
+            )
+            .expect("successor")
+            .get(0);
+        assert_eq!(from, start, "the successor starts at the old note's start");
     }
 
     #[test]
