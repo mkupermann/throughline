@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Four ways to lose data are closed, and CI checks the Rust crate
+
+- **Replace kept only the first 280 characters.** The memory list sent notes cut to 280 characters, and both "expand" and the "Replace" dialog used that text. Saving a replacement without editing the end dropped the rest of the note. The list now sends the whole note.
+- **Writeback wrote every project into one repository.** `throughline writeback` without `--project`, and the UI button, wrote the newest notes of all projects into the `AGENTS.md` of the folder it ran in. Without `--project` it now takes only the project named like the `--root` folder. A stray end marker before the block no longer duplicates the text between them.
+- **Backup rotation deleted files it did not write.** Rotation removed every `*.sql` with a dash in its name, sorted by name, so it could delete foreign files and even the dump it had just written. It now rotates only `<database>-YYYYMMDD-HHMMSS.sql`. A failed `pg_dump` no longer leaves a half-written dump that counts as a backup.
+- **Retention deleted notes without archiving them.** Notes extracted from the deleted conversations were removed, but the archive held only the conversations. `--apply` now writes their full rows to `memory-chunks.json` in the archive first.
+- **Rust in CI.** A new job runs rustfmt, clippy with and without default features, and all tests against Postgres, once on a fresh install and once on a database built from `sql/schema.sql` and upgraded. Database tests that skip fail the job. That second database showed that migration 003 failed under the view `v_conversation_stats`. It now drops and re-creates the view.
+
 ### Edit assistant configuration from the UI (opt-in)
 
 The AI configuration view can edit the files it lists: instructions, skills, agents and config files. Editing is off unless the server runs with `THROUGHLINE_CONFIG_EDIT=1`. In Docker, `docker-compose.edit.yml` sets the variable and mounts the assistant folders and `~/Documents/GitHub` writable; without that file every source folder stays read-only.

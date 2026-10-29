@@ -130,9 +130,9 @@ All 24 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `stale-digest` | Report memory requiring renewed attention. |
 | `answer-eval` | Evaluate supplied/default cases with citation and phrase checks. |
 | `scan-instructions` | Index local project instruction files into the store. |
-| `writeback` | Write distilled notes into project instructions; select `--root` deliberately. |
+| `writeback` | Write distilled notes into project instructions; select `--root` deliberately. Without `--project` only notes of the project named like the `--root` folder are written. |
 | `export-markdown` | Write a Markdown vault; supports project selection and optional redaction. `--evidence` adds a provenance manifest with model, source tool, time range and SHA-256 per exported file. |
-| `backup` | Dump the database to a directory and apply retention. |
+| `backup` | Dump the database to a directory and keep the newest `--keep` dumps. Rotation only touches its own `<database>-YYYYMMDD-HHMMSS.sql` files. |
 | `mcp` | Serve the Rust MCP tool contract over stdio. |
 
 Not all commands have a corresponding browser button. No screenshot can demonstrate the success of an unexecuted CLI command. See the verification record for tested paths.

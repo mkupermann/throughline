@@ -47,19 +47,56 @@ fn render_block(items: &[String]) -> String {
     s
 }
 
+/// Put `block` in place of the existing marker block, or append it.
+fn merge_block(existing: String, block: &str) -> String {
+    let start = existing.find(MARKER_START);
+    let end = start.and_then(|a| {
+        existing[a..]
+            .find(MARKER_END)
+            .map(|b| a + b + MARKER_END.len())
+    });
+    if let (Some(a), Some(end)) = (start, end) {
+        format!("{}{}{}", &existing[..a], block, &existing[end..])
+    } else {
+        let mut t = existing;
+        if !t.ends_with('\n') {
+            t.push('\n');
+        }
+        t.push('\n');
+        t.push_str(block);
+        t
+    }
+}
+
 /// Replace or append the Throughline block in the instruction file.
+///
+/// Without `project` the folder name decides, the same way ingest names a
+/// project after its last path segment. Notes of other projects never land
+/// in this repository's file.
 pub fn writeback<C: GenericClient>(
     client: &mut C,
     root: &Path,
     project: Option<&str>,
     limit: usize,
 ) -> Result<WritebackSummary> {
+    let project = match project {
+        Some(p) => p.to_string(),
+        None => std::path::absolute(root)
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .with_context(|| {
+                format!(
+                    "cannot tell the project of {}, pass --project",
+                    root.display()
+                )
+            })?,
+    };
     let rows = client.query(
         r#"
         SELECT content FROM memory_chunks
         WHERE status = 'active'
           AND category IN ('decision', 'preference', 'project_context', 'workflow', 'error_solution')
-          AND ($1::text IS NULL OR project_name = $1)
+          AND project_name = $1
         ORDER BY created_at DESC
         LIMIT $2::bigint
         "#,
@@ -87,19 +124,7 @@ pub fn writeback<C: GenericClient>(
 
     let block = render_block(&items);
     let replaced = existing.contains(MARKER_START);
-    let new_text =
-        if let (Some(a), Some(b)) = (existing.find(MARKER_START), existing.find(MARKER_END)) {
-            let end = b + MARKER_END.len();
-            format!("{}{}{}", &existing[..a], block, &existing[end..])
-        } else {
-            let mut t = existing;
-            if !t.ends_with('\n') {
-                t.push('\n');
-            }
-            t.push('\n');
-            t.push_str(&block);
-            t
-        };
+    let new_text = merge_block(existing, &block);
 
     std::fs::write(&path, &new_text).with_context(|| format!("write {}", path.display()))?;
 
@@ -134,5 +159,47 @@ mod tests {
         assert!(!out.contains("old"));
         assert!(out.contains("header"));
         assert!(out.contains("footer"));
+    }
+
+    #[test]
+    fn a_stray_end_marker_before_the_block_is_not_duplicated() {
+        let old = format!("intro {MARKER_END}\nmine\n{MARKER_START}\nold\n{MARKER_END}\ntail\n");
+        let out = merge_block(old, &render_block(&["new".into()]));
+        assert_eq!(out.matches("mine").count(), 1, "{out}");
+        assert!(!out.contains("old"), "{out}");
+        assert!(out.contains("new") && out.contains("tail"), "{out}");
+    }
+
+    fn test_db() -> Option<postgres::Client> {
+        crate::config::DbConfig::from_env().connect().ok()
+    }
+
+    #[test]
+    fn writeback_without_project_takes_only_the_root_project() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping writeback_without_project_takes_only_the_root_project: no PostgreSQL reachable");
+            return;
+        };
+        // Never committed: the rows vanish with the transaction.
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let mine = format!("wb-mine-{tag}");
+        let other = format!("wb-other-{tag}");
+        for (project, text) in [(&mine, "mine"), (&other, "other")] {
+            tx.execute(
+                "INSERT INTO memory_chunks (source_type, content, category, project_name, status)
+                 VALUES ('manual', $1, 'decision', $2, 'active')",
+                &[&format!("{text} note {tag}"), project],
+            )
+            .expect("seed note");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(&mine);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let summary = writeback(&mut tx, &root, None, 1000).expect("writeback");
+        let text = std::fs::read_to_string(&summary.file).unwrap();
+        assert!(text.contains(&format!("mine note {tag}")), "{text}");
+        assert!(!text.contains(&format!("other note {tag}")), "{text}");
     }
 }

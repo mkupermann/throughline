@@ -42,6 +42,8 @@ pub fn backup_database(dir: &Path, keep: usize) -> Result<PathBuf> {
         cmd.arg("-d").arg(&dbname).arg("-f").arg(&out);
         let status = cmd.status().context("run pg_dump")?;
         if !status.success() {
+            // A half-written dump would count as a backup and push a good one out.
+            let _ = std::fs::remove_file(&out);
             anyhow::bail!("pg_dump exited with {status}");
         }
     } else {
@@ -59,7 +61,7 @@ pub fn backup_database(dir: &Path, keep: usize) -> Result<PathBuf> {
         std::fs::write(&out, &output.stdout).with_context(|| format!("write {}", out.display()))?;
     }
 
-    prune(dir, keep)?;
+    prune(dir, keep, &dbname)?;
     Ok(out)
 }
 
@@ -71,16 +73,29 @@ fn local_pg_dump_works() -> bool {
         .unwrap_or(false)
 }
 
-fn prune(dir: &Path, keep: usize) -> Result<()> {
+/// Rotate only the dumps this job writes, `{dbname}-YYYYMMDD-HHMMSS.sql`.
+/// Every other file in the folder belongs to someone else.
+fn prune(dir: &Path, keep: usize, dbname: &str) -> Result<()> {
+    let ours = |name: &str| {
+        name.strip_prefix(dbname)
+            .and_then(|r| r.strip_prefix('-'))
+            .and_then(|r| r.strip_suffix(".sql"))
+            .is_some_and(|stamp| {
+                let b = stamp.as_bytes();
+                b.len() == 15
+                    && b.iter().enumerate().all(|(i, c)| {
+                        if i == 8 {
+                            *c == b'-'
+                        } else {
+                            c.is_ascii_digit()
+                        }
+                    })
+            })
+    };
     let mut dumps: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension().and_then(|e| e.to_str()) == Some("sql")
-                && p.file_name()
-                    .map(|n| n.to_string_lossy().contains("-"))
-                    .unwrap_or(false)
-        })
+        .filter(|p| p.file_name().is_some_and(|n| ours(&n.to_string_lossy())))
         .collect();
     dumps.sort();
     while dumps.len() > keep {
@@ -157,7 +172,7 @@ mod tests {
         for i in 0..5 {
             std::fs::write(dir.join(format!("throughline-2026010{i}-000000.sql")), b"x").unwrap();
         }
-        prune(&dir, 2).unwrap();
+        prune(&dir, 2, "throughline").unwrap();
         let left: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -165,6 +180,37 @@ mod tests {
             .collect();
         assert_eq!(left.len(), 2, "prune should keep 2 of 5: {left:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_leaves_files_it_did_not_write() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "my-notes.sql",
+            "other-20250101-000000.sql",
+            "throughline-copy-20250101-000000.sql",
+            "throughline-20260101-000000.sql",
+            "throughline-20260102-000000.sql",
+            "throughline-20260103-000000.sql",
+        ] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        prune(dir.path(), 1, "throughline").unwrap();
+        let mut left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "my-notes.sql",
+                "other-20250101-000000.sql",
+                "throughline-20260103-000000.sql",
+                "throughline-copy-20250101-000000.sql",
+            ]
+        );
     }
 
     #[test]
