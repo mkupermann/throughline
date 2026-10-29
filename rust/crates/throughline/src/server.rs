@@ -1730,27 +1730,61 @@ async fn memory_forget(State(state): State<AppState>, Path(id): Path<i64>) -> Re
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum KeepOutcome {
+    Kept,
+    NotFound,
+    HasSuccessor,
+}
+
+/// Confirm a note: back to active (undo of forget), expiry cleared, `reviewed`
+/// tag and `updated_at` stamped. A note that a successor replaced stays
+/// superseded, so keeping it cannot revive it next to the successor.
+fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<KeepOutcome> {
+    let mut tx = client.transaction()?;
+    let Some(row) = tx.query_opt(
+        "SELECT superseded_by FROM memory_chunks WHERE id = $1 FOR UPDATE",
+        &[&id],
+    )?
+    else {
+        return Ok(KeepOutcome::NotFound);
+    };
+    let superseded_by: Option<i64> = row.get(0);
+    if superseded_by.is_some() {
+        // Dropping tx rolls back; nothing was written.
+        return Ok(KeepOutcome::HasSuccessor);
+    }
+    tx.execute(
+        r#"
+        UPDATE memory_chunks
+        SET status = 'active',
+            expires_at = NULL,
+            updated_at = now(),
+            tags = CASE
+                WHEN 'reviewed' = ANY(COALESCE(tags, '{}')) THEN tags
+                ELSE array_append(COALESCE(tags, '{}'), 'reviewed')
+            END
+        WHERE id = $1
+        "#,
+        &[&id],
+    )?;
+    tx.commit()?;
+    Ok(KeepOutcome::Kept)
+}
+
 async fn memory_keep(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match with_db(&state, move |client| {
-        // Confirm the note: restore to active (undo of forget) and stamp
-        // reviewed via updated_at (M2 column) plus a durable tag.
-        Ok(client.execute(
-            r#"
-            UPDATE memory_chunks
-            SET status = 'active',
-                updated_at = now(),
-                tags = CASE
-                    WHEN 'reviewed' = ANY(COALESCE(tags, '{}')) THEN tags
-                    ELSE array_append(COALESCE(tags, '{}'), 'reviewed')
-                END
-            WHERE id = $1
-            "#,
-            &[&id],
-        )?)
-    })
-    .await
-    {
-        Ok(rows) => memory_status_response(id, rows, "active"),
+    match with_db(&state, move |client| keep_memory(client, id)).await {
+        Ok(KeepOutcome::Kept) => {
+            Json(serde_json::json!({ "id": id, "status": "active" })).into_response()
+        }
+        Ok(KeepOutcome::NotFound) => {
+            api_error(StatusCode::NOT_FOUND, "not_found", "memory chunk not found")
+        }
+        Ok(KeepOutcome::HasSuccessor) => api_error(
+            StatusCode::CONFLICT,
+            "has_successor",
+            "memory chunk was replaced by a newer note and stays superseded",
+        ),
         Err(resp) => resp,
     }
 }
@@ -2962,6 +2996,66 @@ mod tests {
     fn forget_known_id_returns_forgotten() {
         let resp = memory_status_response(7, 1, "forgotten");
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn keep_refuses_a_note_with_a_successor() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping keep_refuses_a_note_with_a_successor: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_note(&mut tx, "keep-successor note A", "decision");
+        let (_, b) = supersede_memory(&mut tx, a, &test_successor("keep-successor note B"))
+            .expect("supersede");
+        assert_eq!(
+            keep_memory(&mut tx, a).expect("keep"),
+            KeepOutcome::HasSuccessor
+        );
+        assert_eq!(validity(&mut tx, a).0, "superseded");
+        assert_eq!(validity(&mut tx, b).0, "active");
+    }
+
+    #[test]
+    fn keep_restores_a_forgotten_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping keep_restores_a_forgotten_note: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_note(&mut tx, "keep-restore forgotten note", "decision");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&a],
+        )
+        .expect("forget");
+        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        assert_eq!(validity(&mut tx, a).0, "active");
+    }
+
+    #[test]
+    fn keep_clears_the_expiry() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping keep_clears_the_expiry: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_note(&mut tx, "keep-expiry stale note", "decision");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'stale', expires_at = $2 WHERE id = $1",
+            &[&a, &at("2026-02-01T00:00:00Z")],
+        )
+        .expect("mark stale");
+        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        let (status, expires_at): (String, Option<chrono::DateTime<chrono::Utc>>) = tx
+            .query_one(
+                "SELECT status, expires_at FROM memory_chunks WHERE id = $1",
+                &[&a],
+            )
+            .map(|r| (r.get(0), r.get(1)))
+            .expect("row");
+        assert_eq!(status, "active");
+        assert!(expires_at.is_none(), "keep must clear expires_at");
     }
 
     // ─── supersede ────────────────────────────────────────────────────────
