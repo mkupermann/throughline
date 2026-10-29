@@ -160,7 +160,7 @@ stays answerable afterwards.
 
 ## Notes and the time they were valid
 
-A note has two clocks. `created_at` says when Throughline recorded it. `valid_from` and `valid_to` say when the statement was true. A new note is valid from the moment it is written. Notes that existed before migration 012 start at their source date, or at their creation date. `valid_to` stays empty until something ends it.
+A note has two clocks. `created_at` says when Throughline recorded it. `valid_from` and `valid_to` say when the statement was true. Where a note starts depends on how it came in. A note pinned in the UI or written through MCP is valid from now. An extracted note starts at the `source_at` of its conversation window. An agent-memory note starts at the modification time of its file, never later than now. A replacement starts where you say, and otherwise as described below. Notes that existed before migration 012 start at their source date, or at their creation date. `valid_to` stays empty until something ends it.
 
 Replacing a note (`POST /api/memory/{id}/supersede`, or the MCP `supersede` tool) takes two optional fields:
 
