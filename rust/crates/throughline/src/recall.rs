@@ -84,6 +84,9 @@ pub fn needs_embedding(mode: RecallMode, rank: Rank) -> bool {
 
 pub const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
+/// `as_of` admits a note that shares a word with the question or has at
+/// least this cosine to it.
+const AS_OF_MIN_COSINE: f64 = 0.5;
 
 pub struct RecallQuery<'a> {
     pub text: &'a str,
@@ -701,18 +704,21 @@ pub fn recall<C: GenericClient>(
             (s, why, c)
         })
         .collect();
+    let limit = q.limit.clamp(1, MAX_LIMIT);
+    by_score(&mut scored);
     if q.mode == RecallMode::AsOf {
-        // Only notes that match the question; the order is the timeline.
-        scored.retain(|(_, why, _)| why.lexical > 0.0 || why.cosine.is_some_and(|c| c >= 0.5));
+        // Only notes that match the question, the `limit` best by the rank;
+        // those come out as a timeline.
+        scored.retain(|(_, why, _)| {
+            why.lexical > 0.0 || why.cosine.is_some_and(|c| c >= AS_OF_MIN_COSINE)
+        });
+        scored.truncate(limit);
         scored.sort_by(|a, b| {
             a.2.valid_from
                 .cmp(&b.2.valid_from)
                 .then(a.2.id.cmp(&b.2.id))
         });
-    } else {
-        by_score(&mut scored);
     }
-    let limit = q.limit.clamp(1, MAX_LIMIT);
     let mut evidence: HashMap<i64, Evidence> = HashMap::new();
     if q.mode == RecallMode::Grounded {
         // Only notes whose chain starts in an existing conversation; a hit
@@ -2040,5 +2046,45 @@ mod tests {
         let r = recall(&mut tx, &query(&text, Some(&project)), None).unwrap();
         assert_eq!(r.degraded, None);
         assert_eq!(position(&r, id), Some(0));
+    }
+
+    #[test]
+    fn recall_as_of_keeps_the_most_relevant_then_orders_by_time() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_as_of_keeps_the_most_relevant_then_orders_by_time: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        // three old notes share one word, two later ones share all three;
+        // the latest is the most relevant by both ranks
+        let notes = [
+            (format!("{tag} alpha"), at(2026, 1, 1)),
+            (format!("{tag} beta"), at(2026, 1, 10)),
+            (format!("{tag} gamma"), at(2026, 1, 20)),
+            (format!("zebra kiwi {tag} zebra kiwi"), at(2026, 3, 1)),
+            (format!("zebra kiwi {tag}"), at(2026, 2, 1)),
+        ];
+        let ids: Vec<i64> = notes
+            .iter()
+            .map(|(c, from)| {
+                let mut sd = Seed::new(c, *from);
+                sd.project = Some(&project);
+                seed(&mut tx, &sd)
+            })
+            .collect();
+        let text = format!("zebra kiwi {tag}");
+        for rank in [Rank::Fulltext, Rank::Weighted] {
+            let mut q = query(&text, Some(&project));
+            q.mode = RecallMode::AsOf;
+            q.valid_at = Some(at(2026, 6, 1));
+            q.known_at = Some(Utc::now());
+            q.limit = 2;
+            q.rank = rank;
+            let r = recall(&mut tx, &q, None).unwrap();
+            let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
+            assert_eq!(got, vec![ids[4], ids[3]], "{rank:?}");
+        }
     }
 }
