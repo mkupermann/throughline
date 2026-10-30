@@ -2,8 +2,10 @@
 //!
 //! Every method ranks the same candidates as `recall` in mode `current`
 //! (except `phrase`, today's whole-phrase search, which is context only).
+//! `current` uses the default rank, full text, so it equals `fulltext` by
+//! construction; `weighted` is the weighted ranking.
 
-use crate::recall::{self, CandidateFilter, RecallMode, RecallQuery};
+use crate::recall::{self, CandidateFilter, Rank, RecallMode, RecallQuery};
 use crate::search;
 use anyhow::{bail, Context, Result};
 use postgres::GenericClient;
@@ -50,25 +52,6 @@ pub fn load_cases(path: &Path) -> Result<Vec<EvalCase>> {
     serde_json::from_str(&text).context("parse test set")
 }
 
-/// `to_tsquery` string of OR-joined words; only `[a-z0-9äöüß]` survives.
-pub fn fulltext_tsquery(words: &[String]) -> Option<String> {
-    let clean: Vec<String> = words
-        .iter()
-        .map(|w| {
-            w.to_lowercase()
-                .chars()
-                .filter(|c| matches!(c, 'a'..='z' | '0'..='9' | 'ä' | 'ö' | 'ü' | 'ß'))
-                .collect::<String>()
-        })
-        .filter(|w| !w.is_empty())
-        .collect();
-    if clean.is_empty() {
-        None
-    } else {
-        Some(clean.join(" | "))
-    }
-}
-
 /// 1-based rank of the first expected id in `ranked`, within `RANK_DEPTH`.
 fn rank_of(ranked: &[i64], expected: &[i64]) -> Option<usize> {
     ranked
@@ -111,7 +94,9 @@ fn shuffle(ids: &mut [i64], rng: &mut Rng) {
     }
 }
 
-pub const METHODS: [&str; 5] = ["current", "cosine", "fulltext", "phrase", "random"];
+pub const METHODS: [&str; 6] = [
+    "current", "weighted", "cosine", "fulltext", "phrase", "random",
+];
 
 pub fn run_eval<C: GenericClient>(
     client: &mut C,
@@ -130,19 +115,26 @@ pub fn run_eval<C: GenericClient>(
         if emb.is_none() {
             bail!("no query embedding (is Ollama reachable?): {}", case.q);
         }
-        let q = RecallQuery {
+        let mut q = RecallQuery {
             text: &case.q,
             project: case.project.as_deref(),
             mode: RecallMode::Current,
             valid_at: None,
             known_at: None,
             limit: RANK_DEPTH,
+            rank: Rank::Fulltext,
         };
-        let current: Vec<i64> = recall::recall(client, &q, emb.as_ref())?
-            .hits
-            .iter()
-            .map(|h| h.id)
-            .collect();
+        let mut ranked = |q: &RecallQuery| -> Result<Vec<i64>> {
+            Ok(recall::recall(client, q, emb.as_ref())?
+                .hits
+                .iter()
+                .map(|h| h.id)
+                .collect())
+        };
+        let current = ranked(&q)?;
+        q.rank = Rank::Weighted;
+        let weighted = ranked(&q)?;
+        q.rank = Rank::Fulltext;
         let cands = recall::candidates(client, CandidateFilter::Current, &q, emb.as_ref())?;
 
         // Notes without an embedding rank after all that have one.
@@ -157,26 +149,15 @@ pub fn run_eval<C: GenericClient>(
         let cosine: Vec<i64> = by_cosine.into_iter().map(|c| c.0).collect();
 
         let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
-        let fulltext = match fulltext_tsquery(&recall::query_words(&case.q)) {
-            Some(tsq) => {
-                let rows = client.query(
-                    "SELECT id, ts_rank(to_tsvector('simple', content), to_tsquery('simple', $1))::float8 \
-                     FROM memory_chunks WHERE id = ANY($2)",
-                    &[&tsq, &ids],
-                )?;
-                let mut scored: Vec<(i64, f64)> = rows
-                    .iter()
-                    .map(|r| (r.get::<_, i64>(0), r.get::<_, f64>(1)))
-                    .collect();
-                // ts_rank is 0 without a match; those rank after all matches.
-                scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-                scored.into_iter().map(|s| s.0).collect()
-            }
-            None => {
-                let mut v = ids.clone();
-                v.sort_unstable();
-                v
-            }
+        let fulltext = {
+            let ranks = recall::fulltext_ranks(client, &recall::query_words(&case.q), &ids)?;
+            let mut scored: Vec<(i64, f64)> = ids
+                .iter()
+                .map(|id| (*id, ranks.get(id).copied().unwrap_or(0.0)))
+                .collect();
+            // ts_rank is 0 without a match; those rank after all matches.
+            scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            scored.into_iter().map(|s| s.0).collect::<Vec<i64>>()
         };
 
         let phrase: Vec<i64> = search::memory_hits(client, &case.q, RANK_DEPTH as i32)?
@@ -188,7 +169,7 @@ pub fn run_eval<C: GenericClient>(
         random.sort_unstable();
         shuffle(&mut random, &mut rng);
 
-        let lists = [current, cosine, fulltext, phrase, random];
+        let lists = [current, weighted, cosine, fulltext, phrase, random];
         let mut ranks = std::collections::BTreeMap::new();
         for (i, list) in lists.iter().enumerate() {
             let r = rank_of(list, &case.expected);
@@ -251,17 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn fulltext_query_is_safe() {
-        let words = recall::query_words("it's a & b | c: d Müller straße");
-        let q = fulltext_tsquery(&words).expect("words present");
-        assert!(q
-            .chars()
-            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | 'ä' | 'ö' | 'ü' | 'ß' | ' ' | '|')));
-        assert_eq!(q, "müller | straße");
-        let dirty = vec!["a'b&c".to_string(), "x:y".to_string()];
-        assert_eq!(fulltext_tsquery(&dirty).unwrap(), "abc | xy");
-        assert_eq!(fulltext_tsquery(&[]), None);
-        assert_eq!(fulltext_tsquery(&["'&|".to_string()]), None);
+    fn methods_keep_the_weighted_ranking() {
+        assert_eq!(
+            METHODS,
+            ["current", "weighted", "cosine", "fulltext", "phrase", "random"]
+        );
     }
 
     #[test]

@@ -71,6 +71,9 @@ enum Command {
         known_at: Option<String>,
         #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
         limit: usize,
+        /// fulltext (default) | weighted
+        #[arg(long, default_value = "fulltext")]
+        rank: String,
         /// Print the full result as JSON.
         #[arg(long)]
         json: bool,
@@ -316,9 +319,11 @@ fn main() -> Result<()> {
             at,
             known_at,
             limit,
+            rank,
             json,
         } => {
             let mode: recall::RecallMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            let rank: recall::Rank = rank.parse().map_err(|e: String| anyhow::anyhow!(e))?;
             let date =
                 |name: &str, v: Option<String>| -> Result<Option<chrono::DateTime<chrono::Utc>>> {
                     match v.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -335,7 +340,9 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let emb = recall::query_embedding(&text);
+            let emb = recall::needs_embedding(mode, rank)
+                .then(|| recall::query_embedding(&text))
+                .flatten();
             let q = recall::RecallQuery {
                 text: &text,
                 project: project.as_deref(),
@@ -343,6 +350,7 @@ fn main() -> Result<()> {
                 valid_at,
                 known_at,
                 limit: limit.clamp(1, 50),
+                rank,
             };
             let result = recall::recall(&mut client, &q, emb.as_ref())?;
             if json {
