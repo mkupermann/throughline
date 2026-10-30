@@ -240,7 +240,7 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Area | Commands |
 | --- | --- |
 | Setup and health | `migrate`, `serve`, `status`, `doctor` |
-| Import and retrieve | `ingest`, `search`, `recall`, `ask`, `handoff` |
+| Import and retrieve | `ingest`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
 | Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval` |
 | Carry context forward | `scan-instructions`, `writeback`, `export-markdown` |
@@ -252,7 +252,7 @@ The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies
 
 Launch `throughline mcp` from a compatible client over stdio, with the database variables in that process's environment. The container equivalent is `docker compose run -i --rm mcp`.
 
-The Rust server advertises `search`, `recall`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall, supersede and write need the current schema (migration 012 or later). The older Python MCP server has a different tool contract.
+The Rust server advertises `search`, `recall`, `project_context`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall, supersede and write need the current schema (migration 012 or later). The older Python MCP server has a different tool contract.
 
 ### Optional models
 
