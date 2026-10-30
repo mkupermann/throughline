@@ -17,6 +17,7 @@ export interface Canned {
 export class FakeServer {
   readonly requests: Recorded[] = [];
   private canned: Canned = { status: 200, body: {} };
+  private queued: Canned[] = [];
   private readonly server: http.Server;
   baseUrl = "";
 
@@ -31,10 +32,16 @@ export class FakeServer {
           headers: req.headers,
           body: Buffer.concat(chunks).toString("utf8"),
         });
-        res.writeHead(this.canned.status, { "Content-Type": "application/json" });
-        res.end(typeof this.canned.body === "string" ? this.canned.body : JSON.stringify(this.canned.body));
+        const c = this.queued.shift() ?? this.canned;
+        res.writeHead(c.status, { "Content-Type": "application/json" });
+        res.end(typeof c.body === "string" ? c.body : JSON.stringify(c.body));
       });
     });
+  }
+
+  /** Answers for the next requests, in order; after that the canned answer applies. */
+  queue(...answers: Canned[]): void {
+    this.queued = [...answers];
   }
 
   respond(status: number, body: unknown): void {
