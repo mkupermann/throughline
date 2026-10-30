@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { resolveProject, statusText, stateFromError } from "../src/statusLogic";
-import { ThroughlineError } from "../src/errors";
+import { NO_MCP_ENDPOINT, ThroughlineError } from "../src/errors";
+import { validateKey, validateUrl } from "../src/validate";
 
 test("project_defaults_to_the_folder_name", () => {
   assert.equal(resolveProject("my-repo", undefined), "my-repo");
@@ -34,4 +37,34 @@ test("state_from_error_maps_kinds", () => {
   assert.deepEqual(stateFromError(new ThroughlineError("access_off", "m"), u), { kind: "access_off" });
   assert.deepEqual(stateFromError(new ThroughlineError("unreachable", "m"), u), { kind: "unreachable", url: u });
   assert.deepEqual(stateFromError(new Error("boom"), u), { kind: "other", reason: "boom" });
+});
+
+test("status_text_for_a_server_without_mcp", () => {
+  const e = new ThroughlineError("protocol", NO_MCP_ENDPOINT);
+  assert.deepEqual(stateFromError(e, "http://x:1"), { kind: "no_mcp" });
+  assert.equal(statusText({ kind: "no_mcp" }), "Throughline: not connected (server has no /mcp endpoint)");
+  // Other protocol errors keep their own text.
+  assert.equal(stateFromError(new ThroughlineError("protocol", "other"), "http://x:1").kind, "other");
+});
+
+test("url_must_be_http_or_https", () => {
+  assert.equal(validateUrl("http://127.0.0.1:8788"), "http://127.0.0.1:8788");
+  assert.equal(validateUrl(" https://tl.example/base "), "https://tl.example/base");
+  for (const bad of ["", "  ", "file:///etc/passwd", "javascript:alert(1)", "ftp://x", "127.0.0.1:8788", "localhost:8788", "not a url"]) {
+    assert.equal(validateUrl(bad), undefined, bad);
+  }
+});
+
+test("url_setting_is_machine_scoped", () => {
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  const props = pkg.contributes.configuration.properties;
+  assert.equal(props["throughline.url"].scope, "machine");
+  assert.equal(props["throughline.project"].scope, "resource");
+});
+
+test("key_must_be_printable_ascii", () => {
+  for (const ok of ["k".repeat(40), "abc-123_XYZ.~!", "a"]) assert.equal(validateKey(ok), true, ok);
+  for (const bad of ["", "a b", "a\tb", "a\nb", "schl\u00fcssel", "\u007f", "key\u2028"]) {
+    assert.equal(validateKey(bad), false, JSON.stringify(bad));
+  }
 });

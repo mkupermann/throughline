@@ -6,6 +6,7 @@ import { McpClient } from "./mcpClient";
 import { getBudget, getProject, getRank, getUrl } from "./settings";
 import { StatusBar } from "./status";
 import { ThroughlineTree } from "./tree";
+import { validateKey } from "./validate";
 
 export function activate(context: vscode.ExtensionContext): void {
   const status = new StatusBar(() => Promise.resolve(context.secrets.get(KEY_NAME)));
@@ -32,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return ed ? ed.document.getText(ed.selection) : undefined;
     },
   };
-  let scratch: vscode.TextDocument | undefined;
+  let scratch: vscode.TextEditor | undefined;
   // Clients are built per call so a changed url setting applies at once.
   const deps = (): cmd.Deps => ({
     api: new ApiClient(getUrl()),
@@ -46,17 +47,21 @@ export function activate(context: vscode.ExtensionContext): void {
       host: {
         executeCommand: (id, ...args) => Promise.resolve(vscode.commands.executeCommand(id, ...args)),
         openScratchDocument: async (content) => {
-          scratch = await vscode.workspace.openTextDocument({ language: "markdown", content });
-          await vscode.window.showTextDocument(scratch);
+          const doc = await vscode.workspace.openTextDocument({ language: "markdown", content });
+          scratch = await vscode.window.showTextDocument(doc);
+        },
+        // Selects through the scratch editor itself, so the selection cannot land in another editor.
+        selectAll: async () => {
+          if (!scratch) return;
+          const doc = scratch.document;
+          scratch.selection = new vscode.Selection(doc.positionAt(0), doc.positionAt(doc.getText().length));
         },
         closeScratchDocument: async () => {
-          if (scratch && vscode.window.activeTextEditor?.document === scratch) {
-            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+          // The untitled scratch document has content, so it is dirty; reverting first avoids a save prompt.
+          if (scratch && vscode.window.activeTextEditor?.document === scratch.document) {
+            await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
           }
           scratch = undefined;
-        },
-        selectAll: async () => {
-          await vscode.commands.executeCommand("editor.action.selectAll");
         },
         clipboard: (t) => Promise.resolve(vscode.env.clipboard.writeText(t)),
         info: ui.info,
@@ -81,8 +86,13 @@ export function activate(context: vscode.ExtensionContext): void {
         ignoreFocusOut: true,
         prompt: "Throughline agent key (stored in VS Code secret storage)",
       });
-      if (input && input.trim()) {
-        await context.secrets.store(KEY_NAME, input.trim());
+      const key = input?.trim();
+      if (key) {
+        if (!validateKey(key)) {
+          void vscode.window.showErrorMessage("The key may only contain printable ASCII characters.");
+          return;
+        }
+        await context.secrets.store(KEY_NAME, key);
       }
       await status.refresh();
     }),

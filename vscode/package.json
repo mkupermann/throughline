@@ -27,7 +27,8 @@
         "throughline.url": {
           "type": "string",
           "default": "http://127.0.0.1:8788",
-          "description": "Address of the Throughline server. The extension calls only this address."
+          "scope": "machine",
+          "description": "Address of the Throughline server (http or https). The extension calls only this address. User settings only, a workspace cannot change it."
         },
         "throughline.project": {
           "type": "string",

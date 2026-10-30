@@ -347,6 +347,46 @@ async function steps(): Promise<void> {
     return `result copied: "${msg}"`;
   });
 
+  await step("sendToAgent to Cline: selection in the scratch tab, closed without a save prompt", async () => {
+    // A stand-in for Cline's command, registered in this extension host.
+    assert.ok((await vscode.commands.getCommands(true)).includes("workbench.action.revertAndCloseActiveEditor"));
+    let atAdd: { text: string; selected: string; dirty: boolean; untitled: boolean } | undefined;
+    let scratch: vscode.TextDocument | undefined;
+    const fake = vscode.commands.registerCommand("cline.addToChat", () => {
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) return;
+      scratch = ed.document;
+      atAdd = { text: ed.document.getText(), selected: ed.document.getText(ed.selection), dirty: ed.document.isDirty, untitled: ed.document.isUntitled };
+    });
+    const ran: string[] = [];
+    const realExec = vscode.commands.executeCommand;
+    stub(vscode.commands, "executeCommand", (id: string, ...a: unknown[]) => {
+      ran.push(id);
+      return realExec.call(vscode.commands, id, ...a);
+    });
+    try {
+      await vscode.env.clipboard.writeText("sentinel");
+      const cs = await exec("throughline.sendToAgent", { inputs: [""] });
+      noErrors();
+      const pack = toolText(only(cs, isMcp, "/mcp").body);
+      assert.ok(seen.infos.includes("Context sent to Cline."));
+      assert.equal(await vscode.env.clipboard.readText(), pack, "clipboard holds the pack");
+      assert.ok(atAdd && scratch, "cline.addToChat ran with an editor in front");
+      assert.ok(atAdd.untitled, "the scratch tab is in front");
+      assert.equal(atAdd.text, pack, "the scratch tab holds the pack");
+      assert.equal(atAdd.selected, pack, "the whole pack is selected");
+      assert.ok(ran.includes("workbench.action.revertAndCloseActiveEditor"), "closed with revert");
+      assert.ok(!ran.includes("workbench.action.closeActiveEditor"), "no plain close, which asks to save");
+      assert.ok(!ran.includes("editor.action.selectAll"), "no selectAll on whatever editor is active");
+      const doc = scratch;
+      assert.ok(!vscode.window.visibleTextEditors.some((e) => e.document === doc), "scratch tab closed");
+      return `pack of ${pack.length} characters selected (dirty at hand-over: ${atAdd.dirty}); commands: ${ran.join(", ")}`;
+    } finally {
+      stub(vscode.commands, "executeCommand", realExec);
+      fake.dispose();
+    }
+  });
+
   await step("openUi", async () => {
     const cs = await exec("throughline.openUi");
     noErrors();

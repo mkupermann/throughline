@@ -1,8 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { McpClient } from "../src/mcpClient";
-import { ThroughlineError } from "../src/errors";
-import { FakeServer, closedPort } from "./fakeServer";
+import { describe, NO_MCP_ENDPOINT, ThroughlineError } from "../src/errors";
+import { FakeServer, closedPort, type Recorded } from "./fakeServer";
 
 const srv = new FakeServer();
 const other = new FakeServer();
@@ -96,4 +96,44 @@ test("clients_never_call_another_host (mcp)", async () => {
   await new McpClient(`${srv.baseUrl}/prefix`, key).listProjects();
   assert.equal(srv.requests[0].path, "/prefix/mcp");
   assert.equal(other.requests.length, 0);
+});
+
+test("mcp_error_text_never_contains_the_key", async () => {
+  const secret = "s3cret-Key_0123456789";
+  const c = new McpClient(srv.baseUrl, async () => secret);
+  const echo = (r: Recorded) => `got ${r.headers["authorization"]}`;
+  const answers: Array<[number, (r: Recorded) => unknown]> = [
+    [401, (r) => ({ error: "unauthorized", detail: echo(r) })],
+    [401, (r) => echo(r)],
+    [200, (r) => rpcError(-32000, echo(r))],
+  ];
+  for (const [status, body] of answers) {
+    srv.respond(status, body);
+    const e = await c.call("stats", {}).then(
+      () => assert.fail("expected an error"),
+      (x: unknown) => x,
+    );
+    assert.ok(e instanceof ThroughlineError);
+    assert.ok(srv.requests.at(-1)?.headers["authorization"]?.includes(secret), "the server did see the key");
+    assert.ok(!e.message.includes(secret), `message: ${e.message}`);
+    assert.ok(!e.detail.includes(secret), `detail: ${e.detail}`);
+    assert.ok(!describe(e).includes(secret));
+    assert.match(describe(e), /\*\*\*/);
+  }
+});
+
+test("mcp_404_means_no_mcp_endpoint", async () => {
+  const c = new McpClient(srv.baseUrl, key);
+  srv.respond(404, "Not Found");
+  await assert.rejects(
+    () => c.call("stats", {}),
+    (e: unknown) => e instanceof ThroughlineError && e.kind === "protocol" && e.message === NO_MCP_ENDPOINT,
+  );
+  assert.equal(NO_MCP_ENDPOINT, "This Throughline server has no /mcp endpoint. Update the server.");
+  // A 404 with a JSON-RPC error comes from an MCP endpoint that exists.
+  srv.respond(404, rpcError(-32601, "method not found: x"));
+  await assert.rejects(
+    () => c.call("stats", {}),
+    (e: unknown) => e instanceof ThroughlineError && e.kind === "server" && /method not found/.test(e.message),
+  );
 });

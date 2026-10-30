@@ -10,6 +10,7 @@ export interface Recorded {
 
 export interface Canned {
   status: number;
+  /** A value, or a function of the request that returns one. */
   body: unknown;
 }
 
@@ -26,15 +27,17 @@ export class FakeServer {
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
-        this.requests.push({
+        const r: Recorded = {
           method: req.method ?? "",
           path: req.url ?? "",
           headers: req.headers,
           body: Buffer.concat(chunks).toString("utf8"),
-        });
+        };
+        this.requests.push(r);
         const c = this.queued.shift() ?? this.canned;
+        const body = typeof c.body === "function" ? c.body(r) : c.body;
         res.writeHead(c.status, { "Content-Type": "application/json" });
-        res.end(typeof c.body === "string" ? c.body : JSON.stringify(c.body));
+        res.end(typeof body === "string" ? body : JSON.stringify(body));
       });
     });
   }
