@@ -69,11 +69,32 @@ test("no_workspace_folder_asks_for_a_project", async () => {
   const b = fakeUi({ input: async () => undefined });
   await cmd.projectContext(deps(b.ui, undefined));
   assert.equal(srv.requests.length, 0);
-  // agent commands offer the server's project list
-  srv.respond(200, { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(["alpha", "beta"]) }] } });
-  const c = fakeUi({ pick: async (items) => (items.includes("alpha") ? "beta" : "decision") });
+  // agent commands offer the server's project list and use the pick
+  srv.requests.length = 0;
+  const rpc = (text: string) => ({ status: 200, body: { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text }] } } });
+  srv.queue(rpc(JSON.stringify(["alpha", "beta"])), rpc("ok"));
+  const offered: string[][] = [];
+  const c = fakeUi({ pick: async (items) => { offered.push(items); return items.includes("alpha") ? "beta" : "decision"; } });
   await cmd.rememberSelection(deps(c.ui, undefined, "k"));
-  assert.ok(srv.requests.length >= 2);
+  assert.ok(offered.some((i) => i.join() === "alpha,beta"), "the list_projects names were offered");
+  assert.equal(JSON.parse(srv.requests[0].body).params.name, "list_projects");
+  assert.equal(JSON.parse(srv.requests[1].body).params.arguments.project, "beta");
+});
+
+test("agent_project_choice_without_a_key_offers_to_set_it", async () => {
+  srv.requests.length = 0;
+  const { ui, log } = fakeUi();
+  await cmd.rememberSelection({ ...deps(ui, undefined), setKey: () => {} });
+  assert.deepEqual(log.actions, ["Set Agent Key"]);
+  assert.equal(log.inputs, 0);
+  assert.equal(srv.requests.length, 0);
+});
+
+test("open_ui_opens_the_configured_url", async () => {
+  const opened: string[] = [];
+  const { ui } = fakeUi({ openExternal: async (u) => void opened.push(u) });
+  await cmd.openUi(deps(ui, "demo"));
+  assert.deepEqual(opened, [srv.baseUrl]);
 });
 
 test("write_commands_need_a_key_and_offer_to_set_it", async () => {

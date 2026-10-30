@@ -42,7 +42,7 @@ export function conflictsToMarkdown(r: ConflictReport): string {
   for (const k of kinds) {
     lines.push(`## ${k}`, "");
     for (const c of r.conflicts.filter((x) => x.kind === k)) {
-      lines.push(`- ${c.left_id ?? "?"} vs ${c.right_id ?? "?"}: ${c.detail}`);
+      lines.push(`- ${c.left_id ?? "?"} vs ${c.right_id ?? "?"}: ${c.detail.replace(/\r?\n/g, " ")}`);
     }
     lines.push("");
   }

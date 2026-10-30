@@ -21,4 +21,15 @@ test("large_pack_is_capped_in_the_tree", () => {
   assert.equal(rows.length, 201);
   assert.equal(rows[200].label, "… and 800 more");
   assert.equal(rows[200].noteId, undefined);
+  assert.equal(rows[0].noteId, 0);
+  assert.equal(rows[5].noteId, 5);
+});
+
+test("context_rows_carry_ids_only_for_memory_citations", () => {
+  const p = { items: [
+    { section: "s", text: "a", tokens: 1, cite: { kind: "memory", id: 3 } },
+    { section: "s", text: "b", tokens: 1, cite: { kind: "session", id: 4 } },
+    { section: "s", text: "c", tokens: 1, cite: null },
+  ] } as unknown as ContextPack;
+  assert.deepEqual(shapeContext(p).map((r) => r.noteId), [3, undefined, undefined]);
 });

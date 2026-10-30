@@ -82,7 +82,9 @@ export async function chooseProject(d: Deps, viaMcp = false): Promise<string | u
   if (viaMcp) {
     try {
       names = await d.mcp.listProjects();
-    } catch {
+    } catch (e) {
+      // A missing key is the user's to fix; do not hide it behind a name prompt.
+      if (e instanceof ThroughlineError && e.kind === "no_key") throw e;
       names = [];
     }
   }
