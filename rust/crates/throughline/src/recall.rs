@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecallMode {
@@ -147,6 +148,8 @@ pub fn query_words(text: &str) -> Vec<String> {
 pub(crate) enum CandidateFilter {
     Current,
     AsOf,
+    /// Notes by id for the associative mode: everything but forgotten notes.
+    Ids,
 }
 
 /// A note that passed the filter, before scoring. `tags`, `source_id` and
@@ -182,7 +185,20 @@ pub(crate) fn candidates<C: GenericClient>(
     q: &RecallQuery,
     emb: Option<&QueryEmbedding>,
 ) -> Result<Vec<Candidate>> {
-    // $1 = valid_at, $2 = known_at, $3 = project, then model and vector.
+    load_candidates(client, filter, q, emb, &[])
+}
+
+/// `candidates`, plus the ids for `CandidateFilter::Ids` (one query for all).
+fn load_candidates<C: GenericClient>(
+    client: &mut C,
+    filter: CandidateFilter,
+    q: &RecallQuery,
+    emb: Option<&QueryEmbedding>,
+    ids: &[i64],
+) -> Result<Vec<Candidate>> {
+    // $1 = valid_at, $2 = known_at, $3 = project, then model and vector, then ids.
+    let id_param = if emb.is_some() { 6 } else { 4 };
+    let id_state = format!("mc.id = ANY(${id_param}) AND");
     let (valid_at, known_at, state) = match filter {
         CandidateFilter::Current => (
             Some(Utc::now()),
@@ -191,6 +207,8 @@ pub(crate) fn candidates<C: GenericClient>(
              AND mc.superseded_by IS NULL AND",
         ),
         CandidateFilter::AsOf => (q.valid_at, q.known_at, ""),
+        // Without both dates the predicate only drops forgotten notes.
+        CandidateFilter::Ids => (None, None, id_state.as_str()),
     };
     let predicate = temporal::as_of_predicate("$1", "$2");
     let project = q.project.map(str::to_string);
@@ -213,6 +231,9 @@ pub(crate) fn candidates<C: GenericClient>(
         }
         None => ("NULL::float8".to_string(), String::new()),
     };
+    if filter == CandidateFilter::Ids {
+        params.push(&ids);
+    }
     let sql = format!(
         r#"
         SELECT mc.id, mc.content, mc.category::text, mc.project_name,
@@ -316,6 +337,116 @@ pub(crate) fn score(
     (total, why)
 }
 
+/// Spread factor per step and the number of steps in associative mode.
+const SPREAD_FACTOR: f64 = 0.8;
+const MAX_HOPS: usize = 2;
+
+/// Notes one edge away from `frontier`: (id, relation, frontier id it comes
+/// from), in the order of the edge table, so the first row per id wins a tie.
+fn neighbour_edges<C: GenericClient>(
+    client: &mut C,
+    frontier: &[i64],
+) -> Result<Vec<(i64, &'static str, i64)>> {
+    let rows = client.query(
+        "SELECT id, prio, via FROM (
+            SELECT mc.id, 1 AS prio, mc.superseded_by AS via
+              FROM memory_chunks mc WHERE mc.superseded_by = ANY($1)
+            UNION ALL
+            SELECT mc.id, 1, f.id FROM memory_chunks f
+              JOIN memory_chunks mc ON mc.id = f.superseded_by WHERE f.id = ANY($1)
+            UNION ALL
+            SELECT mc.id, 2, f.id FROM memory_chunks f
+              JOIN memory_chunks mc ON mc.source_type = 'conversation'
+               AND mc.source_id = f.source_id AND mc.id <> f.id
+             WHERE f.id = ANY($1) AND f.source_type = 'conversation'
+            UNION ALL
+            SELECT mc.id, 3, f.id FROM memory_chunks f
+              JOIN memory_chunks mc ON mc.id <> f.id
+               AND EXISTS (SELECT 1 FROM unnest(COALESCE(f.tags, '{}')) t
+                           WHERE left(t, 5) = 'file:' AND t = ANY(COALESCE(mc.tags, '{}')))
+             WHERE f.id = ANY($1)
+            UNION ALL
+            SELECT mc.id, 4, f.id FROM memory_chunks f
+              JOIN memory_chunks mc ON mc.id <> f.id
+               AND (f.id = ANY(COALESCE(mc.merged_from, '{}'))
+                    OR mc.id = ANY(COALESCE(f.merged_from, '{}')))
+             WHERE f.id = ANY($1)
+         ) x WHERE id <> ALL($1) ORDER BY prio, id, via",
+        &[&frontier],
+    )?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let rel = match r.get::<_, i32>(1) {
+                1 => "chain",
+                2 => "same_conversation",
+                3 => "same_file",
+                _ => "merged",
+            };
+            (r.get(0), rel, r.get(2))
+        })
+        .collect())
+}
+
+/// Adds the neighbours of the seeds in `scored`, at most `MAX_HOPS` steps
+/// away. A neighbour scores `max(own score, seed score * 0.8^steps)`, with the
+/// spread in `why.spread`; reached twice, the higher score stays. Neighbours
+/// may be replaced or merged notes (relation "superseded"), never forgotten
+/// ones, and keep the project filter of the query. One query loads the notes
+/// of a step.
+fn associate<C: GenericClient>(
+    client: &mut C,
+    q: &RecallQuery,
+    emb: Option<&QueryEmbedding>,
+    words: &[String],
+    now: DateTime<Utc>,
+    scored: &mut Vec<(f64, Why, Candidate)>,
+    relations: &mut HashMap<i64, String>,
+) -> Result<()> {
+    let seeds: Vec<i64> = scored.iter().map(|s| s.2.id).collect();
+    // spread value each frontier note passes on
+    let mut frontier: HashMap<i64, f64> = scored.iter().map(|s| (s.2.id, s.0)).collect();
+    let mut found: HashMap<i64, (f64, Why, Candidate)> = HashMap::new();
+    for _ in 0..MAX_HOPS {
+        if frontier.is_empty() {
+            break;
+        }
+        let ids: Vec<i64> = frontier.keys().copied().collect();
+        // id -> (spread, relation)
+        let mut reached: HashMap<i64, (f64, &'static str)> = HashMap::new();
+        for (id, rel, via) in neighbour_edges(client, &ids)? {
+            if seeds.contains(&id) {
+                continue;
+            }
+            let spread = SPREAD_FACTOR * frontier[&via];
+            if reached.get(&id).is_none_or(|(best, _)| spread > *best) {
+                reached.insert(id, (spread, rel));
+            }
+        }
+        let wanted: Vec<i64> = reached.keys().copied().collect();
+        let mut next = HashMap::new();
+        if !wanted.is_empty() {
+            for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
+                let (spread, rel) = reached[&c.id];
+                let (own, mut why) = score(&c, words, emb.is_some(), now);
+                why.spread = Some(spread);
+                let total = own.max(spread);
+                let replaced = c.superseded_by.is_some()
+                    || matches!(c.status.as_str(), "superseded" | "merged");
+                next.insert(c.id, spread);
+                if found.get(&c.id).is_none_or(|(best, _, _)| total > *best) {
+                    relations.insert(c.id, if replaced { "superseded" } else { rel }.to_string());
+                    found.insert(c.id, (total, why, c));
+                }
+            }
+        }
+        frontier = next;
+    }
+    scored.extend(found.into_values());
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
+    Ok(())
+}
+
 pub fn recall<C: GenericClient>(
     client: &mut C,
     q: &RecallQuery,
@@ -329,6 +460,7 @@ pub fn recall<C: GenericClient>(
             }
             CandidateFilter::AsOf
         }
+        RecallMode::Associative => CandidateFilter::Current,
         other => bail!("recall mode {} is not available yet", other.as_str()),
     };
     let now = Utc::now();
@@ -351,10 +483,19 @@ pub fn recall<C: GenericClient>(
     } else {
         scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
     }
-    scored.truncate(q.limit.clamp(1, MAX_LIMIT));
+    let limit = q.limit.clamp(1, MAX_LIMIT);
+    scored.truncate(limit);
+    let mut relations: HashMap<i64, String> = HashMap::new();
+    if q.mode == RecallMode::Associative {
+        // The seeds already fill `limit`: allow twice as many, so the
+        // neighbours that rank high enough are visible.
+        associate(client, q, emb, &words, now, &mut scored, &mut relations)?;
+        scored.truncate((2 * limit).min(2 * MAX_LIMIT));
+    }
     let hits = scored
         .into_iter()
         .map(|(score, why, c)| RecallHit {
+            relation: relations.remove(&c.id),
             id: c.id,
             content: c.content,
             category: c.category,
@@ -369,7 +510,6 @@ pub fn recall<C: GenericClient>(
             supersedes: c.supersedes,
             score,
             why,
-            relation: None,
             evidence: None,
         })
         .collect();
@@ -839,5 +979,186 @@ mod tests {
         q.mode = RecallMode::AsOf;
         let err = recall(&mut tx, &q, None).unwrap_err();
         assert!(err.to_string().contains("as_of needs valid_at or known_at"));
+    }
+
+    fn replace<C: GenericClient>(client: &mut C, old: i64, new: i64) {
+        client
+            .execute(
+                "UPDATE memory_chunks SET superseded_by = $2, status = 'superseded' WHERE id = $1",
+                &[&old, &new],
+            )
+            .unwrap();
+    }
+
+    fn associative(text: &str, project: &str, limit: usize) -> RecallQuery<'static> {
+        // the text is leaked: a few bytes per test run
+        let text: &'static str = Box::leak(text.to_string().into_boxed_str());
+        let project: &'static str = Box::leak(project.to_string().into_boxed_str());
+        let mut q = query(text, Some(project));
+        q.mode = RecallMode::Associative;
+        q.limit = limit;
+        q
+    }
+
+    #[test]
+    fn recall_associative_adds_neighbours() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_associative_adds_neighbours: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let (cs, cn) = (format!("quokka {tag} seed"), "nothing alike".to_string());
+        let conv = 987_000_000 + i64::from(uuid::Uuid::new_v4().as_u128() as u32 % 1_000_000);
+        let mut ss = Seed::new(&cs, long_ago());
+        ss.project = Some(&project);
+        ss.source_type = "conversation";
+        ss.source_id = Some(conv);
+        let mut sn = Seed::new(&cn, long_ago());
+        sn.project = Some(&project);
+        sn.source_type = "conversation";
+        sn.source_id = Some(conv);
+        let (s, n) = (seed(&mut tx, &ss), seed(&mut tx, &sn));
+        let r = recall(
+            &mut tx,
+            &associative(&format!("quokka {tag}"), &project, 1),
+            None,
+        )
+        .unwrap();
+        assert_eq!(r.mode, "associative");
+        let hs = &r.hits[position(&r, s).unwrap()];
+        let hn = &r.hits[position(&r, n).unwrap()];
+        assert_eq!(hs.relation, None);
+        assert_eq!(hs.why.spread, None);
+        assert_eq!(hn.relation.as_deref(), Some("same_conversation"));
+        assert!((hn.why.spread.unwrap() - hs.score * 0.8).abs() < 1e-9);
+        assert!(hn.score >= hn.why.spread.unwrap());
+    }
+
+    #[test]
+    fn recall_associative_marks_replaced_neighbours() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_associative_marks_replaced_neighbours: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let (cs, cp) = (format!("okapi {tag} new"), "old wording".to_string());
+        let mut ss = Seed::new(&cs, long_ago());
+        ss.project = Some(&project);
+        let mut sp = Seed::new(&cp, long_ago());
+        sp.project = Some(&project);
+        let (s, p) = (seed(&mut tx, &ss), seed(&mut tx, &sp));
+        replace(&mut tx, p, s);
+        let r = recall(
+            &mut tx,
+            &associative(&format!("okapi {tag}"), &project, 5),
+            None,
+        )
+        .unwrap();
+        assert_eq!(r.hits[position(&r, s).unwrap()].relation, None);
+        let hp = &r.hits[position(&r, p).unwrap()];
+        assert_eq!(hp.relation.as_deref(), Some("superseded"));
+        assert_eq!(hp.superseded_by, Some(s));
+        assert!(hp.why.spread.is_some());
+    }
+
+    #[test]
+    fn recall_associative_stops_after_two_hops() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_associative_stops_after_two_hops: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let contents = [
+            format!("tapir {tag} head"),
+            "v1".into(),
+            "v2".into(),
+            "v3".into(),
+        ];
+        let ids: Vec<i64> = contents
+            .iter()
+            .map(|c| {
+                let mut sd = Seed::new(c, long_ago());
+                sd.project = Some(&project);
+                seed(&mut tx, &sd)
+            })
+            .collect();
+        for w in ids.windows(2) {
+            replace(&mut tx, w[1], w[0]);
+        }
+        let r = recall(
+            &mut tx,
+            &associative(&format!("tapir {tag}"), &project, 5),
+            None,
+        )
+        .unwrap();
+        let spread = |id: i64| r.hits[position(&r, id).unwrap()].why.spread.unwrap();
+        let head = &r.hits[position(&r, ids[0]).unwrap()];
+        assert!((spread(ids[1]) - head.score * 0.8).abs() < 1e-9);
+        assert!((spread(ids[2]) - head.score * 0.64).abs() < 1e-9);
+        assert_eq!(position(&r, ids[3]), None);
+    }
+
+    #[test]
+    fn recall_associative_follows_files_and_merges() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_associative_follows_files_and_merges: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let file = format!("file:src/{tag}.rs");
+        let cs = format!("axolotl {tag} head");
+        let mut ss = Seed::new(&cs, long_ago());
+        ss.project = Some(&project);
+        let (s, f, m) = (
+            seed(&mut tx, &ss),
+            seed(&mut tx, &Seed::new("same file", long_ago())),
+            seed(&mut tx, &Seed::new("merged away", long_ago())),
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET tags = ARRAY[$2]::text[] WHERE id = ANY($1)",
+            &[&vec![s, f], &file],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = ARRAY[$2]::bigint[] WHERE id = $1",
+            &[&s, &m],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'merged' WHERE id = $1",
+            &[&m],
+        )
+        .unwrap();
+        let rel = |r: &RecallResult, id: i64| r.hits[position(r, id).unwrap()].relation.clone();
+        let q = associative(&format!("axolotl {tag}"), &project, 1);
+        // limit 1 allows two hits: look at one edge at a time
+        tx.execute("UPDATE memory_chunks SET tags = '{}' WHERE id = $1", &[&f])
+            .unwrap();
+        let r2 = recall(&mut tx, &q, None).unwrap();
+        assert_eq!(rel(&r2, m).as_deref(), Some("superseded"));
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = '{}' WHERE id = $1",
+            &[&s],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET tags = ARRAY[$2]::text[] WHERE id = $1",
+            &[&f, &file],
+        )
+        .unwrap();
+        let r3 = recall(&mut tx, &q, None).unwrap();
+        assert_eq!(rel(&r3, f).as_deref(), Some("same_file"));
     }
 }
