@@ -177,6 +177,32 @@ The agent-memory import follows the same rules. A changed section becomes a succ
 
 Replacing a forgotten note keeps it forgotten. It points at its successor and gets an end date, but it shows up neither in History nor in an answer about a date. The import leaves a forgotten note forgotten when its section vanishes.
 
+## Recall: finding notes by meaning
+
+`recall` looks for notes the way you would describe them, not the way they were worded. It needs embeddings. `throughline embed` now embeds memory notes (every status except forgotten) before it turns to messages, so run it once after upgrading.
+
+```bash
+throughline recall "how do we deploy" --project demo --mode current --limit 5
+throughline recall "deployment target" --mode as_of --at 2026-01-15 --json
+```
+
+Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`). A mode that does not exist, a date that does not parse, or `as_of` without a date gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `valid_at`, `known_at` and `limit`. The MCP `search` tool also honours `project` now.
+
+The four modes differ in what they admit and how they rank:
+
+- `current` (the default) admits notes that hold now: not replaced, merged, forgotten or expired, from the given project and from notes without a project. It ranks by a weighted sum of cosine similarity (0.45), word overlap (0.20), recency (0.10, a decay with a 90-day scale), reliability (0.10), strength (0.10, a fixed placeholder of 0.5 for now) and provenance (0.05).
+- `as_of` needs `valid_at` or `known_at`. It admits notes that held on that day and match the question by words or by cosine of at least 0.5. It sorts by `valid_from` and shows the chain fields, so you see what replaced what.
+- `associative` takes the best current notes as seeds and adds neighbours through a replacement chain, the same conversation, the same file, or a merge. A neighbour's score is the seed's score times 0.8 per hop, with at most two hops. A replaced neighbour is labelled "superseded". It returns up to twice the limit.
+- `grounded` admits only notes whose chain started in a conversation that still exists, and attaches the source message that matches best (by cosine, by words if there is no vector). That checks a note against Throughline's own transcripts, not against the world.
+
+Without Ollama no vector exists for the question. Every mode then answers with `"degraded": "no_embeddings"` and ranks by words only. In the memory view, "By meaning" shows the same notice.
+
+### Measuring recall
+
+`throughline recall-eval --set <file> --k 5 [--seed 7] [--json]` runs a set of questions with known answers through `current`, plain cosine, full text, phrase match and random, and reports hit@k and the mean reciprocal rank (MRR). The set is a file you write from your own notes. Keep it outside the repository if the notes are private.
+
+A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5 with MRR 0.62, full text 66.7 % with MRR 0.53, cosine 63.3 % with MRR 0.57, random 3.3 %. So the weighted ranking did not beat plain full text on hits. It ranked the right note higher on average, but the bar set beforehand was five points over the better alternative, and that was not reached. Thirty questions from one corpus is a small sample, and the default ranking may change.
+
 ## Leaving things out of the ingest
 
 Some paths and projects should never reach the corpus at all. The ingest

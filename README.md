@@ -234,9 +234,9 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Area | Commands |
 | --- | --- |
 | Setup and health | `migrate`, `serve`, `status`, `doctor` |
-| Import and retrieve | `ingest`, `search`, `ask`, `handoff` |
+| Import and retrieve | `ingest`, `search`, `recall`, `ask`, `handoff` |
 | Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval` |
+| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval` |
 | Carry context forward | `scan-instructions`, `writeback`, `export-markdown` |
 | Protect and integrate | `backup`, `mcp` |
 
@@ -246,7 +246,7 @@ The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies
 
 Launch `throughline mcp` from a compatible client over stdio, with the database variables in that process's environment. The container equivalent is `docker compose run -i --rm mcp`.
 
-The Rust server advertises `search`, `list_projects`, `stats`, `write` and `forget`. All five actions run against a fresh schema. The older Python MCP server has a different tool contract.
+The Rust server advertises `search`, `recall`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall and supersede need the current schema. The older Python MCP server has a different tool contract.
 
 ### Optional models
 
