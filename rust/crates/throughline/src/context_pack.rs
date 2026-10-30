@@ -1,7 +1,13 @@
 //! Context pack: header, section headings and cited lines packed into a hard token budget.
 
+use crate::recall::{
+    candidates, recall, Candidate, CandidateFilter, QueryEmbedding, Rank, RecallHit, RecallMode,
+    RecallQuery, MAX_QUERY_CHARS,
+};
 use chrono::{DateTime, Utc};
+use postgres::GenericClient;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 pub const MIN_BUDGET: usize = 64;
 pub const MAX_BUDGET: usize = 32_768;
@@ -146,6 +152,337 @@ pub fn pack(header: &str, lines: &[Line], budget: usize) -> Result<ContextPack, 
         skipped,
         estimate: "max(words, ceil(chars/4))",
     })
+}
+
+impl std::fmt::Display for PackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackError::BudgetOutOfRange(n) => {
+                write!(f, "budget {n} is outside {MIN_BUDGET}..={MAX_BUDGET}")
+            }
+            PackError::HeaderTooLarge => write!(f, "the header does not fit the budget"),
+        }
+    }
+}
+
+impl std::error::Error for PackError {}
+
+pub struct ContextRequest<'a> {
+    pub project: &'a str,
+    pub task: Option<&'a str>,
+    pub budget: usize,
+}
+
+const DECISION_CATEGORIES: [&str; 3] = ["decision", "preference", "project_context"];
+const RELEVANT_LIMIT: usize = 20;
+const SESSION_LIMIT: i64 = 8;
+const SESSION_TITLE_CHARS: usize = 120;
+const QUESTION_LIMIT: usize = 5;
+const REVIEW_LIMIT: i64 = 5;
+
+fn ymd(d: DateTime<Utc>) -> String {
+    d.format("%Y-%m-%d").to_string()
+}
+
+/// The conversation a note comes from, resolved through its replacement chain.
+#[derive(Clone)]
+struct Origin {
+    id: i64,
+    title: Option<String>,
+    date: Option<DateTime<Utc>>,
+}
+
+impl Origin {
+    fn label(&self) -> String {
+        self.title
+            .clone()
+            .unwrap_or_else(|| format!("s#{}", self.id))
+    }
+}
+
+struct NoteView<'a> {
+    id: i64,
+    content: &'a str,
+    category: &'a str,
+    valid_from: DateTime<Utc>,
+    source_at: Option<DateTime<Utc>>,
+    conversation_id: Option<i64>,
+    session_title: &'a Option<String>,
+}
+
+/// `- [m#id · date · category] content (source: session "Title", date)`; the part in the last
+/// parentheses is left out for a note that does not come from a conversation.
+fn note_line(section: Section, n: &NoteView, origins: &mut HashMap<i64, Origin>) -> Line {
+    let date = n.source_at.unwrap_or(n.valid_from);
+    let mut text = format!(
+        "- [m#{} · {} · {}] {}",
+        n.id,
+        ymd(date),
+        n.category,
+        n.content
+    );
+    if let Some(conv) = n.conversation_id {
+        let o = Origin {
+            id: conv,
+            title: n.session_title.clone(),
+            date: n.source_at,
+        };
+        text.push_str(&format!(
+            " (source: session \"{}\", {})",
+            o.label(),
+            ymd(date)
+        ));
+        origins.insert(n.id, o);
+    }
+    Line {
+        section,
+        text,
+        cite: Some(Citation {
+            kind: "memory",
+            id: n.id,
+            date: Some(date),
+            title: n.session_title.clone(),
+        }),
+    }
+}
+
+fn hit_line(section: Section, h: &RecallHit, origins: &mut HashMap<i64, Origin>) -> Line {
+    note_line(
+        section,
+        &NoteView {
+            id: h.id,
+            content: &h.content,
+            category: &h.category,
+            valid_from: h.valid_from,
+            source_at: h.source_at,
+            conversation_id: h.conversation_id,
+            session_title: &h.session_title,
+        },
+        origins,
+    )
+}
+
+fn candidate_line(section: Section, c: &Candidate, origins: &mut HashMap<i64, Origin>) -> Line {
+    note_line(
+        section,
+        &NoteView {
+            id: c.id,
+            content: &c.content,
+            category: &c.category,
+            valid_from: c.valid_from,
+            source_at: c.source_at,
+            conversation_id: c.conversation_id,
+            session_title: &c.session_title,
+        },
+        origins,
+    )
+}
+
+/// Gathers the sections for `req.project` and packs them into `req.budget` tokens.
+/// A `PackError` comes back as an error with the text of the variant.
+pub fn build_context<C: GenericClient>(
+    client: &mut C,
+    req: &ContextRequest,
+    emb: Option<&QueryEmbedding>,
+) -> anyhow::Result<ContextPack> {
+    let header = format!(
+        "Context for {} · {} · budget {} tokens (estimated)",
+        req.project,
+        ymd(Utc::now()),
+        req.budget
+    );
+    let mut lines: Vec<Line> = Vec::new();
+    let mut origins: HashMap<i64, Origin> = HashMap::new();
+    let mut shown: HashSet<i64> = HashSet::new();
+
+    // One query for the current notes of the project; Decisions and OpenQuestions share it.
+    // Stale notes belong to the review section only, so they are not shown twice.
+    let query = RecallQuery {
+        text: "",
+        project: Some(req.project),
+        mode: RecallMode::Current,
+        valid_at: None,
+        known_at: None,
+        limit: RELEVANT_LIMIT,
+        rank: Rank::Fulltext,
+    };
+    let mut current: Vec<Candidate> = candidates(client, CandidateFilter::Current, &query, emb)?
+        .into_iter()
+        .filter(|c| c.status != "stale")
+        .collect();
+    current.sort_by(|a, b| b.valid_from.cmp(&a.valid_from).then(a.id.cmp(&b.id)));
+
+    for c in current
+        .iter()
+        .filter(|c| DECISION_CATEGORIES.contains(&c.category.as_str()))
+    {
+        shown.insert(c.id);
+        lines.push(candidate_line(Section::Decisions, c, &mut origins));
+    }
+
+    if let Some(task) = req.task.map(str::trim).filter(|t| !t.is_empty()) {
+        let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
+        let q = RecallQuery {
+            text: &text,
+            ..query
+        };
+        let hits = recall(client, &q, emb)?.hits;
+        for h in hits {
+            // Without a match the full-text rank is 0: not relevant to the task.
+            if h.score <= 0.0 || h.status == "stale" || !shown.insert(h.id) {
+                continue;
+            }
+            lines.push(hit_line(Section::Relevant, &h, &mut origins));
+        }
+    }
+
+    sessions(client, req.project, &mut lines)?;
+
+    let mut questions = 0;
+    for c in &current {
+        if questions == QUESTION_LIMIT {
+            break;
+        }
+        let lower = c.content.to_lowercase();
+        if shown.contains(&c.id)
+            || !(lower.contains('?') || lower.contains("todo") || lower.contains("open"))
+        {
+            continue;
+        }
+        shown.insert(c.id);
+        questions += 1;
+        lines.push(candidate_line(Section::OpenQuestions, c, &mut origins));
+    }
+
+    review(client, req.project, &shown, &mut lines)?;
+
+    // Sources: the sessions behind the lines that made it into the pack, first appearance first.
+    let first = pack(&header, &lines, req.budget).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut sources: Vec<Line> = Vec::new();
+    let mut seen: HashSet<i64> = HashSet::new();
+    for item in &first.items {
+        let Some(cite) = &item.cite else { continue };
+        let origin = match cite.kind {
+            "memory" => origins.get(&cite.id).cloned(),
+            "session" => Some(Origin {
+                id: cite.id,
+                title: cite.title.clone(),
+                date: cite.date,
+            }),
+            _ => None,
+        };
+        let Some(o) = origin else { continue };
+        if !seen.insert(o.id) {
+            continue;
+        }
+        let date = o.date.map(|d| format!(" · {}", ymd(d))).unwrap_or_default();
+        sources.push(Line {
+            section: Section::Sources,
+            text: format!("- [s#{}{}] \"{}\"", o.id, date, o.label()),
+            cite: Some(Citation {
+                kind: "session",
+                id: o.id,
+                date: o.date,
+                title: o.title.clone(),
+            }),
+        });
+    }
+    if sources.is_empty() {
+        return Ok(first);
+    }
+    lines.extend(sources);
+    pack(&header, &lines, req.budget).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Recent human sessions of the project: the summary as title, else the first user message.
+fn sessions<C: GenericClient>(
+    client: &mut C,
+    project: &str,
+    lines: &mut Vec<Line>,
+) -> anyhow::Result<()> {
+    let rows = client.query(
+        "SELECT c.id, c.started_at, COALESCE(c.source_tool, 'unknown'),
+                NULLIF(btrim(c.summary), ''),
+                (SELECT left(m.content, 400) FROM messages m
+                  WHERE m.conversation_id = c.id AND m.role::text = 'user'
+                    AND btrim(COALESCE(m.content, '')) <> ''
+                  ORDER BY m.created_at, m.id LIMIT 1)
+           FROM conversations c
+          WHERE c.project_name = $1 AND c.generated_by IS NULL
+          ORDER BY c.started_at DESC, c.id DESC
+          LIMIT $2",
+        &[&project, &SESSION_LIMIT],
+    )?;
+    for r in rows {
+        let id: i64 = r.get(0);
+        let started: DateTime<Utc> = r.get(1);
+        let tool: String = r.get(2);
+        let summary: Option<String> = r.get(3);
+        let first_message: Option<String> = r.get(4);
+        let title = summary
+            .or(first_message)
+            .map(|t| {
+                t.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(SESSION_TITLE_CHARS)
+                    .collect::<String>()
+            })
+            .unwrap_or_else(|| format!("session {id}"));
+        lines.push(Line {
+            section: Section::Sessions,
+            text: format!("- [s#{id} · {} · {tool}] {title}", ymd(started)),
+            cite: Some(Citation {
+                kind: "session",
+                id,
+                date: Some(started),
+                title: Some(title),
+            }),
+        });
+    }
+    Ok(())
+}
+
+/// Notes that are stale or have lapsed and have no successor; replaced and forgotten notes stay out.
+fn review<C: GenericClient>(
+    client: &mut C,
+    project: &str,
+    shown: &HashSet<i64>,
+    lines: &mut Vec<Line>,
+) -> anyhow::Result<()> {
+    let skip: Vec<i64> = shown.iter().copied().collect();
+    let rows = client.query(
+        "SELECT mc.id, mc.content, COALESCE(mc.status, 'active'),
+                COALESCE(mc.valid_from, mc.source_at, mc.created_at)
+           FROM memory_chunks mc
+          WHERE (mc.project_name = $1 OR mc.project_name IS NULL)
+            AND COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
+            AND mc.superseded_by IS NULL
+            AND NOT (mc.id = ANY($2))
+            AND (mc.status = 'stale' OR mc.expires_at <= now() OR mc.valid_to <= now())
+          ORDER BY COALESCE(mc.valid_from, mc.source_at, mc.created_at) DESC, mc.id
+          LIMIT $3",
+        &[&project, &skip, &REVIEW_LIMIT],
+    )?;
+    for r in rows {
+        let id: i64 = r.get(0);
+        let content: String = r.get(1);
+        let status: String = r.get(2);
+        let date: DateTime<Utc> = r.get(3);
+        let label = if status == "stale" { "stale" } else { "lapsed" };
+        lines.push(Line {
+            section: Section::Review,
+            text: format!("- [m#{id} · {} · {label}] {content}", ymd(date)),
+            cite: Some(Citation {
+                kind: "memory",
+                id,
+                date: Some(date),
+                title: None,
+            }),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -351,5 +688,296 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ---- build_context (database) ----
+
+    use crate::extract_memory::category_column_type;
+    use chrono::{Duration, TimeZone};
+    use postgres::NoTls;
+
+    fn test_db() -> Option<postgres::Client> {
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(NoTls).ok()
+    }
+
+    macro_rules! db_tx {
+        ($name:literal, $tx:ident) => {
+            let Some(mut client) = test_db() else {
+                eprintln!("skipping {}: no PostgreSQL reachable", $name);
+                return;
+            };
+            let mut $tx = client.transaction().unwrap();
+        };
+    }
+
+    fn proj() -> String {
+        format!("ctx-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn day(d: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, d, 12, 0, 0).unwrap()
+    }
+
+    struct Seed<'a> {
+        content: &'a str,
+        category: &'a str,
+        project: Option<&'a str>,
+        source: Option<i64>,
+        status: &'a str,
+        valid_from: DateTime<Utc>,
+        expires_at: Option<DateTime<Utc>>,
+    }
+
+    fn seed<'a>(content: &'a str, project: Option<&'a str>, category: &'a str, d: u32) -> Seed<'a> {
+        Seed {
+            content,
+            category,
+            project,
+            source: None,
+            status: "active",
+            valid_from: day(d),
+            expires_at: None,
+        }
+    }
+
+    fn insert<C: GenericClient>(tx: &mut C, s: &Seed) -> i64 {
+        let ct = category_column_type(tx).unwrap();
+        let source_type = if s.source.is_some() {
+            "conversation"
+        } else {
+            "manual"
+        };
+        tx.query_one(
+            &format!(
+                "INSERT INTO memory_chunks (source_type, source_id, content, category, \
+                 project_name, confidence, tags, status, valid_from, expires_at) \
+                 VALUES ($1, $2, $3, $4::text::{ct}, $5, 0.8::float8, '{{}}', $6, $7, $8) \
+                 RETURNING id"
+            ),
+            &[
+                &source_type,
+                &s.source,
+                &s.content,
+                &s.category,
+                &s.project,
+                &s.status,
+                &s.valid_from,
+                &s.expires_at,
+            ],
+        )
+        .unwrap()
+        .get(0)
+    }
+
+    fn conv<C: GenericClient>(tx: &mut C, project: &str, summary: Option<&str>, d: u32) -> i64 {
+        tx.query_one(
+            "INSERT INTO conversations (session_id, project_path, started_at, summary) \
+             VALUES ($1, $2, $3, $4) RETURNING id",
+            &[
+                &uuid::Uuid::new_v4(),
+                &format!("/fictional/{project}"),
+                &day(d),
+                &summary,
+            ],
+        )
+        .unwrap()
+        .get(0)
+    }
+
+    fn ctx<C: GenericClient>(tx: &mut C, project: &str, task: Option<&str>) -> ContextPack {
+        build_context(
+            tx,
+            &ContextRequest {
+                project,
+                task,
+                budget: 8_000,
+            },
+            None,
+        )
+        .unwrap()
+    }
+
+    fn pos(p: &ContextPack, needle: &str) -> usize {
+        p.text
+            .find(needle)
+            .unwrap_or_else(|| panic!("{needle:?} missing in:\n{}", p.text))
+    }
+
+    #[test]
+    fn decisions_come_first_and_stay_in_the_project() {
+        db_tx!("decisions_come_first_and_stay_in_the_project", tx);
+        let (p, q) = (proj(), proj());
+        conv(&mut tx, &p, Some("Planning"), 1);
+        insert(
+            &mut tx,
+            &seed("alpha decision in P", Some(&p), "decision", 5),
+        );
+        insert(
+            &mut tx,
+            &seed("beta decision in Q", Some(&q), "decision", 6),
+        );
+        insert(
+            &mut tx,
+            &seed("gamma decision without project", None, "decision", 4),
+        );
+        let out = ctx(&mut tx, &p, None);
+        assert!(out.text.starts_with(&format!("Context for {p} · ")));
+        assert!(out.text.contains("alpha decision in P"));
+        assert!(out.text.contains("gamma decision without project"));
+        assert!(!out.text.contains("beta decision in Q"));
+        let d = pos(&out, "## Decisions");
+        assert!(d < pos(&out, "## Recent sessions"));
+        assert!(pos(&out, "alpha decision in P") < pos(&out, "gamma decision without project"));
+        assert!(out.text.contains("· decision] alpha decision in P"));
+    }
+
+    #[test]
+    fn replaced_and_forgotten_notes_stay_out() {
+        db_tx!("replaced_and_forgotten_notes_stay_out", tx);
+        let p = proj();
+        let mut old = seed("old replaced marker", Some(&p), "decision", 1);
+        old.status = "superseded";
+        insert(&mut tx, &old);
+        let mut gone = seed("forgotten marker", Some(&p), "decision", 2);
+        gone.status = "forgotten";
+        insert(&mut tx, &gone);
+        let mut lapsed = seed("lapsed marker", Some(&p), "decision", 3);
+        lapsed.expires_at = Some(Utc::now() - Duration::days(2));
+        insert(&mut tx, &lapsed);
+        insert(&mut tx, &seed("live marker", Some(&p), "decision", 4));
+        let out = ctx(&mut tx, &p, Some("marker"));
+        assert!(!out.text.contains("old replaced marker"));
+        assert!(!out.text.contains("forgotten marker"));
+        assert!(out.text.contains("live marker"));
+        let review = pos(&out, "## Needs review");
+        let at = pos(&out, "lapsed marker");
+        assert!(at > review, "lapsed note only in Review");
+        assert_eq!(out.text.matches("lapsed marker").count(), 1);
+    }
+
+    #[test]
+    fn a_note_appears_once() {
+        db_tx!("a_note_appears_once", tx);
+        let p = proj();
+        insert(
+            &mut tx,
+            &seed("use zebra stripes everywhere?", Some(&p), "decision", 3),
+        );
+        let out = ctx(&mut tx, &p, Some("zebra stripes"));
+        assert_eq!(out.text.matches("zebra stripes everywhere").count(), 1);
+        assert!(!out.text.contains("## Relevant to the task"));
+        assert!(!out.text.contains("## Open questions"));
+    }
+
+    #[test]
+    fn relevant_needs_a_task() {
+        db_tx!("relevant_needs_a_task", tx);
+        let p = proj();
+        insert(&mut tx, &seed("quokka detail", Some(&p), "insight", 3));
+        let without = ctx(&mut tx, &p, None);
+        assert!(!without.text.contains("## Relevant to the task"));
+        assert!(!without.text.contains("quokka detail"));
+        let blank = ctx(&mut tx, &p, Some("   "));
+        assert!(!blank.text.contains("## Relevant to the task"));
+        let with = ctx(&mut tx, &p, Some("quokka"));
+        assert!(with.text.contains("## Relevant to the task"));
+        assert!(with.text.contains("quokka detail"));
+    }
+
+    #[test]
+    fn every_citation_resolves() {
+        db_tx!("every_citation_resolves", tx);
+        let p = proj();
+        let g = conv(&mut tx, &p, Some("Design talk"), 2);
+        let mut s = seed("cited decision", Some(&p), "decision", 5);
+        s.source = Some(g);
+        insert(&mut tx, &s);
+        insert(&mut tx, &seed("a todo item", Some(&p), "insight", 4));
+        let mut stale = seed("stale thing", Some(&p), "insight", 3);
+        stale.status = "stale";
+        insert(&mut tx, &stale);
+        let out = ctx(&mut tx, &p, Some("cited"));
+        assert!(!out.citations.is_empty());
+        for c in &out.citations {
+            let table = match c.kind {
+                "memory" => "memory_chunks",
+                "session" => "conversations",
+                k => panic!("unknown kind {k}"),
+            };
+            let n: i64 = tx
+                .query_one(
+                    &format!("SELECT count(*) FROM {table} WHERE id = $1"),
+                    &[&c.id],
+                )
+                .unwrap()
+                .get(0);
+            assert_eq!(n, 1, "{} {}", c.kind, c.id);
+        }
+        assert!(out
+            .citations
+            .iter()
+            .any(|c| c.kind == "session" && c.id == g));
+        assert!(out.citations.iter().any(|c| c.kind == "memory"));
+    }
+
+    #[test]
+    fn sources_list_the_root_session() {
+        db_tx!("sources_list_the_root_session", tx);
+        let p = proj();
+        let g = conv(&mut tx, &p, Some("Root session"), 2);
+        let mut a = seed("first version", Some(&p), "decision", 3);
+        a.source = Some(g);
+        a.status = "superseded";
+        let a_id = insert(&mut tx, &a);
+        let b_id = insert(&mut tx, &seed("second version", Some(&p), "decision", 6));
+        tx.execute(
+            "UPDATE memory_chunks SET superseded_by = $1 WHERE id = $2",
+            &[&b_id, &a_id],
+        )
+        .unwrap();
+        let out = ctx(&mut tx, &p, None);
+        assert!(out.text.contains("second version"));
+        assert!(!out.text.contains("first version"));
+        let sources = &out.text[pos(&out, "## Sources")..];
+        assert!(
+            sources.contains(&format!("- [s#{g} · 2026-03-02] \"Root session\"")),
+            "{sources}"
+        );
+        assert!(out
+            .text
+            .contains("(source: session \"Root session\", 2026-03-02)"));
+    }
+
+    #[test]
+    fn empty_project_gives_only_the_header() {
+        db_tx!("empty_project_gives_only_the_header", tx);
+        let p = proj();
+        let out = ctx(&mut tx, &p, Some("anything"));
+        assert!(out.items.is_empty());
+        assert!(!out.text.contains('\n'));
+        assert_eq!(
+            out.text,
+            format!(
+                "Context for {p} · {} · budget 8000 tokens (estimated)",
+                Utc::now().format("%Y-%m-%d")
+            )
+        );
     }
 }
