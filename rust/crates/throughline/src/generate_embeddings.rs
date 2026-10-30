@@ -47,7 +47,7 @@ impl EmbedProgress {
     }
 }
 
-/// Active notes and messages with text, and how many of them have a vector
+/// Notes (not forgotten) and messages with text, and how many of them have a vector
 /// for `backend.model` in its column.
 pub fn embed_progress<C: GenericClient>(
     client: &mut C,
@@ -64,7 +64,7 @@ pub fn embed_progress<C: GenericClient>(
     let notes_total = count(
         client,
         "SELECT count(*) FROM memory_chunks \
-         WHERE COALESCE(status, 'active') = 'active' AND COALESCE(content, '') <> ''"
+         WHERE COALESCE(status, 'active') <> 'forgotten' AND COALESCE(content, '') <> ''"
             .into(),
         None,
     )?;
@@ -80,7 +80,7 @@ pub fn embed_progress<C: GenericClient>(
              JOIN memory_chunks c ON c.id = e.source_id \
              WHERE e.source_type = 'memory_chunk' AND e.model = $1 \
                AND e.{column} IS NOT NULL \
-               AND COALESCE(c.status, 'active') = 'active' AND COALESCE(c.content, '') <> ''"
+               AND COALESCE(c.status, 'active') <> 'forgotten' AND COALESCE(c.content, '') <> ''"
         ),
         Some(&backend.model),
     )?;
@@ -146,7 +146,7 @@ pub fn embed_pending<C: GenericClient>(
 }
 
 /// Like [`embed_pending`] with a caller-supplied embedder (tests, no Ollama).
-/// Forgotten notes are skipped; superseded ones keep their vector.
+/// Forgotten notes are skipped; superseded and status-less ones count as candidates.
 pub fn embed_pending_with<C: GenericClient, F: Fn(&str) -> Result<Vec<f32>>>(
     client: &mut C,
     backend: &EmbeddingBackend,
@@ -154,21 +154,25 @@ pub fn embed_pending_with<C: GenericClient, F: Fn(&str) -> Result<Vec<f32>>>(
     embed: F,
 ) -> Result<EmbedSummary> {
     let mut summary = EmbedSummary::default();
+    let column = backend.column;
     let notes = client.query(
-        r#"
+        &format!(
+            r#"
             SELECT c.id, left(c.content, 4000)
             FROM memory_chunks c
-            WHERE c.status <> 'forgotten'
+            WHERE COALESCE(c.status, 'active') <> 'forgotten'
               AND COALESCE(c.content, '') <> ''
               AND NOT EXISTS (
                 SELECT 1 FROM embeddings e
                 WHERE e.source_type = 'memory_chunk'
                   AND e.source_id = c.id
                   AND e.model = $1
+                  AND e.{column} IS NOT NULL
               )
             ORDER BY c.id DESC
             LIMIT $2::bigint
-            "#,
+            "#
+        ),
         &[&backend.model, &(limit as i64)],
     );
     let notes = match notes {
@@ -187,7 +191,8 @@ pub fn embed_pending_with<C: GenericClient, F: Fn(&str) -> Result<Vec<f32>>>(
 
     // Messages without a vector in this backend's column.
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
             SELECT m.id, left(COALESCE(m.content, ''), 4000)
             FROM messages m
             WHERE COALESCE(m.content, '') <> ''
@@ -196,10 +201,12 @@ pub fn embed_pending_with<C: GenericClient, F: Fn(&str) -> Result<Vec<f32>>>(
                 WHERE e.source_type = 'message'
                   AND e.source_id = m.id
                   AND e.model = $1
+                  AND e.{column} IS NOT NULL
               )
             ORDER BY m.id DESC
             LIMIT $2::bigint
-            "#,
+            "#
+        ),
         &[&backend.model, &(remaining as i64)],
     );
 
@@ -514,5 +521,79 @@ mod tests {
         assert_eq!(after.model, backend.model);
         assert_eq!(after.notes_done, 2);
         assert_eq!(after.messages_done, 1);
+    }
+
+    #[test]
+    fn superseded_note_is_pending_and_counted() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping superseded_note_is_pending_and_counted: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let backend = test_backend();
+        let before = embed_progress(&mut tx, &backend).unwrap();
+        let id = seed_note(&mut tx, "old note", "superseded");
+        let mid = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!(mid.notes_total, before.notes_total + 1);
+        assert_eq!(mid.notes_done, 0);
+        let (_, missing) = crate::doctor::embedding_lines(&mut tx, &backend, Ok(None)).unwrap();
+        assert_ne!(missing, "complete");
+        embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
+        assert!(embedded_rows(&mut tx, &backend.model, "memory_chunk").contains(&id));
+        let after = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!(after.notes_done, 1);
+        assert_eq!(after.notes_missing(), before.notes_total);
+    }
+
+    #[test]
+    fn null_status_note_is_embedded() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping null_status_note_is_embedded: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let backend = test_backend();
+        let id = seed_note(&mut tx, "no status", "active");
+        if tx
+            .execute(
+                "UPDATE memory_chunks SET status = NULL WHERE id = $1",
+                &[&id],
+            )
+            .is_err()
+        {
+            eprintln!("skipping null_status_note_is_embedded: status is NOT NULL here");
+            return;
+        }
+        let before = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!(before.notes_done, 0);
+        embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
+        assert!(embedded_rows(&mut tx, &backend.model, "memory_chunk").contains(&id));
+        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 1);
+    }
+
+    #[test]
+    fn null_vector_row_is_filled() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping null_vector_row_is_filled: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let backend = test_backend();
+        let id = seed_note(&mut tx, "half embedded", "active");
+        if tx
+            .execute(
+                "INSERT INTO embeddings (source_type, source_id, model) \
+                 VALUES ('memory_chunk', $1, $2)",
+                &[&id, &backend.model],
+            )
+            .is_err()
+        {
+            eprintln!("skipping null_vector_row_is_filled: row without vector not allowed");
+            return;
+        }
+        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 0);
+        let summary = embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
+        assert_eq!(summary.embedded, 1);
+        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 1);
     }
 }
