@@ -133,3 +133,4 @@ throughline-operate-quality-pass.png
 vscode/node_modules
 vscode/dist
 vscode/*.vsix
+vscode/.vscode-test
