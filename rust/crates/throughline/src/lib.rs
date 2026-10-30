@@ -9,6 +9,7 @@ pub mod audit;
 pub mod config;
 pub mod config_import;
 pub mod conflicts;
+pub mod context_pack;
 pub mod costs;
 pub mod decisions;
 pub mod doctor;
