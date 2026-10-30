@@ -303,16 +303,15 @@ path:
         assert_eq!(r.pattern, "**/x.jsonl");
     }
 
-    /// Throwaway dir inside the repo (never %TEMP%) for file-reading tests.
-    fn unit_dir() -> PathBuf {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tmp_m9_unit");
-        std::fs::create_dir_all(&dir).ok();
-        dir
+    /// Throwaway dir for file-reading tests, removed when the test ends.
+    fn unit_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("temp dir")
     }
 
     #[test]
     fn read_ignore_file_missing_is_silent_and_empty() {
-        let missing = unit_dir().join("definitely-not-a-real-ignore-file");
+        let dir = unit_dir();
+        let missing = dir.path().join("definitely-not-a-real-ignore-file");
         assert!(read_ignore_file(&missing).is_empty());
     }
 
@@ -320,12 +319,13 @@ path:
     fn read_ignore_file_unreadable_does_not_abort() {
         // A directory cannot be read as a file → warn path, zero rules, no panic.
         let dir = unit_dir();
-        assert!(read_ignore_file(&dir).is_empty());
+        assert!(read_ignore_file(dir.path()).is_empty());
     }
 
     #[test]
     fn read_ignore_file_parses_rules() {
-        let path = unit_dir().join("unit_ignore_file");
+        let dir = unit_dir();
+        let path = dir.path().join("unit_ignore_file");
         std::fs::write(&path, "# c\nproject:acme\n**/drop.jsonl\n").unwrap();
         let parsed = read_ignore_file(&path);
         assert_eq!(parsed.len(), 2);
