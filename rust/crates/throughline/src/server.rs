@@ -1089,10 +1089,13 @@ struct RecallParams {
     valid_at: Option<String>,
     known_at: Option<String>,
     limit: Option<i64>,
+    /// `fulltext` (default) | `weighted`
+    rank: Option<String>,
 }
 
 struct ParsedRecall {
     mode: crate::recall::RecallMode,
+    rank: crate::recall::Rank,
     valid_at: Option<chrono::DateTime<chrono::Utc>>,
     known_at: Option<chrono::DateTime<chrono::Utc>>,
     limit: usize,
@@ -1112,6 +1115,15 @@ fn parse_recall_params(
         None => crate::recall::RecallMode::Current,
         Some(m) => m.parse().map_err(invalid)?,
     };
+    let rank = match params
+        .rank
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+    {
+        None => crate::recall::Rank::default(),
+        Some(r) => r.parse().map_err(invalid)?,
+    };
     let (valid_at, known_at) = parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref())?;
     if mode == crate::recall::RecallMode::AsOf && valid_at.is_none() && known_at.is_none() {
         return Err(invalid("as_of needs valid_at or known_at".into()));
@@ -1122,6 +1134,7 @@ fn parse_recall_params(
         .clamp(1, 50) as usize;
     Ok(ParsedRecall {
         mode,
+        rank,
         valid_at,
         known_at,
         limit,
@@ -1148,11 +1161,16 @@ async fn recall_handler(
     }
     // Embed before taking the shared DB lock: a slow Ollama must not stall
     // other requests. The call blocks, so it gets its own blocking task.
-    let embed_text = text.clone();
-    let emb = tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text))
-        .await
-        .ok()
-        .flatten();
+    // Full text in mode current needs no vector and never asks Ollama.
+    let emb = if crate::recall::needs_embedding(parsed.mode, parsed.rank) {
+        let embed_text = text.clone();
+        tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     match with_db(&state, move |client| {
         let q = crate::recall::RecallQuery {
             text: &text,
@@ -1161,6 +1179,7 @@ async fn recall_handler(
             valid_at: parsed.valid_at,
             known_at: parsed.known_at,
             limit: parsed.limit,
+            rank: parsed.rank,
         };
         crate::recall::recall(client, &q, emb.as_ref())
     })
@@ -3656,8 +3675,15 @@ mod tests {
             valid_at: v.map(String::from),
             known_at: k.map(String::from),
             limit: None,
+            rank: None,
+        };
+        let ranked = |r: &str| RecallParams {
+            rank: Some(r.into()),
+            ..p(None, None, None)
         };
         for bad in [
+            ranked("foo"),
+            ranked("Weighted"),
             p(Some("foo"), None, None),
             p(Some("as_of"), None, None),
             p(Some("as_of"), Some("yesterday"), None),
@@ -3673,6 +3699,13 @@ mod tests {
         let dflt = parse_recall_params(&p(None, None, None)).unwrap();
         assert_eq!(dflt.mode, crate::recall::RecallMode::Current);
         assert_eq!(dflt.limit, 10);
+        assert_eq!(dflt.rank, crate::recall::Rank::Fulltext);
+        let w = parse_recall_params(&ranked("weighted")).unwrap();
+        assert_eq!(w.rank, crate::recall::Rank::Weighted);
+        assert_eq!(
+            parse_recall_params(&ranked(" ")).unwrap().rank,
+            crate::recall::Rank::Fulltext
+        );
     }
 
     /// Connect to the throwaway DB (`PG*` env). Skip when unreachable so

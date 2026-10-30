@@ -44,6 +44,44 @@ impl std::str::FromStr for RecallMode {
     }
 }
 
+/// How the candidates are ordered. Full text is the default: in the first
+/// measurement the weighted ranking did not beat it by the bar set beforehand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Rank {
+    /// `ts_rank` of the question words, the method `recall-eval` measured.
+    #[default]
+    Fulltext,
+    /// The weighted sum of `WEIGHTS`.
+    Weighted,
+}
+
+impl Rank {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Rank::Fulltext => "fulltext",
+            Rank::Weighted => "weighted",
+        }
+    }
+}
+
+impl std::str::FromStr for Rank {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "fulltext" => Ok(Rank::Fulltext),
+            "weighted" => Ok(Rank::Weighted),
+            other => Err(format!("unknown rank: {other}")),
+        }
+    }
+}
+
+/// Whether a request uses the question's vector: the weighted ranking, the
+/// cosine gate of `as_of` and the evidence of `grounded`. Callers embed the
+/// question only then, so full text in `current` never waits for Ollama.
+pub fn needs_embedding(mode: RecallMode, rank: Rank) -> bool {
+    rank == Rank::Weighted || matches!(mode, RecallMode::AsOf | RecallMode::Grounded)
+}
+
 pub const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
 
@@ -56,6 +94,7 @@ pub struct RecallQuery<'a> {
     /// 1..=50, default 10. Associative mode returns up to 2 × limit (max 100):
     /// the seeds fill `limit`, the neighbours get the same room again.
     pub limit: usize,
+    pub rank: Rank,
 }
 
 pub struct QueryEmbedding {
@@ -86,6 +125,8 @@ pub struct Why {
     pub provenance: f64,
     pub spread: Option<f64>,
     pub grounding: Option<f64>,
+    /// `ts_rank` of the note when the full-text ranking ordered the hits.
+    pub fulltext: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +203,46 @@ pub fn query_words(text: &str) -> Vec<String> {
         }
     }
     words
+}
+
+/// `to_tsquery` string of OR-joined words; only `[a-z0-9äöüß]` survives.
+pub fn fulltext_tsquery(words: &[String]) -> Option<String> {
+    let clean: Vec<String> = words
+        .iter()
+        .map(|w| {
+            w.to_lowercase()
+                .chars()
+                .filter(|c| matches!(c, 'a'..='z' | '0'..='9' | 'ä' | 'ö' | 'ü' | 'ß'))
+                .collect::<String>()
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    if clean.is_empty() {
+        None
+    } else {
+        Some(clean.join(" | "))
+    }
+}
+
+/// `ts_rank` of the notes `ids` against the OR-joined `words`. A note without
+/// a match, or every note when no word is left, is missing and counts as 0.
+pub(crate) fn fulltext_ranks<C: GenericClient>(
+    client: &mut C,
+    words: &[String],
+    ids: &[i64],
+) -> Result<HashMap<i64, f64>> {
+    let Some(tsq) = fulltext_tsquery(words) else {
+        return Ok(HashMap::new());
+    };
+    let rows = client.query(
+        "SELECT id, ts_rank(to_tsvector('simple', content), to_tsquery('simple', $1))::float8 \
+         FROM memory_chunks WHERE id = ANY($2)",
+        &[&tsq, &ids],
+    )?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get::<_, i64>(0), r.get::<_, f64>(1)))
+        .collect())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +425,7 @@ pub(crate) fn score(
         provenance: provenance(&c.source_type),
         spread: None,
         grounding: None,
+        fulltext: None,
     };
     let rest = w.lexical * why.lexical
         + w.recency * why.recency
@@ -355,6 +437,32 @@ pub(crate) fn score(
         None => rest / (1.0 - w.cosine),
     };
     (total, why)
+}
+
+/// Score of one candidate by the chosen rank: its `ts_rank` (0 without a
+/// match) when `fulltext` holds the ranks, else the weighted score. The
+/// weighted parts stay in `Why` either way.
+fn rank_score(
+    c: &Candidate,
+    words: &[String],
+    has_embedding: bool,
+    now: DateTime<Utc>,
+    fulltext: Option<&HashMap<i64, f64>>,
+) -> (f64, Why) {
+    let (weighted, mut why) = score(c, words, has_embedding, now);
+    match fulltext {
+        Some(ranks) => {
+            let r = ranks.get(&c.id).copied().unwrap_or(0.0);
+            why.fulltext = Some(r);
+            (r, why)
+        }
+        None => (weighted, why),
+    }
+}
+
+/// Highest score first, the lower id first on a tie.
+fn by_score(scored: &mut [(f64, Why, Candidate)]) {
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
 }
 
 /// Spread factor per step and the number of steps in associative mode.
@@ -409,7 +517,8 @@ fn neighbour_edges<C: GenericClient>(
 }
 
 /// Adds the neighbours of the seeds in `scored`, at most `MAX_HOPS` steps
-/// away. A neighbour scores `max(own score, seed score * 0.8^steps)`, with the
+/// away. A neighbour scores `max(own score, seed score * 0.8^steps)`, its own
+/// score by the rank of the query, with the
 /// spread in `why.spread`; reached twice, the higher score stays. Neighbours
 /// may be replaced or merged notes (relation "superseded"), never forgotten
 /// ones, and keep the project filter of the query. One query loads the notes
@@ -446,9 +555,13 @@ fn associate<C: GenericClient>(
         let wanted: Vec<i64> = reached.keys().copied().collect();
         let mut next = HashMap::new();
         if !wanted.is_empty() {
+            let fulltext = match q.rank {
+                Rank::Fulltext => Some(fulltext_ranks(client, words, &wanted)?),
+                Rank::Weighted => None,
+            };
             for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
                 let (spread, rel) = reached[&c.id];
-                let (own, mut why) = score(&c, words, emb.is_some(), now);
+                let (own, mut why) = rank_score(&c, words, emb.is_some(), now, fulltext.as_ref());
                 why.spread = Some(spread);
                 let total = own.max(spread);
                 let replaced = c.superseded_by.is_some()
@@ -463,7 +576,7 @@ fn associate<C: GenericClient>(
         frontier = next;
     }
     scored.extend(found.into_values());
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
+    by_score(scored);
     Ok(())
 }
 
@@ -573,10 +686,18 @@ pub fn recall<C: GenericClient>(
     };
     let now = Utc::now();
     let words = query_words(q.text);
-    let mut scored: Vec<(f64, Why, Candidate)> = candidates(client, filter, q, emb)?
+    let cands = candidates(client, filter, q, emb)?;
+    let fulltext = match q.rank {
+        Rank::Fulltext => {
+            let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
+            Some(fulltext_ranks(client, &words, &ids)?)
+        }
+        Rank::Weighted => None,
+    };
+    let mut scored: Vec<(f64, Why, Candidate)> = cands
         .into_iter()
         .map(|c| {
-            let (s, why) = score(&c, &words, emb.is_some(), now);
+            let (s, why) = rank_score(&c, &words, emb.is_some(), now, fulltext.as_ref());
             (s, why, c)
         })
         .collect();
@@ -589,7 +710,7 @@ pub fn recall<C: GenericClient>(
                 .then(a.2.id.cmp(&b.2.id))
         });
     } else {
-        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
+        by_score(&mut scored);
     }
     let limit = q.limit.clamp(1, MAX_LIMIT);
     let mut evidence: HashMap<i64, Evidence> = HashMap::new();
@@ -652,7 +773,8 @@ pub fn recall<C: GenericClient>(
     Ok(RecallResult {
         mode: q.mode.as_str().to_string(),
         hits,
-        degraded: emb.is_none().then(|| "no_embeddings".to_string()),
+        degraded: (needs_embedding(q.mode, q.rank) && emb.is_none())
+            .then(|| "no_embeddings".to_string()),
     })
 }
 
@@ -760,7 +882,14 @@ mod tests {
             valid_at: None,
             known_at: None,
             limit: 50,
+            rank: Rank::Fulltext,
         }
+    }
+
+    fn weighted<'a>(text: &'a str, project: Option<&'a str>) -> RecallQuery<'a> {
+        let mut q = query(text, project);
+        q.rank = Rank::Weighted;
+        q
     }
 
     fn model_name() -> String {
@@ -807,7 +936,7 @@ mod tests {
         let emb = query_embedding(&model);
         let r = recall(
             &mut tx,
-            &query("kafka retention", Some(&project)),
+            &weighted("kafka retention", Some(&project)),
             Some(&emb),
         )
         .unwrap();
@@ -918,7 +1047,7 @@ mod tests {
         let mut s = Seed::new(&content, long_ago());
         s.project = Some(&project);
         let id = seed(&mut tx, &s);
-        let r = recall(&mut tx, &query("deploy checklist", Some(&project)), None).unwrap();
+        let r = recall(&mut tx, &weighted("deploy checklist", Some(&project)), None).unwrap();
         assert_eq!(r.degraded.as_deref(), Some("no_embeddings"));
         let h = &r.hits[position(&r, id).unwrap()];
         assert_eq!(h.why.cosine, None);
@@ -1435,12 +1564,9 @@ mod tests {
         sn.source_id = Some(conv);
         sn.confidence = 0.9;
         let (s, n) = (seed(&mut tx, &ss), seed(&mut tx, &sn));
-        let r = recall(
-            &mut tx,
-            &associative(&format!("gecko {tag}"), &project, 1),
-            None,
-        )
-        .unwrap();
+        let mut q = associative(&format!("gecko {tag}"), &project, 1);
+        q.rank = Rank::Weighted;
+        let r = recall(&mut tx, &q, None).unwrap();
         let (hs, hn) = (
             &r.hits[position(&r, s).unwrap()],
             &r.hits[position(&r, n).unwrap()],
@@ -1728,7 +1854,9 @@ mod tests {
         let c2 = format!("solid {tag}");
         let solid = sourced_note(&mut tx, &c2, &project, full, &model, Some(&vec768(&[1.0])));
         let emb = query_embedding(&model);
-        let r = recall(&mut tx, &grounded(&tag, &project, 1), Some(&emb)).unwrap();
+        let mut q = grounded(&tag, &project, 1);
+        q.rank = Rank::Weighted;
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
         assert!(position(&r, hollow_id).is_none());
         assert_eq!(r.hits.len(), 1);
         assert_eq!(r.hits[0].id, solid);
@@ -1758,7 +1886,9 @@ mod tests {
             s.confidence = confidence;
             ids.push(seed(&mut tx, &s));
         }
-        let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
+        let mut q = grounded(&tag, &project, 10);
+        q.rank = Rank::Weighted;
+        let r = recall(&mut tx, &q, None).unwrap();
         let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
         assert_eq!(got, ids);
     }
@@ -1811,5 +1941,104 @@ mod tests {
             query_words("Docker docker DOCKER compose docker"),
             vec!["docker", "compose"]
         );
+    }
+
+    #[test]
+    fn recall_current_ranks_by_full_text_by_default() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_current_ranks_by_full_text_by_default: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        // words in common but a distant vector, against the closest vector
+        // without a shared word
+        let content = format!("wombat burrow {tag}");
+        let mut sw = Seed::new(&content, long_ago());
+        sw.project = Some(&project);
+        let mut sv = Seed::new("marsupial den", long_ago());
+        sv.project = Some(&project);
+        let (w, v) = (seed(&mut tx, &sw), seed(&mut tx, &sv));
+        embed(&mut tx, w, &model, &vec768(&[0.0, 1.0]));
+        embed(&mut tx, v, &model, &vec768(&[1.0]));
+        let emb = query_embedding(&model);
+        let text = format!("wombat burrow {tag}");
+        let r = recall(&mut tx, &query(&text, Some(&project)), Some(&emb)).unwrap();
+        assert!(
+            position(&r, w) < position(&r, v),
+            "{:?}",
+            r.hits.iter().map(|h| h.id).collect::<Vec<_>>()
+        );
+        let (hw, hv) = (
+            &r.hits[position(&r, w).unwrap()],
+            &r.hits[position(&r, v).unwrap()],
+        );
+        assert!(hw.score > 0.0);
+        assert_eq!(hw.why.fulltext, Some(hw.score));
+        assert_eq!(hv.why.fulltext, Some(0.0));
+        assert_eq!(hv.score, 0.0);
+        // the weighted parts stay filled for display
+        assert_eq!(hv.why.cosine, Some(1.0));
+        assert_eq!(hw.why.lexical, 1.0);
+        // control: the weighted ranking puts the close vector first
+        let r = recall(&mut tx, &weighted(&text, Some(&project)), Some(&emb)).unwrap();
+        assert!(position(&r, v) < position(&r, w));
+        assert_eq!(r.hits[position(&r, v).unwrap()].why.fulltext, None);
+    }
+
+    #[test]
+    fn rank_parses_and_decides_the_embedding() {
+        assert_eq!("fulltext".parse::<Rank>(), Ok(Rank::Fulltext));
+        assert_eq!("weighted".parse::<Rank>(), Ok(Rank::Weighted));
+        assert!("Weighted".parse::<Rank>().is_err());
+        assert!("".parse::<Rank>().is_err());
+        assert_eq!(Rank::default(), Rank::Fulltext);
+        assert_eq!(Rank::Weighted.as_str(), "weighted");
+        use RecallMode::*;
+        assert!(!needs_embedding(Current, Rank::Fulltext));
+        assert!(!needs_embedding(Associative, Rank::Fulltext));
+        assert!(needs_embedding(Current, Rank::Weighted));
+        assert!(needs_embedding(Associative, Rank::Weighted));
+        assert!(needs_embedding(AsOf, Rank::Fulltext));
+        assert!(needs_embedding(Grounded, Rank::Fulltext));
+    }
+
+    #[test]
+    fn fulltext_query_is_safe() {
+        let words = query_words("it's a & b | c: d Müller straße");
+        let q = fulltext_tsquery(&words).expect("words present");
+        assert!(q
+            .chars()
+            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | 'ä' | 'ö' | 'ü' | 'ß' | ' ' | '|')));
+        assert_eq!(q, "müller | straße");
+        let dirty = vec!["a'b&c".to_string(), "x:y".to_string()];
+        assert_eq!(fulltext_tsquery(&dirty).unwrap(), "abc | xy");
+        assert_eq!(fulltext_tsquery(&[]), None);
+        assert_eq!(fulltext_tsquery(&["'&|".to_string()]), None);
+    }
+
+    #[test]
+    fn recall_current_full_text_needs_no_embedding() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_current_full_text_needs_no_embedding: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let content = format!("deploy checklist {tag}");
+        let mut s = Seed::new(&content, long_ago());
+        s.project = Some(&project);
+        let id = seed(&mut tx, &s);
+        let text = format!("deploy checklist {tag}");
+        let r = recall(&mut tx, &query(&text, Some(&project)), None).unwrap();
+        assert_eq!(r.degraded, None);
+        assert_eq!(position(&r, id), Some(0));
     }
 }

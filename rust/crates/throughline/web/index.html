@@ -6541,13 +6541,13 @@ html {
     return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
-  // "By meaning": ranked recall over current notes, no paging.
+  // "By meaning": the weighted recall ranking over current notes, no paging.
   async function loadMemoryMeaning(el) {
     const note = $("memory-degraded");
     const pager = $("memory-pager");
     if (pager) pager.hidden = true;
     if (note) note.hidden = true;
-    const p = new URLSearchParams({ mode: "current", limit: "50", q: state.memory.q });
+    const p = new URLSearchParams({ mode: "current", rank: "weighted", limit: "50", q: state.memory.q });
     try {
       const data = await fetchJson("/api/recall?" + p.toString());
       const hits = data.hits || [];

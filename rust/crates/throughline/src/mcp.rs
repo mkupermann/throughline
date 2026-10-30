@@ -71,7 +71,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes ranked by meaning, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: fulltext (default, word match) or weighted (meaning, recency, reliability; needs embeddings)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -84,7 +84,12 @@ fn tools_list() -> Value {
                         },
                         "valid_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
                         "known_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
-                        "limit": { "type": "integer", "default": 10 }
+                        "limit": { "type": "integer", "default": 10 },
+                        "rank": {
+                            "type": "string",
+                            "enum": ["fulltext", "weighted"],
+                            "default": "fulltext"
+                        }
                     },
                     "required": ["query"]
                 }
@@ -205,6 +210,10 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 None | Some("") => crate::recall::RecallMode::Current,
                 Some(m) => m.parse().map_err(|e: String| invalid(&e))?,
             };
+            let rank = match optional_str(&args, "rank", "rank must be a string")? {
+                None | Some("") => crate::recall::Rank::default(),
+                Some(r) => r.parse().map_err(|e: String| invalid(&e))?,
+            };
             let date = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, Value> {
                 match optional_str(&args, name, &format!("{name} must be a string"))? {
                     None | Some("") => Ok(None),
@@ -226,7 +235,9 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .and_then(|l| l.as_i64())
                 .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
                 .clamp(1, 50) as usize;
-            let emb = crate::recall::query_embedding(query);
+            let emb = crate::recall::needs_embedding(mode, rank)
+                .then(|| crate::recall::query_embedding(query))
+                .flatten();
             let q = crate::recall::RecallQuery {
                 text: query,
                 project,
@@ -234,6 +245,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 valid_at,
                 known_at,
                 limit,
+                rank,
             };
             let result = crate::recall::recall(client, &q, emb.as_ref())
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
@@ -422,6 +434,10 @@ mod tests {
             .as_array()
             .expect("enum");
         assert_eq!(modes.len(), 4);
+        assert_eq!(
+            schema["properties"]["rank"]["enum"],
+            json!(["fulltext", "weighted"])
+        );
         for k in ["project", "valid_at", "known_at", "limit"] {
             assert!(schema["properties"].get(k).is_some(), "{k}");
         }
@@ -460,7 +476,8 @@ mod tests {
             .map(|h| h["id"].as_i64().unwrap())
             .collect();
         assert!(ids.contains(&id), "{out}");
-        assert!(out["degraded"].is_string(), "no Ollama here: {out}");
+        // current + full text needs no question vector, Ollama or not
+        assert!(out["degraded"].is_null(), "{out}");
     }
 
     #[test]
@@ -475,6 +492,23 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn mcp_recall_rejects_bad_rank() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_rejects_bad_rank: no PostgreSQL reachable");
+            return;
+        };
+        for rank in [json!("foo"), json!(5)] {
+            let err = call_tool(
+                &mut client,
+                &json!({ "name": "recall", "arguments": { "query": "x", "rank": rank } }),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("rank {rank} must be refused"));
+            assert_eq!(err["code"], -32602);
+        }
     }
 
     #[test]
