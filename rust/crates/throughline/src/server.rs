@@ -1106,6 +1106,7 @@ fn parse_recall_params(
     params: &RecallParams,
 ) -> std::result::Result<ParsedRecall, (StatusCode, &'static str, String)> {
     let invalid = |m: String| (StatusCode::UNPROCESSABLE_ENTITY, "validation_error", m);
+    crate::recall::check_query(params.q.as_deref().unwrap_or_default().trim()).map_err(invalid)?;
     let mode = match params
         .mode
         .as_deref()
@@ -3681,7 +3682,14 @@ mod tests {
             rank: Some(r.into()),
             ..p(None, None, None)
         };
+        let asked = |q: String| RecallParams {
+            q: Some(q),
+            ..p(None, None, None)
+        };
+        let at_cap = "abc ".repeat(500);
+        assert!(parse_recall_params(&asked(at_cap.clone())).is_ok());
         for bad in [
+            asked(format!("{at_cap}x")),
             ranked("foo"),
             ranked("Weighted"),
             p(Some("foo"), None, None),

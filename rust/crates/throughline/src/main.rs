@@ -324,6 +324,7 @@ fn main() -> Result<()> {
         } => {
             let mode: recall::RecallMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
             let rank: recall::Rank = rank.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            recall::check_query(&text).map_err(|e| anyhow::anyhow!(e))?;
             let date =
                 |name: &str, v: Option<String>| -> Result<Option<chrono::DateTime<chrono::Utc>>> {
                     match v.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
