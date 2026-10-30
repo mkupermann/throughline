@@ -194,10 +194,13 @@ A separate packaged job, `python -m throughline.jobs.extract_entities`, populate
 `entities`, `entity_mentions` and `relationships`, producing the
 knowledge graph behind the MCP `recall_entity` tool.
 
-`throughline reflect` maintains the memory store over time in four modes: **dedup** (merge
-near-duplicates within a category and project), **contradictions** (find chunks that
-disagree), **stale** (set `expires_at` on time-bound facts and mark expired ones), and
-**consolidate** (write a super-chunk over a cluster of related chunks). Every action is
+`throughline reflect` maintains the memory store over time in three modes: **dedup** (merge
+notes with the same project, category and identical first 80 characters, through the
+consolidation path), **contradictions** (find chunks that disagree) and **stale** (set
+`expires_at` on time-bound facts and mark expired ones). Similar but different notes are
+the job of the separate `throughline consolidate` command: it finds notes of one project
+with a cosine of at least 0.92 and merges them only on approval or with `--apply`; the
+sources stay in history as superseded notes. Every action is
 written to `memory_reflections` with its reasoning. Nothing is hard-deleted by the engine —
 chunks are superseded or marked, and the previous state stays queryable. `--dry-run`
 reports without writing.
