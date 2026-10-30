@@ -2523,6 +2523,7 @@ async fn ask_handler(State(state): State<AppState>, Query(params): Query<AskPara
     let q = question.clone();
     match with_db(&state, move |client| {
         let backend = crate::llm::resolve_backend()?;
+        crate::llm::ensure_local_or_allowed(&backend)?;
         crate::ask::ask(client, &q, &backend, 12)
     })
     .await
@@ -2598,7 +2599,8 @@ async fn operate_handler(
                 format!("embed: embedded={} errors={}", s.embedded, s.errors)
             }
             "extract-memory" => {
-                let _backend = crate::llm::resolve_backend()?;
+                let backend = crate::llm::resolve_backend()?;
+                crate::llm::ensure_local_or_allowed(&backend)?;
                 let rows = client.query(
                     "SELECT id, COALESCE(summary,'') FROM conversations WHERE generated_by IS NULL ORDER BY started_at DESC LIMIT 5",
                     &[],
@@ -2683,6 +2685,7 @@ async fn stale_digest_handler(State(state): State<AppState>) -> Response {
 async fn answer_eval_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, |client| {
         let backend = crate::llm::resolve_backend()?;
+        crate::llm::ensure_local_or_allowed(&backend)?;
         let rows = client.query(
             "SELECT content FROM memory_chunks WHERE status='active' AND category='decision' ORDER BY created_at DESC LIMIT 10",
             &[],

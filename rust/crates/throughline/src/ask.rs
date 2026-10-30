@@ -79,6 +79,7 @@ pub fn ask<C: GenericClient>(
     backend: &GenerationBackend,
     limit: i32,
 ) -> Result<AskAnswer> {
+    llm::ensure_local_or_allowed(backend)?;
     // Hybrid retrieval: semantic (when embeddings exist) + lexical + memory/instructions.
     // Pure lexical `search_from` misses natural-language questions (whole-string ILIKE).
     let embed = crate::embedding::resolve().ok();
@@ -189,5 +190,43 @@ mod tests {
         assert!(a.answer.contains("[2]"));
         assert!(a.answer.contains("rate limit"));
         assert_eq!(a.sources.len(), 2);
+    }
+
+    #[test]
+    fn ask_refuses_a_non_local_backend_before_anything_else() {
+        use postgres::NoTls;
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(&pw);
+        }
+        let Ok(mut client) = cfg.connect(NoTls) else {
+            eprintln!("skipping ask_refuses_a_non_local_backend_before_anything_else: no PostgreSQL reachable");
+            return;
+        };
+        let backend = GenerationBackend {
+            kind: llm::BackendKind::OpenAiCompatible,
+            label: "compatible/m".into(),
+            base_url: "https://api.example.com/v1".into(),
+            model: "m".into(),
+            api_key: None,
+        };
+        let err = ask(&mut client, "q", &backend, 5).unwrap_err();
+        assert!(
+            err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
+            "{err}"
+        );
     }
 }

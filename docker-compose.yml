@@ -138,6 +138,8 @@ services:
       # Extra host names the server answers to besides loopback and the
       # THROUGHLINE_PUBLIC_URL host; anything else gets 403 (DNS rebinding).
       THROUGHLINE_ALLOWED_HOSTS: "${THROUGHLINE_ALLOWED_HOSTS:-}"
+      # Off by default: no text goes to a model that is not local.
+      THROUGHLINE_ALLOW_REMOTE_LLM: "${THROUGHLINE_ALLOW_REMOTE_LLM:-}"
       # Project Management is opt-in. Off unless .env sets THROUGHLINE_ENABLE_PM=1;
       # the knowledge pipeline (ingest, find, ask, export) never depends on it.
       THROUGHLINE_ENABLE_PM: "${THROUGHLINE_ENABLE_PM:-0}"

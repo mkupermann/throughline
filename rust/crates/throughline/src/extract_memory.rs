@@ -235,6 +235,7 @@ pub fn extract_conversation<C: GenericClient>(
     conv_id: i64,
     window_chars: usize,
 ) -> Result<ExtractSummary> {
+    llm::ensure_local_or_allowed(backend)?;
     let lines: Vec<(DateTime<Utc>, String)> = client
         .query(
             r#"
@@ -774,5 +775,26 @@ mod tests {
         }];
         let r = render_transcript(&msgs, 100);
         assert!(r.len() <= 110);
+    }
+
+    #[test]
+    fn extract_refuses_a_non_local_backend_before_sending() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping extract_refuses_a_non_local_backend_before_sending: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = seed_conversation(&mut tx, &[(1, "secret note text")]);
+        let (base, requests) = fake_ollama(vec![DECISION]);
+        // A cloud model name makes the backend non-local; the fake server would
+        // record any request that reached it.
+        let mut backend = ollama_at(base);
+        backend.model = "glm-5.2:cloud".into();
+        let err = extract_conversation(&mut tx, &backend, conv, 25).unwrap_err();
+        assert!(
+            err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
+            "{err}"
+        );
+        assert_eq!(requests.try_iter().count(), 0, "text was sent");
     }
 }

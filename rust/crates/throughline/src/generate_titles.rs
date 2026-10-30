@@ -10,6 +10,7 @@ Prefer concrete nouns over vague phrases. Reply with the title only — no quote
 
 pub fn title_messages(messages: &[NormalisedMessage]) -> Result<String> {
     let backend = llm::resolve_backend()?;
+    llm::ensure_local_or_allowed(&backend)?;
     let transcript = render_transcript(messages, 4000);
     let mut title = llm::complete(&backend, Some(TITLE_PROMPT), &transcript)?;
     title = clean_title(&title);

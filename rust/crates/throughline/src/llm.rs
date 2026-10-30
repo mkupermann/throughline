@@ -307,6 +307,31 @@ pub fn is_local(backend: &GenerationBackend) -> bool {
     host.contains("localhost") || host.contains("127.0.0.1") || host.contains("::1")
 }
 
+/// `THROUGHLINE_ALLOW_REMOTE_LLM`: only `1`, `true`, `yes`, `on` allow it.
+fn remote_allowed(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_lowercase()).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+fn check_local_or_allowed(backend: &GenerationBackend, allowed: bool) -> Result<()> {
+    if allowed || is_local(backend) {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "refusing to send text to {}: the model is not local. Set THROUGHLINE_ALLOW_REMOTE_LLM=1 to allow it, or use a local model",
+        backend.label
+    ))
+}
+
+/// Refuse a non-local backend unless `THROUGHLINE_ALLOW_REMOTE_LLM` is truthy.
+/// Call this before any transcript or note text is sent to `backend`.
+pub fn ensure_local_or_allowed(backend: &GenerationBackend) -> Result<()> {
+    let flag = std::env::var("THROUGHLINE_ALLOW_REMOTE_LLM").ok();
+    check_local_or_allowed(backend, remote_allowed(flag.as_deref()))
+}
+
 /// `THROUGHLINE_REDACT_PII` defaults to on.
 pub fn redact_prompts_enabled() -> bool {
     env_falsey_or_unset("THROUGHLINE_REDACT_PII") || env_truthy("THROUGHLINE_REDACT_PII")
@@ -344,6 +369,56 @@ fn ollama_chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn backend(kind: BackendKind, base: &str, model: &str) -> GenerationBackend {
+        GenerationBackend {
+            kind,
+            label: format!("t/{model}"),
+            base_url: base.into(),
+            model: model.into(),
+            api_key: None,
+        }
+    }
+
+    #[test]
+    fn remote_allowed_parses_the_flag() {
+        for v in ["1", "true", "TRUE", "yes", "On", " on "] {
+            assert!(remote_allowed(Some(v)), "{v:?} should allow");
+        }
+        for v in ["", "0", "false", "no", "off", "maybe"] {
+            assert!(!remote_allowed(Some(v)), "{v:?} should not allow");
+        }
+        assert!(!remote_allowed(None));
+    }
+
+    #[test]
+    fn non_local_backend_is_refused_unless_allowed() {
+        let cloud = backend(
+            BackendKind::Ollama,
+            "http://localhost:11434",
+            "glm-5.2:cloud",
+        );
+        let remote = backend(
+            BackendKind::OpenAiCompatible,
+            "https://api.example.com/v1",
+            "m",
+        );
+        let local = backend(BackendKind::Ollama, "http://localhost:11434", "qwen3.6:27b");
+        let loopback = backend(
+            BackendKind::OpenAiCompatible,
+            "http://127.0.0.1:8000/v1",
+            "m",
+        );
+        for b in [&cloud, &remote] {
+            let err = check_local_or_allowed(b, false).unwrap_err().to_string();
+            assert!(err.contains("THROUGHLINE_ALLOW_REMOTE_LLM"), "{err}");
+            assert!(check_local_or_allowed(b, true).is_ok());
+        }
+        for b in [&local, &loopback] {
+            assert!(check_local_or_allowed(b, false).is_ok());
+            assert!(check_local_or_allowed(b, true).is_ok());
+        }
+    }
 
     fn mac_tags() -> serde_json::Value {
         serde_json::json!({"models": [
