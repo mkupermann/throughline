@@ -69,6 +69,7 @@ ALLOWED: frozenset[str] = frozenset(
         "systemd",
         "tests",
         "throughline",
+        "vscode",
         "web",
         "windows",
     }
