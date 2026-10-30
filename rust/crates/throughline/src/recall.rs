@@ -4,6 +4,7 @@
 //! evaluation can rank the same candidates in a different way.
 
 use crate::generate_embeddings::vector_literal;
+use crate::lifecycle;
 use crate::temporal;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
@@ -296,6 +297,8 @@ pub(crate) struct Candidate {
     pub merged_from: Vec<i64>,
     pub expires_at: Option<DateTime<Utc>>,
     pub source_at: Option<DateTime<Utc>>,
+    pub access_count: i64,
+    pub last_accessed: Option<DateTime<Utc>>,
 }
 
 /// All notes that pass `filter` and the project filter, with their cosine to
@@ -366,7 +369,8 @@ fn load_candidates<C: GenericClient>(
                COALESCE(mc.confidence::float8, 0.5),
                {cosine},
                COALESCE(mc.tags, '{{}}'), mc.source_id, COALESCE(mc.merged_from, '{{}}'),
-               mc.expires_at, COALESCE(root.source_at, c.started_at)
+               mc.expires_at, COALESCE(root.source_at, c.started_at),
+               COALESCE(mc.access_count, 0)::bigint, mc.last_accessed
         FROM memory_chunks mc
         LEFT JOIN LATERAL (
             WITH RECURSIVE up(id, source_type, source_id, source_at, depth) AS (
@@ -406,6 +410,8 @@ fn load_candidates<C: GenericClient>(
             merged_from: r.get(16),
             expires_at: r.get(17),
             source_at: r.get(18),
+            access_count: r.get(19),
+            last_accessed: r.get(20),
         })
         .collect())
 }
@@ -440,12 +446,16 @@ pub(crate) fn score(
             / words.len() as f64
     };
     let days = ((now - c.valid_from).num_milliseconds() as f64 / 86_400_000.0).max(0.0);
+    let used_days = ((now - c.last_accessed.unwrap_or(c.valid_from)).num_milliseconds() as f64
+        / 86_400_000.0)
+        .max(0.0);
+    let pinned_or_decision = c.source_type == "ui_pin" || c.category == "decision";
     let why = Why {
         cosine: has_embedding.then(|| c.cosine.unwrap_or(0.0)),
         lexical,
         recency: (-days / 90.0).exp(),
         reliability: c.confidence.clamp(0.0, 1.0),
-        strength: 0.5, // Baustein 4
+        strength: lifecycle::strength(used_days, c.access_count, pinned_or_decision),
         provenance: provenance(&c.source_type),
         spread: None,
         grounding: None,
@@ -1034,6 +1044,57 @@ mod tests {
         assert_eq!(ha.why.provenance, 0.8);
         assert_eq!(hb.why.provenance, 1.0);
         assert!((ha.why.reliability - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn weighted_ranking_prefers_a_recently_used_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping weighted_ranking_prefers_a_recently_used_note: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let (ca, cb) = (
+            format!("rotation plan {tag} one"),
+            format!("rotation plan {tag} two"),
+        );
+        let mut sa = Seed::new(&ca, long_ago());
+        sa.project = Some(&project);
+        let mut sb = Seed::new(&cb, long_ago());
+        sb.project = Some(&project);
+        let a = seed(&mut tx, &sa);
+        let b = seed(&mut tx, &sb);
+        embed(&mut tx, a, &model, &vec768(&[0.8, 0.6]));
+        embed(&mut tx, b, &model, &vec768(&[0.8, 0.6]));
+        // b was used yesterday, a never
+        tx.execute(
+            "UPDATE memory_chunks SET access_count = 1, \
+             last_accessed = now() - interval '1 day' WHERE id = $1",
+            &[&b],
+        )
+        .unwrap();
+        let emb = query_embedding(&model);
+        let r = recall(
+            &mut tx,
+            &weighted("rotation plan", Some(&project)),
+            Some(&emb),
+        )
+        .unwrap();
+        let (ha, hb) = (
+            &r.hits[position(&r, a).unwrap()],
+            &r.hits[position(&r, b).unwrap()],
+        );
+        assert!(position(&r, b) < position(&r, a));
+        assert!(hb.why.strength > ha.why.strength);
+        let diff = hb.score - ha.score;
+        let expected = WEIGHTS.strength * (hb.why.strength - ha.why.strength);
+        assert!((diff - expected).abs() < 1e-9, "{diff} vs {expected}");
+        assert!((hb.why.strength - lifecycle::strength(1.0, 1, false)).abs() < 1e-3);
+        assert!((ha.why.strength - lifecycle::strength(30.0, 0, false)).abs() < 1e-3);
     }
 
     #[test]

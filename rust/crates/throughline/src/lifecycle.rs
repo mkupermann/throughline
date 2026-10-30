@@ -22,6 +22,21 @@ pub fn record_use<C: GenericClient>(client: &mut C, ids: &[i64]) -> anyhow::Resu
     )?)
 }
 
+/// How strong a note is: it fades with the days since its last use and
+/// holds longer the more it was used. Pinned notes and decisions fade four
+/// times slower. Between 0.05 and 1.0.
+///
+/// `half_life = 30 * (1 + ln(1 + access_count))` days, times 4 if pinned or
+/// a decision; `strength = 0.05 + 0.95 * 2^(-days / half_life)`.
+pub fn strength(days_since_use: f64, access_count: i64, pinned_or_decision: bool) -> f64 {
+    let mut half_life = 30.0 * (1.0 + (1.0 + access_count.max(0) as f64).ln());
+    if pinned_or_decision {
+        half_life *= 4.0;
+    }
+    let days = days_since_use.max(0.0);
+    (0.05 + 0.95 * (-days / half_life).exp2()).clamp(0.05, 1.0)
+}
+
 /// A read path must not fail because of a counter: report and go on.
 pub fn record_use_or_log<C: GenericClient>(client: &mut C, ids: &[i64]) {
     if let Err(e) = record_use(client, ids) {
@@ -80,6 +95,45 @@ mod tests {
             )
             .expect("row");
         (row.get(0), row.get(1))
+    }
+
+    #[test]
+    fn strength_golden_values() {
+        assert!((strength(0.0, 0, false) - 1.0).abs() < 1e-12);
+        assert!((strength(30.0, 0, false) - 0.525).abs() < 1e-12);
+        // 3 uses: half-life 30 * (1 + ln 4)
+        let hl = 30.0 * (1.0 + 4.0_f64.ln());
+        assert!((strength(hl, 3, false) - 0.525).abs() < 1e-12);
+        // pinned: half-life 120
+        assert!((strength(120.0, 0, true) - 0.525).abs() < 1e-12);
+    }
+
+    #[test]
+    fn strength_halves_after_one_half_life() {
+        let s = strength(30.0, 0, false);
+        assert!((s - (0.05 + 0.95 * 0.5)).abs() < 1e-9, "{s}");
+    }
+
+    #[test]
+    fn strength_reinforced_by_use() {
+        assert!(strength(30.0, 10, false) > strength(30.0, 0, false));
+        assert!(strength(30.0, 10, false) > strength(30.0, 1, false));
+    }
+
+    #[test]
+    fn strength_floor() {
+        assert!((strength(10_000.0, 0, false) - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn strength_pinned_decays_slower() {
+        assert!(strength(60.0, 0, true) > strength(60.0, 0, false));
+    }
+
+    #[test]
+    fn strength_is_capped() {
+        assert_eq!(strength(-5.0, 0, false), 1.0);
+        assert!(strength(0.0, 100, true) <= 1.0);
     }
 
     #[test]
