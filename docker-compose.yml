@@ -140,6 +140,11 @@ services:
       THROUGHLINE_ALLOWED_HOSTS: "${THROUGHLINE_ALLOWED_HOSTS:-}"
       # Off by default: no text goes to a model that is not local.
       THROUGHLINE_ALLOW_REMOTE_LLM: "${THROUGHLINE_ALLOW_REMOTE_LLM:-}"
+      # Agent access over HTTP (POST /mcp). Off while the key is unset or
+      # shorter than 32 characters. Make one with `throughline agent-key`.
+      THROUGHLINE_AGENT_KEY: "${THROUGHLINE_AGENT_KEY:-}"
+      # 1, true, yes or on hides write, forget, supersede and keep from /mcp.
+      THROUGHLINE_MCP_READ_ONLY: "${THROUGHLINE_MCP_READ_ONLY:-}"
       # Project Management is opt-in. Off unless .env sets THROUGHLINE_ENABLE_PM=1;
       # the knowledge pipeline (ingest, find, ask, export) never depends on it.
       THROUGHLINE_ENABLE_PM: "${THROUGHLINE_ENABLE_PM:-0}"
@@ -232,6 +237,8 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *pg-env
+      # 1, true, yes or on hides write, forget, supersede and keep.
+      THROUGHLINE_MCP_READ_ONLY: "${THROUGHLINE_MCP_READ_ONLY:-}"
     volumes: *source-mounts
     command: ["throughline", "mcp"]
     profiles:

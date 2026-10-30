@@ -250,9 +250,9 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Anreicherung | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
 | Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
 | Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
-| Schützen und integrieren | `backup`, `retention`, `mcp` |
+| Schützen und integrieren | `backup`, `retention`, `mcp`, `agent-key` |
 
-Das sind alle 32 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
+Das sind alle 33 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
 
 Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkeiten und Nebenwirkungen. Verfügbarkeit heißt nicht, dass jeder Befehl gegen jede Schema-Variante getestet wurde.
 
@@ -260,7 +260,14 @@ Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkei
 
 Starte `throughline mcp` aus einem kompatiblen Client über stdio, mit den Datenbank-Variablen in dessen Prozess-Umgebung. Das Container-Pendant ist `docker compose run -i --rm mcp`.
 
-Der Rust-Server bietet `search`, `recall`, `project_context`, `list_projects`, `stats`, `write`, `forget` und `supersede` an. `recall`, `supersede` und `write` brauchen das aktuelle Schema (Migration 012 oder neuer). Der Server prüft die Schema-Version nicht. Auf einem älteren Schema scheitern diese Tools mit einem rohen SQL-Fehler, also vorher `throughline migrate` laufen lassen. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
+Derselbe Server antwortet auch über HTTP unter `POST /mcp`, für Claude Code, Codex und andere Clients mit Streamable HTTP. Er bleibt aus, bis du `THROUGHLINE_AGENT_KEY` setzt (mindestens 32 Zeichen, `throughline agent-key` erzeugt einen). Clients senden den Schlüssel als `Authorization: Bearer <Schlüssel>`. Für Claude Code:
+
+```bash
+claude mcp add --transport http throughline http://127.0.0.1:8788/mcp \
+  --header "Authorization: Bearer $THROUGHLINE_AGENT_KEY"
+```
+
+Werkzeuge: `search`, `recall`, `project_context`, `get_note`, `conflicts`, `list_projects`, `stats`, `write`, `forget`, `supersede` und `keep`. Ressourcen: `throughline://projects`, `throughline://project/{name}/context` und `throughline://note/{id}`. Prompts: `before_coding` und `handoff`. `THROUGHLINE_MCP_READ_ONLY=1` blendet `write`, `forget`, `supersede` und `keep` aus. Was ein Agent abruft, landet im Kontext seines eigenen Modells, und `THROUGHLINE_ALLOW_REMOTE_LLM` regelt das nicht. Der Schlüssel schützt nur `/mcp`, nicht die Oberfläche und nicht den Rest der API. Einrichtung für Codex, Fehler-Codes und Zählregel stehen im [Nutzungshandbuch](docs/USAGE.md#agent-access-over-http). Einige Werkzeuge brauchen das aktuelle Schema (Migration 012 oder neuer). Der Server prüft die Schema-Version nicht. Auf einem älteren Schema scheitern sie mit einem rohen SQL-Fehler, also vorher `throughline migrate` laufen lassen. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
 
 ### Optionale Modelle
 
@@ -323,7 +330,7 @@ Verwaltungen auf dem Weg zur digitalen Souveränität, etwa die [deutsch-franzö
 
 Ehrliche Grenzen sind besser als stille Überraschungen. Das sind die aktuellen.
 
-- **Lokaler, vertrauenswürdiger Betrieb.** Der Rust-Router hat keinen Anwendungs-Login und keine Rollenprüfung. Lass ihn auf Loopback. Ältere Python-Team-Einstellungen schützen diese Laufzeit nicht. Er weist Anfragen ab, deren Host weder Loopback noch `THROUGHLINE_PUBLIC_URL` oder `THROUGHLINE_ALLOWED_HOSTS` ist, Anfragen von fremder Herkunft und API-Aufrufe, die ein Browser als seitenübergreifend kennzeichnet. Eine besuchte Webseite kann ihn also nicht steuern. Routen, die Daten verändern, nehmen nur POST an, und eine API-Anfrage ohne Host-Header wird abgewiesen. Im Browser fragt jede Wartungsaktion, die Daten verändert, vorher nach.
+- **Lokaler, vertrauenswürdiger Betrieb.** Der Rust-Router hat keinen Anwendungs-Login und keine Rollenprüfung. Lass ihn auf Loopback. Ältere Python-Team-Einstellungen schützen diese Laufzeit nicht. Er weist Anfragen ab, deren Host weder Loopback noch `THROUGHLINE_PUBLIC_URL` oder `THROUGHLINE_ALLOWED_HOSTS` ist, Anfragen von fremder Herkunft und API-Aufrufe, die ein Browser als seitenübergreifend kennzeichnet. Eine besuchte Webseite kann ihn also nicht steuern. Routen, die Daten verändern, nehmen POST, `PUT` (Assistenten-Datei speichern) oder `DELETE` (Favorit entfernen) an, nie GET, und eine API-Anfrage ohne Host-Header wird abgewiesen. Im Browser fragt jede Wartungsaktion, die Daten verändert, vorher nach.
 - **Sicherungen brauchen einen gemounteten Ordner.** Der Sicherungs-Knopf und ein nacktes `backup` schreiben in den Container, solange `THROUGHLINE_BACKUP_DIR` nicht auf einen gemounteten Pfad zeigt. Ein solcher Dump ist mit dem Container weg.
 - **Wartung nach Faustregeln.** Die Deduplizierung führt Notizen zusammen, deren erste 80 Zeichen gleich sind. Konflikt- und Stale-Bericht melden jede Notiz über ihrer Altersgrenze als nie abgerufen, weil Abrufe noch nicht gezählt werden. Der API-Job `/api/operate?job=extract-memory` zählt Konversationen und extrahiert nichts. Dafür `throughline extract-memory` nutzen.
 - **Historische Evidenz.** Konversationen, Notizen und Antworten können unvollständig, veraltet oder falsch sein. Ein Tool-Call-Eintrag beweist nicht, dass ein Befehl gelang oder eine Datei noch existiert.

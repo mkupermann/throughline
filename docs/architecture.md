@@ -73,6 +73,15 @@ embeddings and the ingestion ledger. `pgvector` supplies the vector type and HNS
   writes memory at runtime. Results are project-scoped by default, derived from
   `CLAUDE_PROJECT_DIR`; setting `THROUGHLINE_PROJECT_SCOPE_STRICT` forbids the
   cross-project opt-out entirely.
+- **Rust MCP server** (`rust/crates/throughline/src/mcp.rs`, `mcp_protocol.rs`,
+  `mcp_http.rs`) — one dispatcher takes a JSON-RPC message plus a context (database,
+  read-only flag, transport) and returns a response or nothing. It holds no state, so
+  tools, resources and prompts exist once. Two transports call it: stdio reads one
+  message per line (`throughline mcp`), and `POST /mcp` on the web server checks the
+  agent key and the request guard, then runs the dispatcher on the blocking database
+  path. HTTP answers with plain JSON, no SSE and no sessions. The dispatcher speaks the
+  modern `2026-07-28` protocol and the legacy `2025-11-25` and `2025-06-18` handshakes
+  (stdio also `2024-11-05`). Use is counted per note where a note is handed to an agent.
 - **GUI** (`throughline/api/` and `web/src/`) — one FastAPI process serves the JSON API and
   built React SPA. It has eight route components: Overview, Find, Timeline, Curate, Project,
   Detail, Operate, and Console. Overview, Find, Timeline, Curate, Operate, and Console are
