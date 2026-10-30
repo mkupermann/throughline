@@ -102,7 +102,7 @@ pub fn embedding_lines<C: GenericClient>(
             let p = generate_embeddings::embed_progress(client, &t)?;
             Some(if p.is_complete() {
                 format!(
-                    "{}: complete, switch OLLAMA_EMBED_MODEL and restart web",
+                    "{}: complete, set OLLAMA_EMBED_MODEL to it, remove the target and run docker compose up -d web",
                     p.model
                 )
             } else {
@@ -251,7 +251,7 @@ mod tests {
             line.as_deref(),
             Some(
                 format!(
-                    "{}: complete, switch OLLAMA_EMBED_MODEL and restart web",
+                    "{}: complete, set OLLAMA_EMBED_MODEL to it, remove the target and run docker compose up -d web",
                     target.model
                 )
                 .as_str()
