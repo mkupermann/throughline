@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### No text to a model off this machine unless you allow it
+
+Every command that sends transcript or note text to a generation model now refuses a model that is not local, unless you opt in.
+
+- **New variable `THROUGHLINE_ALLOW_REMOTE_LLM`.** Unset or false (the default): `extract-memory` (CLI and the operate job), `generate-titles`, `reflect` contradictions, `ask` (CLI and `/api/ask`) and `answer-eval` (CLI and HTTP) stop with an error that names the variable, before any text is sent. `1`, `true`, `yes` or `on` allows a remote model as before. `reflect` without a mode skips only the model step and says so. The merge proposal never sends text off the machine, even with the variable set.
+- **Docs match the code.** `forget` sets `status` to `forgotten` and updates `updated_at`; it writes no audit row, stores no reason and does not cascade. In the Rust runtime only retention writes `memory_reflections` rows.
+
 ### Memory lifecycle: use counts, strength and merging similar notes
 
 Notes now remember whether anyone used them, fade with time, and near-duplicates can be merged on your approval. Nothing is deleted and no note text is rewritten.
@@ -19,7 +26,7 @@ Notes now remember whether anyone used them, fade with time, and near-duplicates
 - **Review tab.** "Similar notes" suggests a merged text and merges after you confirm. "Damaged notes" lists current notes the old reflect glued together: the text holds a `---` separator line and the note lists itself in `merged_from`. **Replace** lets you write the clean text.
 - **No cloud model by accident.** Automatic choice of the generation model never picks a cloud model (a `:cloud` name, or a model served from a remote host), and a model whose name ends in `:cloud` is never treated as local. A merge suggestion runs on a local model only and times out after 120 seconds in the UI. If it fails, the longest note is offered.
 - **Cloud names.** A model name ending in `-cloud` (for example `gpt-oss:120b-cloud`) counts as cloud like `:cloud`, and an Ollama backend on ollama.com is not local.
-- **Privacy note.** A model you name explicitly (`THROUGHLINE_ANSWER_MODEL`) or a remote `THROUGHLINE_ANSWER_BASE_URL` receives transcript and note text from `extract-memory` (also the hourly job, when enabled), `generate-titles`, the contradiction check of `reflect` and `ask`. Only the merge proposal refuses a backend that is not local.
+- **Privacy note.** A model you name explicitly (`THROUGHLINE_ANSWER_MODEL`) or a remote `THROUGHLINE_ANSWER_BASE_URL` receives transcript and note text from `extract-memory` (also the hourly job, when enabled), `generate-titles`, the contradiction check of `reflect` and `ask`. Only the merge proposal refuses a backend that is not local. (Superseded by `THROUGHLINE_ALLOW_REMOTE_LLM`, above.)
 - **Threshold floor.** `min_similarity` below 0.5 is refused: the endpoint answers 422 (also above 1.0), the CLI exits with an error.
 
 ### With a task, matching decisions lead the context pack
