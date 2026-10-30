@@ -29,7 +29,7 @@ pub fn embed_pending<C: GenericClient>(
     limit: usize,
 ) -> Result<EmbedSummary> {
     embed_pending_with(client, backend, limit, |text| {
-        embedding::embed_text(backend, text)
+        embedding::embed_text(backend, text, embedding::TextKind::Document)
     })
 }
 
@@ -152,7 +152,7 @@ pub fn semantic_search<C: GenericClient>(
     query: &str,
     limit: i32,
 ) -> Result<Vec<(i64, String, f32)>> {
-    let vector = embedding::embed_text(backend, query)?;
+    let vector = embedding::embed_text(backend, query, embedding::TextKind::Query)?;
     let literal = vector_literal(&vector);
     let column = backend.column;
     let rows = client.query(
@@ -213,6 +213,7 @@ mod tests {
             base_url: String::new(),
             column: "embedding_768",
             dim: 768,
+            profile: embedding::model_profile("nomic-embed-text").unwrap(),
         }
     }
 

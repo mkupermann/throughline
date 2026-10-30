@@ -99,8 +99,11 @@ pub fn check_query(text: &str) -> Result<(), String> {
     Ok(())
 }
 /// `as_of` admits a note that shares a word with the question or has at
-/// least this cosine to it.
-const AS_OF_MIN_COSINE: f64 = 0.5;
+/// least the active model's `as_of_min_cosine` to it. Without an embedding
+/// no cosine exists, so the threshold is moot.
+fn as_of_min_cosine(emb: Option<&QueryEmbedding>) -> f64 {
+    emb.map_or(0.5, |e| e.min_cosine)
+}
 
 pub struct RecallQuery<'a> {
     pub text: &'a str,
@@ -118,6 +121,8 @@ pub struct QueryEmbedding {
     pub model: String,
     pub column: &'static str,
     pub vector: Vec<f32>,
+    /// `as_of` cosine threshold of the model that embedded the question.
+    pub min_cosine: f64,
 }
 
 /// Embed the question with the configured backend. A refusal by the
@@ -126,7 +131,7 @@ pub struct QueryEmbedding {
 pub fn query_embedding(text: &str) -> anyhow::Result<Option<QueryEmbedding>> {
     query_embedding_with(
         crate::embedding::resolve,
-        crate::embedding::embed_text,
+        |b, t| crate::embedding::embed_text(b, t, crate::embedding::TextKind::Query),
         text,
     )
 }
@@ -155,6 +160,7 @@ pub fn query_embedding_with(
         model: backend.model,
         column: backend.column,
         vector,
+        min_cosine: backend.profile.as_of_min_cosine,
     }))
 }
 
@@ -789,9 +795,9 @@ pub fn recall<C: GenericClient>(
     if q.mode == RecallMode::AsOf {
         // Only notes that match the question, the `limit` best by the rank;
         // those come out as a timeline.
-        scored.retain(|(_, why, _)| {
-            why.lexical > 0.0 || why.cosine.is_some_and(|c| c >= AS_OF_MIN_COSINE)
-        });
+        let min_cosine = as_of_min_cosine(emb);
+        scored
+            .retain(|(_, why, _)| why.lexical > 0.0 || why.cosine.is_some_and(|c| c >= min_cosine));
         scored.truncate(limit);
         scored.sort_by(|a, b| {
             a.2.valid_from
@@ -887,6 +893,37 @@ pub fn render_line(h: &RecallHit) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn as_of_threshold_follows_the_profile() {
+        let backend = |model: &str| {
+            let profile = crate::embedding::profile_for(model, 768).unwrap();
+            crate::embedding::EmbeddingBackend {
+                name: "ollama".into(),
+                model: model.into(),
+                base_url: "http://127.0.0.1:11434".into(),
+                column: profile.column,
+                dim: profile.dim,
+                profile,
+            }
+        };
+        let granite = query_embedding_with(
+            || Ok(backend("granite-embedding-multilingual:278m")),
+            |_, _| Ok(vec![1.0]),
+            "q",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(as_of_min_cosine(Some(&granite)), 0.68);
+        let base = query_embedding_with(
+            || Ok(backend("nomic-embed-text")),
+            |_, _| Ok(vec![1.0]),
+            "q",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(as_of_min_cosine(Some(&base)), 0.5);
+    }
+
     #[test]
     fn refused_embedding_is_an_error() {
         let refused = || {
@@ -1029,6 +1066,7 @@ mod tests {
             model: model.to_string(),
             column: "embedding_768",
             vector: vec768(&[1.0]),
+            min_cosine: 0.5,
         }
     }
 

@@ -2085,16 +2085,16 @@ async fn consolidation_candidates_handler(
     State(state): State<AppState>,
     Query(params): Query<CandidateParams>,
 ) -> Response {
-    let min_similarity = params
-        .min_similarity
-        .unwrap_or(crate::lifecycle::MIN_SIMILARITY);
-    if let Err(msg) = crate::lifecycle::check_min_similarity(min_similarity) {
-        return api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", &msg);
-    }
     let backend = tokio::task::spawn_blocking(crate::embedding::resolve)
         .await
         .ok()
         .and_then(|r| r.ok());
+    let min_similarity = params
+        .min_similarity
+        .unwrap_or_else(|| crate::lifecycle::default_min_similarity(backend.as_ref()));
+    if let Err(msg) = crate::lifecycle::check_min_similarity(min_similarity) {
+        return api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", &msg);
+    }
     let Some(backend) = backend else {
         return Json(serde_json::json!({ "groups": [], "degraded": "no_embeddings" }))
             .into_response();
