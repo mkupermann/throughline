@@ -231,6 +231,21 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Find notes that say nearly the same thing and merge them on approval.
+    Consolidate {
+        /// List the groups, change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Merge every group into one new note holding the longest text.
+        #[arg(long)]
+        apply: bool,
+        /// Cosine at or above which two notes belong together.
+        #[arg(long, default_value_t = lifecycle::MIN_SIMILARITY)]
+        min_similarity: f64,
+        /// Print the groups as JSON (with --dry-run).
+        #[arg(long)]
+        json: bool,
+    },
     /// Measure recall against cosine, full text and random on a test set.
     RecallEval {
         /// JSON file: [{"q": "...", "project": "..." | null, "expected": [id, ...]}]
@@ -787,6 +802,63 @@ fn main() -> Result<()> {
             };
             let report = answer_eval::run_eval(&mut client, &backend, &case_list)?;
             print!("{}", answer_eval::render_text(&report));
+        }
+        Command::Consolidate {
+            dry_run,
+            apply,
+            min_similarity,
+            json,
+        } => {
+            if dry_run == apply {
+                anyhow::bail!(
+                    "choose one: --dry-run lists the groups, --apply merges them \
+                     (for example: throughline consolidate --dry-run)"
+                );
+            }
+            let backend = embedding::resolve()
+                .context("consolidate needs the embedding model to find similar notes")?;
+            let mut client = config::DbConfig::from_env()
+                .connect()
+                .context("connect to PostgreSQL")?;
+            let groups = lifecycle::consolidation_candidates(
+                &mut client,
+                &backend.model,
+                backend.column,
+                min_similarity,
+            )?;
+            if apply {
+                for g in &groups {
+                    let ids: Vec<i64> = g.notes.iter().map(|n| n.id).collect();
+                    match lifecycle::consolidate(&mut client, &ids, &g.proposal, None) {
+                        Ok(new_id) => println!("{ids:?} -> {new_id}"),
+                        Err(e) => eprintln!("{ids:?} not merged: {e}"),
+                    }
+                }
+                println!("{} group(s) found", groups.len());
+            } else if json {
+                println!("{}", serde_json::to_string_pretty(&groups)?);
+            } else {
+                for g in &groups {
+                    println!(
+                        "{} notes, similarity >= {:.3}",
+                        g.notes.len(),
+                        g.min_similarity
+                    );
+                    for n in &g.notes {
+                        println!(
+                            "  #{} [{}] {}",
+                            n.id,
+                            n.category,
+                            n.content
+                                .chars()
+                                .take(100)
+                                .collect::<String>()
+                                .replace('\n', " ")
+                        );
+                    }
+                }
+                println!("{} group(s)", groups.len());
+            }
         }
         Command::RecallEval { set, k, seed, json } => {
             let cases = recall_eval::load_cases(std::path::Path::new(&set))?;

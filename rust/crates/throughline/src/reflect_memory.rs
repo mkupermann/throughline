@@ -42,7 +42,8 @@ pub fn expire_stale<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<R
     Ok(summary)
 }
 
-/// Collapse near-duplicate (category, project, content-prefix) groups.
+/// Collapse near-duplicate (category, project, content-prefix) groups into
+/// one new `consolidation` note each. With `dry_run` only the groups are counted.
 pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectSummary> {
     let mut summary = ReflectSummary {
         mode: "dedup".into(),
@@ -72,25 +73,10 @@ pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectS
             summary.acted += 1;
             continue;
         }
-        let keep = ids[0];
-        let merged = contents.join("\n---\n");
-        client.execute(
-            "UPDATE memory_chunks SET content = $2, merged_from = $3 WHERE id = $1",
-            &[&keep, &merged, &ids],
-        )?;
-        if ids.len() > 1 {
-            // Close the validity like VALID_TIME_BACKFILL does: the duplicate
-            // ends where the kept note starts, never before its own start.
-            client.execute(
-                "UPDATE memory_chunks
-                 SET status = 'superseded', superseded_by = $2, superseded_at = now(),
-                     valid_to = GREATEST(COALESCE(valid_from, source_at, created_at),
-                         (SELECT COALESCE(n.valid_from, n.source_at, n.created_at)
-                          FROM memory_chunks n WHERE n.id = $2))
-                 WHERE id = ANY($1) AND id <> $2",
-                &[&ids, &keep],
-            )?;
-        }
+        // One new note holds the longest text; the duplicates are closed like
+        // a supersede. No existing note changes its content.
+        let text = crate::lifecycle::longest_text(contents.iter().map(String::as_str));
+        crate::lifecycle::consolidate(client, &ids, text, None)?;
         summary.acted += 1;
     }
     Ok(summary)
@@ -212,10 +198,10 @@ mod tests {
     }
 
     #[test]
-    fn dedup_closes_the_validity_of_the_replaced_duplicate() {
+    fn dedup_closes_the_validity_of_the_merged_duplicates() {
         let Some(mut client) = test_db() else {
             eprintln!(
-                "skipping dedup_closes_the_validity_of_the_replaced_duplicate: no PostgreSQL reachable"
+                "skipping dedup_closes_the_validity_of_the_merged_duplicates: no PostgreSQL reachable"
             );
             return;
         };
@@ -236,23 +222,25 @@ mod tests {
             .expect("seed duplicate")
             .get(0)
         };
-        let kept = seed("(first)", "2026-01-01T00:00:00Z");
-        let dup = seed("(second)", "2026-02-01T00:00:00Z");
+        let first = seed("(first)", "2026-01-01T00:00:00Z");
+        let second = seed("(second)", "2026-02-01T00:00:00Z");
         dedup(&mut tx, false).expect("dedup");
 
-        let row = tx
-            .query_one(
-                "SELECT status, superseded_by, valid_to FROM memory_chunks WHERE id = $1",
-                &[&dup],
-            )
-            .expect("duplicate row");
-        assert_eq!(row.get::<_, String>(0), "superseded");
-        assert_eq!(row.get::<_, Option<i64>>(1), Some(kept));
-        assert_eq!(
-            row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(2),
-            Some("2026-02-01T00:00:00Z".parse().unwrap()),
-            "the replaced duplicate needs an end of validity"
-        );
+        for id in [first, second] {
+            let row = tx
+                .query_one(
+                    "SELECT status, superseded_by, valid_to FROM memory_chunks WHERE id = $1",
+                    &[&id],
+                )
+                .expect("duplicate row");
+            assert_eq!(row.get::<_, String>(0), "superseded");
+            assert!(row.get::<_, Option<i64>>(1).is_some());
+            assert!(
+                row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(2)
+                    .is_some(),
+                "a merged duplicate needs an end of validity"
+            );
+        }
         let pattern = format!("{tag}%");
         let valid_now: Vec<i64> = tx
             .query(
@@ -270,6 +258,100 @@ mod tests {
             .iter()
             .map(|r| r.get(0))
             .collect();
-        assert_eq!(valid_now, vec![kept], "only the kept note is valid now");
+        assert_eq!(valid_now.len(), 1, "only the new merged note is valid now");
+        assert!(!valid_now.contains(&first) && !valid_now.contains(&second));
+    }
+
+    fn seed_dup<C: GenericClient>(client: &mut C, content: &str) -> i64 {
+        let category_type =
+            crate::extract_memory::category_column_type(client).expect("category_column_type");
+        client
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, confidence, status)
+                     VALUES ('manual', $1, 'decision'::text::{category_type}, 1.0, 'active') RETURNING id"
+                ),
+                &[&content],
+            )
+            .expect("seed duplicate")
+            .get(0)
+    }
+
+    fn contents<C: GenericClient>(client: &mut C, pattern: &str) -> Vec<(i64, String, String)> {
+        client
+            .query(
+                "SELECT id, content, source_type FROM memory_chunks WHERE content LIKE $1 ORDER BY id",
+                &[&pattern],
+            )
+            .expect("contents")
+            .iter()
+            .map(|r| (r.get(0), r.get(1), r.get(2)))
+            .collect()
+    }
+
+    #[test]
+    fn reflect_dedup_never_rewrites_a_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping reflect_dedup_never_rewrites_a_note: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let head = format!("{tag} the team agreed to deploy only on Tuesdays and never on Fridays");
+        let short = format!("{head} ok");
+        let long = format!("{head} because the weekend on-call is thin");
+        let a = seed_dup(&mut tx, &short);
+        let b = seed_dup(&mut tx, &long);
+        dedup(&mut tx, false).expect("dedup");
+
+        let rows = contents(&mut tx, &format!("{tag}%"));
+        for (id, content, _) in &rows {
+            if *id == a {
+                assert_eq!(content, &short, "an existing note was rewritten");
+            }
+            if *id == b {
+                assert_eq!(content, &long, "an existing note was rewritten");
+            }
+        }
+        let new: Vec<_> = rows.iter().filter(|r| r.2 == "consolidation").collect();
+        assert_eq!(new.len(), 1, "{rows:?}");
+        assert_eq!(
+            new[0].1, long,
+            "the new note holds the longest text exactly once"
+        );
+        assert_eq!(new[0].1.matches(&head).count(), 1);
+        let merged_from: Vec<i64> = tx
+            .query_one(
+                "SELECT merged_from FROM memory_chunks WHERE id = $1",
+                &[&new[0].0],
+            )
+            .expect("merged_from")
+            .get(0);
+        assert_eq!(merged_from, vec![a, b]);
+    }
+
+    #[test]
+    fn consolidate_twice_does_not_nest() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping consolidate_twice_does_not_nest: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let head = format!("{tag} backups run nightly at two and are kept for fourteen days");
+        seed_dup(&mut tx, &format!("{head} (a)"));
+        seed_dup(&mut tx, &format!("{head} (b)"));
+        dedup(&mut tx, false).expect("first dedup");
+        let after_first = contents(&mut tx, &format!("{tag}%"));
+        assert_eq!(after_first.len(), 3);
+        dedup(&mut tx, false).expect("second dedup");
+        let after_second = contents(&mut tx, &format!("{tag}%"));
+        assert_eq!(
+            after_second, after_first,
+            "the second run changed or added notes"
+        );
+        for (_, content, _) in &after_second {
+            assert_eq!(content.matches(&head).count(), 1, "text nested: {content}");
+        }
     }
 }
