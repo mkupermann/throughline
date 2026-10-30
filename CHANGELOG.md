@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Model choice, titles, extraction, recall counts and tokens
+
+Six findings from the audit of 30.10.2026.
+
+- **No embedding model as generator.** Ollama auto-selection skips models named `*embed*`, `*minilm*` or `bge*`. With only embedding models installed, `doctor` reports generation as unavailable instead of a model that fails with HTTP 400.
+- **No permanent fallback title.** When the model call fails, `generate-titles` leaves the title empty and tries again on the next run. It reports `titled N conversation(s), M failed`.
+- **The extract-memory job extracts.** `POST /api/operate?job=extract-memory` runs the real extraction on up to three pending conversations. It used to count five and extract nothing.
+- **Recall counts access.** Each note returned by recall through the CLI, the API or MCP gets `access_count + 1` and `last_accessed`. `recall-eval` does not count. The conflict and stale reports now see which notes are used.
+- **Honest search mode.** `mode=semantic` without an embedding service answers with `"mode":"lexical"`, the mode it actually ran.
+- **Claude Code tokens once per API message.** Claude Code writes one JSONL entry per content block with the same `message.id` and usage. Each id now counts once. Sessions already imported keep their totals until their files are read again.
+
 ### With a task, matching decisions lead the context pack
 
 When you give `context` a task, the Decisions section now starts with the decisions that match it, best full-text match first, and then the rest newest first. On a project with many decisions the budget used to fill with the newest ones whatever the task said. Without a task the order is unchanged, and so are the sections, the budget rules and the line format.

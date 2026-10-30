@@ -829,6 +829,16 @@ pub fn recall<C: GenericClient>(
     })
 }
 
+/// Count an access to each returned note so `conflicts` and `stale_digest`
+/// can tell a used note from a never-read one.
+pub fn mark_accessed<C: GenericClient>(client: &mut C, ids: &[i64]) -> Result<u64> {
+    let n = client.execute(
+        "UPDATE memory_chunks SET access_count = COALESCE(access_count,0) + 1, last_accessed = now() WHERE id = ANY($1)",
+        &[&ids],
+    )?;
+    Ok(n)
+}
+
 /// One line per hit for the CLI:
 /// `[m#id · valid_from · category · score] content (Quelle: title, date)`.
 pub fn render_line(h: &RecallHit) -> String {

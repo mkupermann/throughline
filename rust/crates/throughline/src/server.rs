@@ -297,7 +297,12 @@ async fn search_handler(
             "lexical" => crate::search::search(client, &q, limit, None)?,
             _ => crate::search::hybrid(client, backend.as_ref(), &q, limit)?,
         };
-        Ok((hits, backend_label, m))
+        let mode = if m == "semantic" && backend.is_none() {
+            "lexical".to_string()
+        } else {
+            m
+        };
+        Ok((hits, backend_label, mode))
     })
     .await
     {
@@ -1266,7 +1271,12 @@ async fn recall_handler(
             limit: parsed.limit,
             rank: parsed.rank,
         };
-        crate::recall::recall(client, &q, emb.as_ref())
+        let result = crate::recall::recall(client, &q, emb.as_ref())?;
+        let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+        if let Err(e) = crate::recall::mark_accessed(client, &ids) {
+            eprintln!("mark_accessed: {e}");
+        }
+        Ok(result)
     })
     .await
     {
@@ -2346,12 +2356,20 @@ async fn operate_handler(
                 format!("embed: embedded={} errors={}", s.embedded, s.errors)
             }
             "extract-memory" => {
-                let _backend = crate::llm::resolve_backend()?;
-                let rows = client.query(
-                    "SELECT id, COALESCE(summary,'') FROM conversations WHERE generated_by IS NULL ORDER BY started_at DESC LIMIT 5",
-                    &[],
-                )?;
-                format!("extract-memory: scanned {} conversation(s)", rows.len())
+                let backend = crate::llm::resolve_backend()?;
+                let mut total = crate::extract_memory::ExtractSummary::default();
+                for conv_id in crate::extract_memory::pending_conversations(client, 3)? {
+                    let s = crate::extract_memory::extract_conversation(
+                        client, &backend, conv_id, 24_000,
+                    )?;
+                    total.windows += s.windows;
+                    total.chunks += s.chunks;
+                    total.errors += s.errors;
+                }
+                format!(
+                    "extract-memory: extracted {} note(s) from {} window(s), {} error(s)",
+                    total.chunks, total.windows, total.errors
+                )
             }
             "reflect" => {
                 let s = crate::reflect_memory::dedup(client, false)?;

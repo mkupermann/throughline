@@ -8,6 +8,7 @@ use crate::types::{NormalisedConversation, NormalisedMessage};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -235,6 +236,9 @@ fn per_message_total(message: &Value) -> Option<i64> {
 }
 
 fn sum_usage(entries: &[Value]) -> (Option<i64>, Option<i64>) {
+    // Claude Code writes one JSONL entry per content block; all blocks of one
+    // API response share `message.id` and the same `usage`. Count each id once.
+    let mut seen: HashSet<String> = HashSet::new();
     let mut tin = 0i64;
     let mut tout = 0i64;
     for e in entries {
@@ -244,6 +248,11 @@ fn sum_usage(entries: &[Value]) -> (Option<i64>, Option<i64>) {
         let Some(usage) = msg.get("usage") else {
             continue;
         };
+        if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
+            if !seen.insert(id.to_string()) {
+                continue;
+            }
+        }
         tin += usage
             .get("input_tokens")
             .and_then(|v| v.as_i64())
@@ -399,6 +408,7 @@ impl Adapter for ClaudeCodeAdapter {
 
         let mut last_ts = started_at;
         let mut messages = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         for e in &msg_entries {
             let msg = e.get("message").cloned().unwrap_or(Value::Null);
             let tool_calls = extract_tool_calls(&msg);
@@ -416,6 +426,13 @@ impl Adapter for ClaudeCodeAdapter {
             };
             let ts = parse_timestamp_or(e.get("timestamp").and_then(|t| t.as_str()), last_ts);
             last_ts = ts;
+            // One API response can span several JSONL entries (one per content
+            // block) sharing `message.id` and `usage`. Only the first entry of
+            // an id carries the token total; the rest get None.
+            let first_of_id = match msg.get("id").and_then(|v| v.as_str()) {
+                Some(id) => seen_ids.insert(id.to_string()),
+                None => true,
+            };
             messages.push(NormalisedMessage {
                 role: map_role(e).to_string(),
                 content: extract_content(&msg),
@@ -427,7 +444,11 @@ impl Adapter for ClaudeCodeAdapter {
                     .get("model")
                     .and_then(|m| m.as_str())
                     .map(|s| s.to_string()),
-                token_count: per_message_total(&msg),
+                token_count: if first_of_id {
+                    per_message_total(&msg)
+                } else {
+                    None
+                },
                 is_sidechain: e
                     .get("isSidechain")
                     .and_then(|v| v.as_bool())
@@ -542,6 +563,61 @@ mod tests {
         assert_eq!(conv.messages[1].tool_name.as_deref(), Some("Bash"));
         assert_eq!(conv.token_count_in, Some(10));
         assert_eq!(conv.token_count_out, Some(20));
+    }
+
+    #[test]
+    fn usage_is_counted_once_per_api_message() {
+        // Claude Code writes one JSONL entry per content block; all three share
+        // message.id and usage, so the conversation totals must count 10/20 once
+        // and exactly one message carries token_count Some(30).
+        let tmp = tempfile::tempdir().unwrap();
+        let session = Uuid::new_v4();
+        let entries = vec![
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:00Z",
+                "message": {
+                    "id": "msg_same",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "block one"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 20}
+                }
+            }),
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:01Z",
+                "message": {
+                    "id": "msg_same",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "block two"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 20}
+                }
+            }),
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:02Z",
+                "message": {
+                    "id": "msg_same",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "block three"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 20}
+                }
+            }),
+        ];
+        let path = write_session(tmp.path(), "dup-usage.jsonl", &entries);
+        let adapter = ClaudeCodeAdapter::new(tmp.path().to_path_buf());
+        let conv = adapter.parse(&path).unwrap().expect("parsed");
+
+        assert_eq!(conv.token_count_in, Some(10));
+        assert_eq!(conv.token_count_out, Some(20));
+        assert_eq!(conv.messages.len(), 3);
+        let counts: Vec<Option<i64>> = conv.messages.iter().map(|m| m.token_count).collect();
+        assert_eq!(
+            counts.iter().filter(|c| **c == Some(30)).count(),
+            1,
+            "exactly one message carries the token total"
+        );
+        assert_eq!(counts, vec![Some(30), None, None]);
     }
 
     #[test]

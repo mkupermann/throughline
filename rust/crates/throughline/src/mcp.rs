@@ -263,6 +263,10 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             };
             let result = crate::recall::recall(client, &q, emb.as_ref())
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            if let Err(e) = crate::recall::mark_accessed(client, &ids) {
+                eprintln!("mark_accessed: {e}");
+            }
             Ok(text_result(serde_json::to_string(&result).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))

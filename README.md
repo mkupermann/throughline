@@ -46,7 +46,7 @@ The Rust registry includes **11 adapters**. They read local files. They are not 
 
 | Status | Adapters | What that means |
 | --- | --- | --- |
-| Verified on real files | Claude Code, Codex, Vibe | Roles, tool calls, model and timestamps import. Claude Code token totals count each streamed entry and run high, about double. |
+| Verified on real files | Claude Code, Codex, Vibe | Roles, tool calls, model and timestamps import. Claude Code token totals count each API message once. Sessions imported before 30.10.2026 keep their earlier, roughly doubled totals until their files are read again. |
 | Partial | Cline, Hermes, Windsurf | Cline gives every message the session start time and no model. Hermes reads only the first session from `state.db`. Windsurf imports plan files, not Cascade conversations. |
 | Not verified, likely wrong path or format | Cursor, Zed, Continue, OpenCode, Aider | Cursor and Zed look in folders those tools do not use. OpenCode found 254 real files and imported none. Aider and Continue were written against an assumed format. |
 
@@ -325,7 +325,7 @@ Honest limits beat silent surprises. These are the current ones.
 
 - **Local, trusted use.** The Rust router has no application login or role enforcement. Keep it on loopback. Older Python team-mode settings do not add authentication to this runtime. It does refuse requests with a Host other than loopback, `THROUGHLINE_PUBLIC_URL` or `THROUGHLINE_ALLOWED_HOSTS`, requests from another origin, and API calls a browser marks as cross-site, so a web page you visit cannot drive it. Routes that change data accept only POST, and an API request without a Host header is refused. In the browser, every maintenance action that changes data asks for confirmation first.
 - **Backups need a mounted folder.** The Backup button and a bare `backup` write inside the container unless `THROUGHLINE_BACKUP_DIR` points at a mounted path. Such a dump is gone with the container.
-- **Heuristic maintenance.** Deduplication merges notes whose first 80 characters match. The conflict and stale reports flag every note older than their threshold as never accessed, because access is not counted yet. The API job `/api/operate?job=extract-memory` counts conversations and extracts nothing. Use `throughline extract-memory`.
+- **Heuristic maintenance.** Deduplication merges notes whose first 80 characters match. Recall counts each note it returns, through the CLI, the API and MCP. Until a note has been recalled once, the conflict and stale reports treat it as never accessed.
 - **Historical evidence.** Conversations, notes and answers can be incomplete, stale or wrong. A tool-call record does not prove a command succeeded or a file still exists.
 - **Separate model validation.** The demo demonstrates navigation and selected deterministic actions, not model quality, vector retrieval, agent execution or backup restoration.
 - **Incomplete parity.** React team operations, the template library, Review, SQL Console and account management are not registered by the Rust server. Older documentation may use different commands and variables.

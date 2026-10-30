@@ -369,6 +369,10 @@ fn main() -> Result<()> {
                 rank,
             };
             let result = recall::recall(&mut client, &q, emb.as_ref())?;
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            if let Err(e) = recall::mark_accessed(&mut client, &ids) {
+                eprintln!("mark_accessed: {e}");
+            }
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
                 return Ok(());
@@ -561,6 +565,7 @@ fn main() -> Result<()> {
                 &[&(limit as i64)],
             )?;
             let mut titled = 0usize;
+            let mut failed = 0usize;
             for row in rows {
                 let id: i64 = row.get(0);
                 let msgs = client.query(
@@ -578,15 +583,21 @@ fn main() -> Result<()> {
                         ..Default::default()
                     })
                     .collect();
-                let title = generate_titles::title_messages(&messages)
-                    .unwrap_or_else(|_| generate_titles::fallback_title(&messages));
-                client.execute(
-                    "UPDATE conversations SET summary = $2, updated_at = now() WHERE id = $1",
-                    &[&id, &title],
-                )?;
-                titled += 1;
+                match generate_titles::title_messages(&messages) {
+                    Ok(title) => {
+                        client.execute(
+                            "UPDATE conversations SET summary = $2, updated_at = now() WHERE id = $1",
+                            &[&id, &title],
+                        )?;
+                        titled += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("generate-titles: conversation {id}: {e}");
+                        failed += 1;
+                    }
+                }
             }
-            println!("titled {titled} conversation(s)");
+            println!("titled {titled} conversation(s), {failed} failed");
         }
         Command::ExportMarkdown {
             out,

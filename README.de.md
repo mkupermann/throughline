@@ -46,7 +46,7 @@ Die Rust-Registry enthält **11 Adapter**. Sie lesen lokale Dateien. Es sind kei
 
 | Stand | Adapter | Was das heißt |
 | --- | --- | --- |
-| Mit echten Dateien geprüft | Claude Code, Codex, Vibe | Rollen, Tool-Aufrufe, Modell und Zeitstempel kommen an. Die Token-Summen von Claude Code zählen jeden gestreamten Eintrag und liegen etwa doppelt zu hoch. |
+| Mit echten Dateien geprüft | Claude Code, Codex, Vibe | Rollen, Tool-Aufrufe, Modell und Zeitstempel kommen an. Die Token-Summen von Claude Code zählen jede API-Nachricht einmal. Sessions, die vor dem 30.10.2026 importiert wurden, behalten ihre alten, etwa doppelten Summen, bis ihre Dateien neu eingelesen werden. |
 | Teilweise | Cline, Hermes, Windsurf | Cline gibt jeder Nachricht die Startzeit der Session und kein Modell. Hermes liest aus `state.db` nur die erste Session. Windsurf importiert Plandateien, keine Cascade-Gespräche. |
 | Nicht geprüft, Pfad oder Format vermutlich falsch | Cursor, Zed, Continue, OpenCode, Aider | Cursor und Zed suchen in Ordnern, die diese Tools nicht nutzen. OpenCode fand 254 echte Dateien und importierte keine. Aider und Continue beruhen auf einem angenommenen Format. |
 
@@ -325,7 +325,7 @@ Ehrliche Grenzen sind besser als stille Überraschungen. Das sind die aktuellen.
 
 - **Lokaler, vertrauenswürdiger Betrieb.** Der Rust-Router hat keinen Anwendungs-Login und keine Rollenprüfung. Lass ihn auf Loopback. Ältere Python-Team-Einstellungen schützen diese Laufzeit nicht. Er weist Anfragen ab, deren Host weder Loopback noch `THROUGHLINE_PUBLIC_URL` oder `THROUGHLINE_ALLOWED_HOSTS` ist, Anfragen von fremder Herkunft und API-Aufrufe, die ein Browser als seitenübergreifend kennzeichnet. Eine besuchte Webseite kann ihn also nicht steuern. Routen, die Daten verändern, nehmen nur POST an, und eine API-Anfrage ohne Host-Header wird abgewiesen. Im Browser fragt jede Wartungsaktion, die Daten verändert, vorher nach.
 - **Sicherungen brauchen einen gemounteten Ordner.** Der Sicherungs-Knopf und ein nacktes `backup` schreiben in den Container, solange `THROUGHLINE_BACKUP_DIR` nicht auf einen gemounteten Pfad zeigt. Ein solcher Dump ist mit dem Container weg.
-- **Wartung nach Faustregeln.** Die Deduplizierung führt Notizen zusammen, deren erste 80 Zeichen gleich sind. Konflikt- und Stale-Bericht melden jede Notiz über ihrer Altersgrenze als nie abgerufen, weil Abrufe noch nicht gezählt werden. Der API-Job `/api/operate?job=extract-memory` zählt Konversationen und extrahiert nichts. Dafür `throughline extract-memory` nutzen.
+- **Wartung nach Faustregeln.** Die Deduplizierung führt Notizen zusammen, deren erste 80 Zeichen gleich sind. Recall zählt jede Notiz, die es liefert, über CLI, API und MCP. Bis eine Notiz einmal abgerufen wurde, gilt sie in Konflikt- und Stale-Bericht als nie abgerufen.
 - **Historische Evidenz.** Konversationen, Notizen und Antworten können unvollständig, veraltet oder falsch sein. Ein Tool-Call-Eintrag beweist nicht, dass ein Befehl gelang oder eine Datei noch existiert.
 - **Modell-Validierung ist getrennt.** Die Demo zeigt Navigation und ausgewählte deterministische Aktionen, nicht Modellqualität, Vektor-Retrieval, Agenten-Ausführung oder Backup-Wiederherstellung.
 - **Unvollständige Parität.** React-Team-Operations, die Template-Bibliothek, Review, SQL-Konsole und Konten-Verwaltung registriert der Rust-Server nicht. Ältere Dokumentation kann andere Befehle und Variablen verwenden.

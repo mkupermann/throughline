@@ -120,6 +120,25 @@ fn compat_backend(base: &str, model: String, api_key: Option<String>) -> Generat
     }
 }
 
+/// Pick a text-generation model from Ollama's tag list, skipping embedding
+/// models (`*embed*`, `*minilm*`, `bge*`). Prefers `qwen*`, then `*llama*`,
+/// `*mistral*`, else the first remaining name. `None` when only embedding
+/// models are installed.
+pub fn pick_generation_model(names: &[String]) -> Option<String> {
+    let is_embedding = |n: &str| {
+        let lower = n.to_lowercase();
+        lower.contains("embed") || lower.contains("minilm") || lower.starts_with("bge")
+    };
+    names
+        .iter()
+        .find(|n| {
+            !is_embedding(n)
+                && (n.starts_with("qwen") || n.contains("llama") || n.contains("mistral"))
+        })
+        .or_else(|| names.iter().find(|n| !is_embedding(n)))
+        .cloned()
+}
+
 fn probe_ollama(base: &str, model_override: Option<String>) -> Result<GenerationBackend> {
     let base = base.to_string();
     crate::embedding::isolated_blocking(move || {
@@ -143,13 +162,11 @@ fn probe_ollama(base: &str, model_override: Option<String>) -> Result<Generation
         if names.is_empty() {
             return Err(anyhow!("ollama has no models"));
         }
-        let model = model_override.unwrap_or_else(|| {
-            names
-                .iter()
-                .find(|n| n.starts_with("qwen") || n.contains("llama") || n.contains("mistral"))
-                .cloned()
-                .unwrap_or_else(|| names[0].clone())
-        });
+        let model = match model_override {
+            Some(m) => m,
+            None => pick_generation_model(&names)
+                .ok_or_else(|| anyhow!("ollama has only embedding models"))?,
+        };
         ollama_backend(&base, model)
     })
 }
@@ -335,6 +352,19 @@ mod tests {
             .unwrap();
         assert_eq!(body["think"], serde_json::json!(false));
         assert_eq!(body["options"]["num_ctx"], serde_json::json!(16384));
+    }
+
+    #[test]
+    fn pick_generation_model_skips_embedding_models() {
+        assert_eq!(pick_generation_model(&["nomic-embed-text".into()]), None);
+        assert_eq!(
+            pick_generation_model(&["nomic-embed-text".into(), "qwen2.5:1.5b-instruct".into()]),
+            Some("qwen2.5:1.5b-instruct".into())
+        );
+        assert_eq!(
+            pick_generation_model(&["mxbai-embed-large".into(), "gemma3:4b".into()]),
+            Some("gemma3:4b".into())
+        );
     }
 
     #[test]
