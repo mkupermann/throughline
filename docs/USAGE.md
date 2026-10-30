@@ -521,6 +521,14 @@ Two limits, stated plainly.
 
 Throughline writes no log of MCP requests, keys or client names.
 
+## VS Code
+
+The extension in [`vscode/`](../vscode/README.md) brings recall, the context pack, single notes and the conflict report into VS Code, and writes notes from the editor. It calls only the address in `throughline.url`.
+
+Looking goes through `/api` without a key and does not count as use. Writing and handing the context pack to Cline or Continue go through `POST /mcp` with the agent key, which VS Code keeps in its secret storage. Only the pack counts, as `project_context` does above. Without Cline or Continue the pack lands on the clipboard.
+
+There is no marketplace release. Build the VSIX with `npm ci && npm run package` in `vscode/`, install it with `code --install-extension`, then run **Throughline: Set Agent Key**. Commands, settings and the hand-over are in the [extension README](../vscode/README.md).
+
 ## The continue loop
 
 The handoff brief is only useful if it reaches the next session without

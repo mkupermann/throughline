@@ -273,6 +273,10 @@ Die Shell setzt die Variable ein. Exportiere den Schlüssel also vor `claude mcp
 
 Werkzeuge: `search`, `recall`, `project_context`, `get_note`, `conflicts`, `list_projects`, `stats`, `write`, `forget`, `supersede` und `keep`. Ressourcen: `throughline://projects`, `throughline://project/{name}/context` und `throughline://note/{id}`. Prompts: `before_coding` und `handoff`. `THROUGHLINE_MCP_READ_ONLY=1` blendet `write`, `forget`, `supersede` und `keep` aus. Was ein Agent abruft, landet im Kontext seines eigenen Modells, und `THROUGHLINE_ALLOW_REMOTE_LLM` regelt das nicht. Der Schlüssel schützt nur `/mcp`, nicht die Oberfläche und nicht den Rest der API. Einrichtung für Codex, Fehler-Codes und Zählregel stehen im [Nutzungshandbuch](docs/USAGE.md#agent-access-over-http). Einige Werkzeuge brauchen das aktuelle Schema (Migration 012 oder neuer). Der Server prüft die Schema-Version nicht. Auf einem älteren Schema scheitern sie mit einem rohen SQL-Fehler, also vorher `throughline migrate` laufen lassen. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
 
+### VS Code
+
+Die Erweiterung in [`vscode/`](vscode/README.md) zeigt Abruf, Kontextpaket, einzelne Notizen und Konflikte in VS Code, legt Notizen aus dem Editor an und reicht das Kontextpaket an Cline oder Continue weiter. Fehlen beide, landet es in der Zwischenablage. Anzeigen läuft über `/api` ohne Schlüssel und zählt nicht als Nutzung. Schreiben und Weitergabe laufen über `/mcp` mit dem Agenten-Schlüssel, den VS Code in seinem Secret-Speicher hält. Die Erweiterung ruft nur die eingestellte Throughline-Adresse auf, sendet keine Telemetrie und wird als lokales VSIX installiert (`code --install-extension`), nicht über den Marketplace.
+
 ### Optionale Modelle
 
 Setze diese Variablen in der Umgebung des Anwendungs-Containers. Compose braucht einen `environment`-Eintrag oder eine Override-Datei für Variablen, die es nicht ohnehin weiterreicht.

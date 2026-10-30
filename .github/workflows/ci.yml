@@ -175,6 +175,36 @@ jobs:
           fi
           echo "Committed frontend matches source."
 
+  vscode-extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run lint
+      # Unit tests only. The end-to-end run (npm run test:integration) needs a
+      # Throughline instance with an agent key and stays local.
+      - name: Unit tests
+        run: npm test
+      # A local VSIX, no marketplace publish.
+      - name: Package
+        run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: throughline-vscode
+          path: vscode/throughline-*.vsix
+          if-no-files-found: error
+
   wheel-smoke:
     name: Clean wheel smoke
     runs-on: ubuntu-latest
