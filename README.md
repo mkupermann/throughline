@@ -273,6 +273,10 @@ The shell fills in the variable, so export the key in that shell before `claude 
 
 Tools: `search`, `recall`, `project_context`, `get_note`, `conflicts`, `list_projects`, `stats`, `write`, `forget`, `supersede` and `keep`. Resources: `throughline://projects`, `throughline://project/{name}/context` and `throughline://note/{id}`. Prompts: `before_coding` and `handoff`. `THROUGHLINE_MCP_READ_ONLY=1` hides `write`, `forget`, `supersede` and `keep`. What an agent recalls goes into its own model's context, which `THROUGHLINE_ALLOW_REMOTE_LLM` does not govern, and the key protects `/mcp` only, not the UI or the rest of the API. Setup for Codex, the error codes and the counting rule are in the [usage guide](docs/USAGE.md#agent-access-over-http). Some tools need the current schema (migration 012 or later). The server does not check the schema version. On an older schema they fail with a raw SQL error, so run `throughline migrate` first. The older Python MCP server has a different tool contract.
 
+### VS Code
+
+The extension in [`vscode/`](vscode/README.md) shows recall, the context pack, single notes and conflicts in VS Code, writes notes from the editor and hands the context pack to Cline or Continue, with the clipboard as fallback. Looking goes through `/api` without a key and does not count as use. Writing and handing over go through `/mcp` with the agent key, kept in VS Code's secret storage. It calls only the configured Throughline address, sends no telemetry and is installed from a local VSIX (`code --install-extension`), not from the marketplace.
+
 ### Optional models
 
 Set these in the application container's environment. Compose needs an `environment` entry or an override file for variables it does not already forward.

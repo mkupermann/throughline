@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### VS Code extension
+
+A VS Code extension in `vscode/`, installed from a local VSIX. No marketplace release, no server change.
+
+- **Commands.** Recall, project context, open note, conflicts and the web UI for looking. Quick note and remember selection for writing. Copy context and send context to an agent for handing over. Set agent key, refresh connection and embedding status for the setup.
+- **Two paths.** Looking goes through `GET /api` without a key and does not count as use. Writing and handing over go through `POST /mcp` (`2026-07-28`) with the agent key, which VS Code keeps in its secret storage, never in `settings.json`. Only the handed-over context pack counts, as `project_context`.
+- **Hand-over.** Send context to an agent passes the pack to Cline (`cline.addToChat`) or Continue (`continue.focusContinueInputWithoutClear`). Both commands are undocumented, so the pack always goes to the clipboard as well, and without either agent the clipboard is the result. The extension writes no key into their configuration.
+- **Status bar and view.** The status bar shows the project and the connection, or why it is not connected. The Throughline view holds the context pack and the last recall. No polling.
+- **Only the configured address.** The extension calls `throughline.url` and nothing else, and sends no telemetry. There is no recording of AI code changes.
+- **CI.** A "VS Code extension" job runs the type check, the unit tests and the packaging, and keeps the VSIX as the `throughline-vscode` artifact. The end-to-end run in a real VS Code (`npm run test:integration`) needs a test instance with a key and stays local.
+
 ### Multilingual embedding model
 
 Throughline now supports a multilingual embedding model and recommends it for notes in more than one language. The default stays `nomic-embed-text`, so an existing install does not switch models on restart; the multilingual model is opt-in through `OLLAMA_EMBED_MODEL`.

@@ -125,7 +125,7 @@
     "build": "node esbuild.mjs",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "package": "npm run build && vsce package --no-dependencies",
+    "package": "npm run build && vsce package --no-dependencies --baseContentUrl https://github.com/mkupermann/throughline/blob/main/vscode",
     "test:integration": "npm run build && node --import tsx test/runIntegration.ts"
   },
   "devDependencies": {
