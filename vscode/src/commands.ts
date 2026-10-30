@@ -1,3 +1,4 @@
+import { detectAgents, sendToAgent as deliver, type Agent, type AgentHost } from "./agents";
 import type { ApiClient, ContextPack, RecallResult } from "./apiClient";
 import { describe, ThroughlineError } from "./errors";
 import { conflictsToMarkdown, noteToMarkdown, packToMarkdown } from "./markdown";
@@ -50,6 +51,7 @@ export interface Deps {
   settings: Settings;
   tree?: Sink;
   setKey?: () => void;
+  agents?: { host: AgentHost; commands(): Promise<string[]> };
 }
 
 export function clampBudget(n: number): number {
@@ -166,15 +168,41 @@ export function quickNote(d: Deps): Promise<void> {
   });
 }
 
+/** Fetches the context pack over /mcp (counts as agent use). Undefined when the project choice is cancelled. */
+async function fetchPack(d: Deps): Promise<string | undefined> {
+  const project = await chooseProject(d, true);
+  if (!project) return undefined;
+  const task = (await d.ui.input("Task (optional)"))?.trim();
+  const args: { project: string; task?: string; budget: number } = { project, budget: clampBudget(d.settings.budget()) };
+  if (task) args.task = task;
+  return d.mcp.call("project_context", args);
+}
+
 export function copyContext(d: Deps): Promise<void> {
   return guarded(d, async () => {
-    const project = await chooseProject(d, true);
-    if (!project) return;
-    const task = (await d.ui.input("Task (optional)"))?.trim();
-    const args: { project: string; task?: string; budget: number } = { project, budget: clampBudget(d.settings.budget()) };
-    if (task) args.task = task;
-    const text = await d.mcp.call("project_context", args);
+    const text = await fetchPack(d);
+    if (text === undefined) return;
     await d.ui.clipboard(text);
     d.ui.info("Context copied to the clipboard.");
+  });
+}
+
+const LABELS: Record<Agent, string> = { cline: "Cline", continue: "Continue", clipboard: "Clipboard" };
+
+export function sendToAgent(d: Deps): Promise<void> {
+  return guarded(d, async () => {
+    if (!d.agents) return;
+    const text = await fetchPack(d);
+    if (text === undefined) return;
+    const found = detectAgents(await d.agents.commands());
+    const real = found.filter((a) => a !== "clipboard");
+    let agent: Agent = "clipboard";
+    if (real.length === 1) agent = real[0];
+    else if (real.length > 1) {
+      const picked = await d.ui.pick(found.map((a) => LABELS[a]), "Send the context to");
+      if (!picked) return;
+      agent = found.find((a) => LABELS[a] === picked) ?? "clipboard";
+    }
+    await deliver(agent, text, d.agents.host);
   });
 }

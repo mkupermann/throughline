@@ -40,6 +40,21 @@ export function activate(context: vscode.ExtensionContext): void {
     settings: { url: getUrl, project: () => getProject(), budget: getBudget, rank: getRank },
     tree,
     setKey: () => void vscode.commands.executeCommand("throughline.setKey"),
+    agents: {
+      commands: () => Promise.resolve(vscode.commands.getCommands(true)),
+      host: {
+        executeCommand: (id, ...args) => Promise.resolve(vscode.commands.executeCommand(id, ...args)),
+        openScratchDocument: async (content) => {
+          const doc = await vscode.workspace.openTextDocument({ language: "markdown", content });
+          await vscode.window.showTextDocument(doc);
+        },
+        selectAll: async () => {
+          await vscode.commands.executeCommand("editor.action.selectAll");
+        },
+        clipboard: (t) => Promise.resolve(vscode.env.clipboard.writeText(t)),
+        info: ui.info,
+      },
+    },
   });
   context.subscriptions.push(
     status,
@@ -52,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("throughline.rememberSelection", () => cmd.rememberSelection(deps())),
     vscode.commands.registerCommand("throughline.quickNote", () => cmd.quickNote(deps())),
     vscode.commands.registerCommand("throughline.copyContext", () => cmd.copyContext(deps())),
+    vscode.commands.registerCommand("throughline.sendToAgent", () => cmd.sendToAgent(deps())),
     vscode.commands.registerCommand("throughline.setKey", async () => {
       const input = await vscode.window.showInputBox({
         password: true,
