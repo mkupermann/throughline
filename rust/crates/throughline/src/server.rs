@@ -1,7 +1,10 @@
 //! HTTP API + embedded web UI.
 //!
-//! Loopback-only by default: the API has no authentication and serves the
-//! whole corpus. Same posture as the Python server.
+//! Loopback-only by default. The UI and the REST API have no login and serve
+//! the whole corpus, the same posture as the Python server. `/mcp` needs the
+//! agent key (`THROUGHLINE_AGENT_KEY`). `GET /api/recall` and
+//! `GET /api/context` count agent use when a valid Bearer key comes with the
+//! request.
 
 use crate::search;
 use crate::temporal::as_of_predicate;
