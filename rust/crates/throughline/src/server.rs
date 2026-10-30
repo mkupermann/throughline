@@ -1579,11 +1579,16 @@ pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Opt
 
 /// `load_note` plus `source_type`, `source_id` and the whole supersede chain
 /// (predecessors and successors, oldest first, the note itself included).
-/// Does not count a use; the caller decides.
+/// For agents: a forgotten note is `None` and forgotten members leave the
+/// chain (the walk still passes through them). Does not count a use; the
+/// caller decides.
 pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
     let Some(mut note) = load_note(client, id)? else {
         return Ok(None);
     };
+    if note["status"] == "forgotten" {
+        return Ok(None);
+    }
     let source = client.query_one(
         "SELECT source_type, source_id FROM memory_chunks WHERE id = $1",
         &[&id],
@@ -1603,6 +1608,7 @@ pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result
          )
          SELECT m.id, COALESCE(m.status, 'active'), m.valid_from, m.valid_to, m.content
          FROM memory_chunks m JOIN chain USING (id)
+         WHERE COALESCE(m.status, 'active') <> 'forgotten'
          ORDER BY m.valid_from NULLS FIRST, m.id",
         &[&id],
     )?;

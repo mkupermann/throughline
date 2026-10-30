@@ -1625,6 +1625,67 @@ mod tests {
     }
 
     #[test]
+    fn forgotten_note_is_not_found_for_agents() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping forgotten_note_is_not_found_for_agents: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&id],
+        )
+        .expect("forget");
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "get_note", "arguments": { "id": id } }),
+        )
+        .expect_err("a forgotten note is not found");
+        assert_eq!(err["code"], -32000, "{err}");
+        assert_eq!(err["message"], "memory chunk not found");
+        let uri = format!("throughline://note/{id}");
+        let legacy = rpc(&mut tx, "resources/read", json!({ "uri": uri }), false);
+        assert_eq!(legacy["error"]["code"], -32002, "{legacy}");
+        assert_eq!(legacy["error"]["message"], "Resource not found");
+        let modern = rpc(&mut tx, "resources/read", json!({ "uri": uri }), true);
+        assert_eq!(modern["error"]["code"], -32602, "{modern}");
+        assert_eq!(use_count(&mut tx, id), 0, "a note not served counts nothing");
+        // the UI detail still shows it, for restore
+        let detail = crate::server::load_note(&mut tx, id)
+            .expect("load")
+            .expect("row");
+        assert_eq!(detail["status"], "forgotten");
+    }
+
+    #[test]
+    fn get_note_chain_omits_forgotten_members() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping get_note_chain_omits_forgotten_members: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let old = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let mid = replace(&mut tx, old, "mcp chain middle");
+        let new = replace(&mut tx, mid, "mcp chain newest");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&mid],
+        )
+        .expect("forget the middle");
+        for start in [old, new] {
+            let note = call_text(&mut tx, "get_note", json!({ "id": start }));
+            let ids: Vec<i64> = note["chain"]
+                .as_array()
+                .expect("chain")
+                .iter()
+                .map(|n| n["id"].as_i64().unwrap())
+                .collect();
+            assert_eq!(ids, vec![old, new], "from {start}: {note}");
+        }
+    }
+
+    #[test]
     fn get_note_counts_use() {
         let Some(mut client) = test_db() else {
             eprintln!("skipping get_note_counts_use: no PostgreSQL reachable");
