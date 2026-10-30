@@ -1,5 +1,5 @@
 import { join, send } from "./apiClient";
-import { ThroughlineError } from "./errors";
+import { NO_MCP_ENDPOINT, ThroughlineError } from "./errors";
 
 const PROTOCOL_VERSION = "2026-07-28";
 export const CLIENT_NAME = "throughline-vscode";
@@ -8,6 +8,14 @@ export const CLIENT_VERSION = "0.1.0";
 interface RpcError {
   code?: number;
   message?: string;
+}
+
+/** The same error with every occurrence of the key replaced by ***, so no message can leak it. */
+function redact(e: unknown, key: string): unknown {
+  const clean = (s: string) => s.split(key).join("***");
+  if (e instanceof ThroughlineError) return new ThroughlineError(e.kind, clean(e.message), clean(e.detail));
+  if (e instanceof Error) return new Error(clean(e.message));
+  return new Error(clean(String(e)));
 }
 
 export class McpClient {
@@ -23,6 +31,14 @@ export class McpClient {
     if (!key) {
       throw new ThroughlineError("no_key", "No agent key is stored. Run \"Throughline: Set Agent Key\".");
     }
+    try {
+      return await this.request(tool, args, key);
+    } catch (e) {
+      throw redact(e, key);
+    }
+  }
+
+  private async request(tool: string, args: object, key: string): Promise<string> {
     const body = JSON.stringify({
       jsonrpc: "2.0",
       id: this.nextId++,
@@ -70,6 +86,10 @@ export class McpClient {
         throw new ThroughlineError("too_large", "The request is over the 1 MiB limit", detail);
       default:
         break;
+    }
+    if (res.status === 404 && !rpc) {
+      // An older server without the MCP endpoint; a 404 with a JSON-RPC error comes from /mcp itself.
+      throw new ThroughlineError("protocol", NO_MCP_ENDPOINT);
     }
     if (res.status === 400 && (rpc?.code === -32020 || rpc?.code === -32022)) {
       throw new ThroughlineError("protocol", "The server does not speak this protocol version", detail);

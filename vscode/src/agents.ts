@@ -3,8 +3,9 @@ export type Agent = "cline" | "continue" | "clipboard";
 export interface AgentHost {
   executeCommand(id: string, ...args: unknown[]): Promise<unknown>;
   openScratchDocument(text: string): Promise<void>;
+  /** Selects the whole scratch document in the scratch editor itself. */
   selectAll(): Promise<void>;
-  /** Closes the scratch document opened by openScratchDocument, only if it is still the active editor. */
+  /** Discards and closes the scratch document, without a save prompt, only if it is still the active editor. */
   closeScratchDocument(): Promise<void>;
   clipboard(text: string): Promise<void>;
   info(msg: string): void;

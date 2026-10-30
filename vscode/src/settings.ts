@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { resolveProject } from "./statusLogic";
+import { DEFAULT_URL, validateUrl } from "./validate";
 
 export const KEY_NAME = "throughline.agentKey";
 
@@ -7,8 +8,19 @@ function cfg(scope?: vscode.ConfigurationScope) {
   return vscode.workspace.getConfiguration("throughline", scope);
 }
 
+let warnedFor: string | undefined;
+
+/** The configured address if it is http or https, otherwise the default, with one warning per bad value. */
 export function getUrl(): string {
-  return cfg().get<string>("url", "http://127.0.0.1:8788").trim() || "http://127.0.0.1:8788";
+  const raw = cfg().get<string>("url", DEFAULT_URL).trim();
+  if (!raw) return DEFAULT_URL;
+  const url = validateUrl(raw);
+  if (url) return url;
+  if (warnedFor !== raw) {
+    warnedFor = raw;
+    void vscode.window.showWarningMessage(`Throughline: throughline.url must be an http or https address. Using ${DEFAULT_URL}.`);
+  }
+  return DEFAULT_URL;
 }
 
 export function getProject(folder?: vscode.WorkspaceFolder): string | undefined {

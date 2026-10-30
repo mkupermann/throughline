@@ -9,6 +9,8 @@ export type ErrorKind =
   | "server"
   | "unreachable";
 
+export const NO_MCP_ENDPOINT = "This Throughline server has no /mcp endpoint. Update the server.";
+
 export class ThroughlineError extends Error {
   readonly kind: ErrorKind;
   readonly detail: string;

@@ -9,7 +9,7 @@ export class StatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
 
   constructor(private readonly getKey: () => Promise<string | undefined>) {
-    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 0);
     this.item.command = "throughline.showEmbeddingStatus";
     this.item.text = "Throughline: …";
     this.item.show();
