@@ -1705,6 +1705,67 @@ try {
     await del('/api/favorites/message/1');
     pass('bc-fav-home', `metric shows ${apiFavs.count} from API, drill opens history with fav-only active, DE label "${deLabel.trim()}"`);
   }
+
+  // ── (bd) Session detail shows tool results under the Tool toggle ───────
+  {
+    await page.evaluate(() => { localStorage.setItem('th-lang', 'en'); });
+    await page.goto(base + '/#session/18', { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('#view-detail').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('#detail-messages .msg').first().waitFor({ state: 'visible', timeout: 10000 });
+    const conv = await json('/api/conversations/18');
+    const shown = await page.locator('#detail-messages .msg').count();
+    if (shown !== conv.messages.length) fail('bd-detail-tool-results', `${shown} of ${conv.messages.length} messages shown with all toggles on`);
+    const toolBtn = page.locator('#view-detail .togglable[data-role="tool"]');
+    const toolLabel = (await toolBtn.textContent()).trim();
+    if (toolLabel !== 'Tool') fail('bd-detail-tool-results', `third toggle reads "${toolLabel}", want "Tool"`);
+    const toolCards = page.locator('#detail-messages .msg-tool');
+    if (await toolCards.count() < 1) fail('bd-detail-tool-results', 'no tool result card in session 18');
+    const pill = (await toolCards.first().locator('.role-pill').textContent()).trim();
+    if (pill !== 'Tool result') fail('bd-detail-tool-results', `tool result pill reads "${pill}"`);
+    const startsClosed = await toolCards.first().evaluate((e) => !e.classList.contains('open'));
+    if (!startsClosed) fail('bd-detail-tool-results', 'tool result does not start collapsed');
+    await toolBtn.click();
+    const hidden = await page.locator('#detail-messages .msg-tool').count();
+    if (hidden !== 0) fail('bd-detail-tool-results', `${hidden} tool result(s) still shown with the Tool toggle off`);
+    await toolBtn.click();
+    pass('bd-detail-tool-results', `${shown}/${conv.messages.length} messages, toggle "Tool", pill "Tool result", starts collapsed, toggle hides it`);
+  }
+
+  // ── (be) Expand all opens every message and toggles back ───────────────
+  {
+    const btn = page.locator('#detail-expand');
+    await btn.click();
+    const total = await page.locator('#detail-messages .msg').count();
+    const openAfter = await page.locator('#detail-messages .msg.open').count();
+    const labelOpen = (await btn.textContent()).trim();
+    if (openAfter !== total) fail('be-detail-expand-all', `${openAfter} of ${total} open after Expand all`);
+    if (labelOpen !== 'Collapse all') fail('be-detail-expand-all', `button reads "${labelOpen}" after expanding`);
+    await btn.click();
+    const openBack = await page.locator('#detail-messages .msg.open').count();
+    const labelBack = (await btn.textContent()).trim();
+    if (openBack !== 0 || labelBack !== 'Expand all') fail('be-detail-expand-all', `after collapse ${openBack} open, label "${labelBack}"`);
+    pass('be-detail-expand-all', `${total} open, label "Collapse all", then 0 open, label "Expand all"`);
+  }
+
+  // ── (bf) Opening a session sets #session/<id>, Back returns ────────────
+  {
+    await page.goto(base + '/#history', { waitUntil: 'networkidle' });
+    await page.locator('#view-history').waitFor({ state: 'visible', timeout: 10000 });
+    if ((await page.locator('#history-fav-only').getAttribute('aria-pressed')) === 'true') {
+      await page.locator('#history-fav-only').click();
+      await page.waitForLoadState('networkidle');
+    }
+    await page.locator('#hist-tbody tr[data-id]').first().waitFor({ state: 'visible', timeout: 10000 });
+    const rowId = await page.locator('#hist-tbody tr[data-id]').first().getAttribute('data-id');
+    await page.locator('#hist-tbody tr[data-id] td.td-date').first().click();
+    await page.locator('#view-detail').waitFor({ state: 'visible', timeout: 10000 });
+    const hash = await page.evaluate(() => location.hash);
+    if (hash !== '#session/' + rowId) fail('bf-session-deeplink', `hash "${hash}", want "#session/${rowId}"`);
+    await page.goBack();
+    await page.locator('#view-history').waitFor({ state: 'visible', timeout: 10000 });
+    pass('bf-session-deeplink', `row #${rowId} opens with ${hash}, browser Back returns to Sessions`);
+  }
 } finally {
   await browser.close();
 }

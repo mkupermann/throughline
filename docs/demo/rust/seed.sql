@@ -37,10 +37,11 @@ SELECT c.id, ('e0000000-0000-4000-8000-' || lpad((c.id*10+m)::text,12,'0'))::uui
    WHEN 'Atlas-demo' THEN 'Decision: keep lexical retrieval as the baseline. The long-document counterexample needs a separate evaluation before changing the design.'
    WHEN 'Harbor-demo' THEN 'Decision: retain keyboard navigation and visible focus. Recheck the mobile drawer before the release handoff.'
    ELSE 'Decision: validate the data contract before each incremental load. The next check is recovery from an interrupted batch.' END
+   || ' [Tool: Read] path=/fictional/' || c.project_name || '/notes/decision.md'
  WHEN 3 THEN 'FICTIONAL TOOL RESULT: opened /fictional/' || c.project_name || '/notes/decision.md. This is demonstration content, not a command executed by a real agent.'
  ELSE 'Handoff: the decision is recorded; the follow-up check is still open. Read the source conversation before treating this note as current project state.' END,
  CASE WHEN m=3 THEN 'Read' ELSE NULL END,
- CASE WHEN m=3 THEN jsonb_build_array(jsonb_build_object('name','Read','input',jsonb_build_object('path','/fictional/'||c.project_name||'/notes/decision.md'))) ELSE NULL END,
+ CASE WHEN m=2 THEN jsonb_build_array(jsonb_build_object('name','Read','input',jsonb_build_object('path','/fictional/'||c.project_name||'/notes/decision.md'))) ELSE NULL END,
  c.started_at + (m::text || ' minutes')::interval
 FROM conversations c CROSS JOIN generate_series(1,4) AS m;
 
