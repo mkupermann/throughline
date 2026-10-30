@@ -148,13 +148,20 @@ const STOPWORDS: &[&str] = &[
     "were", "not", "but", "can", "you", "our", "your", "has", "have", "had", "into", "about",
 ];
 
-/// Lower-case runs of letters and digits, at least 3 characters, no stopwords.
+/// Lower-case runs of letters and digits, at least 3 characters, no stopwords,
+/// each word once in the order it first appears.
 pub fn query_words(text: &str) -> Vec<String> {
-    text.to_lowercase()
+    let mut words: Vec<String> = Vec::new();
+    for w in text
+        .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.chars().count() >= 3 && !STOPWORDS.contains(w))
-        .map(str::to_string)
-        .collect()
+    {
+        if !words.iter().any(|x| x == w) {
+            words.push(w.to_string());
+        }
+    }
+    words
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,6 +478,12 @@ fn evidence_from(r: &postgres::Row, first: usize) -> Evidence {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Notes handed to `ground` on this thread, so a test sees where it stopped.
+    static GROUNDED_NOTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Evidence for notes taken from a conversation (`notes` = note id and the
 /// conversation of its chain root). With an embedding: the message with the
 /// highest cosine to the note vector, for notes that have a vector and a
@@ -481,6 +494,8 @@ fn ground<C: GenericClient>(
     notes: &[(&Candidate, i64)],
     emb: Option<&QueryEmbedding>,
 ) -> Result<HashMap<i64, Grounding>> {
+    #[cfg(test)]
+    GROUNDED_NOTES.with(|g| g.set(g.get() + notes.len()));
     let mut found: HashMap<i64, Grounding> = HashMap::new();
     let note_ids: Vec<i64> = notes.iter().map(|n| n.0.id).collect();
     let conv_ids: Vec<i64> = notes.iter().map(|n| n.1).collect();
@@ -581,19 +596,29 @@ pub fn recall<C: GenericClient>(
     if q.mode == RecallMode::Grounded {
         // Only notes whose chain starts in an existing conversation; a hit
         // without a message to cite is dropped before the limit applies.
-        let notes: Vec<(&Candidate, i64)> = scored
-            .iter()
-            .filter_map(|s| s.2.conversation_id.map(|conv| (&s.2, conv)))
-            .collect();
-        let mut grounding = ground(client, &notes, emb)?;
-        scored.retain_mut(|(_, why, c)| match grounding.remove(&c.id) {
-            Some((strength, ev)) => {
-                why.grounding = Some(strength);
-                evidence.insert(c.id, ev);
-                true
+        // Grounding walks the ranking 2 × limit notes at a time and stops
+        // once `limit` hits have evidence.
+        let mut rest = std::mem::take(&mut scored)
+            .into_iter()
+            .filter(|s| s.2.conversation_id.is_some());
+        while scored.len() < limit {
+            let chunk: Vec<(f64, Why, Candidate)> = rest.by_ref().take(2 * limit).collect();
+            if chunk.is_empty() {
+                break;
             }
-            None => false,
-        });
+            let notes: Vec<(&Candidate, i64)> = chunk
+                .iter()
+                .filter_map(|s| s.2.conversation_id.map(|conv| (&s.2, conv)))
+                .collect();
+            let mut grounding = ground(client, &notes, emb)?;
+            for (s, mut why, c) in chunk {
+                if let Some((strength, ev)) = grounding.remove(&c.id) {
+                    why.grounding = Some(strength);
+                    evidence.insert(c.id, ev);
+                    scored.push((s, why, c));
+                }
+            }
+        }
     }
     scored.truncate(limit);
     let mut relations: HashMap<i64, String> = HashMap::new();
@@ -1736,5 +1761,55 @@ mod tests {
         let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
         let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
         assert_eq!(got, ids);
+    }
+
+    #[test]
+    fn recall_grounded_stops_grounding_at_the_limit() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_grounded_stops_grounding_at_the_limit: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        message(&mut tx, conv, &format!("cited {tag}"), &model, None);
+        let c = format!("cited {tag}");
+        for _ in 0..12 {
+            sourced_note(&mut tx, &c, &project, conv, &model, None);
+        }
+        GROUNDED_NOTES.with(|g| g.set(0));
+        let r = recall(&mut tx, &grounded(&tag, &project, 2), None).unwrap();
+        assert_eq!(r.hits.len(), 2);
+        let n = GROUNDED_NOTES.with(|g| g.get());
+        assert!(n <= 4, "grounded {n} notes for limit 2");
+    }
+
+    #[test]
+    fn recall_grounded_word_share_counts_each_word_once() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_word_share_counts_each_word_once: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        let m = message(&mut tx, conv, "alpha only", &model, None);
+        let content = format!("alpha alpha alpha beta {tag}");
+        let n = sourced_note(&mut tx, &content, &project, conv, &model, None);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
+        let h = &r.hits[position(&r, n).unwrap()];
+        assert_eq!(h.evidence.as_ref().unwrap().message_id, m);
+        let g = h.why.grounding.unwrap();
+        assert!((g - 1.0 / 3.0).abs() < 1e-9, "grounding {g}");
+        assert_eq!(
+            query_words("Docker docker DOCKER compose docker"),
+            vec!["docker", "compose"]
+        );
     }
 }
