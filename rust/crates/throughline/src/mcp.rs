@@ -95,6 +95,19 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "project_context",
+                "description": "Pack the current decisions, notes, recent sessions and open questions of a project into a token budget, with citations. Give a task to pull in the notes that match it",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "project": { "type": "string" },
+                        "task": { "type": "string" },
+                        "budget": { "type": "integer", "default": 2000, "description": "estimated tokens, 64 to 32768" }
+                    },
+                    "required": ["project"]
+                }
+            },
+            {
                 "name": "list_projects",
                 "description": "List known project names",
                 "inputSchema": { "type": "object", "properties": {} }
@@ -251,6 +264,48 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             let result = crate::recall::recall(client, &q, emb.as_ref())
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
             Ok(text_result(serde_json::to_string(&result).map_err(
+                |e| json!({ "code": -32000, "message": e.to_string() }),
+            )?))
+        }
+        "project_context" => {
+            let invalid = |m: &str| json!({ "code": -32602, "message": m });
+            let project = match optional_str(&args, "project", "project must be a string")? {
+                Some(p) if !p.is_empty() => p,
+                _ => return Err(invalid("project required")),
+            };
+            let task =
+                optional_str(&args, "task", "task must be a string")?.filter(|t| !t.is_empty());
+            if let Some(t) = task {
+                crate::recall::check_query(t).map_err(|e| invalid(&e))?;
+            }
+            let budget = match args.get("budget") {
+                None | Some(Value::Null) => crate::context_pack::DEFAULT_BUDGET,
+                Some(v) => v
+                    .as_u64()
+                    .map(|b| b as usize)
+                    .filter(|b| {
+                        (crate::context_pack::MIN_BUDGET..=crate::context_pack::MAX_BUDGET)
+                            .contains(b)
+                    })
+                    .ok_or_else(|| {
+                        invalid(&format!(
+                            "budget must be an integer between {} and {}",
+                            crate::context_pack::MIN_BUDGET,
+                            crate::context_pack::MAX_BUDGET
+                        ))
+                    })?,
+            };
+            let pack = crate::context_pack::build_context(
+                client,
+                &crate::context_pack::ContextRequest {
+                    project,
+                    task,
+                    budget,
+                },
+                None,
+            )
+            .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            Ok(text_result(serde_json::to_string(&pack).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))
         }
@@ -441,6 +496,73 @@ mod tests {
         );
         for k in ["project", "valid_at", "known_at", "limit"] {
             assert!(schema["properties"].get(k).is_some(), "{k}");
+        }
+    }
+
+    #[test]
+    fn tools_list_includes_project_context() {
+        let tools = tools_list();
+        let tool = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "project_context")
+            .expect("project_context tool");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["required"], json!(["project"]));
+        assert_eq!(schema["properties"]["budget"]["type"], "integer");
+        assert_eq!(schema["properties"]["project"]["type"], "string");
+        assert_eq!(schema["properties"]["task"]["type"], "string");
+    }
+
+    #[test]
+    fn mcp_project_context_returns_a_pack() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_project_context_returns_a_pack: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let written = call_text(
+            &mut tx,
+            "write",
+            json!({
+                "content": format!("we chose heron storage {tag}"),
+                "project": project,
+                "category": "decision"
+            }),
+        );
+        let id = written["id"].as_i64().unwrap();
+        let out = call_text(
+            &mut tx,
+            "project_context",
+            json!({ "project": project, "budget": 1000 }),
+        );
+        assert_eq!(out["within_budget"], true, "{out}");
+        let cited = out["citations"]
+            .as_array()
+            .expect("citations")
+            .iter()
+            .filter(|c| c["kind"] == "memory" && c["id"].as_i64() == Some(id))
+            .count();
+        assert_eq!(cited, 1, "{out}");
+        for bad in [
+            json!({}),
+            json!({ "project": 5 }),
+            json!({ "project": "" }),
+            json!({ "project": project, "budget": "big" }),
+            json!({ "project": project, "budget": 63 }),
+            json!({ "project": project, "budget": 40000 }),
+            json!({ "project": project, "task": 7 }),
+            json!({ "project": project, "task": "x".repeat(2001) }),
+        ] {
+            let err = call_tool(
+                &mut tx,
+                &json!({ "name": "project_context", "arguments": bad }),
+            )
+            .expect_err("refused");
+            assert_eq!(err["code"], -32602, "{bad}: {err}");
         }
     }
 

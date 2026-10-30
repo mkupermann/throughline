@@ -4,10 +4,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use throughline::types::IngestSummary;
 use throughline::{
-    adapters, answer_eval, ask, audit, config, conflicts, costs, decisions, doctor, embedding,
-    export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles, handoff,
-    ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions, recall,
-    recall_eval, reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
+    adapters, answer_eval, ask, audit, config, conflicts, context_pack, costs, decisions, doctor,
+    embedding, export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles,
+    handoff, ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions,
+    recall, recall_eval, reflect_memory, repair, retention, search, server, stale_digest, temporal,
+    types,
 };
 
 #[derive(Parser)]
@@ -216,6 +217,20 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Pack a project's decisions, notes and sessions into a token budget.
+    Context {
+        #[arg(long)]
+        project: String,
+        /// What the work is about; pulls in matching notes.
+        #[arg(long)]
+        task: Option<String>,
+        /// Estimated tokens, 64 to 32768.
+        #[arg(long, default_value_t = context_pack::DEFAULT_BUDGET)]
+        budget: usize,
+        /// Print the full pack as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Measure recall against cosine, full text and random on a test set.
     RecallEval {
         /// JSON file: [{"q": "...", "project": "..." | null, "expected": [id, ...]}]
@@ -367,6 +382,49 @@ fn main() -> Result<()> {
             for h in &result.hits {
                 println!("{}", recall::render_line(h));
             }
+        }
+        Command::Context {
+            project,
+            task,
+            budget,
+            json,
+        } => {
+            if !(context_pack::MIN_BUDGET..=context_pack::MAX_BUDGET).contains(&budget) {
+                anyhow::bail!(
+                    "--budget must be between {} and {}",
+                    context_pack::MIN_BUDGET,
+                    context_pack::MAX_BUDGET
+                );
+            }
+            let project = project.trim();
+            if project.is_empty() {
+                anyhow::bail!("--project must not be empty");
+            }
+            let task = task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+            if let Some(t) = task {
+                recall::check_query(t).map_err(|e| anyhow::anyhow!(e))?;
+            }
+            let mut client = config::DbConfig::from_env()
+                .connect()
+                .context("connect to PostgreSQL")?;
+            let pack = context_pack::build_context(
+                &mut client,
+                &context_pack::ContextRequest {
+                    project,
+                    task,
+                    budget,
+                },
+                None,
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&pack)?);
+                return Ok(());
+            }
+            println!("{}", pack.text);
+            println!(
+                "tokens: {} of {} (estimated), skipped: {}",
+                pack.tokens_used, pack.budget, pack.skipped
+            );
         }
         Command::Search {
             query,
