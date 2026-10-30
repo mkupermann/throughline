@@ -573,7 +573,16 @@
 <span class="cmt"># Optional: local embeddings via Ollama</span>
 <span class="cmd">docker compose --profile embeddings up -d</span>
 <span class="cmd">docker compose exec ollama</span> \
-  ollama pull nomic-embed-text</pre>
+  ollama pull nomic-embed-text
+
+<span class="cmt"># Optional: multilingual notes (opt-in)</span>
+<span class="cmd">docker compose exec ollama</span> \
+  ollama pull granite-embedding:278m
+<span class="cmt"># then set OLLAMA_EMBED_MODEL=granite-embedding:278m in .env</span>
+<span class="cmd">docker compose up -d web</span>
+<span class="cmt"># if the pull fails: fetch ai/granite-embedding-multilingual:278M-F16</span>
+<span class="cmt"># from Docker Hub, run ollama create granite-embedding-multilingual:278m</span>
+<span class="cmt"># -f Modelfile and set that name instead</span></pre>
   </div>
 </div>
 

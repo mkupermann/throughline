@@ -195,24 +195,33 @@ relevant memories into every new Claude session as
 
 ## 12. Optional: generate embeddings for semantic search
 
-Pick a backend:
-
-**OpenAI** (cheapest, cloud):
-
-```bash
-# export THROUGHLINE_API_KEY=...   # only for a named compatible endpoint
-throughline embed --backend openai
-```
-
-**Ollama** (local, no API key):
+Embeddings come from a local Ollama, no API key. Hosted OpenAI embeddings are
+disabled.
 
 ```bash
 brew install ollama
 brew services start ollama
-ollama pull nomic-embed-text          # embeddings, ~275 MB; see USAGE.md "Embedding model" for the multilingual default
+ollama pull nomic-embed-text          # embeddings, the default model, ~275 MB
 ollama pull qwen3.5:9b                # generation, ~6.6 GB
-throughline embed --backend ollama
+throughline embed                     # up to 500 per run; --limit <n> changes that
 ```
+
+For notes in more than one language the multilingual model is the measured
+recommendation. It is opt-in: pull it and name it in `.env`.
+
+```bash
+ollama pull granite-embedding:278m
+# in .env:
+OLLAMA_EMBED_MODEL=granite-embedding:278m
+```
+
+If `ollama pull` fails, import the same model from Docker Hub instead: fetch
+`ai/granite-embedding-multilingual:278M-F16`, run
+`ollama create granite-embedding-multilingual:278m -f Modelfile` and set
+`OLLAMA_EMBED_MODEL=granite-embedding-multilingual:278m`. The steps are in
+[USAGE.md](USAGE.md#when-ollama-pull-fails). An install that already has
+vectors should switch through the target model described in
+[USAGE.md](USAGE.md#switching-models-without-losing-recall) instead.
 
 On Windows the session directories live under `C:\Users\<you>\` and Docker
 Desktop must be allowed to share that drive. `make init-compose` resolves
