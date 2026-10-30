@@ -29,6 +29,7 @@ pub mod migrate;
 pub mod ops_jobs;
 pub mod pii;
 pub mod project_instructions;
+pub mod recall;
 pub mod reflect_memory;
 pub mod repair;
 pub mod retention;
