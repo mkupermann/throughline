@@ -2,7 +2,7 @@
 //! `/api/embed` server). Hosted OpenAI embeddings are intentionally not a
 //! fallback — transcripts stay on this machine.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
 /// Run blocking HTTP on a dedicated OS thread.
@@ -228,9 +228,11 @@ pub fn resolve_target_from(
         Some(m) if m == active.model => return Ok(None),
         Some(m) => m,
     };
+    // `context` keeps the cause, so a `RemoteLlmNotAllowed` stays downcastable;
+    // print it with `{:#}` to see the model and the reason.
     ollama(&active.base_url, model)
         .map(Some)
-        .map_err(|e| anyhow!("{model}: {e}"))
+        .with_context(|| model.to_string())
 }
 
 fn ollama(base: &str, model: &str) -> Result<EmbeddingBackend> {
@@ -376,6 +378,29 @@ mod tests {
             resolve_target_from(Some(&format!(" {DEFAULT_EMBED_MODEL} ")), &active)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn remote_target_is_refused_before_any_request() {
+        let active = backend_for(DEFAULT_EMBED_MODEL);
+        let err = resolve_target_from(Some("some-model:cloud"), &active).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+                .is_some(),
+            "{err:#}"
+        );
+        assert!(
+            format!("{err:#}").starts_with("some-model:cloud: "),
+            "{err:#}"
+        );
+        let mut remote = backend_for(DEFAULT_EMBED_MODEL);
+        remote.base_url = "https://ollama.com".into();
+        let err = resolve_target_from(Some("granite-embedding:278m"), &remote).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+                .is_some(),
+            "{err:#}"
         );
     }
 

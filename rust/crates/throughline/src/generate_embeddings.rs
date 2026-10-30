@@ -129,7 +129,7 @@ pub fn embed_job_with<C: GenericClient, F: Fn(&EmbeddingBackend, &str) -> Result
             job.runs.push((embedding::label(&t), summary));
         }
         Ok(None) => {}
-        Err(e) => job.target_error = Some(e.to_string()),
+        Err(e) => job.target_error = Some(format!("{e:#}")),
     }
     Ok(job)
 }

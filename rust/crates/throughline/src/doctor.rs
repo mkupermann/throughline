@@ -112,7 +112,7 @@ pub fn embedding_lines<C: GenericClient>(
                 )
             })
         }
-        Err(e) => Some(e.to_string()),
+        Err(e) => Some(format!("{e:#}")),
     };
     let p = generate_embeddings::embed_progress(client, active)?;
     let missing = if p.is_complete() {
