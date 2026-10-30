@@ -1264,12 +1264,7 @@ async fn context_handler(
         ) {
             Ok(pack) => {
                 if counted {
-                    let ids: Vec<i64> = pack
-                        .citations
-                        .iter()
-                        .filter(|c| c.kind == "memory")
-                        .map(|c| c.id)
-                        .collect();
+                    let ids = crate::context_pack::cited_note_ids(&pack);
                     crate::lifecycle::record_use_or_log(client, &ids);
                 }
                 Ok(Ok(pack))
