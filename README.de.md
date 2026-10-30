@@ -38,11 +38,17 @@ Jedes KI-Coding-Tool speichert seine eigenen Session-Dateien und vergisst den Re
 | Verstehen, warum eine Entscheidung fiel | Suchtreffer mit Verbindung zur Original-Konversation. |
 | Zwischen Coding-Tools wechseln | Einen gemeinsamen Speicher, Markdown-Export und MCP-Zugriff. |
 | Prüfen, was ein Agent aufgezeichnet hat | Nachrichteninhalt, Tool-Call-JSON, Zeitstempel und Quell-Tool-Label. |
-| Angesammelten Kontext pflegen | Memory-Kategorien, Deduplizierung, Stale-Memory-Berichte und explizites Writeback. |
+| Angesammelten Kontext pflegen | Memory-Kategorien, Deduplizierung von Notizen mit gleichem Anfang, Stale-Memory-Berichte und explizites Writeback. |
 
 ### Unterstützte Session-Quellen
 
-Die Rust-Registry enthält **11 Adapter**: Claude Code, Codex, Cursor, Zed, Continue, Cline, Windsurf, Vibe, Hermes, OpenCode und Aider. Sie lesen unterstützte lokale Dateien. Es sind keine Cloud-Synchronisierungen, und die Format-Abdeckung ist je Tool unterschiedlich.
+Die Rust-Registry enthält **11 Adapter**. Sie lesen lokale Dateien. Es sind keine Cloud-Synchronisierungen. Die Abdeckung unterscheidet sich stark. Ein externes Audit hat sie am 30.10.2026 gegen echte Session-Dateien geprüft.
+
+| Stand | Adapter | Was das heißt |
+| --- | --- | --- |
+| Mit echten Dateien geprüft | Claude Code, Codex, Vibe | Rollen, Tool-Aufrufe, Modell und Zeitstempel kommen an. Die Token-Summen von Claude Code zählen jeden gestreamten Eintrag und liegen etwa doppelt zu hoch. |
+| Teilweise | Cline, Hermes, Windsurf | Cline gibt jeder Nachricht die Startzeit der Session und kein Modell. Hermes liest aus `state.db` nur die erste Session. Windsurf importiert Plandateien, keine Cascade-Gespräche. |
+| Nicht geprüft, Pfad oder Format vermutlich falsch | Cursor, Zed, Continue, OpenCode, Aider | Cursor und Zed suchen in Ordnern, die diese Tools nicht nutzen. OpenCode fand 254 echte Dateien und importierte keine. Aider und Continue beruhen auf einem angenommenen Format. |
 
 Das Standard-Compose mountet die ersten neun Tool-Verzeichnisse schreibgeschützt. OpenCode und Aider brauchen ihre Quellverzeichnisse separat. Quelle der Wahrheit ist die [Adapter-Registry](rust/crates/throughline/src/adapters/registry.rs).
 
@@ -213,7 +219,7 @@ Stelle eine Frage und folge den gelieferten Quellen. Ein konfiguriertes Generier
 
 Starte Import, KI-Konfiguration importieren, Status, Embedding, Deduplizierung, Backup, Audit, Stale-Memory-Bericht, Instruktionsdatei-Writeback oder Antwort-Evaluierung. Einige Aktionen verändern Daten oder Dateien, und modellabhängige Aktionen brauchen vorher Konfiguration. Siehe die [Aktions-Referenz](docs/FEATURE_GUIDE.md#maintenance-actions).
 
-![Alle neun Wartungsaktionen mit Importstatus](docs/media/rust/de/operate.png)
+![Alle zehn Wartungsaktionen mit Importstatus](docs/media/rust/de/operate.png)
 
 ![Abgeschlossene Status-Aktion der Demo](docs/media/rust/de/operate-status.png)
 
@@ -240,11 +246,13 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Bereich | Befehle |
 | --- | --- |
 | Einrichtung und Gesundheit | `migrate`, `serve`, `status`, `doctor` |
-| Import und Abruf | `ingest`, `search`, `recall`, `ask`, `handoff` |
+| Import und Abruf | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Anreicherung | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval` |
-| Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown` |
-| Schützen und integrieren | `backup`, `mcp` |
+| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
+| Schützen und integrieren | `backup`, `retention`, `mcp` |
+
+Das sind alle 31 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
 
 Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkeiten und Nebenwirkungen. Verfügbarkeit heißt nicht, dass jeder Befehl gegen jede Schema-Variante getestet wurde.
 
@@ -252,7 +260,7 @@ Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkei
 
 Starte `throughline mcp` aus einem kompatiblen Client über stdio, mit den Datenbank-Variablen in dessen Prozess-Umgebung. Das Container-Pendant ist `docker compose run -i --rm mcp`.
 
-Der Rust-Server bietet `search`, `recall`, `list_projects`, `stats`, `write`, `forget` und `supersede` an. `recall`, `supersede` und `write` brauchen das aktuelle Schema (Migration 012 oder neuer). Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
+Der Rust-Server bietet `search`, `recall`, `project_context`, `list_projects`, `stats`, `write`, `forget` und `supersede` an. `recall`, `supersede` und `write` brauchen das aktuelle Schema (Migration 012 oder neuer). Der Server prüft die Schema-Version nicht. Auf einem älteren Schema scheitern diese Tools mit einem rohen SQL-Fehler, also vorher `throughline migrate` laufen lassen. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
 
 ### Optionale Modelle
 
@@ -301,7 +309,7 @@ Regulierer, Prüfer und Forschungseinrichtungen verlangen zunehmend dasselbe: KI
 | Anforderung | Quelle | Was Throughline speichert |
 | --- | --- | --- |
 | Automatische Aufzeichnung von Ereignissen über die Lebensdauer des Systems, für Nachvollziehbarkeit | [EU AI Act, Art. 12(1) und 12(2)](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-12), Verordnung (EU) 2024/1689 | Jede importierte Session wird automatisch erfasst, mit Zeitstempeln, Quell-Tool und Modell-Label. Keine manuelle Buchführung. |
-| Log-Aufbewahrung von mindestens sechs Monaten durch den Betreiber | [EU AI Act, Art. 19 und Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | Der Korpus liegt im eigenen PostgreSQL-Volume, so lange Du ihn behältst, mit `backup` und Restore als expliziten Befehlen. Löschen ist eine bewusste Handlung. |
+| Log-Aufbewahrung von mindestens sechs Monaten durch den Betreiber | [EU AI Act, Art. 19 und Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | Der Korpus liegt im eigenen PostgreSQL-Volume, so lange Du ihn behältst, mit `backup` als explizitem Befehl und Restore über `psql`. Löschen ist eine bewusste Handlung über `retention --apply`. |
 | Ein Prüfer muss sehen, welches Modell lief, wie es angewiesen wurde und wie das Ergebnis validiert wurde | [Weltbank-Leitlinien zur KI-Reproduzierbarkeit](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Je Nachricht: Modell-Label, vollständiger Prompt- und Antworttext, Rolle, Zeitstempel. Je Antwort in Ask: die zitierten Quelldatensätze. |
 | Protokoll je Interaktion mit Zeitstempel, Modellversion, Prompts, Tool-Aufrufen und Ergebnissen für agentengestützte Forschung | [Logging-Schema aus arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | Der Nachrichtendatensatz enthält genau diese Felder, samt Tool-Call-JSON und Content-Blöcken, prüfbar in Browse. |
 | Ein Prüfpaket, das sich unabhängig vom erzeugenden System verifizieren lässt | [Weltbank-Leitlinien zur KI-Reproduzierbarkeit](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html), [arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | `export-markdown --evidence` legt dem Export ein Provenance-Manifest bei: je Konversation Modell, Quell-Tool und Zeitraum, je Datei SHA-256 und Größe, dazu die Korpus-Summen. Deterministisch bis auf den Erzeugungszeitstempel. |
@@ -315,7 +323,9 @@ Verwaltungen auf dem Weg zur digitalen Souveränität, etwa die [deutsch-franzö
 
 Ehrliche Grenzen sind besser als stille Überraschungen. Das sind die aktuellen.
 
-- **Lokaler, vertrauenswürdiger Betrieb.** Der Rust-Router hat keinen Anwendungs-Login und keine Rollenprüfung. Lass ihn auf Loopback. Ältere Python-Team-Einstellungen schützen diese Laufzeit nicht. Er weist Anfragen ab, deren Host weder Loopback noch `THROUGHLINE_PUBLIC_URL` oder `THROUGHLINE_ALLOWED_HOSTS` ist, Anfragen von fremder Herkunft und API-Aufrufe, die ein Browser als seitenübergreifend kennzeichnet. Eine besuchte Webseite kann ihn also nicht steuern. Browser ohne Fetch-Metadata-Header schicken seitenübergreifende GET-Anfragen trotzdem durch.
+- **Lokaler, vertrauenswürdiger Betrieb.** Der Rust-Router hat keinen Anwendungs-Login und keine Rollenprüfung. Lass ihn auf Loopback. Ältere Python-Team-Einstellungen schützen diese Laufzeit nicht. Er weist Anfragen ab, deren Host weder Loopback noch `THROUGHLINE_PUBLIC_URL` oder `THROUGHLINE_ALLOWED_HOSTS` ist, Anfragen von fremder Herkunft und API-Aufrufe, die ein Browser als seitenübergreifend kennzeichnet. Eine besuchte Webseite kann ihn also nicht steuern. Browser ohne Fetch-Metadata-Header schicken seitenübergreifende GET-Anfragen trotzdem durch, und einige GET-Routen verändern Daten: `/api/operate`, `/api/writeback` und der Agent-Memory-Import. Eine Anfrage ohne Host-Header passiert die Prüfung.
+- **Sicherungen brauchen einen gemounteten Ordner.** Der Sicherungs-Knopf und ein nacktes `backup` schreiben in den Container, solange `THROUGHLINE_BACKUP_DIR` nicht auf einen gemounteten Pfad zeigt. Ein solcher Dump ist mit dem Container weg.
+- **Wartung nach Faustregeln.** Die Deduplizierung führt Notizen zusammen, deren erste 80 Zeichen gleich sind. Konflikt- und Stale-Bericht melden jede Notiz über ihrer Altersgrenze als nie abgerufen, weil Abrufe noch nicht gezählt werden. Der API-Job `/api/operate?job=extract-memory` zählt Konversationen und extrahiert nichts. Dafür `throughline extract-memory` nutzen.
 - **Historische Evidenz.** Konversationen, Notizen und Antworten können unvollständig, veraltet oder falsch sein. Ein Tool-Call-Eintrag beweist nicht, dass ein Befehl gelang oder eine Datei noch existiert.
 - **Modell-Validierung ist getrennt.** Die Demo zeigt Navigation und ausgewählte deterministische Aktionen, nicht Modellqualität, Vektor-Retrieval, Agenten-Ausführung oder Backup-Wiederherstellung.
 - **Unvollständige Parität.** React-Team-Operations, die Template-Bibliothek, Review, SQL-Konsole und Konten-Verwaltung registriert der Rust-Server nicht. Ältere Dokumentation kann andere Befehle und Variablen verwenden.

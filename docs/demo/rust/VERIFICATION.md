@@ -16,7 +16,8 @@ Updated 2026-10-24 after the presentation-readiness program (M2 to M5). The orig
 - Migration idempotency: a second and third `throughline migrate` run applied 0 migrations and exited 0 (throwaway database, 2026-10-24).
 - Backup restoration: `pg_dump` from the running demo restored into a fresh PostgreSQL container. Row counts matched the live `/api/status` exactly (18/72/12 plus 72 embeddings; 2026-10-24).
 - The running CLI's help exposed 24 application commands. `search decision --limit 2` and `handoff --project Atlas-demo --limit 2` returned fictional corpus records. `export-markdown --evidence` produced a provenance manifest whose SHA-256 entries verified against the exported files.
-- `cargo test -p throughline --lib`: 81 passed, 0 failed (2026-10-24). CI green on `main` through commit 4c0887a.
+- `cargo test -p throughline --lib`: 81 passed, 0 failed (2026-10-24). CI green on `main` through commit 4c0887a. An external audit on 2026-10-30 (main 460cbd0) ran 295 library tests and 1 end-to-end test against a throwaway pgvector database, all passed, none skipped.
+- The same audit imported real sessions on macOS. Claude Code (54 of 54 files) and Codex (11 of 11) imported fully. OpenCode found 254 files and imported none. The adapter status in the README follows this run.
 - Accessibility: `web/scripts/a11y-rust.mjs` ran axe-core over all nine views in dark/en, light/en and dark/de (27 checks). Result: 0 critical, 0 serious, 3 moderate (heading order on Projects, listed, not gating). Keyboard walk on Home: 15 of 15 focusable elements show a visible focus style (2026-10-24).
 
 ## Resolved since the first pass
