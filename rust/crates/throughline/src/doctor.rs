@@ -184,7 +184,7 @@ mod tests {
             (
                 "memory_chunk",
                 "memory_chunks",
-                "COALESCE(status, 'active') = 'active' AND",
+                "COALESCE(status, 'active') <> 'forgotten' AND",
             ),
             ("message", "messages", ""),
         ] {
