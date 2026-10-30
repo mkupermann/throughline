@@ -13,10 +13,61 @@
   "engines": {
     "vscode": "^1.96.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
-  "contributes": {},
+  "contributes": {
+    "configuration": {
+      "title": "Throughline",
+      "properties": {
+        "throughline.url": {
+          "type": "string",
+          "default": "http://127.0.0.1:8788",
+          "description": "Address of the Throughline server. The extension calls only this address."
+        },
+        "throughline.project": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Throughline project name. Empty means the workspace folder name."
+        },
+        "throughline.contextBudget": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 64,
+          "maximum": 32768,
+          "description": "Token budget for a context pack."
+        },
+        "throughline.rank": {
+          "type": "string",
+          "enum": [
+            "fulltext",
+            "weighted"
+          ],
+          "default": "fulltext",
+          "description": "Ranking used for recall: full text or weighted."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "throughline.setKey",
+        "title": "Throughline: Set Agent Key"
+      },
+      {
+        "command": "throughline.refreshStatus",
+        "title": "Throughline: Refresh Connection"
+      },
+      {
+        "command": "throughline.showEmbeddingStatus",
+        "title": "Throughline: Show Embedding Status"
+      }
+    ]
+  },
   "scripts": {
     "build": "node esbuild.mjs",
     "lint": "tsc --noEmit",
