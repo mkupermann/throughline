@@ -32,6 +32,30 @@ jobs:
             range="$BEFORE..$AFTER"
           fi
           python3 scripts/check_commit_messages.py "$range"
+      # The repository is public. Customer and employer names and personal
+      # paths must not reach it. The list lives in the BLOCKED_TERMS secret,
+      # never in the repository, and the report names only file, line and
+      # list entry number. Fork pull requests cannot read secrets.
+      - name: No blocked terms
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS }}
+          ALLOW_EMPTY_TERMS: ${{ github.event.pull_request.head.repo.fork && '1' || '0' }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$BASE..$HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            range="$AFTER"
+          else
+            range="$BEFORE..$AFTER"
+          fi
+          python3 scripts/check_blocked_terms.py "$range"
 
   rust:
     name: Rust fmt, clippy and tests (Postgres)
