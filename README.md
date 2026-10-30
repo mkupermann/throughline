@@ -246,7 +246,7 @@ The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies
 
 Launch `throughline mcp` from a compatible client over stdio, with the database variables in that process's environment. The container equivalent is `docker compose run -i --rm mcp`.
 
-The Rust server advertises `search`, `recall`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall and supersede need the current schema. The older Python MCP server has a different tool contract.
+The Rust server advertises `search`, `recall`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall, supersede and write need the current schema (migration 012 or later). The older Python MCP server has a different tool contract.
 
 ### Optional models
 
