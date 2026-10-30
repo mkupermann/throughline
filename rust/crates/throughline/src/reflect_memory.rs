@@ -14,6 +14,13 @@ pub struct ReflectSummary {
     pub dry_run: bool,
 }
 
+impl ReflectSummary {
+    /// `acted=N failed=M`, for the operate message in the UI.
+    pub fn counts(&self) -> String {
+        format!("acted={} failed={}", self.acted, self.failed)
+    }
+}
+
 /// Mark chunks expired / stale when their expiry has passed.
 pub fn expire_stale<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectSummary> {
     let mut summary = ReflectSummary {
@@ -158,6 +165,16 @@ pub fn run_all<C: GenericClient>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_show_failed_groups() {
+        let s = ReflectSummary {
+            acted: 2,
+            failed: 1,
+            ..Default::default()
+        };
+        assert_eq!(s.counts(), "acted=2 failed=1");
+    }
 
     #[test]
     fn is_contradiction_detects_yes() {
