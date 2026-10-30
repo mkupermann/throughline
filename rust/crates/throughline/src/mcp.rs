@@ -70,6 +70,26 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "recall",
+                "description": "Recall memory notes ranked by meaning, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string" },
+                        "project": { "type": "string" },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["current", "as_of", "associative", "grounded"],
+                            "default": "current"
+                        },
+                        "valid_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
+                        "known_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
+                        "limit": { "type": "integer", "default": 10 }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
                 "name": "list_projects",
                 "description": "List known project names",
                 "inputSchema": { "type": "object", "properties": {} }
@@ -153,7 +173,9 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
         "search" => {
             let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
             let limit = args.get("limit").and_then(|l| l.as_i64()).unwrap_or(10) as i32;
-            let hits = search::search(client, query, limit)
+            let project = optional_str(&args, "project", "project must be a string")?
+                .filter(|p| !p.is_empty());
+            let hits = search::search(client, query, limit, project)
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
             let payload = serde_json::to_string(
                 &hits
@@ -170,6 +192,54 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             )
             .unwrap_or_else(|_| "[]".into());
             Ok(text_result(payload))
+        }
+        "recall" => {
+            let invalid = |m: &str| json!({ "code": -32602, "message": m });
+            let query = match args.get("query").and_then(|q| q.as_str()) {
+                Some(q) if !q.trim().is_empty() => q,
+                _ => return Err(invalid("query required")),
+            };
+            let project = optional_str(&args, "project", "project must be a string")?
+                .filter(|p| !p.is_empty());
+            let mode = match optional_str(&args, "mode", "mode must be a string")? {
+                None | Some("") => crate::recall::RecallMode::Current,
+                Some(m) => m.parse().map_err(|e: String| invalid(&e))?,
+            };
+            let date = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, Value> {
+                match optional_str(&args, name, &format!("{name} must be a string"))? {
+                    None | Some("") => Ok(None),
+                    Some(s) => crate::temporal::parse_as_of_instant(s)
+                        .map(Some)
+                        .ok_or_else(|| {
+                            invalid(&format!(
+                                "{name} must be YYYY-MM-DD or an RFC 3339 timestamp, got {s:?}"
+                            ))
+                        }),
+                }
+            };
+            let (valid_at, known_at) = (date("valid_at")?, date("known_at")?);
+            if mode == crate::recall::RecallMode::AsOf && valid_at.is_none() && known_at.is_none() {
+                return Err(invalid("as_of needs valid_at or known_at"));
+            }
+            let limit = args
+                .get("limit")
+                .and_then(|l| l.as_i64())
+                .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
+                .clamp(1, 50) as usize;
+            let emb = crate::recall::query_embedding(query);
+            let q = crate::recall::RecallQuery {
+                text: query,
+                project,
+                mode,
+                valid_at,
+                known_at,
+                limit,
+            };
+            let result = crate::recall::recall(client, &q, emb.as_ref())
+                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            Ok(text_result(serde_json::to_string(&result).map_err(
+                |e| json!({ "code": -32000, "message": e.to_string() }),
+            )?))
         }
         "list_projects" => {
             let rows = client
@@ -335,6 +405,107 @@ mod tests {
             names.contains(&"supersede".to_string()),
             "supersede missing from {names:?}"
         );
+    }
+
+    #[test]
+    fn tools_list_includes_recall() {
+        let tools = tools_list();
+        let tool = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "recall")
+            .expect("recall tool");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["required"], json!(["query"]));
+        let modes = schema["properties"]["mode"]["enum"]
+            .as_array()
+            .expect("enum");
+        assert_eq!(modes.len(), 4);
+        for k in ["project", "valid_at", "known_at", "limit"] {
+            assert!(schema["properties"].get(k).is_some(), "{k}");
+        }
+    }
+
+    fn call_text(client: &mut impl GenericClient, name: &str, args: Value) -> Value {
+        let out = call_tool(client, &json!({ "name": name, "arguments": args })).expect("ok");
+        let text = out["content"][0]["text"].as_str().expect("text");
+        serde_json::from_str(text).expect("json payload")
+    }
+
+    #[test]
+    fn mcp_recall_finds_a_project_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_finds_a_project_note: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let written = call_text(
+            &mut tx,
+            "write",
+            json!({ "content": format!("zebrafinch rollout {tag}"), "project": project }),
+        );
+        let id = written["id"].as_i64().unwrap();
+        let out = call_text(
+            &mut tx,
+            "recall",
+            json!({ "query": format!("zebrafinch {tag}"), "project": project }),
+        );
+        let ids: Vec<i64> = out["hits"]
+            .as_array()
+            .expect("hits")
+            .iter()
+            .map(|h| h["id"].as_i64().unwrap())
+            .collect();
+        assert!(ids.contains(&id), "{out}");
+        assert!(out["degraded"].is_string(), "no Ollama here: {out}");
+    }
+
+    #[test]
+    fn mcp_recall_rejects_bad_mode() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_rejects_bad_mode: no PostgreSQL reachable");
+            return;
+        };
+        let err = call_tool(
+            &mut client,
+            &json!({ "name": "recall", "arguments": { "query": "x", "mode": "foo" } }),
+        )
+        .unwrap_err();
+        assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn mcp_search_honours_project() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_search_honours_project: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (px, py) = (format!("px-{tag}"), format!("py-{tag}"));
+        for (proj, word) in [(&px, "alpha"), (&py, "beta")] {
+            let conv: i64 = tx
+                .query_one(
+                    "INSERT INTO conversations (session_id, project_path, started_at) \
+                     VALUES ($1, '/tmp/' || $2::text, now()) RETURNING id",
+                    &[&uuid::Uuid::new_v4(), proj],
+                )
+                .unwrap()
+                .get(0);
+            tx.execute(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user', $2, now())",
+                &[&conv, &format!("{word} marker {tag}")],
+            )
+            .unwrap();
+        }
+        let out = call_text(&mut tx, "search", json!({ "query": tag, "project": px }));
+        let rows = out.as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{out}");
+        assert_eq!(rows[0]["project"], json!(px));
     }
 
     #[test]

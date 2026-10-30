@@ -292,9 +292,9 @@ async fn search_handler(
         let hits = match m.as_str() {
             "semantic" => match backend.as_ref() {
                 Some(b) => crate::search::semantic(client, b, &q, limit)?,
-                None => crate::search::search(client, &q, limit)?,
+                None => crate::search::search(client, &q, limit, None)?,
             },
-            "lexical" => crate::search::search(client, &q, limit)?,
+            "lexical" => crate::search::search(client, &q, limit, None)?,
             _ => crate::search::hybrid(client, backend.as_ref(), &q, limit)?,
         };
         Ok((hits, backend_label, m))
@@ -1078,6 +1078,92 @@ fn parse_as_of(
             }),
     };
     Ok((one("valid_at", valid_at)?, one("known_at", known_at)?))
+}
+
+#[derive(Deserialize)]
+struct RecallParams {
+    q: Option<String>,
+    project: Option<String>,
+    /// `current` (default) | `as_of` | `associative` | `grounded`
+    mode: Option<String>,
+    valid_at: Option<String>,
+    known_at: Option<String>,
+    limit: Option<i64>,
+}
+
+struct ParsedRecall {
+    mode: crate::recall::RecallMode,
+    valid_at: Option<chrono::DateTime<chrono::Utc>>,
+    known_at: Option<chrono::DateTime<chrono::Utc>>,
+    limit: usize,
+}
+
+/// Check mode and dates before the database is touched.
+fn parse_recall_params(
+    params: &RecallParams,
+) -> std::result::Result<ParsedRecall, (StatusCode, &'static str, String)> {
+    let invalid = |m: String| (StatusCode::UNPROCESSABLE_ENTITY, "validation_error", m);
+    let mode = match params
+        .mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
+        None => crate::recall::RecallMode::Current,
+        Some(m) => m.parse().map_err(invalid)?,
+    };
+    let (valid_at, known_at) = parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref())?;
+    if mode == crate::recall::RecallMode::AsOf && valid_at.is_none() && known_at.is_none() {
+        return Err(invalid("as_of needs valid_at or known_at".into()));
+    }
+    let limit = params
+        .limit
+        .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
+        .clamp(1, 50) as usize;
+    Ok(ParsedRecall {
+        mode,
+        valid_at,
+        known_at,
+        limit,
+    })
+}
+
+async fn recall_handler(
+    State(state): State<AppState>,
+    Query(params): Query<RecallParams>,
+) -> Response {
+    let parsed = match parse_recall_params(&params) {
+        Ok(p) => p,
+        Err((status, code, detail)) => return api_error(status, code, detail),
+    };
+    let text = params.q.unwrap_or_default().trim().to_string();
+    let project = params.project.filter(|p| !p.trim().is_empty());
+    if text.is_empty() {
+        return Json(crate::recall::RecallResult {
+            mode: parsed.mode.as_str().into(),
+            hits: vec![],
+            degraded: None,
+        })
+        .into_response();
+    }
+    match with_db(&state, move |client| {
+        // with_db runs on a blocking thread; the embedding call is isolated too.
+        let emb = crate::recall::query_embedding(&text);
+        let q = crate::recall::RecallQuery {
+            text: &text,
+            project: project.as_deref(),
+            mode: parsed.mode,
+            valid_at: parsed.valid_at,
+            known_at: parsed.known_at,
+            limit: parsed.limit,
+        };
+        crate::recall::recall(client, &q, emb.as_ref())
+    })
+    .await
+    {
+        Ok(result) => Json(result).into_response(),
+        Err(resp) => resp,
+    }
 }
 
 /// Map the UI/URL status filter onto a SQL predicate + bind.
@@ -2750,6 +2836,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/search", get(search_handler))
+        .route("/api/recall", get(recall_handler))
         .route("/api/messages", get(messages_handler))
         .route("/api/messages/{id}", get(message_detail))
         .route("/api/tools", get(tools_handler))
@@ -3553,6 +3640,34 @@ mod tests {
             "plain project filtered out: {only:?}"
         );
         // Drop tx → rollback, nothing left behind.
+    }
+
+    #[test]
+    fn recall_params_reject_bad_input() {
+        let p = |mode: Option<&str>, v: Option<&str>, k: Option<&str>| RecallParams {
+            q: Some("x".into()),
+            project: None,
+            mode: mode.map(String::from),
+            valid_at: v.map(String::from),
+            known_at: k.map(String::from),
+            limit: None,
+        };
+        for bad in [
+            p(Some("foo"), None, None),
+            p(Some("as_of"), None, None),
+            p(Some("as_of"), Some("yesterday"), None),
+            p(Some("current"), Some("gestern"), None),
+        ] {
+            let err = parse_recall_params(&bad).err().expect("must be refused");
+            assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(err.1, "validation_error");
+        }
+        let ok = parse_recall_params(&p(Some("as_of"), Some("2026-01-31"), None)).unwrap();
+        assert_eq!(ok.mode, crate::recall::RecallMode::AsOf);
+        assert!(ok.valid_at.is_some());
+        let dflt = parse_recall_params(&p(None, None, None)).unwrap();
+        assert_eq!(dflt.mode, crate::recall::RecallMode::Current);
+        assert_eq!(dflt.limit, 10);
     }
 
     /// Connect to the throwaway DB (`PG*` env). Skip when unreachable so
