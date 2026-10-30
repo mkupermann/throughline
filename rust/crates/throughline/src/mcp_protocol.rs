@@ -1,5 +1,7 @@
 //! Protocol constants and version negotiation shared by every MCP transport.
 
+use serde_json::{json, Value};
+
 /// The modern protocol era (`_meta`-based, `resultType`).
 pub const MODERN_VERSION: &str = "2026-07-28";
 /// Legacy versions served on every transport, newest first.
@@ -14,6 +16,50 @@ pub const INVALID_PARAMS: i64 = -32602;
 pub const RESOURCE_NOT_FOUND: i64 = -32002;
 pub const PARSE_ERROR: i64 = -32700;
 pub const INVALID_REQUEST: i64 = -32600;
+
+const VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+
+/// The protocol version a request names in `params._meta`, if any.
+pub fn request_version(msg: &Value) -> Option<&str> {
+    msg.get("params")?
+        .get("_meta")?
+        .get(VERSION_META_KEY)?
+        .as_str()
+}
+
+/// Every version this transport answers: modern first, then legacy newest first.
+pub fn supported_versions(transport: Transport) -> Vec<&'static str> {
+    std::iter::once(MODERN_VERSION)
+        .chain(LEGACY_VERSIONS)
+        .chain((transport == Transport::Stdio).then_some(STDIO_EXTRA_VERSION))
+        .collect()
+}
+
+/// The `-32022` error body for a request naming a version we do not serve.
+pub fn unsupported_version(id: &Value, requested: &str, transport: Transport) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": UNSUPPORTED_VERSION,
+            "message": "Unsupported protocol version",
+            "data": { "supported": supported_versions(transport), "requested": requested }
+        }
+    })
+}
+
+/// The result of `server/discover`; `capabilities` is shared with `initialize`.
+pub fn discover_result(capabilities: Value, transport: Transport) -> Value {
+    json!({
+        "resultType": "complete",
+        "supportedVersions": supported_versions(transport),
+        "capabilities": capabilities,
+        "_meta": { "io.modelcontextprotocol/serverInfo": {
+            "name": "throughline", "version": env!("CARGO_PKG_VERSION")
+        } },
+        "instructions": "Throughline is a local memory server over past AI sessions. Recall notes, pack project context and search the corpus."
+    })
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Transport {

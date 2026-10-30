@@ -1,6 +1,9 @@
 //! Minimal MCP stdio server (JSON-RPC 2.0) exposing memory tools.
 
-use crate::mcp_protocol::{negotiate_legacy, Transport, METHOD_NOT_FOUND};
+use crate::mcp_protocol::{
+    discover_result, negotiate_legacy, request_version, supported_versions, unsupported_version,
+    Transport, METHOD_NOT_FOUND, MODERN_VERSION,
+};
 use crate::search;
 use crate::server::{
     supersede_memory, validate_supersede, Successor, SupersedeError, SupersedeKind,
@@ -66,32 +69,63 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
     let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
 
+    // `_meta` decides the era; `initialize` is always legacy. A version we
+    // serve but that is not the modern one is answered the legacy way.
+    let mut modern = false;
+    if method != "initialize" {
+        if let Some(version) = request_version(msg) {
+            if version == MODERN_VERSION {
+                modern = true;
+            } else if !supported_versions(ctx.transport).contains(&version) {
+                return Reply {
+                    status: 400,
+                    body: Some(unsupported_version(&id, version, ctx.transport)),
+                };
+            }
+        }
+    }
+
     let result = match method {
         "initialize" => Ok(json!({
             "protocolVersion": negotiate_legacy(
                 params.get("protocolVersion").and_then(|v| v.as_str()),
                 ctx.transport,
             ),
-            "capabilities": { "tools": {} },
+            "capabilities": capabilities(),
             "serverInfo": { "name": "throughline", "version": env!("CARGO_PKG_VERSION") }
         })),
         "tools/list" => Ok(tools_list()),
         "tools/call" => call_tool(client, &params),
         "ping" => Ok(json!({})),
+        "server/discover" => Ok(discover_result(capabilities(), ctx.transport)),
         other => Err(json!({
             "code": METHOD_NOT_FOUND,
             "message": format!("method not found: {other}")
         })),
     };
 
+    let status = match &result {
+        Err(err) if modern && err["code"] == METHOD_NOT_FOUND => 404,
+        _ => 200,
+    };
     let body = match result {
-        Ok(value) => json!({ "jsonrpc": "2.0", "id": id, "result": value }),
+        Ok(mut value) => {
+            if modern {
+                value["resultType"] = json!("complete");
+            }
+            json!({ "jsonrpc": "2.0", "id": id, "result": value })
+        }
         Err(err) => json!({ "jsonrpc": "2.0", "id": id, "error": err }),
     };
     Reply {
-        status: 200,
+        status,
         body: Some(body),
     }
+}
+
+/// What both `initialize` and `server/discover` report.
+fn capabilities() -> Value {
+    json!({ "tools": {} })
 }
 
 fn tools_list() -> Value {
@@ -531,6 +565,109 @@ mod tests {
             let body = reply.body.expect("body");
             assert_eq!(body["result"]["protocolVersion"], answered, "{body}");
             assert_eq!(body["result"]["serverInfo"]["name"], "throughline");
+        }
+    }
+
+    const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+
+    fn modern(client: &mut impl GenericClient, method: &str, version: &str) -> Reply {
+        dispatch(
+            client,
+            &json!({ "jsonrpc": "2.0", "id": 7, "method": method,
+                     "params": { "_meta": { VERSION_KEY: version } } }),
+            &ctx(),
+        )
+    }
+
+    #[test]
+    fn modern_request_gets_result_type_complete() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping modern_request_gets_result_type_complete: no PostgreSQL reachable");
+            return;
+        };
+        let reply = modern(&mut client, "tools/list", "2026-07-28");
+        assert_eq!(reply.status, 200);
+        let body = reply.body.expect("body");
+        assert_eq!(body["result"]["resultType"], "complete", "{body}");
+        assert!(body["result"]["tools"].is_array());
+    }
+
+    #[test]
+    fn modern_unknown_version_is_400_with_list() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping modern_unknown_version_is_400_with_list: no PostgreSQL reachable");
+            return;
+        };
+        let reply = modern(&mut client, "tools/list", "1900-01-01");
+        assert_eq!(reply.status, 400);
+        let body = reply.body.expect("body");
+        assert_eq!(body["id"], 7);
+        assert_eq!(body["error"]["code"], -32022, "{body}");
+        let supported = body["error"]["data"]["supported"].as_array().expect("list");
+        assert!(supported.contains(&json!("2026-07-28")));
+        assert!(supported.contains(&json!("2025-11-25")));
+        assert_eq!(body["error"]["data"]["requested"], "1900-01-01");
+    }
+
+    #[test]
+    fn modern_unknown_method_is_404() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping modern_unknown_method_is_404: no PostgreSQL reachable");
+            return;
+        };
+        let reply = modern(&mut client, "nope/nothing", "2026-07-28");
+        assert_eq!(reply.status, 404);
+        assert_eq!(reply.body.expect("body")["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn server_discover_lists_versions_and_capabilities() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping server_discover_lists_versions_and_capabilities: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let reply = modern(&mut client, "server/discover", "2026-07-28");
+        assert_eq!(reply.status, 200);
+        let body = reply.body.expect("body");
+        let result = &body["result"];
+        assert_eq!(result["resultType"], "complete", "{body}");
+        assert_eq!(
+            result["supportedVersions"],
+            json!(["2026-07-28", "2025-11-25", "2025-06-18"])
+        );
+        assert!(result["capabilities"]["tools"].is_object());
+        let info = &result["_meta"]["io.modelcontextprotocol/serverInfo"];
+        assert_eq!(info["name"], "throughline");
+        assert_eq!(info["version"], env!("CARGO_PKG_VERSION"));
+        assert!(result["instructions"].is_string());
+        // Also answered without _meta (legacy era), still with resultType.
+        let plain = dispatch(
+            &mut client,
+            &json!({ "jsonrpc": "2.0", "id": 8, "method": "server/discover" }),
+            &ctx(),
+        );
+        assert_eq!(
+            plain.body.expect("body")["result"]["resultType"],
+            "complete"
+        );
+    }
+
+    #[test]
+    fn legacy_result_has_no_result_type() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping legacy_result_has_no_result_type: no PostgreSQL reachable");
+            return;
+        };
+        for msg in [
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            // initialize stays legacy even when it carries _meta (ruling R4)
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "initialize",
+                    "params": { "_meta": { VERSION_KEY: "2026-07-28" } } }),
+        ] {
+            let body = dispatch(&mut client, &msg, &ctx()).body.expect("body");
+            assert!(body["result"].get("resultType").is_none(), "{body}");
         }
     }
 
