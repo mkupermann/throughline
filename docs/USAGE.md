@@ -147,7 +147,7 @@ contradict newer ones, facts that have gone stale:
 
 ```bash
 throughline reflect                     # all four modes
-throughline reflect --mode dedup       # merges near-duplicates, see below
+throughline reflect --mode dedup       # merges exact-prefix duplicates, see below
 throughline reflect --dry-run           # see what it would do
 throughline conflicts                   # cross-tool disagreements
 ```
@@ -160,7 +160,7 @@ stays answerable afterwards.
 
 ## How often a note is used, and how strong it is
 
-Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall` and `project_context`, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. They do not change for HTTP `GET /api/recall`, `GET /api/context` or browsing in the UI.
+Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall` and `project_context`, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. They do not change for HTTP `GET /api/recall`, `GET /api/context`, search, ask, browsing in the UI or any other HTTP route.
 
 From that Throughline derives a strength between 0.05 and 1:
 
@@ -186,16 +186,16 @@ Candidates are notes that are valid now, have a vector, belong to the same proje
 
 A merge creates a new note with the longest text of the group. Its `source_type` is `consolidation` and `merged_from` holds the source ids. The sources become superseded and their text never changes. A forgotten note stays forgotten. A star on a source moves to the new note. `--apply` exits non-zero if any group failed; the other groups are still merged.
 
-`reflect --mode dedup` now works the same way. It never rewrites a note, it merges. The Reflect action in the UI reports how many groups it merged and how many failed.
+`reflect --mode dedup` merges through the same path (new note, sources superseded, texts unchanged), but it groups only notes with the same project, the same category and an identical first 80 characters. It does not use the cosine. Similar but different notes are found by `consolidate` and the Review tab. The action in the UI reports how many groups it merged and how many failed.
 
 Over HTTP:
 
 - `GET /api/consolidation/candidates?min_similarity=` lists the groups.
 - `POST /api/consolidate` merges one group of ids. 422 means the request is not valid, 404 that a note does not exist, 409 that a note is no longer current.
 - `GET /api/consolidation/proposal` asks a local model for a merged text. It never uses a cloud model. If the model fails or is missing, it falls back to the longest note. The UI waits 120 seconds for it.
-- `GET /api/damaged-notes` lists notes whose text looks cut off or broken, so you can replace them.
+- `GET /api/damaged-notes` lists current notes the old reflect glued together: the text holds a `---` separator line and the note lists itself in `merged_from`. Replace lets you write the clean text.
 
-Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model on a remote host. Such a model is never treated as local either. Name one explicitly if you want it.
+Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model served from a remote host. A model whose name ends in `:cloud` is never treated as local. Name one explicitly if you want it.
 
 ## Notes and the time they were valid
 
