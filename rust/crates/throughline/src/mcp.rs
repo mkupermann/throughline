@@ -1,4 +1,8 @@
-//! Minimal MCP stdio server (JSON-RPC 2.0) exposing memory tools.
+//! MCP (JSON-RPC 2.0) for the memory tools, resources and prompts.
+//!
+//! `dispatch` answers one message and knows no transport. `run_stdio` feeds
+//! it lines from stdin, and the `/mcp` handler in `mcp_http` feeds it HTTP
+//! request bodies.
 
 use crate::mcp_protocol::{
     discover_result, negotiate_legacy, request_version, supported_versions, unsupported_version,

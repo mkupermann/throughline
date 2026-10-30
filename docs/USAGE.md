@@ -162,7 +162,7 @@ wrote an audit row; the Rust version does not.)
 
 ## How often a note is used, and how strong it is
 
-Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall`, `project_context`, `get_note` and `keep`, MCP `prompts/get`, MCP `resources/read` for a note or a context pack, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. `GET /api/recall` and `GET /api/context` count only when the request carries a valid agent key (see [Agent access over HTTP](#agent-access-over-http)); without one they do not, and an `Authorization` header that is not a valid key is refused with 401. These never count: `search` (MCP, HTTP or CLI), `conflicts`, `resources/list`, ask, browsing in the UI and any other HTTP route. Counting is per note. There is no count per agent, key or time of day.
+Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall`, `project_context`, `get_note` and `keep`, MCP `prompts/get`, MCP `resources/read` for a note or a context pack, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. `GET /api/recall` and `GET /api/context` count only when the request carries a valid agent key (see [Agent access over HTTP](#agent-access-over-http)); without one they do not. Without an `Authorization` header, or with a scheme other than Bearer (such as `Basic` from an auth proxy in front of the UI), the request is the UI: answered and not counted. A Bearer header with a wrong or empty key, or while agent access is off, gets 401. These never count: `search` (MCP, HTTP or CLI), `conflicts`, `resources/list`, ask, browsing in the UI and any other HTTP route. Counting is per note. There is no count per agent, key or time of day.
 
 From that Throughline derives a strength between 0.05 and 1:
 
@@ -386,6 +386,8 @@ claude mcp add --transport http throughline http://127.0.0.1:8788/mcp \
   --header "Authorization: Bearer $THROUGHLINE_AGENT_KEY"
 ```
 
+Your shell fills in `$THROUGHLINE_AGENT_KEY` when you run `claude mcp add`, so export the key in that shell first (or paste the key in place of the variable). Putting it into `.env` alone is not enough.
+
 Port 8788 is the Compose default (`THROUGHLINE_WEB_PORT`). Run the web server natively and the port is the one you started it on, 8787 by default.
 
 Codex reads MCP servers from `~/.codex/config.toml`. A Streamable HTTP server takes a `url` and, for a bearer token, `bearer_token_env_var`, the name of an environment variable that holds the key:
@@ -396,6 +398,8 @@ url = "http://127.0.0.1:8788/mcp"
 bearer_token_env_var = "THROUGHLINE_AGENT_KEY"
 ```
 
+Codex reads that variable from its own environment, so `THROUGHLINE_AGENT_KEY` must be set in the environment Codex runs in.
+
 Those keys come from the Codex MCP documentation (read on 2026-10-30), not from a run against Throughline. Any other client needs the same two things: the URL and an `Authorization: Bearer <key>` header.
 
 ### Tools
@@ -405,7 +409,7 @@ Those keys come from the Codex MCP documentation (read on 2026-10-30), not from 
 | `search` | Keyword search over messages. Arguments: `query`, `limit`, `project`. | no |
 | `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext` or `weighted`. | yes |
 | `project_context` | The context pack of a project (`project`, `task`, `budget`). | yes |
-| `get_note` | One note by `id` with its source and its whole supersede chain, oldest first. | yes |
+| `get_note` | One note by `id` with its source and its whole supersede chain, oldest first. A forgotten note is not found, and forgotten notes leave the chain. | yes |
 | `conflicts` | The conflict report, optionally for one `project`. Each row has a kind: `contradiction` (open), `documented_supersession` (already resolved by a replacement) or `stale_tool_drift` (never-used notes of one tool). | no |
 | `list_projects` | Known project names. | no |
 | `stats` | Corpus counts. | no |
@@ -416,7 +420,7 @@ Those keys come from the Codex MCP documentation (read on 2026-10-30), not from 
 
 ### Resources and prompts
 
-Resources: `throughline://projects`, and the templates `throughline://project/{name}/context` (the context pack with the default budget) and `throughline://note/{id}`. Reading a note or a context pack counts as use; `resources/list` does not.
+Resources: `throughline://projects`, and the templates `throughline://project/{name}/context` (the context pack with the default budget) and `throughline://note/{id}`. A forgotten note is not found, as with `get_note`. Reading a note or a context pack counts as use; `resources/list` does not.
 
 Prompts: `before_coding(project, task?)` and `handoff(project)`. Both fetch the context pack and put it inside a `<throughline-data>` block, as data and not as an instruction. In Claude Code they show up as slash commands. Getting a prompt counts as use.
 
