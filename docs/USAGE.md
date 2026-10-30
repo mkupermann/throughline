@@ -222,7 +222,7 @@ Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`. Over MCP, the `
 
 ### What goes in, and in which order
 
-Notes that hold now are used: not replaced, forgotten, merged or expired, from the project plus notes without a project. Sections appear in this order and only when they have a line.
+Notes that hold now are used: not replaced, forgotten, merged or expired, from the project plus notes without a project. A project name that does not exist is not an error: the pack then holds the header and any notes without a project, not an empty pack. Sections appear in this order and only when they have a line.
 
 1. **Decisions**: current notes of the categories decision, preference and project_context, newest first. They come before everything else, so they are the last to be crowded out. Stale notes never appear here, only under Needs review.
 2. **Relevant to the task**: only with a task. Up to 20 notes ranked by full text, without the ones already shown.
@@ -233,13 +233,13 @@ Notes that hold now are used: not replaced, forgotten, merged or expired, from t
 
 ### The budget
 
-The budget is in estimated tokens, 64 to 32,768, default 2,000. The estimate is the larger of the word count and the character count divided by four (rounded up), at least 1, plus 1 for each line break. A section heading costs the same as a line. Throughline has no tokenizer for your model, so this is a rule of thumb; leave some room if the limit is tight.
+The budget is in estimated tokens, 64 to 32,768, default 2,000. The estimate is the larger of the word count and the character count divided by four (rounded up), at least 1, plus 1 for each line break. A section heading costs the same as a line. Decisions come first, so in a project with many of them a 2,000-token pack may hold only decisions and a `task` adds nothing; use a larger budget then. Throughline has no tokenizer for your model, so this is a rule of thumb; leave some room if the limit is tight.
 
 The pack is filled line by line in the order above. A line that would push the total over the budget is skipped whole, and a shorter line after it can still fit. Lines are never cut. `skipped` counts the lines left out. `tokens_used` never exceeds `budget`. A budget below 64, or above 32,768, gives 422 `validation_error` over HTTP and error -32602 over MCP. A header that does not fit the budget (a very long project name) gives the same, 422 `validation_error` or -32602, and a plain error on the command line.
 
 ### Line format
 
-The first line is the header: project, date and budget. A note reads `- [m#42 · 2026-03-02 · decision] text (source: session "Title", 2026-03-02)`, where `m#` is the note id and the part in parentheses is left out for a note that does not come from a conversation. A session reads `- [s#17 · 2026-03-02 · claude_code] Title`. Line breaks inside a note become spaces. Every `m#` and `s#` id exists in the database; `citations` lists each one once.
+The first line is the header: project, date and budget. A note reads `- [m#42 · 2026-03-02 · decision] text (source: session "Title", 2026-03-02)`, where `m#` is the note id and the part in parentheses is left out for a note that does not come from a conversation. A session reads `- [s#17 · 2026-03-02 · claude_code] Title`. Line breaks inside a note become spaces. Session titles are shown on one line and cut to 120 characters, with "…" when cut. A source session is dated by its start. A note's source session can belong to another project; its title is shown all the same. Every `m#` and `s#` id exists in the database; `citations` lists each one once.
 
 ### Example
 
