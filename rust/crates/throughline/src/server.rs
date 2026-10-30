@@ -2862,19 +2862,28 @@ async fn writeback_handler(State(state): State<AppState>) -> Response {
     }
 }
 
+/// What the home view offers when a backend is missing. The Ollama hint names
+/// `embed_model`, the model this process is configured for.
+fn recovery_actions(r: &crate::doctor::DoctorReport, embed_model: &str) -> Vec<serde_json::Value> {
+    let mut actions = Vec::new();
+    if r.database != "ok" {
+        actions.push(serde_json::json!({"id":"db","label":"Check Postgres","hint":"docker compose up -d postgres"}));
+    }
+    if r.embeddings.contains("unavailable") {
+        let hint = format!("ollama serve && ollama pull {embed_model}");
+        actions
+            .push(serde_json::json!({"id":"ollama","label":"Start Ollama embeddings","hint":hint}));
+    }
+    if r.generation.contains("unavailable") {
+        actions.push(serde_json::json!({"id":"llm","label":"Configure generation","hint":"set THROUGHLINE_ANSWER_BASE_URL or run Ollama"}));
+    }
+    actions
+}
+
 async fn health_recovery_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, crate::doctor::run).await {
         Ok(r) => {
-            let mut actions = Vec::new();
-            if r.database != "ok" {
-                actions.push(serde_json::json!({"id":"db","label":"Check Postgres","hint":"docker compose up -d postgres"}));
-            }
-            if r.embeddings.contains("unavailable") {
-                actions.push(serde_json::json!({"id":"ollama","label":"Start Ollama embeddings","hint":"ollama serve && ollama pull nomic-embed-text"}));
-            }
-            if r.generation.contains("unavailable") {
-                actions.push(serde_json::json!({"id":"llm","label":"Configure generation","hint":"set THROUGHLINE_ANSWER_BASE_URL or run Ollama"}));
-            }
+            let actions = recovery_actions(&r, &crate::embedding::configured_model());
             Json(serde_json::json!({
                 "database": r.database,
                 "generation": r.generation,
@@ -3458,6 +3467,27 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_hint_pulls_the_configured_embedding_model() {
+        let report = crate::doctor::DoctorReport {
+            database: "ok".into(),
+            generation: "ollama/qwen (local)".into(),
+            embeddings: "unavailable".into(),
+            embedding_target: None,
+            embedding_missing: "unavailable".into(),
+            generation_local: true,
+            agent_access: "off".into(),
+            notes: Vec::new(),
+        };
+        let actions = recovery_actions(&report, "granite-embedding:278m");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["id"], "ollama");
+        assert_eq!(
+            actions[0]["hint"],
+            "ollama serve && ollama pull granite-embedding:278m"
+        );
+    }
 
     fn loopback() -> Vec<String> {
         allowed_hosts(None, None)
