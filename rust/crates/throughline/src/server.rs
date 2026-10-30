@@ -13,6 +13,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use postgres::GenericClient;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -1533,54 +1534,102 @@ fn list_memory_rows<C: GenericClient>(
     Ok((total, items))
 }
 
+/// The detail fields of `GET /api/memory/{id}`, or `None` for an unknown id.
+pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
+    let row = client.query_opt(
+        "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at, mc.status,
+                mc.superseded_by, mc.superseded_at,
+                (SELECT o.id FROM memory_chunks o
+                  WHERE o.superseded_by = mc.id
+                  ORDER BY o.id DESC LIMIT 1) AS supersedes,
+                mc.source_at, mc.valid_from, mc.valid_to
+         FROM memory_chunks mc WHERE mc.id = $1",
+        &[&id],
+    )?;
+    Ok(row.map(|r| {
+        let content: String = r.get(0);
+        let category: String = r.get(1);
+        let project_name: Option<String> = r.get(2);
+        let created_at: chrono::DateTime<chrono::Utc> = r.get(3);
+        let status: String = r.get(4);
+        let superseded_by: Option<i64> = r.get(5);
+        let superseded_at: Option<chrono::DateTime<chrono::Utc>> = r.get(6);
+        let supersedes: Option<i64> = r.get(7);
+        let source_at: Option<chrono::DateTime<chrono::Utc>> = r.get(8);
+        let valid_from: Option<chrono::DateTime<chrono::Utc>> = r.get(9);
+        let valid_to: Option<chrono::DateTime<chrono::Utc>> = r.get(10);
+        serde_json::json!({
+            "id": id,
+            "content": content,
+            "category": category,
+            "project_name": project_name,
+            "created_at": created_at,
+            "source_at": source_at,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
+            "status": status,
+            "superseded_by": superseded_by,
+            "superseded_at": superseded_at,
+            "supersedes": supersedes,
+        })
+    }))
+}
+
+/// `load_note` plus `source_type`, `source_id` and the whole supersede chain
+/// (predecessors and successors, oldest first, the note itself included).
+/// Does not count a use; the caller decides.
+pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
+    let Some(mut note) = load_note(client, id)? else {
+        return Ok(None);
+    };
+    let source = client.query_one(
+        "SELECT source_type, source_id FROM memory_chunks WHERE id = $1",
+        &[&id],
+    )?;
+    let source_type: Option<String> = source.get(0);
+    let source_id: Option<i64> = source.get(1);
+    let rows = client.query(
+        "WITH RECURSIVE chain(id) AS (
+             SELECT $1::bigint
+             UNION
+             SELECT n.id FROM chain c CROSS JOIN LATERAL (
+                 SELECT id FROM memory_chunks WHERE superseded_by = c.id
+                 UNION ALL
+                 SELECT superseded_by FROM memory_chunks
+                  WHERE id = c.id AND superseded_by IS NOT NULL
+             ) n
+         )
+         SELECT m.id, m.status, m.valid_from, m.valid_to, m.content
+         FROM memory_chunks m JOIN chain USING (id)
+         ORDER BY m.valid_from NULLS FIRST, m.id",
+        &[&id],
+    )?;
+    let chain: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let id: i64 = r.get(0);
+            let status: String = r.get(1);
+            let valid_from: Option<chrono::DateTime<chrono::Utc>> = r.get(2);
+            let valid_to: Option<chrono::DateTime<chrono::Utc>> = r.get(3);
+            let content: String = r.get(4);
+            serde_json::json!({
+                "id": id,
+                "status": status,
+                "valid_from": valid_from,
+                "valid_to": valid_to,
+                "content": content,
+            })
+        })
+        .collect();
+    note["source_type"] = serde_json::json!(source_type);
+    note["source_id"] = serde_json::json!(source_id);
+    note["chain"] = Value::Array(chain);
+    Ok(Some(note))
+}
+
 async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match with_db(&state, move |client| {
-        let row = client.query_opt(
-            "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at, mc.status,
-                    mc.superseded_by, mc.superseded_at,
-                    (SELECT o.id FROM memory_chunks o
-                      WHERE o.superseded_by = mc.id
-                      ORDER BY o.id DESC LIMIT 1) AS supersedes,
-                    EXISTS (SELECT 1 FROM favorites f
-                            WHERE f.kind = 'memory'
-                              AND f.ref = mc.id::text) AS favorite,
-                    mc.source_at, mc.valid_from, mc.valid_to
-             FROM memory_chunks mc WHERE mc.id = $1",
-            &[&id],
-        )?;
-        Ok(row.map(|r| MemoryRow {
-            id,
-            content: r.get(0),
-            category: r.get(1),
-            project_name: r.get(2),
-            created_at: r.get(3),
-            source_at: r.get(9),
-            valid_from: r.get(10),
-            valid_to: r.get(11),
-            status: r.get(4),
-            superseded_by: r.get(5),
-            superseded_at: r.get(6),
-            supersedes: r.get(7),
-            favorite: r.get(8),
-        }))
-    })
-    .await
-    {
-        Ok(Some(row)) => Json(serde_json::json!({
-            "id": row.id,
-            "content": row.content,
-            "category": row.category,
-            "project_name": row.project_name,
-            "created_at": row.created_at,
-            "source_at": row.source_at,
-            "valid_from": row.valid_from,
-            "valid_to": row.valid_to,
-            "status": row.status,
-            "superseded_by": row.superseded_by,
-            "superseded_at": row.superseded_at,
-            "supersedes": row.supersedes,
-        }))
-        .into_response(),
+    match with_db(&state, move |client| load_note(client, id)).await {
+        Ok(Some(note)) => Json(note).into_response(),
         Ok(None) => api_error(StatusCode::NOT_FOUND, "not_found", "memory chunk not found"),
         Err(resp) => resp,
     }
@@ -2274,7 +2323,7 @@ async fn memory_forget(State(state): State<AppState>, Path(id): Path<i64>) -> Re
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum KeepOutcome {
+pub(crate) enum KeepOutcome {
     Kept,
     NotFound,
     HasSuccessor,
@@ -2283,7 +2332,7 @@ enum KeepOutcome {
 /// Confirm a note: back to active (undo of forget), expiry cleared, `reviewed`
 /// tag and `updated_at` stamped. A note that a successor replaced stays
 /// superseded, so keeping it cannot revive it next to the successor.
-fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<KeepOutcome> {
+pub(crate) fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<KeepOutcome> {
     let mut tx = client.transaction()?;
     let Some(row) = tx.query_opt(
         "SELECT superseded_by FROM memory_chunks WHERE id = $1 FOR UPDATE",
@@ -4625,6 +4674,44 @@ mod tests {
         )
         .expect("set valid_from");
         id
+    }
+
+    #[test]
+    fn load_note_keeps_the_detail_json_of_the_memory_route() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping load_note_keeps_the_detail_json: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let id = seed_note(&mut tx, "detail seed", "decision");
+        let v = load_note(&mut tx, id).expect("load").expect("row");
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "category",
+                "content",
+                "created_at",
+                "id",
+                "project_name",
+                "source_at",
+                "status",
+                "superseded_at",
+                "superseded_by",
+                "supersedes",
+                "valid_from",
+                "valid_to"
+            ]
+        );
+        assert_eq!(v["id"], serde_json::json!(id));
+        assert_eq!(v["content"], "detail seed");
+        assert_eq!(v["category"], "decision");
+        assert_eq!(v["status"], "active");
+        assert!(v["project_name"].is_null() && v["superseded_by"].is_null());
+        assert!(v["supersedes"].is_null() && v["superseded_at"].is_null());
+        assert!(v["created_at"].is_string());
+        assert!(load_note(&mut tx, -5).expect("load").is_none());
     }
 
     #[test]
