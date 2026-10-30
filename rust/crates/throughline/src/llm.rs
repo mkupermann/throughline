@@ -120,6 +120,40 @@ fn compat_backend(base: &str, model: String, api_key: Option<String>) -> Generat
     }
 }
 
+/// A model served by Ollama's cloud: it runs off this machine.
+fn is_cloud_model(name: &str, entry: &serde_json::Value) -> bool {
+    name.ends_with(":cloud")
+        || entry["remote_host"]
+            .as_str()
+            .is_some_and(|h| !h.trim().is_empty())
+}
+
+/// Choose the chat model from an Ollama `/api/tags` answer. Automatic choice
+/// never lands on a cloud model (note text would leave the machine) nor on an
+/// embedding model; an explicit `model_override` is taken as given.
+fn pick_ollama_model(tags: &serde_json::Value, model_override: Option<String>) -> Result<String> {
+    if let Some(m) = model_override {
+        return Ok(m);
+    }
+    let names: Vec<String> = tags["models"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|m| {
+                    let name = m["name"].as_str()?;
+                    (!is_cloud_model(name, m) && !name.contains("embed")).then(|| name.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names
+        .iter()
+        .find(|n| n.starts_with("qwen") || n.contains("llama") || n.contains("mistral"))
+        .or_else(|| names.first())
+        .cloned()
+        .ok_or_else(|| anyhow!("ollama has no local chat model"))
+}
+
 fn probe_ollama(base: &str, model_override: Option<String>) -> Result<GenerationBackend> {
     let base = base.to_string();
     crate::embedding::isolated_blocking(move || {
@@ -132,24 +166,7 @@ fn probe_ollama(base: &str, model_override: Option<String>) -> Result<Generation
             .context("ollama /api/tags")?
             .json()
             .context("ollama tags json")?;
-        let names: Vec<String> = tags["models"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if names.is_empty() {
-            return Err(anyhow!("ollama has no models"));
-        }
-        let model = model_override.unwrap_or_else(|| {
-            names
-                .iter()
-                .find(|n| n.starts_with("qwen") || n.contains("llama") || n.contains("mistral"))
-                .cloned()
-                .unwrap_or_else(|| names[0].clone())
-        });
+        let model = pick_ollama_model(&tags, model_override)?;
         ollama_backend(&base, model)
     })
 }
@@ -278,10 +295,10 @@ pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -
 /// Whether this backend keeps data on the machine.
 pub fn is_local(backend: &GenerationBackend) -> bool {
     let host = backend.base_url.to_lowercase();
-    backend.kind == BackendKind::Ollama
-        || host.contains("localhost")
-        || host.contains("127.0.0.1")
-        || host.contains("::1")
+    if backend.kind == BackendKind::Ollama {
+        return !backend.model.ends_with(":cloud");
+    }
+    host.contains("localhost") || host.contains("127.0.0.1") || host.contains("::1")
 }
 
 /// `THROUGHLINE_REDACT_PII` defaults to on.
@@ -321,6 +338,44 @@ fn ollama_chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mac_tags() -> serde_json::Value {
+        serde_json::json!({"models": [
+            {"name": "glm-5.2:cloud", "remote_host": "https://ollama.com"},
+            {"name": "nomic-embed-text:latest"},
+            {"name": "qwen3.6:27b"}
+        ]})
+    }
+
+    #[test]
+    fn auto_selection_skips_cloud_models() {
+        assert_eq!(pick_ollama_model(&mac_tags(), None).unwrap(), "qwen3.6:27b");
+        // A cloud model that sorts first and matches no preferred name must not win.
+        let tags = serde_json::json!({"models": [
+            {"name": "glm-5.2:cloud", "remote_host": "https://ollama.com"},
+            {"name": "gemma3:4b"}
+        ]});
+        assert_eq!(pick_ollama_model(&tags, None).unwrap(), "gemma3:4b");
+        // Only a cloud model and an embedding model: nothing local to chat with.
+        let tags = serde_json::json!({"models": [
+            {"name": "glm-5.2:cloud", "remote_host": "https://ollama.com"},
+            {"name": "nomic-embed-text:latest"}
+        ]});
+        assert!(pick_ollama_model(&tags, None).is_err());
+        // A remote_host alone marks a model as remote, whatever its name says.
+        let tags = serde_json::json!({"models": [
+            {"name": "qwen-big", "remote_host": "https://ollama.com"}
+        ]});
+        assert!(pick_ollama_model(&tags, None).is_err());
+    }
+
+    #[test]
+    fn cloud_ollama_models_are_not_local() {
+        let local = ollama_backend("http://localhost:11434", "qwen3.6:27b".into()).unwrap();
+        assert!(is_local(&local));
+        let cloud = ollama_backend("http://localhost:11434", "glm-5.2:cloud".into()).unwrap();
+        assert!(!is_local(&cloud));
+    }
 
     #[test]
     fn ollama_body_leaves_think_and_options_out_when_unset() {
