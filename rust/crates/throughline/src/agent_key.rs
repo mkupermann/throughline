@@ -58,15 +58,12 @@ fn bearer_credentials(header: &str) -> Option<&str> {
 }
 
 pub fn check_bearer(state: &KeyState, authorization: Option<&str>) -> KeyCheck {
-    let Some(header) = authorization else {
-        return KeyCheck::Missing;
-    };
     let expected = match state {
         KeyState::Off => return KeyCheck::Off,
         KeyState::TooShort => return KeyCheck::TooShort,
         KeyState::Ready(d) => d,
     };
-    let Some(credentials) = bearer_credentials(header) else {
+    let Some(credentials) = authorization.and_then(bearer_credentials) else {
         return KeyCheck::Missing;
     };
     let presented = digest(credentials);
@@ -164,7 +161,8 @@ mod tests {
     #[test]
     fn missing_header_is_missing() {
         assert_eq!(check_bearer(&ready(), None), KeyCheck::Missing);
-        assert_eq!(check_bearer(&KeyState::Off, None), KeyCheck::Missing);
+        assert_eq!(check_bearer(&KeyState::Off, None), KeyCheck::Off);
+        assert_eq!(check_bearer(&KeyState::TooShort, None), KeyCheck::TooShort);
     }
 
     #[test]
