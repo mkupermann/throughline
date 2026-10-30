@@ -1142,6 +1142,82 @@ fn parse_recall_params(
     })
 }
 
+#[derive(Deserialize)]
+struct ContextParams {
+    project: Option<String>,
+    task: Option<String>,
+    budget: Option<i64>,
+}
+
+#[derive(Debug)]
+struct ParsedContext {
+    project: String,
+    task: Option<String>,
+    budget: usize,
+}
+
+/// Check project, task and budget before the database is touched.
+fn parse_context_params(
+    params: &ContextParams,
+) -> std::result::Result<ParsedContext, (StatusCode, &'static str, String)> {
+    let invalid = |m: String| (StatusCode::UNPROCESSABLE_ENTITY, "validation_error", m);
+    let project = params.project.as_deref().map(str::trim).unwrap_or_default();
+    if project.is_empty() {
+        return Err(invalid("project is required".into()));
+    }
+    let task = params
+        .task
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    if let Some(t) = task {
+        crate::recall::check_query(t).map_err(invalid)?;
+    }
+    let budget = params
+        .budget
+        .unwrap_or(crate::context_pack::DEFAULT_BUDGET as i64);
+    let range = crate::context_pack::MIN_BUDGET as i64..=crate::context_pack::MAX_BUDGET as i64;
+    if !range.contains(&budget) {
+        return Err(invalid(format!(
+            "budget must be between {} and {}",
+            crate::context_pack::MIN_BUDGET,
+            crate::context_pack::MAX_BUDGET
+        )));
+    }
+    Ok(ParsedContext {
+        project: project.to_string(),
+        task: task.map(String::from),
+        budget: budget as usize,
+    })
+}
+
+async fn context_handler(
+    State(state): State<AppState>,
+    Query(params): Query<ContextParams>,
+) -> Response {
+    let parsed = match parse_context_params(&params) {
+        Ok(p) => p,
+        Err((status, code, detail)) => return api_error(status, code, detail),
+    };
+    // The default ranking is full text and needs no question vector.
+    match with_db(&state, move |client| {
+        crate::context_pack::build_context(
+            client,
+            &crate::context_pack::ContextRequest {
+                project: &parsed.project,
+                task: parsed.task.as_deref(),
+                budget: parsed.budget,
+            },
+            None,
+        )
+    })
+    .await
+    {
+        Ok(pack) => Json(pack).into_response(),
+        Err(resp) => resp,
+    }
+}
+
 async fn recall_handler(
     State(state): State<AppState>,
     Query(params): Query<RecallParams>,
@@ -2889,6 +2965,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/status", get(status))
         .route("/api/search", get(search_handler))
         .route("/api/recall", get(recall_handler))
+        .route("/api/context", get(context_handler))
         .route("/api/messages", get(messages_handler))
         .route("/api/messages/{id}", get(message_detail))
         .route("/api/tools", get(tools_handler))
@@ -3692,6 +3769,35 @@ mod tests {
             "plain project filtered out: {only:?}"
         );
         // Drop tx → rollback, nothing left behind.
+    }
+
+    #[test]
+    fn context_params_are_validated() {
+        let p = |project: Option<&str>, task: Option<String>, budget: Option<i64>| ContextParams {
+            project: project.map(String::from),
+            task,
+            budget,
+        };
+        let long = "abc ".repeat(500);
+        for bad in [
+            p(None, None, None),
+            p(Some("  "), None, None),
+            p(Some("P"), None, Some(63)),
+            p(Some("P"), None, Some(40_000)),
+            p(Some("P"), Some(format!("{long}x")), None),
+        ] {
+            let err = parse_context_params(&bad).expect_err("must be refused");
+            assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(err.1, "validation_error");
+        }
+        let ok = parse_context_params(&p(Some(" P "), Some(long.clone()), None)).unwrap();
+        assert_eq!(ok.budget, 2_000);
+        assert_eq!(ok.project, "P");
+        assert_eq!(ok.task.as_deref(), Some(long.trim()));
+        let lo = parse_context_params(&p(Some("P"), Some(" ".into()), Some(64))).unwrap();
+        assert_eq!((lo.budget, lo.task), (64, None));
+        let hi = parse_context_params(&p(Some("P"), None, Some(32_768))).unwrap();
+        assert_eq!(hi.budget, 32_768);
     }
 
     #[test]
