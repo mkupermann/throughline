@@ -1891,6 +1891,236 @@ async fn memory_supersede(
     }
 }
 
+// ---- Merge of similar notes (lifecycle) ----
+
+fn consolidate_error_response(e: crate::lifecycle::ConsolidateError) -> Response {
+    use crate::lifecycle::ConsolidateError as E;
+    let detail = e.to_string();
+    match e {
+        E::TooFew | E::EmptyContent | E::InvalidCategory(_) | E::MixedProjects => {
+            api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", detail)
+        }
+        E::NotFound(_) => api_error(StatusCode::NOT_FOUND, "not_found", detail),
+        E::AlreadySuperseded(_) => api_error(StatusCode::CONFLICT, "already_superseded", detail),
+        E::Db(_) => api_error(StatusCode::INTERNAL_SERVER_ERROR, "query_failed", detail),
+    }
+}
+
+#[derive(Deserialize)]
+struct ConsolidateBody {
+    #[serde(default)]
+    ids: Vec<i64>,
+    #[serde(default)]
+    content: String,
+    category: Option<String>,
+}
+
+async fn consolidate_handler(
+    State(state): State<AppState>,
+    Json(body): Json<ConsolidateBody>,
+) -> Response {
+    // Carry ConsolidateError as Ok(payload) so with_db keeps 500 for real
+    // connection failures and the typed codes stay exact.
+    let outcome = with_db(&state, move |client| {
+        Ok(crate::lifecycle::consolidate(
+            client,
+            &body.ids,
+            &body.content,
+            body.category.as_deref(),
+        ))
+    })
+    .await;
+    match outcome {
+        Ok(Ok(new_id)) => Json(serde_json::json!({ "new_id": new_id })).into_response(),
+        Ok(Err(e)) => consolidate_error_response(e),
+        Err(resp) => resp,
+    }
+}
+
+#[derive(Deserialize)]
+struct CandidateParams {
+    min_similarity: Option<f64>,
+}
+
+/// Groups of similar notes. Without a usable embedding model the list is
+/// empty and `degraded` says why; no embedding is ever computed here.
+async fn consolidation_candidates_handler(
+    State(state): State<AppState>,
+    Query(params): Query<CandidateParams>,
+) -> Response {
+    let min_similarity = params
+        .min_similarity
+        .unwrap_or(crate::lifecycle::MIN_SIMILARITY);
+    if !(0.0..=1.0).contains(&min_similarity) {
+        return api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "min_similarity must be between 0 and 1",
+        );
+    }
+    let backend = tokio::task::spawn_blocking(crate::embedding::resolve)
+        .await
+        .ok()
+        .and_then(|r| r.ok());
+    let Some(backend) = backend else {
+        return Json(serde_json::json!({ "groups": [], "degraded": "no_embeddings" }))
+            .into_response();
+    };
+    match with_db(&state, move |client| {
+        crate::lifecycle::consolidation_candidates(
+            client,
+            &backend.model,
+            backend.column,
+            min_similarity,
+        )
+    })
+    .await
+    {
+        Ok(groups) => {
+            Json(serde_json::json!({ "groups": groups, "degraded": null })).into_response()
+        }
+        Err(resp) => resp,
+    }
+}
+
+/// Currently valid notes that the old `reflect` damaged: they hold several
+/// notes joined by a rule line and name themselves among their sources.
+fn damaged_notes<C: GenericClient>(client: &mut C) -> Result<Vec<serde_json::Value>> {
+    let predicate = crate::temporal::as_of_predicate("$1", "$2");
+    let now = Some(chrono::Utc::now());
+    let known_at: Option<chrono::DateTime<chrono::Utc>> = None;
+    let rows = client.query(
+        &format!(
+            "SELECT mc.id, left(mc.content, 280), mc.category::text, mc.project_name,
+                    COALESCE(mc.valid_from, mc.source_at, mc.created_at)
+             FROM memory_chunks mc
+             WHERE COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
+               AND mc.superseded_by IS NULL
+               AND position(E'\\n---\\n' IN mc.content) > 0
+               AND mc.id = ANY(mc.merged_from)
+               AND {predicate}
+             ORDER BY mc.id"
+        ),
+        &[&now, &known_at],
+    )?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.get::<_, i64>(0),
+                "content": r.get::<_, String>(1),
+                "category": r.get::<_, String>(2),
+                "project_name": r.get::<_, Option<String>>(3),
+                "valid_from": r.get::<_, chrono::DateTime<chrono::Utc>>(4),
+            })
+        })
+        .collect())
+}
+
+async fn damaged_notes_handler(State(state): State<AppState>) -> Response {
+    match with_db(&state, damaged_notes).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+const PROPOSAL_MIN_IDS: usize = 2;
+const PROPOSAL_MAX_IDS: usize = 20;
+
+fn parse_proposal_ids(raw: &str) -> Result<Vec<i64>, String> {
+    let mut ids = Vec::new();
+    for part in raw.split(',') {
+        let id: i64 = part
+            .trim()
+            .parse()
+            .map_err(|_| format!("ids must be comma-separated integers, got {part:?}"))?;
+        if ids.contains(&id) {
+            return Err(format!("id {id} appears twice"));
+        }
+        ids.push(id);
+    }
+    if !(PROPOSAL_MIN_IDS..=PROPOSAL_MAX_IDS).contains(&ids.len()) {
+        return Err(format!(
+            "give between {PROPOSAL_MIN_IDS} and {PROPOSAL_MAX_IDS} ids"
+        ));
+    }
+    Ok(ids)
+}
+
+/// The model's text, or the longest note when the model failed or said nothing.
+fn proposal_or_longest(llm: Result<String>, texts: &[String]) -> (String, &'static str) {
+    match llm {
+        Ok(text) if !text.trim().is_empty() => (text.trim().to_string(), "llm"),
+        _ => (
+            crate::lifecycle::longest_text(texts.iter().map(String::as_str)).to_string(),
+            "longest",
+        ),
+    }
+}
+
+const PROPOSAL_SYSTEM: &str = "Merge the given notes into one note. Do not lose any fact and do \
+not add any. Keep it short, write in the language of the notes, and answer with the merged \
+note only.";
+
+#[derive(Deserialize)]
+struct ProposalParams {
+    #[serde(default)]
+    ids: String,
+}
+
+/// Read-only. The model runs outside the database lock, like the query
+/// embedding in `/api/recall`; any failure falls back to the longest note.
+async fn consolidation_proposal_handler(
+    State(state): State<AppState>,
+    Query(params): Query<ProposalParams>,
+) -> Response {
+    let ids = match parse_proposal_ids(&params.ids) {
+        Ok(ids) => ids,
+        Err(detail) => {
+            return api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", detail)
+        }
+    };
+    let wanted = ids.clone();
+    let texts = match with_db(&state, move |client| {
+        let rows = client.query(
+            "SELECT id, content FROM memory_chunks WHERE id = ANY($1) ORDER BY id",
+            &[&wanted],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<_, i64>(0), r.get::<_, String>(1)))
+            .collect::<Vec<_>>())
+    })
+    .await
+    {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    if let Some(missing) = ids.iter().find(|id| !texts.iter().any(|(t, _)| t == *id)) {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("memory note {missing} not found"),
+        );
+    }
+    let texts: Vec<String> = texts.into_iter().map(|(_, c)| c).collect();
+    let user = texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| format!("Note {}:\n{t}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let llm = tokio::task::spawn_blocking(move || {
+        let backend = crate::llm::resolve_backend()?;
+        crate::llm::complete(&backend, Some(PROPOSAL_SYSTEM), &user)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    let (text, source) = proposal_or_longest(llm, &texts);
+    Json(serde_json::json!({ "text": text, "source": source })).into_response()
+}
+
 #[derive(Deserialize)]
 struct MemoryCreate {
     #[serde(default)]
@@ -2987,6 +3217,16 @@ pub fn app(state: AppState) -> Router {
         .route("/api/memory/{id}/forget", post(memory_forget))
         .route("/api/memory/{id}/keep", post(memory_keep))
         .route("/api/memory/{id}/supersede", post(memory_supersede))
+        .route(
+            "/api/consolidation/candidates",
+            get(consolidation_candidates_handler),
+        )
+        .route(
+            "/api/consolidation/proposal",
+            get(consolidation_proposal_handler),
+        )
+        .route("/api/consolidate", post(consolidate_handler))
+        .route("/api/damaged-notes", get(damaged_notes_handler))
         .route("/api/mimo-memory/ingest", post(agent_memory_ingest))
         .route("/api/agent-memory/ingest", post(agent_memory_ingest))
         .route("/api/conversations", get(recent))
@@ -4733,5 +4973,127 @@ mod tests {
         assert!(err.2.contains("known_at"), "{}", err.2);
         let ok = parse_as_of(Some("2026-03-01"), Some("  ")).expect("ok");
         assert!(ok.0.is_some() && ok.1.is_none());
+    }
+
+    #[test]
+    fn consolidate_endpoint_maps_errors() {
+        use crate::lifecycle::consolidate;
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping consolidate_endpoint_maps_errors: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_note(&mut tx, &format!("merge a {tag}"), "decision");
+        let b = seed_note(&mut tx, &format!("merge b {tag}"), "decision");
+        let status = |r: Result<i64, crate::lifecycle::ConsolidateError>| {
+            consolidate_error_response(r.expect_err("must be refused")).status()
+        };
+        assert_eq!(
+            status(consolidate(&mut tx, &[a], "x", None)),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            status(consolidate(&mut tx, &[a, b], "  ", None)),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            status(consolidate(&mut tx, &[a, b], "x", Some("nonsense"))),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            status(consolidate(&mut tx, &[a, i64::MAX], "x", None)),
+            StatusCode::NOT_FOUND
+        );
+        let p1 = seed_note(&mut tx, &format!("merge p1 {tag}"), "decision");
+        let p2 = seed_note(&mut tx, &format!("merge p2 {tag}"), "decision");
+        tx.execute(
+            "UPDATE memory_chunks SET project_name = $2 WHERE id = $1",
+            &[&p1, &format!("p-{tag}")],
+        )
+        .expect("project");
+        assert_eq!(
+            status(consolidate(&mut tx, &[p1, p2], "x", None)),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let new_id = consolidate(&mut tx, &[a, b], "merged", None).expect("merge");
+        assert!(new_id > 0);
+        assert_eq!(
+            status(consolidate(&mut tx, &[a, b], "again", None)),
+            StatusCode::CONFLICT
+        );
+    }
+
+    #[test]
+    fn damaged_notes_lists_reflect_damage() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping damaged_notes_lists_reflect_damage: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let damaged = seed_note(&mut tx, &format!("first {tag}\n---\nsecond"), "decision");
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = ARRAY[$1::bigint, $1 + 1] WHERE id = $1",
+            &[&damaged],
+        )
+        .expect("damage");
+        let plain = seed_note(&mut tx, &format!("fine {tag}\n---\nwith rule"), "decision");
+        let other = seed_note(&mut tx, &format!("clean merge {tag}"), "decision");
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = ARRAY[$1::bigint - 1] WHERE id = $1",
+            &[&other],
+        )
+        .expect("merged");
+        let closed = seed_note(&mut tx, &format!("old {tag}\n---\ndamage"), "decision");
+        tx.execute("UPDATE memory_chunks SET merged_from = ARRAY[$1::bigint], status = 'superseded' WHERE id = $1", &[&closed]).expect("closed");
+        let listed = damaged_notes(&mut tx).expect("list");
+        let ids: Vec<i64> = listed.iter().filter_map(|v| v["id"].as_i64()).collect();
+        assert!(ids.contains(&damaged), "damaged note missing: {ids:?}");
+        for id in [plain, other, closed] {
+            assert!(!ids.contains(&id), "note {id} must not be listed");
+        }
+        let row = listed.iter().find(|v| v["id"] == damaged).expect("row");
+        assert!(
+            row["content"].as_str().is_some()
+                && row.get("valid_from").is_some()
+                && row.get("project_name").is_some()
+        );
+    }
+
+    #[test]
+    fn proposal_ids_are_validated() {
+        assert_eq!(parse_proposal_ids("3, 1,2").expect("ok"), vec![3, 1, 2]);
+        for bad in ["", "1", "1,x", "1,,2", "1,1"] {
+            assert!(parse_proposal_ids(bad).is_err(), "{bad:?} must be refused");
+        }
+        let many = (1..=21)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(parse_proposal_ids(&many).is_err());
+        let twenty = (1..=20)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(parse_proposal_ids(&twenty).expect("20").len(), 20);
+    }
+
+    #[test]
+    fn proposal_falls_back_to_the_longest_note() {
+        let texts = vec!["short".to_string(), "the longest one".to_string()];
+        assert_eq!(
+            proposal_or_longest(Err(anyhow::anyhow!("no llm")), &texts),
+            ("the longest one".to_string(), "longest")
+        );
+        assert_eq!(
+            proposal_or_longest(Ok("  summary ".into()), &texts),
+            ("summary".to_string(), "llm")
+        );
+        assert_eq!(
+            proposal_or_longest(Ok("   ".into()), &texts).1,
+            "longest",
+            "an empty answer counts as a failure"
+        );
     }
 }
