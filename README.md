@@ -38,11 +38,17 @@ Every AI coding tool keeps its own session files and forgets the rest. Decisions
 | Understand why a decision was made | Search results connected to the original conversation. |
 | Move between coding tools | A shared store, Markdown export and MCP access. |
 | Inspect what an agent recorded | Message content, tool-call JSON, timestamps and source-tool labels. |
-| Maintain accumulated context | Memory categories, deduplication, stale-memory reports and explicit writeback. |
+| Maintain accumulated context | Memory categories, deduplication of notes with the same opening, stale-memory reports and explicit writeback. |
 
 ### Supported session sources
 
-The Rust registry includes **11 adapters**: Claude Code, Codex, Cursor, Zed, Continue, Cline, Windsurf, Vibe, Hermes, OpenCode and Aider. They read supported local files. They are not cloud-account sync integrations, and format coverage varies by tool.
+The Rust registry includes **11 adapters**. They read local files. They are not cloud-account sync integrations. Coverage differs a lot between them, and an external audit on 30.10.2026 checked them against real session files.
+
+| Status | Adapters | What that means |
+| --- | --- | --- |
+| Verified on real files | Claude Code, Codex, Vibe | Roles, tool calls, model and timestamps import. Claude Code token totals count each streamed entry and run high, about double. |
+| Partial | Cline, Hermes, Windsurf | Cline gives every message the session start time and no model. Hermes reads only the first session from `state.db`. Windsurf imports plan files, not Cascade conversations. |
+| Not verified, likely wrong path or format | Cursor, Zed, Continue, OpenCode, Aider | Cursor and Zed look in folders those tools do not use. OpenCode found 254 real files and imported none. Aider and Continue were written against an assumed format. |
 
 Standard Compose mounts the first nine tool directories read-only. OpenCode and Aider need their source directories mounted separately. The source of truth is the [adapter registry](rust/crates/throughline/src/adapters/registry.rs).
 
@@ -213,7 +219,7 @@ Enter a question and follow the returned sources. A configured generation backen
 
 Run ingestion, AI configuration import, status, embedding, deduplication, backup, audit, stale-memory reporting, instruction-file writeback or answer evaluation. Some actions mutate data or files, and model-dependent actions need configuration first. See the [action reference](docs/FEATURE_GUIDE.md#maintenance-actions).
 
-![All nine maintenance actions and ingestion status](docs/media/rust/operate.png)
+![All ten maintenance actions and ingestion status](docs/media/rust/operate.png)
 
 ![Completed demo Status action](docs/media/rust/operate-status.png)
 
@@ -240,11 +246,13 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Area | Commands |
 | --- | --- |
 | Setup and health | `migrate`, `serve`, `status`, `doctor` |
-| Import and retrieve | `ingest`, `search`, `recall`, `context`, `ask`, `handoff` |
+| Import and retrieve | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval` |
-| Carry context forward | `scan-instructions`, `writeback`, `export-markdown` |
-| Protect and integrate | `backup`, `mcp` |
+| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Carry context forward | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
+| Protect and integrate | `backup`, `retention`, `mcp` |
+
+These are all 31 commands. There is no restore command. A dump from `backup` goes back in with `psql`. `retention --apply` deletes conversations and their notes after archiving them, and it is a dry run without `--apply`.
 
 The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies and side effects. Availability is not a claim that every command was tested against every schema variant.
 
@@ -252,7 +260,7 @@ The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies
 
 Launch `throughline mcp` from a compatible client over stdio, with the database variables in that process's environment. The container equivalent is `docker compose run -i --rm mcp`.
 
-The Rust server advertises `search`, `recall`, `project_context`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall, supersede and write need the current schema (migration 012 or later). The older Python MCP server has a different tool contract.
+The Rust server advertises `search`, `recall`, `project_context`, `list_projects`, `stats`, `write`, `forget` and `supersede`. Recall, supersede and write need the current schema (migration 012 or later). The server does not check the schema version. On an older schema these tools fail with a raw SQL error, so run `throughline migrate` first. The older Python MCP server has a different tool contract.
 
 ### Optional models
 
@@ -301,7 +309,7 @@ Regulators, auditors and research institutions are converging on the same demand
 | Requirement | Source | What Throughline stores |
 | --- | --- | --- |
 | Automatic recording of events over the system's lifetime, for traceability | [EU AI Act, Art. 12(1) and 12(2)](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-12), Regulation (EU) 2024/1689 | Every imported session is recorded automatically with timestamps, source tool and model label. No manual bookkeeping. |
-| Log retention of at least six months by the deployer | [EU AI Act, Art. 19 and Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | The corpus lives in your PostgreSQL volume for as long as you keep it, with `backup` and restore as explicit commands. Deletion is a deliberate act. |
+| Log retention of at least six months by the deployer | [EU AI Act, Art. 19 and Art. 26(6)](https://artificialintelligenceact.eu/article/19/) | The corpus lives in your PostgreSQL volume for as long as you keep it, with `backup` as an explicit command and restore through `psql`. Deletion is a deliberate act through `retention --apply`. |
 | A reviewer must see which model was used, how it was prompted and how the output was validated | [World Bank AI reproducibility guidelines](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html) | Per message: model label, full prompt and response text, role, timestamps. Per answer in Ask: the cited source records. |
 | Per-interaction logs of timestamps, model version, prompts, tool calls and outputs for agent-assisted research | [Logging schema proposed in arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | The message record carries exactly these fields, including tool-call JSON and content blocks, inspectable in Browse. |
 | An evidence package that can be verified independently of the system that produced it | [World Bank AI reproducibility guidelines](https://worldbank.github.io/wb-reproducible-research-repository/guidance/AI_reproducibility_guidelines.html), [arXiv:2604.00945](https://arxiv.org/pdf/2604.00945) | `export-markdown --evidence` ships a provenance manifest with the export: per conversation the model, source tool and time range, per file a SHA-256 hash and size, plus corpus totals. Deterministic except for the generation timestamp. |
@@ -315,7 +323,9 @@ Public administrations pushing for digital sovereignty, such as the [Franco-Germ
 
 Honest limits beat silent surprises. These are the current ones.
 
-- **Local, trusted use.** The Rust router has no application login or role enforcement. Keep it on loopback. Older Python team-mode settings do not add authentication to this runtime. It does refuse requests with a Host other than loopback, `THROUGHLINE_PUBLIC_URL` or `THROUGHLINE_ALLOWED_HOSTS`, requests from another origin, and API calls a browser marks as cross-site, so a web page you visit cannot drive it. Browsers without Fetch Metadata headers still send cross-site GET requests.
+- **Local, trusted use.** The Rust router has no application login or role enforcement. Keep it on loopback. Older Python team-mode settings do not add authentication to this runtime. It does refuse requests with a Host other than loopback, `THROUGHLINE_PUBLIC_URL` or `THROUGHLINE_ALLOWED_HOSTS`, requests from another origin, and API calls a browser marks as cross-site, so a web page you visit cannot drive it. Browsers without Fetch Metadata headers still send cross-site GET requests, and some GET routes change data: `/api/operate`, `/api/writeback` and the agent-memory import. A request with no Host header passes the check.
+- **Backups need a mounted folder.** The Backup button and a bare `backup` write inside the container unless `THROUGHLINE_BACKUP_DIR` points at a mounted path. Such a dump is gone with the container.
+- **Heuristic maintenance.** Deduplication merges notes whose first 80 characters match. The conflict and stale reports flag every note older than their threshold as never accessed, because access is not counted yet. The API job `/api/operate?job=extract-memory` counts conversations and extracts nothing. Use `throughline extract-memory`.
 - **Historical evidence.** Conversations, notes and answers can be incomplete, stale or wrong. A tool-call record does not prove a command succeeded or a file still exists.
 - **Separate model validation.** The demo demonstrates navigation and selected deterministic actions, not model quality, vector retrieval, agent execution or backup restoration.
 - **Incomplete parity.** React team operations, the template library, Review, SQL Console and account management are not registered by the Rust server. Older documentation may use different commands and variables.

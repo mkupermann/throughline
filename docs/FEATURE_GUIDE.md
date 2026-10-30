@@ -98,10 +98,11 @@ Submit a question to retrieve evidence and request generation. Open cited sessio
 | Action | What it does | Dependency or side effect |
 | --- | --- | --- |
 | Ingest all providers | Runs registered adapters. | Reads available local source files; writes imported records. |
+| Import AI configuration | Imports the assistant configuration inventory, secrets masked. | Reads local configuration files; writes inventory records. |
 | Status | Reports conversation and message counts. | Database read; demonstrated below. |
 | Embed | Vectorizes pending messages. | Calls the embedding service and writes vectors; UI batch is bounded. |
-| Reflect | Deduplicates memory chunks. | Changes memory state; the UI action is not every CLI reflection mode. |
-| Backup | Runs `pg_dump` and retains recent dumps. | Writes files and prunes old dumps; configure a persistent backup directory. |
+| Reflect | Merges notes whose first 80 characters match. | Changes memory state without a dry run; the UI action is not every CLI reflection mode. |
+| Backup | Runs `pg_dump` and retains recent dumps. | Writes files and prunes old dumps. Without `THROUGHLINE_BACKUP_DIR` on a mounted path the dump stays inside the container and is lost with it. |
 | Audit | Reports recorded agent/MCP activity. | A summary of available records, not a tamper-proof security audit. |
 | Stale digest | Reports stale/superseded/unused memory candidates. | Heuristics need human review. |
 | Write to AGENTS.md | Writes distilled memory into an instruction file. | Filesystem mutation; use CLI `--root` for an explicit destination. |
@@ -113,7 +114,7 @@ The provider status panel is a separate view of discovery/import state. The demo
 
 ## CLI functions
 
-All 24 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
+All 31 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
 
 | Command | Function and relevant boundary |
 | --- | --- |
@@ -121,8 +122,11 @@ All 24 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `serve` | Start the embedded UI/API; defaults to loopback port 8787. |
 | `status` | Report conversation/message counts. |
 | `doctor` | Inspect database and model/backend availability. |
-| `ingest` | Import `--source all` or a named adapter. |
+| `ingest` | Import `--source all` or a named adapter. See the adapter status table in the README. |
+| `import-config` | Import the assistant configuration inventory with secrets masked. |
 | `search` | Keyword search; optional `--semantic` and `--from` selection. |
+| `recall` | Ranked memory-note recall with a reason per hit; modes `current`, `as_of`, `associative`, `grounded`. |
+| `context` | Build a project briefing from current notes that fits a token budget; `--task`, `--budget`, `--json`. No model needed. |
 | `ask` | Retrieve records and generate a cited answer, with conditional excerpt fallback. |
 | `handoff` | Build an offline continuation brief, optionally scoped to a project. |
 | `extract-memory` | Extract durable notes from messages not yet extracted, newest conversations first, in bounded windows using generation. |
@@ -136,10 +140,14 @@ All 24 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `reflect` | Run memory maintenance modes; inspect `--dry-run` where applicable. |
 | `stale-digest` | Report memory requiring renewed attention. |
 | `answer-eval` | Evaluate supplied/default cases with citation and phrase checks. |
+| `recall-eval` | Measure hit@k and MRR of the recall rankers against a question set from `--set`. Needs embeddings. |
+| `repair-timestamps` | Clamp message times later than the conversation end; dry run without `--apply`. |
 | `scan-instructions` | Index local project instruction files into the store. |
 | `writeback` | Write distilled notes into project instructions; select `--root` deliberately. Without `--project` only notes of the project named like the `--root` folder are written. |
 | `export-markdown` | Write a Markdown vault; supports project selection and optional redaction. `--evidence` adds a provenance manifest with model, source tool, time range and SHA-256 per exported file. |
-| `backup` | Dump the database to a directory and keep the newest `--keep` dumps. Rotation only touches its own `<database>-YYYYMMDD-HHMMSS.sql` files. |
+| `export-otel` | Write OTLP/JSON traces with `gen_ai.*` attributes, one trace per conversation. Content only with `--include-content`, no redaction, existing files are overwritten. |
+| `backup` | Dump the database to a directory and keep the newest `--keep` dumps. Rotation only touches its own `<database>-YYYYMMDD-HHMMSS.sql` files. There is no restore command. Load a dump with `psql`. |
+| `retention` | Archive and then delete conversations older than `--older-than` days with their notes. Dry run without `--apply`, refuses under 180 days without `--allow-short-retention`. The archive is not redacted. |
 | `mcp` | Serve the Rust MCP tool contract over stdio. |
 
 Not all commands have a corresponding browser button. No screenshot can demonstrate the success of an unexecuted CLI command. See the verification record for tested paths.

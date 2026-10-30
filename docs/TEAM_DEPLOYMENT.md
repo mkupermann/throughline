@@ -1,5 +1,7 @@
 # Controlled shared-workspace deployment
 
+> **Not for the default Rust runtime.** This guide describes the earlier Python application. The Rust binary that Compose starts has no accounts, no login and no roles. It does not read `THROUGHLINE_AUTH_MODE`, and `throughline account` does not exist there. Do not expose port 8788 to colleagues on the strength of this page. Keep the Rust server on loopback, as the [README](../README.md#current-boundaries) says.
+
 This guide describes a controlled internal deployment and its operating boundary. It is not a certification or a claim that every enterprise requirement is met.
 
 Throughline's team mode serves one shared corpus. Every authenticated member can read that corpus. It does not provide separate tenants or project-level confidentiality. Use separate installations/databases for data that must not be shared with every member.
