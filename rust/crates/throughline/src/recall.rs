@@ -84,6 +84,19 @@ pub fn needs_embedding(mode: RecallMode, rank: Rank) -> bool {
 
 pub const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
+/// The longest question recall takes, in characters.
+pub const MAX_QUERY_CHARS: usize = 2000;
+
+/// Refuse a question longer than `MAX_QUERY_CHARS`.
+pub fn check_query(text: &str) -> Result<(), String> {
+    let n = text.chars().count();
+    if n > MAX_QUERY_CHARS {
+        return Err(format!(
+            "query has {n} characters, at most {MAX_QUERY_CHARS} are allowed"
+        ));
+    }
+    Ok(())
+}
 /// `as_of` admits a note that shares a word with the question or has at
 /// least this cosine to it.
 const AS_OF_MIN_COSINE: f64 = 0.5;
@@ -690,6 +703,9 @@ pub fn recall<C: GenericClient>(
     q: &RecallQuery,
     emb: Option<&QueryEmbedding>,
 ) -> Result<RecallResult> {
+    if let Err(e) = check_query(q.text) {
+        bail!(e);
+    }
     let filter = match q.mode {
         RecallMode::Current => CandidateFilter::Current,
         RecallMode::AsOf => {
@@ -2136,5 +2152,29 @@ mod tests {
             let ho = &r.hits[position(&r, o).unwrap_or_else(|| panic!("{set}"))];
             assert_eq!(ho.relation.as_deref(), Some(want), "{set}");
         }
+    }
+
+    #[test]
+    fn recall_refuses_a_query_over_2000_characters() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_refuses_a_query_over_2000_characters: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let at_cap = "abc ".repeat(500);
+        assert_eq!(at_cap.chars().count(), 2000);
+        assert!(recall(&mut tx, &query(&at_cap, None), None).is_ok());
+        let over = format!("{at_cap}x");
+        let err = recall(&mut tx, &query(&over, None), None)
+            .expect_err("2001 characters must be refused");
+        assert!(err.to_string().contains("2000"), "{err}");
+        // characters, not bytes
+        let umlauts = "ü".repeat(2000);
+        assert!(recall(&mut tx, &query(&umlauts, None), None).is_ok());
+        assert!(check_query(&umlauts).is_ok());
+        assert!(check_query(&over).is_err());
+        assert_eq!(MAX_QUERY_CHARS, 2000);
     }
 }

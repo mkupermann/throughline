@@ -204,6 +204,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 Some(q) if !q.trim().is_empty() => q,
                 _ => return Err(invalid("query required")),
             };
+            crate::recall::check_query(query).map_err(|e| invalid(&e))?;
             let project = optional_str(&args, "project", "project must be a string")?
                 .filter(|p| !p.is_empty());
             let mode = match optional_str(&args, "mode", "mode must be a string")? {
@@ -509,6 +510,21 @@ mod tests {
             .unwrap_or_else(|| panic!("rank {rank} must be refused"));
             assert_eq!(err["code"], -32602);
         }
+    }
+
+    #[test]
+    fn mcp_recall_rejects_an_overlong_query() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_rejects_an_overlong_query: no PostgreSQL reachable");
+            return;
+        };
+        let query = format!("{}x", "abc ".repeat(500));
+        let err = call_tool(
+            &mut client,
+            &json!({ "name": "recall", "arguments": { "query": query } }),
+        )
+        .expect_err("2001 characters must be refused");
+        assert_eq!(err["code"], -32602);
     }
 
     #[test]
