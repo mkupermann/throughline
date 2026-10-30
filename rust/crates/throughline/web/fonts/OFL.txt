@@ -1,0 +1,4 @@
+Epilogue, Copyright 2020 The Epilogue Project Authors (Etcetera Type Co).
+IBM Plex Mono, Copyright 2017 IBM Corp.
+Both are licensed under the SIL Open Font License, Version 1.1.
+https://openfontlicense.org

@@ -1838,6 +1838,31 @@ async fn favicon() -> Response {
         .into_response()
 }
 
+const EPILOGUE_WOFF2: &[u8] = include_bytes!("../web/fonts/epilogue-latin.woff2");
+const PLEX_MONO_WOFF2: &[u8] = include_bytes!("../web/fonts/ibm-plex-mono-latin.woff2");
+
+fn font_response(bytes: &'static [u8]) -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "font/woff2"),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable",
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+async fn font_epilogue() -> Response {
+    font_response(EPILOGUE_WOFF2)
+}
+
+async fn font_plex_mono() -> Response {
+    font_response(PLEX_MONO_WOFF2)
+}
+
 async fn conflicts_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, |client| {
         crate::conflicts::find_conflicts(client, None, 0.85)
@@ -2746,6 +2771,8 @@ pub fn app(state: AppState) -> Router {
         .route("/", get(index))
         .route("/favicon.svg", get(favicon))
         .route("/favicon.ico", get(favicon))
+        .route("/fonts/epilogue-latin.woff2", get(font_epilogue))
+        .route("/fonts/ibm-plex-mono-latin.woff2", get(font_plex_mono))
         .route("/index.html", get(index))
         .route("/api/health", get(health))
         .route("/api/status", get(status))

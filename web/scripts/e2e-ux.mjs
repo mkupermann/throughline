@@ -66,18 +66,18 @@ function contrast(a, b) {
 }
 const themePairs = {
   dark: {
-    'text/bg': ['#f3f7fc', '#0b0e14'],
-    'text-2/bg': ['#b6c2d6', '#0b0e14'],
-    'text-3/bg': ['#8b9bb3', '#0b0e14'],
-    'text/bg-elevated': ['#f3f7fc', '#121822'],
-    'text-2/bg-elevated': ['#b6c2d6', '#121822'],
+    'text/bg': ['#ebebeb', '#0b0b0a'],
+    'text-2/bg': ['#cacaca', '#0b0b0a'],
+    'text-3/bg': ['#a4a4a4', '#0b0b0a'],
+    'text/bg-elevated': ['#ebebeb', '#121210'],
+    'text-2/bg-elevated': ['#cacaca', '#121210'],
   },
   light: {
-    'text/bg': ['#0f172a', '#f4f6fa'],
-    'text-2/bg': ['#334155', '#f4f6fa'],
-    'text-3/bg': ['#5b6b80', '#f4f6fa'],
-    'text/bg-elevated': ['#0f172a', '#ffffff'],
-    'text-2/bg-elevated': ['#334155', '#ffffff'],
+    'text/bg': ['#0d0d0d', '#fefdfb'],
+    'text-2/bg': ['#292929', '#fefdfb'],
+    'text-3/bg': ['#525252', '#fefdfb'],
+    'text/bg-elevated': ['#0d0d0d', '#ffffff'],
+    'text-2/bg-elevated': ['#292929', '#ffffff'],
   },
 };
 const contrastReport = {};
@@ -1411,8 +1411,10 @@ try {
     if (dc !== ch.created_at) fail('au-memory-source-date', `data-created-at "${dc}" != API created_at "${ch.created_at}"`);
     const fmtSrc = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), apiSrc);
     const fmtCreated = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), ch.created_at);
+    const enLabel = ch.source_at ? 'source from ' : 'recorded ';
+    const deLabel = ch.source_at ? 'Quelle vom ' : 'erfasst ';
     const enChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
-    if (!enChips.includes('recorded ' + fmtSrc)) fail('au-memory-source-date', `EN chips ${JSON.stringify(enChips)} lack "recorded ${fmtSrc}"`);
+    if (!enChips.includes(enLabel + fmtSrc)) fail('au-memory-source-date', `EN chips ${JSON.stringify(enChips)} lack "${enLabel}${fmtSrc}"`);
     const enExt = enChips.find((x) => x.startsWith('extracted ')) || null;
     if (expectExtracted !== !!enExt) fail('au-memory-source-date', `EN extracted chip ${enExt ? 'shown' : 'absent'} but source_at/created_at diff ${diffMs}ms`);
     if (expectExtracted && enExt !== 'extracted ' + fmtCreated) fail('au-memory-source-date', `EN extracted chip "${enExt}" != "extracted ${fmtCreated}"`);
@@ -1421,11 +1423,11 @@ try {
     if (extractedCards < 1) fail('au-memory-source-date', 'no visible card shows the "extracted" chip although the fixture carries notes with source_at = created_at − 2 days');
     await page.locator('#lang-select').selectOption('de');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('#memory-list .mem-card .chip'))
-      .some((x) => (x.textContent || '').includes('erfasst')), null, { timeout: 10000 });
+      .some((x) => /^(erfasst|Quelle vom) /.test((x.textContent || '').trim())), null, { timeout: 10000 });
     const fmtSrcDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), apiSrc);
     const fmtCreatedDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), ch.created_at);
     const deChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
-    if (!deChips.includes('erfasst ' + fmtSrcDe)) fail('au-memory-source-date', `DE chips ${JSON.stringify(deChips)} lack "erfasst ${fmtSrcDe}"`);
+    if (!deChips.includes(deLabel + fmtSrcDe)) fail('au-memory-source-date', `DE chips ${JSON.stringify(deChips)} lack "${deLabel}${fmtSrcDe}"`);
     const deExt = deChips.find((x) => x.startsWith('extrahiert ')) || null;
     if (expectExtracted !== !!deExt) fail('au-memory-source-date', `DE extracted chip ${deExt ? 'shown' : 'absent'} but diff ${diffMs}ms`);
     if (expectExtracted && deExt !== 'extrahiert ' + fmtCreatedDe) fail('au-memory-source-date', `DE extracted chip "${deExt}" != "extrahiert ${fmtCreatedDe}"`);
