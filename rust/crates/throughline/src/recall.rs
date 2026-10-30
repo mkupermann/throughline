@@ -164,6 +164,9 @@ pub struct RecallHit {
     pub source_type: String,
     pub conversation_id: Option<i64>,
     pub session_title: Option<String>,
+    /// When the source said it: `source_at` of the chain's first note, else
+    /// the start of its conversation.
+    pub source_at: Option<DateTime<Utc>>,
     pub superseded_by: Option<i64>,
     pub supersedes: Option<i64>,
     pub score: f64,
@@ -292,6 +295,7 @@ pub(crate) struct Candidate {
     pub source_id: Option<i64>,
     pub merged_from: Vec<i64>,
     pub expires_at: Option<DateTime<Utc>>,
+    pub source_at: Option<DateTime<Utc>>,
 }
 
 /// All notes that pass `filter` and the project filter, with their cosine to
@@ -362,16 +366,16 @@ fn load_candidates<C: GenericClient>(
                COALESCE(mc.confidence::float8, 0.5),
                {cosine},
                COALESCE(mc.tags, '{{}}'), mc.source_id, COALESCE(mc.merged_from, '{{}}'),
-               mc.expires_at
+               mc.expires_at, COALESCE(root.source_at, c.started_at)
         FROM memory_chunks mc
         LEFT JOIN LATERAL (
-            WITH RECURSIVE up(id, source_type, source_id, depth) AS (
-                SELECT mc.id, mc.source_type, mc.source_id, 0
+            WITH RECURSIVE up(id, source_type, source_id, source_at, depth) AS (
+                SELECT mc.id, mc.source_type, mc.source_id, mc.source_at, 0
                 UNION ALL
-                SELECT p.id, p.source_type, p.source_id, up.depth + 1
+                SELECT p.id, p.source_type, p.source_id, p.source_at, up.depth + 1
                 FROM memory_chunks p JOIN up ON p.superseded_by = up.id
                 WHERE up.depth < 50)
-            SELECT source_type, source_id FROM up ORDER BY depth DESC LIMIT 1
+            SELECT source_type, source_id, source_at FROM up ORDER BY depth DESC LIMIT 1
         ) root ON true
         LEFT JOIN conversations c ON root.source_type = 'conversation' AND c.id = root.source_id
         {join}
@@ -401,6 +405,7 @@ fn load_candidates<C: GenericClient>(
             source_id: r.get(15),
             merged_from: r.get(16),
             expires_at: r.get(17),
+            source_at: r.get(18),
         })
         .collect())
 }
@@ -799,6 +804,7 @@ pub fn recall<C: GenericClient>(
             source_type: c.source_type,
             conversation_id: c.conversation_id,
             session_title: c.session_title,
+            source_at: c.source_at,
             superseded_by: c.superseded_by,
             supersedes: c.supersedes,
             score,
@@ -812,6 +818,26 @@ pub fn recall<C: GenericClient>(
         degraded: (needs_embedding(q.mode, q.rank) && emb.is_none())
             .then(|| "no_embeddings".to_string()),
     })
+}
+
+/// One line per hit for the CLI:
+/// `[m#id · valid_from · category · score] content (Quelle: title, date)`.
+pub fn render_line(h: &RecallHit) -> String {
+    let date = h.source_at.or(h.evidence.as_ref().map(|e| e.created_at));
+    let source = match (&h.session_title, date) {
+        (Some(t), Some(d)) => format!(" (Quelle: {t}, {})", d.format("%Y-%m-%d")),
+        (Some(t), None) => format!(" (Quelle: {t})"),
+        _ => String::new(),
+    };
+    format!(
+        "[m#{} · {} · {} · {:.2}] {}{}",
+        h.id,
+        h.valid_from.format("%Y-%m-%d"),
+        h.category,
+        h.score,
+        h.content.replace('\n', " "),
+        source
+    )
 }
 
 #[cfg(test)]
@@ -2176,5 +2202,63 @@ mod tests {
         assert!(check_query(&umlauts).is_ok());
         assert!(check_query(&over).is_err());
         assert_eq!(MAX_QUERY_CHARS, 2000);
+    }
+
+    #[test]
+    fn recall_hits_carry_the_source_date() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_hits_carry_the_source_date: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary) \
+                 VALUES ($1, '/tmp/recall-test', $2, $3) RETURNING id",
+                &[
+                    &uuid::Uuid::new_v4(),
+                    &at(2026, 2, 20),
+                    &format!("Session {tag}"),
+                ],
+            )
+            .unwrap()
+            .get(0);
+        let (ca, cb, cc) = (
+            format!("old {tag}"),
+            format!("new {tag}"),
+            format!("undated {tag}"),
+        );
+        let a = sourced_note(&mut tx, &ca, &project, conv, &model, None);
+        let mut sb = Seed::new(&cb, long_ago());
+        sb.project = Some(&project);
+        sb.source_type = "ui_pin";
+        let b = seed(&mut tx, &sb);
+        replace(&mut tx, a, b);
+        let c = sourced_note(&mut tx, &cc, &project, conv, &model, None);
+        for (id, when) in [
+            (a, Some(at(2026, 2, 28))),
+            (b, Some(at(2026, 4, 1))),
+            (c, None),
+        ] {
+            tx.execute(
+                "UPDATE memory_chunks SET source_at = $2 WHERE id = $1",
+                &[&id, &when],
+            )
+            .unwrap();
+        }
+        let r = recall(&mut tx, &query(&tag, Some(&project)), None).unwrap();
+        let json = |id: i64| serde_json::to_value(&r.hits[position(&r, id).unwrap()]).unwrap();
+        // the chain root's source date, else the start of the conversation
+        assert_eq!(json(b)["source_at"], "2026-02-28T00:00:00Z");
+        assert_eq!(json(c)["source_at"], "2026-02-20T00:00:00Z");
+        let line = render_line(&r.hits[position(&r, b).unwrap()]);
+        assert!(line.starts_with(&format!("[m#{b} · ")), "{line}");
+        assert!(
+            line.ends_with(&format!("new {tag} (Quelle: Session {tag}, 2026-02-28)")),
+            "{line}"
+        );
     }
 }

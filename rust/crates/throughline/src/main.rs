@@ -365,22 +365,7 @@ fn main() -> Result<()> {
                 println!("no matches");
             }
             for h in &result.hits {
-                let source = match (&h.session_title, &h.evidence) {
-                    (Some(t), Some(e)) => {
-                        format!(" (Quelle: {t}, {})", e.created_at.format("%Y-%m-%d"))
-                    }
-                    (Some(t), None) => format!(" (Quelle: {t})"),
-                    _ => String::new(),
-                };
-                println!(
-                    "[m#{} · {} · {} · {:.2}] {}{}",
-                    h.id,
-                    h.valid_from.format("%Y-%m-%d"),
-                    h.category,
-                    h.score,
-                    h.content.replace('\n', " "),
-                    source
-                );
+                println!("{}", recall::render_line(h));
             }
         }
         Command::Search {
