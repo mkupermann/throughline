@@ -12,6 +12,7 @@ function host(failOn?: string) {
     },
     openScratchDocument: async (t) => void calls.push(`open:${t}`),
     selectAll: async () => void calls.push("selectAll"),
+    closeScratchDocument: async () => void calls.push("close"),
     clipboard: async (t) => void calls.push(`clip:${t}`),
     info: (m) => void infos.push(m),
   };
@@ -34,7 +35,13 @@ test("send_to_agent_falls_back_to_clipboard", async () => {
 test("send_to_cline_runs_add_to_chat", async () => {
   const { h, calls } = host();
   assert.equal(await sendToAgent("cline", "T", h), "sent");
-  assert.deepEqual(calls, ["open:T", "selectAll", "exec:cline.addToChat"]);
+  assert.deepEqual(calls, ["clip:T", "open:T", "selectAll", "exec:cline.addToChat", "close"]);
+});
+
+test("send_to_cline_also_copies_to_clipboard", async () => {
+  const { h, calls } = host();
+  await sendToAgent("cline", "T", h);
+  assert.equal(calls[0], "clip:T");
 });
 
 test("send_to_continue_copies_and_focuses", async () => {

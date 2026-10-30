@@ -32,6 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return ed ? ed.document.getText(ed.selection) : undefined;
     },
   };
+  let scratch: vscode.TextDocument | undefined;
   // Clients are built per call so a changed url setting applies at once.
   const deps = (): cmd.Deps => ({
     api: new ApiClient(getUrl()),
@@ -45,8 +46,14 @@ export function activate(context: vscode.ExtensionContext): void {
       host: {
         executeCommand: (id, ...args) => Promise.resolve(vscode.commands.executeCommand(id, ...args)),
         openScratchDocument: async (content) => {
-          const doc = await vscode.workspace.openTextDocument({ language: "markdown", content });
-          await vscode.window.showTextDocument(doc);
+          scratch = await vscode.workspace.openTextDocument({ language: "markdown", content });
+          await vscode.window.showTextDocument(scratch);
+        },
+        closeScratchDocument: async () => {
+          if (scratch && vscode.window.activeTextEditor?.document === scratch) {
+            await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+          }
+          scratch = undefined;
         },
         selectAll: async () => {
           await vscode.commands.executeCommand("editor.action.selectAll");

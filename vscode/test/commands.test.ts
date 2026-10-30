@@ -147,6 +147,7 @@ function agentDeps(ui: cmd.Ui, commands: string[], calls: string[]): cmd.Deps {
       executeCommand: async (id) => void calls.push(`exec:${id}`),
       openScratchDocument: async () => void calls.push("open"),
       selectAll: async () => void calls.push("selectAll"),
+      closeScratchDocument: async () => void calls.push("close"),
       clipboard: async (t) => void calls.push(`clip:${t}`),
       info: () => {},
     },
@@ -163,7 +164,8 @@ test("send_to_agent_command_picks_by_available_agents", async () => {
   let a = fakeUi({ input: async () => "" });
   await cmd.sendToAgent(agentDeps(a.ui, ["cline.addToChat"], calls));
   assert.deepEqual(a.log.picks, []);
-  assert.deepEqual(calls, ["open", "selectAll", "exec:cline.addToChat"]);
+  assert.deepEqual(calls, ["clip:PACK", "open", "selectAll", "exec:cline.addToChat", "close"]);
+  assert.deepEqual(a.log.infos, ["Context sent to Cline."]);
   assert.equal(JSON.parse(srv.requests[0].body).params.name, "project_context");
   // both: offer a pick
   rpc();
@@ -172,6 +174,15 @@ test("send_to_agent_command_picks_by_available_agents", async () => {
   await cmd.sendToAgent(agentDeps(a.ui, ["cline.addToChat", "continue.focusContinueInputWithoutClear"], calls));
   assert.deepEqual(a.log.picks, [["Cline", "Continue", "Clipboard"]]);
   assert.deepEqual(calls, ["clip:PACK", "exec:continue.focusContinueInputWithoutClear"]);
+  assert.deepEqual(a.log.infos, [], "the host's own text is not doubled");
+  // an unexpected or cancelled pick does nothing
+  for (const v of ["Other", undefined]) {
+    rpc();
+    calls = [];
+    a = fakeUi({ input: async () => "", pick: async () => v });
+    await cmd.sendToAgent(agentDeps(a.ui, ["cline.addToChat", "continue.focusContinueInputWithoutClear"], calls));
+    assert.deepEqual(calls, []);
+  }
   // none: straight to the clipboard
   rpc();
   calls = [];
