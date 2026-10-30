@@ -1257,10 +1257,18 @@ async fn recall_handler(
     // Full text in mode current needs no vector and never asks Ollama.
     let emb = if crate::recall::needs_embedding(parsed.mode, parsed.rank) {
         let embed_text = text.clone();
-        tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text))
-            .await
-            .ok()
-            .flatten()
+        match tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text)).await
+        {
+            Ok(Ok(emb)) => emb,
+            Ok(Err(e)) => {
+                return api_error(
+                    StatusCode::FORBIDDEN,
+                    "remote_llm_not_allowed",
+                    e.to_string(),
+                )
+            }
+            Err(_) => None,
+        }
     } else {
         None
     };

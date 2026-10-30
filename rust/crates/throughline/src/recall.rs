@@ -120,16 +120,42 @@ pub struct QueryEmbedding {
     pub vector: Vec<f32>,
 }
 
-/// Embed the question with the configured backend. Any failure (no Ollama,
-/// model missing, empty vector) is `None`, which the ranking reports as degraded.
-pub fn query_embedding(text: &str) -> Option<QueryEmbedding> {
-    let backend = crate::embedding::resolve().ok()?;
-    let vector = crate::embedding::embed_text(&backend, text).ok()?;
-    Some(QueryEmbedding {
+/// Embed the question with the configured backend. A refusal by the
+/// remote-model lock is an error; any other failure (no Ollama, model missing,
+/// empty vector) is `None`, which the ranking reports as degraded.
+pub fn query_embedding(text: &str) -> anyhow::Result<Option<QueryEmbedding>> {
+    query_embedding_with(
+        crate::embedding::resolve,
+        crate::embedding::embed_text,
+        text,
+    )
+}
+
+/// [`query_embedding`] with resolve and embed passed in, so tests need no Ollama.
+pub fn query_embedding_with(
+    resolve: impl FnOnce() -> anyhow::Result<crate::embedding::EmbeddingBackend>,
+    embed: impl FnOnce(&crate::embedding::EmbeddingBackend, &str) -> anyhow::Result<Vec<f32>>,
+    text: &str,
+) -> anyhow::Result<Option<QueryEmbedding>> {
+    let refused = |e: &anyhow::Error| {
+        e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+            .is_some()
+    };
+    let backend = match resolve() {
+        Ok(b) => b,
+        Err(e) if refused(&e) => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let vector = match embed(&backend, text) {
+        Ok(v) => v,
+        Err(e) if refused(&e) => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(QueryEmbedding {
         model: backend.model,
         column: backend.column,
         vector,
-    })
+    }))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -861,6 +887,27 @@ pub fn render_line(h: &RecallHit) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refused_embedding_is_an_error() {
+        let refused = || {
+            Err(anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+                label: "ollama/nomic-embed-text".into(),
+            }))
+        };
+        let r = query_embedding_with(refused, |_, _| Ok(vec![1.0]), "q");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn unreachable_ollama_degrades_not_refuses() {
+        let r = query_embedding_with(
+            || Err(anyhow::anyhow!("ollama unreachable")),
+            |_, _| Ok(vec![1.0]),
+            "q",
+        );
+        assert!(matches!(r, Ok(None)));
+    }
+
     use super::*;
     use crate::extract_memory::category_column_type;
     use chrono::Duration;

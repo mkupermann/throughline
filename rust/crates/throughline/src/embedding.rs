@@ -54,6 +54,8 @@ pub fn resolve() -> Result<EmbeddingBackend> {
 }
 
 fn ollama(base: &str, model: &str) -> Result<EmbeddingBackend> {
+    // Fail early: no request, not even the model list, goes to a remote server.
+    crate::llm::ensure_ollama_local_or_allowed(base, model)?;
     let base = base.to_string();
     let model = model.to_string();
     isolated_blocking(move || {
@@ -98,6 +100,8 @@ struct OllamaEmbedResponse {
 }
 
 pub fn embed_text(backend: &EmbeddingBackend, text: &str) -> Result<Vec<f32>> {
+    // Every caller sends text through here, so the lock is checked before the POST.
+    crate::llm::ensure_ollama_local_or_allowed(&backend.base_url, &backend.model)?;
     let backend = backend.clone();
     let text = text.to_string();
     isolated_blocking(move || {
@@ -130,6 +134,21 @@ pub fn label(backend: &EmbeddingBackend) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embed_text_refuses_before_sending() {
+        let backend = EmbeddingBackend {
+            name: "ollama".into(),
+            model: "nomic-embed-text".into(),
+            base_url: "http://ollama.com:1".into(),
+            column: "embedding_768",
+            dim: 768,
+        };
+        let err = embed_text(&backend, "secret").unwrap_err();
+        assert!(err
+            .downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+            .is_some());
+    }
 
     #[test]
     fn isolated_blocking_returns_value() {
