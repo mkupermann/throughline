@@ -218,8 +218,9 @@ try {
   const t1 = await post('/api/memory', twinBody);
   const t2 = await post('/api/memory', twinBody);
   if (t1.status !== 200 || t2.status !== 200) fail('e-review-forget', `plant ${t1.status}/${t2.status}`);
-  const reflect = await json('/api/operate?job=reflect');
-  if (!reflect.message) fail('e-review-forget', 'reflect produced no message');
+  const reflectResp = await post('/api/operate?job=reflect');
+  const reflect = reflectResp.body;
+  if (!reflect || !reflect.message) fail('e-review-forget', `reflect produced no message (status ${reflectResp.status})`);
   const stale = await json('/api/stale-digest');
   const items = stale.items || [];
   if (!items.length) fail('e-review-forget', `stale-digest empty after reflect (${reflect.message})`);
@@ -1025,7 +1026,7 @@ try {
 
   // ── (ah) Assistants view (imported source): tools, counter, skills, mask ─
   {
-    await fetch(base + '/api/operate?job=import-config');
+    await post('/api/operate?job=import-config');
     await view('assistants');
     const toolBtns = page.locator('#asst-tools button.asst-tool-btn');
     await toolBtns.first().waitFor({ state: 'visible', timeout: 10000 });
@@ -1333,6 +1334,10 @@ try {
     const btnExists = await page.locator('#view-operate [data-job="import-config"]').count();
     if (btnExists !== 1) fail('ar-asst-imported', `data-job="import-config" buttons in operate view: ${btnExists}`);
     await page.locator('#view-operate [data-job="import-config"]').click();
+    // import-config is mutating: confirm dialog appears, click Run
+    const importConfirm = page.locator('#operate-out .confirm-block [data-confirm-run]');
+    await importConfirm.waitFor({ state: 'visible', timeout: 5000 });
+    await importConfirm.click();
     await page.waitForFunction(() => ((document.querySelector('#operate-out') || {}).textContent || '').includes('import-config: seen='), null, { timeout: 20000 });
     const outText = (await page.locator('#operate-out').textContent()) || '';
     if (!outText.includes('import-config: seen=')) fail('ar-asst-imported', `operate-out missing "import-config: seen=": "${outText.slice(0, 200)}"`);
@@ -1765,6 +1770,78 @@ try {
     await page.goBack();
     await page.locator('#view-history').waitFor({ state: 'visible', timeout: 10000 });
     pass('bf-session-deeplink', `row #${rowId} opens with ${hash}, browser Back returns to Sessions`);
+  }
+
+  // ── (bg) GET on mutating routes returns 405 ────────────────────────────
+  {
+    for (const p of ['/api/operate?job=status', '/api/writeback', '/api/agent-memory/ingest', '/api/mimo-memory/ingest']) {
+      const r = await fetch(base + p);
+      if (r.status !== 405) fail('bg-get-mutation-405', `GET ${p} returned ${r.status}, want 405`);
+    }
+    const okResp = await post('/api/operate?job=status');
+    if (okResp.status !== 200) fail('bg-get-mutation-405', `POST /api/operate?job=status returned ${okResp.status}, want 200`);
+    pass('bg-get-mutation-405', 'GET on all four mutating routes → 405, POST /api/operate?job=status → 200');
+  }
+
+  // ── (bh) Confirm block on mutating job: Cancel sends nothing ──────────
+  {
+    await view('operate');
+    const requests = [];
+    page.on('request', req => { if (req.url().includes('/api/operate') || req.url().includes('/api/writeback')) requests.push(req.url()); });
+    await page.locator('[data-job="embed"]').click();
+    const confirmBlock = page.locator('#operate-out .confirm-block');
+    await confirmBlock.waitFor({ state: 'visible', timeout: 5000 });
+    const cancelBtn = confirmBlock.locator('[data-confirm-cancel]');
+    if (await cancelBtn.count() !== 1) fail('bh-confirm-cancel', 'cancel button not found');
+    await cancelBtn.click();
+    await page.waitForTimeout(300);
+    if (requests.length > 0) fail('bh-confirm-cancel', `requests sent before confirm: ${requests.join(', ')}`);
+    if (await page.locator('#operate-out .confirm-block').count() > 0) fail('bh-confirm-cancel', 'confirm block still visible after cancel');
+    pass('bh-confirm-cancel', 'mutating tile shows confirm, Cancel sends no request and restores content');
+  }
+
+  // ── (bi) Confirm block: Run executes the job ──────────────────────────
+  {
+    await view('operate');
+    await page.locator('[data-job="embed"]').click();
+    const confirmBlock = page.locator('#operate-out .confirm-block');
+    await confirmBlock.waitFor({ state: 'visible', timeout: 5000 });
+    const runBtn = confirmBlock.locator('[data-confirm-run]');
+    if (await runBtn.count() !== 1) fail('bi-confirm-run', 'run button not found');
+    await runBtn.click();
+    await page.locator('#operate-out .result-block:not(.confirm-block)').first().waitFor({ state: 'visible', timeout: 20000 });
+    const outText = (await page.locator('#operate-out').textContent()) || '';
+    if (outText.includes('confirm-block')) fail('bi-confirm-run', 'confirm block still present after run');
+    pass('bi-confirm-run', 'Run button executes the job and shows result');
+  }
+
+  // ── (bj) Palette Embed/Backup goes through the same confirmation ──────
+  {
+    await view('operate');
+    const requests = [];
+    page.on('request', req => { if (req.url().includes('/api/operate') || req.url().includes('/api/writeback')) requests.push(req.url()); });
+    // Open the palette via the toolbar button
+    await page.locator('#open-palette').click();
+    await page.locator('#palette').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('#palette-input').fill('Embed pending messages');
+    await page.waitForTimeout(500);
+    // Find the palette item whose label span is exactly "Embed pending messages"
+    // (search extras have longer labels like 'Semantic search: "..."').
+    const embedItem = page.locator('#palette-list .palette-item').filter({
+      has: page.locator('span:first-child', { hasText: /^Embed pending messages$/ }),
+    }).first();
+    if (await embedItem.count() === 0) {
+      fail('bj-palette-confirm', 'no "Embed pending messages" palette item found');
+    }
+    await embedItem.click();
+    await page.waitForTimeout(500);
+    const confirmBlock = page.locator('#operate-out .confirm-block');
+    await confirmBlock.waitFor({ state: 'visible', timeout: 5000 });
+    if (requests.length > 0) fail('bj-palette-confirm', `requests sent before confirm: ${requests.join(', ')}`);
+    const cancelBtn = confirmBlock.locator('[data-confirm-cancel]');
+    await cancelBtn.click();
+    await page.waitForTimeout(300);
+    pass('bj-palette-confirm', 'palette Embed action shows the same confirmation, no request before Run');
   }
 } finally {
   await browser.close();

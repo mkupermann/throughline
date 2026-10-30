@@ -1291,6 +1291,38 @@ td.td-id, td.td-num, td.td-date {
   color: var(--text);
   margin-bottom: var(--space-1);
 }
+/* Mutating job flag: text label, not colour alone */
+.job-flag {
+  display: inline-block;
+  font-style: normal;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  margin-right: var(--space-1);
+}
+/* Confirmation block for mutating jobs */
+.confirm-block {
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text-2);
+}
+.confirm-block strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: var(--space-1);
+}
+.confirm-block .confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
 /* Review cards (memory keep/forget) */
 .review-card {
   border: 1px solid var(--border-subtle);
@@ -2345,16 +2377,16 @@ td .empty {
           </div>
         </div>
         <div class="job-grid">
-          <button class="job" data-job="ingest"><strong data-i18n="op.ingest">Ingest all assistants</strong><span data-i18n="op.ingest.sub">Import sessions from every adapter</span></button>
-          <button class="job" data-job="import-config"><strong data-i18n="op.importConfig">Import AI configuration</strong><span data-i18n="op.importConfig.sub">Instructions, skills, agents, configuration</span></button>
           <button class="job" data-job="status"><strong data-i18n="op.status">Status</strong><span data-i18n="op.status.sub">Corpus counts</span></button>
-          <button class="job" data-job="embed"><strong data-i18n="op.embed">Embed</strong><span data-i18n="op.embed.sub">Vectorise pending messages</span></button>
-          <button class="job" data-job="reflect"><strong data-i18n="op.reflect">Reflect</strong><span data-i18n="op.reflect.sub">Dedup memory chunks</span></button>
-          <button class="job" data-job="backup"><strong data-i18n="op.backup">Backup</strong><span data-i18n="op.backup.sub">pg_dump snapshot</span></button>
           <button class="job" data-job="audit"><strong data-i18n="op.audit">Audit</strong><span data-i18n="op.audit.sub">Agent accountability</span></button>
           <button class="job" data-job="stale"><strong data-i18n="op.stale">Stale digest</strong><span data-i18n="op.stale.sub">What went stale since last session</span></button>
-          <button class="job" data-job="writeback"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></button>
           <button class="job" data-job="answer-eval"><strong data-i18n="op.answerEval">Answer eval</strong><span data-i18n="op.answerEval.sub">Citations and hallucination check</span></button>
+          <button class="job" data-job="ingest" data-mutating="true"><strong data-i18n="op.ingest">Ingest all assistants</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.ingest.sub">Import sessions from every adapter</span></span></button>
+          <button class="job" data-job="import-config" data-mutating="true"><strong data-i18n="op.importConfig">Import AI configuration</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.importConfig.sub">Instructions, skills, agents, configuration</span></span></button>
+          <button class="job" data-job="embed" data-mutating="true"><strong data-i18n="op.embed">Embed</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.embed.sub">Vectorise pending messages</span></span></button>
+          <button class="job" data-job="reflect" data-mutating="true"><strong data-i18n="op.reflect">Reflect</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.reflect.sub">Dedup memory chunks</span></span></button>
+          <button class="job" data-job="backup" data-mutating="true"><strong data-i18n="op.backup">Backup</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.backup.sub">pg_dump snapshot</span></span></button>
+          <button class="job" data-job="writeback" data-mutating="true"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></span></button>
         </div>
         <div class="panel" id="ingest-status" style="margin-top:16px">
           <div class="panel-title"><h2 data-i18n="op.ingestStatus">Ingestion status</h2><div class="meta" data-i18n="op.perProvider">per assistant</div></div>
@@ -2959,6 +2991,15 @@ td .empty {
       "op.noProviders": "No assistants yet",
       "op.couldNotLoadStatus": "Could not load ingest status",
       "op.spinnerRunning": "Running …",
+      "op.changesData": "Changes data",
+      "op.confirmRun": "Run",
+      "op.confirmCancel": "Cancel",
+      "op.confirm.ingest": "Imports sessions from every adapter into the database.",
+      "op.confirm.import-config": "Imports instructions, skills and settings, secrets masked.",
+      "op.confirm.embed": "Computes vectors for up to 200 pending messages.",
+      "op.confirm.reflect": "Merges notes with the same opening. This changes memory and has no dry run.",
+      "op.confirm.backup": "Writes a database dump and deletes dumps beyond the newest 14.",
+      "op.confirm.writeback": "Writes distilled notes into AGENTS.md in the server's folder.",
       // detail
       "detail.back": "← Back",
       "detail.title": "Session",
@@ -3604,6 +3645,15 @@ td .empty {
       "op.noProviders": "Noch keine Assistenten",
       "op.couldNotLoadStatus": "Importstatus konnte nicht geladen werden",
       "op.spinnerRunning": "Läuft …",
+      "op.changesData": "Verändert Daten",
+      "op.confirmRun": "Ausführen",
+      "op.confirmCancel": "Abbrechen",
+      "op.confirm.ingest": "Importiert Sitzungen aus allen Adaptern in die Datenbank.",
+      "op.confirm.import-config": "Importiert Anweisungen, Skills und Einstellungen, Secrets maskiert.",
+      "op.confirm.embed": "Berechnet Vektoren für bis zu 200 ausstehende Nachrichten.",
+      "op.confirm.reflect": "Führt Notizen mit gleichem Anfang zusammen. Das verändert das Gedächtnis und hat keinen Probelauf.",
+      "op.confirm.backup": "Schreibt einen Datenbank-Dump und löscht Dumps jenseits der neuesten 14.",
+      "op.confirm.writeback": "Schreibt verdichtete Notizen in AGENTS.md im Ordner des Servers.",
       "detail.back": "← Zurück",
       "detail.title": "Sitzung",
       "detail.copy": "Zusammenfassung kopieren",
@@ -5372,10 +5422,36 @@ td .empty {
       el.setAttribute("aria-busy", "false");
     }
   }
-  async function runJob(job) {
+  const MUTATING_JOBS = ["ingest", "import-config", "embed", "reflect", "backup", "writeback"];
+  async function runJob(job, opts) {
     const el = $("operate-out");
     const btn = document.querySelector('#view-operate [data-job="' + job + '"]');
     const label = btn ? (btn.querySelector("strong") || btn).textContent.trim() : job;
+    // Mutating jobs need an explicit confirmation first.
+    if (MUTATING_JOBS.includes(job) && !(opts && opts.confirmed)) {
+      const prevHtml = el.innerHTML;
+      const confirmText = t("op.confirm." + job) || "";
+      const titleId = "confirm-title-" + job;
+      el.innerHTML =
+        '<div class="result-block confirm-block" role="alertdialog" aria-labelledby="' + titleId + '">' +
+        '<strong id="' + titleId + '">' + escapeHtml(label) + "</strong>" +
+        "<p>" + escapeHtml(confirmText) + "</p>" +
+        '<div class="confirm-actions">' +
+        '<button type="button" class="btn btn-primary" data-confirm-run="' + escapeHtml(job) + '">' + escapeHtml(t("op.confirmRun")) + "</button>" +
+        '<button type="button" class="btn" data-confirm-cancel>' + escapeHtml(t("op.confirmCancel")) + "</button>" +
+        "</div></div>";
+      const runBtn = el.querySelector("[data-confirm-run]");
+      if (runBtn) runBtn.focus();
+      const cancel = () => { el.innerHTML = prevHtml; };
+      const cancelBtn = el.querySelector("[data-confirm-cancel]");
+      if (cancelBtn) cancelBtn.addEventListener("click", cancel);
+      if (runBtn) runBtn.addEventListener("click", () => { runJob(job, { confirmed: true }); });
+      const onKey = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); document.removeEventListener("keydown", onKey); cancel(); }
+      };
+      document.addEventListener("keydown", onKey);
+      return;
+    }
     el.setAttribute("aria-busy", "true");
     let restoreLabel = null;
     if (btn) {
@@ -5402,7 +5478,7 @@ td .empty {
         return;
       }
       if (job === "writeback") {
-        const w = await fetchJson("/api/writeback");
+        const w = await postJson("/api/writeback");
         el.innerHTML = '<div class="result-block"><strong>' + t("op.writebackFinished") + '</strong>' + t("op.wrote") + w.items_written + " " + plural(w.items_written, t("op.item"), t("op.items")) + t("op.itemsTo") + escapeHtml(w.file) + "</div>";
         toast(t("op.writebackDone"));
         return;
@@ -5433,7 +5509,7 @@ td .empty {
         announce(t("op.auditFinished"));
         return;
       }
-      const r = await fetchJson("/api/operate?job=" + encodeURIComponent(job));
+      const r = await postJson("/api/operate?job=" + encodeURIComponent(job));
       el.innerHTML =
         '<div class="result-block"><strong>' + escapeHtml(label) + t("op.finished") + '</strong>' +
         escapeHtml(r.message || t("done")) + '</div>';
@@ -5677,7 +5753,7 @@ td .empty {
     { kind: t("pal.action"), label: t("pal.ingestFiles"), hint: t("pal.ingestFiles.hint"), run: async () => {
       showView("memory");
       try {
-        const r = await fetchJson("/api/agent-memory/ingest");
+        const r = await postJson("/api/agent-memory/ingest");
         toast(t("toast.agentMemory") + r.files_scanned + " " + plural(r.files_scanned, t("p.file"), t("p.files")) + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, t("p.chunk"), t("p.chunks")));
         loadMemory();
       } catch (e) {
@@ -5978,7 +6054,7 @@ td .empty {
       ' <button type="button" class="btn btn-ghost" id="asst-import-now">' + escapeHtml(t("asst.importNow")) + "</button>";
     const b = $("asst-import-now");
     if (b) b.addEventListener("click", async () => {
-      try { await fetchJson("/api/operate?job=import-config"); } catch {}
+      try { await postJson("/api/operate?job=import-config"); } catch {}
       loadAssistants();
     });
   }
@@ -6772,7 +6848,7 @@ td .empty {
         ingest.disabled = true;
         ingest.textContent = t("mem.ingesting");
         try {
-          const r = await fetchJson("/api/agent-memory/ingest");
+          const r = await postJson("/api/agent-memory/ingest");
           toast(t("toast.ingested") + r.files_scanned + " " + plural(r.files_scanned, t("p.file"), t("p.files")) + " → " + r.chunks_upserted + " " + plural(r.chunks_upserted, t("p.chunk"), t("p.chunks")));
           loadMemory();
           loadStatus();
