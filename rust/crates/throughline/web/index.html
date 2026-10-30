@@ -96,6 +96,7 @@
   --status-warn: #8a5600;
   --status-bad: #a92321;
   --focus-ring: #00746d;
+  --scrim: rgb(0 0 0 / 0.45);
 }
 
 /* Dark: re-derived from the light tokens, hue unchanged. Explicit choice is
@@ -298,7 +299,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   line-height: 1;
   opacity: 0.75;
   /* Force text presentation - avoid emoji glyph substitution in primary nav */
-  font-family: "Segoe UI Symbol", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font);
   font-style: normal;
 }
 .nav button[aria-current="page"] .icon { opacity: 1; }
@@ -607,7 +608,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
 .chart {
   display: flex;
   align-items: end;
-  gap: 3px;
+  gap: var(--space-1);
   height: 88px;
   padding: var(--space-2) 2px var(--space-1);
 }
@@ -786,7 +787,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
 }
 @media (max-width: 900px) {
@@ -822,9 +823,12 @@ table.sessions {
   border-spacing: 0;
   font-size: var(--text-base);
 }
-table.sessions th {
+table.sessions thead {
   position: sticky;
   top: 0;
+  z-index: 1;
+}
+table.sessions th {
   z-index: 1;
   background: var(--bg-elevated);
   color: var(--text-2);
@@ -1033,12 +1037,12 @@ table.sessions tr.active td { background: var(--accent-soft); color: var(--accen
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--scrim);
   z-index: 50;
   display: none;
   align-items: flex-start;
   justify-content: center;
-  padding: 12vh 16px 16px;
+  padding: 12vh var(--space-4) var(--space-4);
 }
 .palette-backdrop.open { display: flex; }
 .palette {
@@ -1090,7 +1094,7 @@ table.sessions tr.active td { background: var(--accent-soft); color: var(--accen
   color: var(--text-3);
 }
 .palette-foot {
-  padding: 10px 16px;
+  padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--border-subtle);
   color: var(--text-3);
   font-size: var(--text-xs);
@@ -1354,7 +1358,7 @@ table.sessions tr.active td { background: var(--accent-soft); color: var(--accen
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--scrim);
   z-index: 120;
   padding: var(--space-4);
 }
@@ -1504,8 +1508,9 @@ table.sessions tr.active td { background: var(--accent-soft); color: var(--accen
 /* Skip link - visible on keyboard focus */
 #skip-link {
   position: absolute;
-  left: -9999px;
+  left: var(--space-4);
   top: 0;
+  transform: translateY(-200%);
   z-index: 200;
   padding: var(--space-2) var(--space-4);
   background: var(--text);
@@ -1516,7 +1521,7 @@ table.sessions tr.active td { background: var(--accent-soft); color: var(--accen
 }
 #skip-link:focus,
 #skip-link:focus-visible {
-  left: var(--space-4);
+  transform: none;
   top: var(--space-4);
   outline: 2px solid var(--text);
   outline-offset: 2px;
@@ -1546,7 +1551,7 @@ td .empty {
 .table-wrap .skeleton {
   height: 36px;
   border-radius: var(--radius-xs);
-  margin: 4px 0;
+  margin: var(--space-1) 0;
 }
 
 /* Slightly denser metric hint used in home cards */
@@ -1778,7 +1783,7 @@ td .empty {
 </style>
 </head>
 <body>
-<a href="#main" id="skip-link" style="position:absolute;left:-9999px;top:0;z-index:200;padding:10px 16px;background:#0d0d0d;color:#fefdfb;border-radius:8px;font-weight:600;text-decoration:none" data-i18n="skip">Skip to main content</a>
+<a href="#main" id="skip-link" data-i18n="skip">Skip to main content</a>
 <div id="sr-status" class="sr" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="app">
   <aside class="sidebar">
@@ -1821,14 +1826,14 @@ td .empty {
       <button type="button" data-view="assistants"><span class="icon">☷</span><span data-i18n="nav.assistants">AI configuration</span></button>
       <button type="button" data-view="timeline"><span class="icon">⌁</span><span data-i18n="nav.timeline">Timeline</span></button>
       <button type="button" data-view="ask"><span class="icon">✦</span><span data-i18n="nav.ask">Research</span></button>
-      <button type="button" data-view="operate"><span class="icon">⚙</span><span data-i18n="nav.operate">Import and status</span></button>
+      <button type="button" data-view="operate"><span class="icon">⇅</span><span data-i18n="nav.operate">Import and status</span></button>
     </nav>
     <div class="sidebar-foot">
       <div class="health" id="health-pill">
         <span class="dot" id="health-dot"></span>
         <span id="health-text" aria-live="polite" data-i18n="health.checking">Checking</span>
       </div>
-      <div class="kbd-hint"><kbd>⌁˜K</kbd> <span data-i18n="kbd.hint">palette · g h home · g s history · g b browse</span></div>
+      <div class="kbd-hint"><kbd>⌁˜K</kbd> <span data-i18n="kbd.hint">palette, g h overview, g s sessions, g b messages</span></div>
     </div>
   </aside>
 
@@ -1943,7 +1948,7 @@ td .empty {
         <div class="panel">
           <div class="panel-title">
             <h2 data-i18n="home.recent">Recent sessions</h2>
-            <button class="btn btn-ghost" type="button" id="see-all" data-i18n="home.seeAll">See all →</button>
+            <button class="btn btn-ghost" type="button" id="see-all" data-i18n="home.seeAll">See all</button>
           </div>
           <div class="history list-anim" id="home-list"></div>
         </div>
@@ -2023,7 +2028,7 @@ td .empty {
         <div class="pager">
           <button class="btn btn-ghost" id="hist-prev" type="button" data-i18n="hist.prev">← Prev</button>
           <div id="hist-page-info">-</div>
-          <button class="btn btn-ghost" id="hist-next" type="button" data-i18n="hist.next">Next →</button>
+          <button class="btn btn-ghost" id="hist-next" type="button" data-i18n="hist.next">Next</button>
         </div>
       </section>
 
@@ -2077,7 +2082,7 @@ td .empty {
         <div class="pager">
           <button class="btn btn-ghost" id="browse-prev" type="button" data-i18n="browse.prev">← Prev</button>
           <div id="browse-page-info">-</div>
-          <button class="btn btn-ghost" id="browse-next" type="button" data-i18n="browse.next">Next →</button>
+          <button class="btn btn-ghost" id="browse-next" type="button" data-i18n="browse.next">Next</button>
         </div>
       </section>
 
@@ -2173,7 +2178,7 @@ td .empty {
         <div class="pager">
           <button class="btn btn-ghost" id="memory-prev" type="button" data-i18n="mem.prev">← Prev</button>
           <div id="memory-page-info">-</div>
-          <button class="btn btn-ghost" id="memory-next" type="button" data-i18n="mem.next">Next →</button>
+          <button class="btn btn-ghost" id="memory-next" type="button" data-i18n="mem.next">Next</button>
         </div>
         </div>
         <div id="memory-review-panel" hidden>
@@ -2617,7 +2622,7 @@ td .empty {
       "home.quickstart.s3": "Come back here. Sessions, memory and handoff fill in automatically.",
       "home.quickstart.action": "Run import",
       "home.recent": "Recent sessions",
-      "home.seeAll": "See all →",
+      "home.seeAll": "See all",
       "home.noSessions": "No sessions yet",
       "home.nothingIngested": "Nothing has been imported yet.",
       "home.couldNotLoad": "Could not load sessions",
@@ -2654,7 +2659,7 @@ td .empty {
       "hist.th.msgs": "Msgs",
       "hist.th.preview": "Preview",
       "hist.prev": "← Prev",
-      "hist.next": "Next →",
+      "hist.next": "Next",
       "hist.noMatches": "No matches",
       "hist.nothingFits": "Nothing fits the current filters.",
       "hist.empty": "History is empty",
@@ -2667,7 +2672,7 @@ td .empty {
       "of": "of",
       "onThisPage": "on this page",
       "avg": "avg",
-      "kbd.hint": "palette · g h overview · g s sessions · g b messages · k AI configuration",
+      "kbd.hint": "palette, g h overview, g s sessions, g b messages, k AI configuration",
       "hist.of": " / ",
       "hist.untitled": "Untitled session",
       "all": "All",
@@ -2685,7 +2690,7 @@ td .empty {
       "browse.apply": "Apply",
       "browse.reset": "Reset",
       "browse.prev": "← Prev",
-      "browse.next": "Next →",
+      "browse.next": "Next",
       "browse.noMessages": "No messages",
       "browse.loosen": "Loosen filters. The corpus has 164k+ rows.",
       "browse.empty": "Browse is empty",
@@ -2726,7 +2731,7 @@ td .empty {
       "mem.ingest": "Import memory",
       "mem.ingesting": "Importing…",
       "mem.prev": "← Prev",
-      "mem.next": "Next →",
+      "mem.next": "Next",
       "mem.review.loading": "Loading review candidates…",
       "mem.nothingToReview": "Nothing to review",
       "mem.noMemory": "No memory yet",
@@ -3266,7 +3271,7 @@ td .empty {
       "home.quickstart.s3": "Wieder hierher zurückkehren. Sitzungen, Memory und Übergabe füllen sich automatisch.",
       "home.quickstart.action": "Import starten",
       "home.recent": "Letzte Sitzungen",
-      "home.seeAll": "Alle anzeigen →",
+      "home.seeAll": "Alle anzeigen",
       "home.noSessions": "Noch keine Sitzungen",
       "home.nothingIngested": "Es wurde noch nichts importiert.",
       "home.couldNotLoad": "Sitzungen konnten nicht geladen werden",
@@ -3302,7 +3307,7 @@ td .empty {
       "hist.th.msgs": "Nachr.",
       "hist.th.preview": "Vorschau",
       "hist.prev": "← Zurück",
-      "hist.next": "Weiter →",
+      "hist.next": "Weiter",
       "hist.noMatches": "Keine Treffer",
       "hist.nothingFits": "Nichts passt zu den aktuellen Filtern.",
       "hist.empty": "Verlauf ist leer",
@@ -3315,7 +3320,7 @@ td .empty {
       "of": "von",
       "onThisPage": "auf dieser Seite",
       "avg": "Ø",
-      "kbd.hint": "Palette · g h Übersicht · s Sitzungen · b Nachrichten · k KI-Konfiguration",
+      "kbd.hint": "Palette, g h Übersicht, s Sitzungen, b Nachrichten, k KI-Konfiguration",
       "hist.of": " / ",
       "hist.untitled": "Unbenannte Sitzung",
       "all": "Alle",
@@ -3332,7 +3337,7 @@ td .empty {
       "browse.apply": "Anwenden",
       "browse.reset": "Zurücksetzen",
       "browse.prev": "← Zurück",
-      "browse.next": "Weiter →",
+      "browse.next": "Weiter",
       "browse.noMessages": "Keine Nachrichten",
       "browse.loosen": "Filter lockern. Der Datenbestand umfasst 164k+ Zeilen.",
       "browse.empty": "Durchsuchen ist leer",
@@ -3371,7 +3376,7 @@ td .empty {
       "mem.ingest": "Memory importieren",
       "mem.ingesting": "Import läuft…",
       "mem.prev": "← Zurück",
-      "mem.next": "Weiter →",
+      "mem.next": "Weiter",
       "mem.review.loading": "Prüfkandidaten werden geladen…",
       "mem.nothingToReview": "Nichts zu prüfen",
       "mem.noMemory": "Noch kein Memory",
