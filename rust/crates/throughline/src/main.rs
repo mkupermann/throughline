@@ -515,6 +515,7 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend().context("resolve generation backend")?;
+            llm::ensure_local_or_allowed(&backend)?;
             let answer = ask::ask(&mut client, &question, &backend, limit)?;
             println!("{}", answer.answer);
             println!();
@@ -540,6 +541,7 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend()?;
+            llm::ensure_local_or_allowed(&backend)?;
             let mut total = extract_memory::ExtractSummary::default();
             for conv_id in extract_memory::pending_conversations(&mut client, limit)? {
                 let s = extract_memory::extract_conversation(
@@ -584,6 +586,9 @@ fn main() -> Result<()> {
                 "#,
                 &[&(limit as i64)],
             )?;
+            if let Ok(backend) = llm::resolve_backend() {
+                llm::ensure_local_or_allowed(&backend)?;
+            }
             let mut titled = 0usize;
             for row in rows {
                 let id: i64 = row.get(0);
@@ -774,6 +779,7 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend().context("resolve generation backend")?;
+            llm::ensure_local_or_allowed(&backend)?;
             let case_list = match cases {
                 Some(path) => answer_eval::load_cases(std::path::Path::new(&path))?,
                 None => {
@@ -961,6 +967,7 @@ fn main() -> Result<()> {
                     let b = backend.as_ref().ok_or_else(|| {
                         anyhow::anyhow!("contradictions need a generation backend")
                     })?;
+                    llm::ensure_local_or_allowed(b)?;
                     vec![reflect_memory::contradictions(
                         &mut client,
                         b,
@@ -968,7 +975,20 @@ fn main() -> Result<()> {
                         limit,
                     )?]
                 }
-                _ => reflect_memory::run_all(&mut client, backend.as_ref(), dry_run, limit)?,
+                _ => {
+                    // "all" skips the model step on a non-local backend instead of failing the rest.
+                    let usable =
+                        backend
+                            .as_ref()
+                            .filter(|b| match llm::ensure_local_or_allowed(b) {
+                                Ok(()) => true,
+                                Err(e) => {
+                                    eprintln!("reflect: skipping contradictions: {e}");
+                                    false
+                                }
+                            });
+                    reflect_memory::run_all(&mut client, usable, dry_run, limit)?
+                }
             };
             let mut failed = 0usize;
             for s in summaries {

@@ -108,6 +108,7 @@ pub fn contradictions<C: GenericClient>(
     dry_run: bool,
     limit: usize,
 ) -> Result<ReflectSummary> {
+    llm::ensure_local_or_allowed(backend)?;
     let mut summary = ReflectSummary {
         mode: "contradictions".into(),
         dry_run,
