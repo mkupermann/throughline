@@ -168,15 +168,33 @@ pub fn resolve() -> Result<EmbeddingBackend> {
         .unwrap_or_else(|_| "http://localhost:11434".into())
         .trim_end_matches('/')
         .to_string();
-    let ollama_model = std::env::var("OLLAMA_EMBED_MODEL")
-        .or_else(|_| std::env::var("THROUGHLINE_EMBED_MODEL"))
-        .unwrap_or_else(|_| DEFAULT_EMBED_MODEL.into());
+    let ollama_model = configured_model();
 
     match preference.as_str() {
         "openai" | "openai-compatible" | "hosted" => Err(anyhow!(
             "hosted OpenAI embeddings are disabled; use Ollama ({DEFAULT_EMBED_MODEL}) locally"
         )),
         _ => ollama(&ollama_url, &ollama_model),
+    }
+}
+
+/// The embedding model this process is set to: `OLLAMA_EMBED_MODEL`, else
+/// `THROUGHLINE_EMBED_MODEL`, else [`DEFAULT_EMBED_MODEL`]. Compose forwards an
+/// unset variable as an empty one, so an empty value counts as unset.
+pub fn configured_model() -> String {
+    let set = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+    selected_model(
+        set("OLLAMA_EMBED_MODEL")
+            .or_else(|| set("THROUGHLINE_EMBED_MODEL"))
+            .as_deref(),
+    )
+}
+
+/// The trimmed value, or the default when it is missing or blank.
+fn selected_model(value: Option<&str>) -> String {
+    match value.map(str::trim) {
+        Some(m) if !m.is_empty() => m.to_string(),
+        _ => DEFAULT_EMBED_MODEL.to_string(),
     }
 }
 
@@ -324,6 +342,15 @@ mod tests {
             dim: profile.dim,
             profile,
         }
+    }
+
+    #[test]
+    fn empty_model_variable_counts_as_unset() {
+        assert_eq!(selected_model(None), DEFAULT_EMBED_MODEL);
+        assert_eq!(selected_model(Some("")), DEFAULT_EMBED_MODEL);
+        assert_eq!(selected_model(Some("  ")), DEFAULT_EMBED_MODEL);
+        assert_eq!(selected_model(Some("x")), "x");
+        assert_eq!(selected_model(Some(" x ")), "x");
     }
 
     #[test]
