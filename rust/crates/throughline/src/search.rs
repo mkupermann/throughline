@@ -222,7 +222,7 @@ pub fn hybrid<C: GenericClient>(
 }
 
 /// Lexical hits from `memory_chunks` and indexed instruction files.
-fn memory_hits<C: GenericClient>(
+pub(crate) fn memory_hits<C: GenericClient>(
     client: &mut C,
     query: &str,
     limit: i32,

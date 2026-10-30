@@ -7,7 +7,7 @@ use throughline::{
     adapters, answer_eval, ask, audit, config, conflicts, costs, decisions, doctor, embedding,
     export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles, handoff,
     ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions, recall,
-    reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
+    recall_eval, reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
 };
 
 #[derive(Parser)]
@@ -212,6 +212,18 @@ enum Command {
         cases: Option<String>,
         #[arg(long, default_value_t = 20)]
         limit: usize,
+    },
+    /// Measure recall against cosine, full text and random on a test set.
+    RecallEval {
+        /// JSON file: [{"q": "...", "project": "..." | null, "expected": [id, ...]}]
+        #[arg(long)]
+        set: String,
+        #[arg(long, default_value_t = 5)]
+        k: usize,
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        #[arg(long)]
+        json: bool,
     },
     /// Digest of stale / superseded / never-opened memory.
     StaleDigest {
@@ -714,6 +726,18 @@ fn main() -> Result<()> {
             };
             let report = answer_eval::run_eval(&mut client, &backend, &case_list)?;
             print!("{}", answer_eval::render_text(&report));
+        }
+        Command::RecallEval { set, k, seed, json } => {
+            let cases = recall_eval::load_cases(std::path::Path::new(&set))?;
+            let mut client = config::DbConfig::from_env()
+                .connect()
+                .context("connect to PostgreSQL")?;
+            let report = recall_eval::run_eval(&mut client, &cases, k, seed)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", recall_eval::render_text(&report));
+            }
         }
         Command::StaleDigest { since } => {
             let mut client = config::DbConfig::from_env()
