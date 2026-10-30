@@ -201,8 +201,12 @@ export function sendToAgent(d: Deps): Promise<void> {
     else if (real.length > 1) {
       const picked = await d.ui.pick(found.map((a) => LABELS[a]), "Send the context to");
       if (!picked) return;
-      agent = found.find((a) => LABELS[a] === picked) ?? "clipboard";
+      const match = found.find((a) => LABELS[a] === picked);
+      if (!match) return;
+      agent = match;
     }
-    await deliver(agent, text, d.agents.host);
+    const result = await deliver(agent, text, d.agents.host);
+    // The "copied" paths already told the user through the host.
+    if (result === "sent") d.ui.info("Context sent to Cline.");
   });
 }

@@ -4,6 +4,8 @@ export interface AgentHost {
   executeCommand(id: string, ...args: unknown[]): Promise<unknown>;
   openScratchDocument(text: string): Promise<void>;
   selectAll(): Promise<void>;
+  /** Closes the scratch document opened by openScratchDocument, only if it is still the active editor. */
+  closeScratchDocument(): Promise<void>;
   clipboard(text: string): Promise<void>;
   info(msg: string): void;
 }
@@ -34,9 +36,16 @@ export async function sendToAgent(agent: Agent, text: string, host: AgentHost): 
   }
   try {
     if (agent === "cline") {
+      // Insurance: a registered but non-functional command resolves without error.
+      await host.clipboard(text);
       await host.openScratchDocument(text);
       await host.selectAll();
       await host.executeCommand(CLINE_CMD);
+      try {
+        await host.closeScratchDocument();
+      } catch {
+        // a tab that stays open is harmless
+      }
       return "sent";
     }
     await host.clipboard(text);
