@@ -448,6 +448,86 @@ fn associate<C: GenericClient>(
     Ok(())
 }
 
+/// The message that backs a note and how well: (strength, evidence).
+type Grounding = (f64, Evidence);
+
+fn evidence_from(r: &postgres::Row, first: usize) -> Evidence {
+    Evidence {
+        message_id: r.get(first),
+        excerpt: r.get(first + 1),
+        created_at: r.get(first + 2),
+    }
+}
+
+/// Evidence for notes taken from a conversation (`notes` = note id and the
+/// conversation of its chain root). With an embedding: the message with the
+/// highest cosine to the note vector, for notes that have a vector and a
+/// conversation with message vectors. Every other note: the message that
+/// holds the largest share of the note's words. Two queries for all notes.
+fn ground<C: GenericClient>(
+    client: &mut C,
+    notes: &[(&Candidate, i64)],
+    emb: Option<&QueryEmbedding>,
+) -> Result<HashMap<i64, Grounding>> {
+    let mut found: HashMap<i64, Grounding> = HashMap::new();
+    let note_ids: Vec<i64> = notes.iter().map(|n| n.0.id).collect();
+    let conv_ids: Vec<i64> = notes.iter().map(|n| n.1).collect();
+    if let Some(e) = emb {
+        let col = e.column;
+        let sql = format!(
+            "SELECT n.note_id, best.id, best.excerpt, best.created_at, best.cos
+             FROM unnest($1::bigint[], $2::bigint[]) AS n(note_id, conv_id)
+             JOIN embeddings ne ON ne.source_type = 'memory_chunk'
+              AND ne.source_id = n.note_id AND ne.model = $3 AND ne.{col} IS NOT NULL
+             CROSS JOIN LATERAL (
+                SELECT m.id, left(COALESCE(m.content, ''), 240) AS excerpt, m.created_at,
+                       GREATEST(0, LEAST(1, 1 - (ne.{col} <=> me.{col})))::float8 AS cos
+                FROM messages m
+                JOIN embeddings me ON me.source_type = 'message' AND me.source_id = m.id
+                 AND me.model = $3 AND me.{col} IS NOT NULL
+                WHERE m.conversation_id = n.conv_id
+                ORDER BY ne.{col} <=> me.{col}, m.id LIMIT 1) best"
+        );
+        for r in client.query(&sql, &[&note_ids, &conv_ids, &e.model])? {
+            let cos: Option<f64> = r.get(4);
+            found.insert(r.get(0), (cos.unwrap_or(0.0), evidence_from(&r, 1)));
+        }
+    }
+    // One row per note and word; a message scores the words it contains.
+    let (mut word_notes, mut word_convs, mut word_list) = (vec![], vec![], vec![]);
+    let mut totals: HashMap<i64, usize> = HashMap::new();
+    for (c, conv) in notes.iter().filter(|n| !found.contains_key(&n.0.id)) {
+        let words = query_words(&c.content);
+        totals.insert(c.id, words.len());
+        for w in words {
+            word_notes.push(c.id);
+            word_convs.push(*conv);
+            word_list.push(w);
+        }
+    }
+    if word_list.is_empty() {
+        return Ok(found);
+    }
+    let rows = client.query(
+        "SELECT DISTINCT ON (x.note_id) x.note_id, m.id, left(m.content, 240), m.created_at, x.hits
+         FROM (
+            SELECT w.note_id, m.id AS message_id, count(*)::float8 AS hits
+            FROM unnest($1::bigint[], $2::bigint[], $3::text[]) AS w(note_id, conv_id, word)
+            JOIN messages m ON m.conversation_id = w.conv_id
+             AND strpos(lower(m.content), w.word) > 0
+            GROUP BY w.note_id, m.id) x
+         JOIN messages m ON m.id = x.message_id
+         ORDER BY x.note_id, x.hits DESC, m.id",
+        &[&word_notes, &word_convs, &word_list],
+    )?;
+    for r in rows {
+        let id: i64 = r.get(0);
+        let hits: f64 = r.get(4);
+        found.insert(id, (hits / totals[&id] as f64, evidence_from(&r, 1)));
+    }
+    Ok(found)
+}
+
 pub fn recall<C: GenericClient>(
     client: &mut C,
     q: &RecallQuery,
@@ -462,7 +542,7 @@ pub fn recall<C: GenericClient>(
             CandidateFilter::AsOf
         }
         RecallMode::Associative => CandidateFilter::Current,
-        other => bail!("recall mode {} is not available yet", other.as_str()),
+        RecallMode::Grounded => CandidateFilter::Current,
     };
     let now = Utc::now();
     let words = query_words(q.text);
@@ -485,6 +565,24 @@ pub fn recall<C: GenericClient>(
         scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
     }
     let limit = q.limit.clamp(1, MAX_LIMIT);
+    let mut evidence: HashMap<i64, Evidence> = HashMap::new();
+    if q.mode == RecallMode::Grounded {
+        // Only notes whose chain starts in an existing conversation; a hit
+        // without a message to cite is dropped before the limit applies.
+        let notes: Vec<(&Candidate, i64)> = scored
+            .iter()
+            .filter_map(|s| s.2.conversation_id.map(|conv| (&s.2, conv)))
+            .collect();
+        let mut grounding = ground(client, &notes, emb)?;
+        scored.retain_mut(|(_, why, c)| match grounding.remove(&c.id) {
+            Some((strength, ev)) => {
+                why.grounding = Some(strength);
+                evidence.insert(c.id, ev);
+                true
+            }
+            None => false,
+        });
+    }
     scored.truncate(limit);
     let mut relations: HashMap<i64, String> = HashMap::new();
     if q.mode == RecallMode::Associative {
@@ -511,7 +609,7 @@ pub fn recall<C: GenericClient>(
             supersedes: c.supersedes,
             score,
             why,
-            evidence: None,
+            evidence: evidence.remove(&c.id),
         })
         .collect();
     Ok(RecallResult {
@@ -1323,5 +1421,308 @@ mod tests {
             / (1.0 - w.cosine);
         assert!(own > spread, "own {own} must beat spread {spread}");
         assert!((hn.score - own).abs() < 1e-9);
+    }
+
+    fn conversation<C: GenericClient>(tx: &mut C, tag: &str) -> i64 {
+        tx.query_one(
+            "INSERT INTO conversations (session_id, project_path, started_at, summary) \
+             VALUES ($1, '/tmp/recall-test', now(), $2) RETURNING id",
+            &[&uuid::Uuid::new_v4(), &format!("Session {tag}")],
+        )
+        .unwrap()
+        .get(0)
+    }
+
+    fn message<C: GenericClient>(
+        tx: &mut C,
+        conv: i64,
+        content: &str,
+        model: &str,
+        vector: Option<&[f32]>,
+    ) -> i64 {
+        let id: i64 = tx
+            .query_one(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user', $2, now()) RETURNING id",
+                &[&conv, &content],
+            )
+            .unwrap()
+            .get(0);
+        if let Some(v) = vector {
+            tx.execute(
+                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+                 VALUES ('message', $1, $2, $3::text::vector)",
+                &[&id, &model, &vector_literal(v)],
+            )
+            .unwrap();
+        }
+        id
+    }
+
+    fn grounded(text: &str, project: &str, limit: usize) -> RecallQuery<'static> {
+        let text: &'static str = Box::leak(text.to_string().into_boxed_str());
+        let project: &'static str = Box::leak(project.to_string().into_boxed_str());
+        let mut q = query(text, Some(project));
+        q.mode = RecallMode::Grounded;
+        q.limit = limit;
+        q
+    }
+
+    /// A note taken from `conv`, with project and optional note vector.
+    fn sourced_note<C: GenericClient>(
+        tx: &mut C,
+        content: &str,
+        project: &str,
+        conv: i64,
+        model: &str,
+        vector: Option<&[f32]>,
+    ) -> i64 {
+        let mut s = Seed::new(content, long_ago());
+        s.project = Some(project);
+        s.source_type = "conversation";
+        s.source_id = Some(conv);
+        let id = seed(tx, &s);
+        if let Some(v) = vector {
+            embed(tx, id, model, v);
+        }
+        id
+    }
+
+    #[test]
+    fn recall_grounded_returns_evidence() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_returns_evidence: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        let other = conversation(&mut tx, &tag);
+        let near = vec768(&[1.0, 0.1]);
+        // the far message comes first, the foreign exact match must not count
+        let far = message(
+            &mut tx,
+            conv,
+            "far away",
+            &model,
+            Some(&vec768(&[0.0, 1.0])),
+        );
+        let long = "x".repeat(500);
+        let m = message(&mut tx, conv, &long, &model, Some(&near));
+        let _novec = message(&mut tx, conv, "no vector here", &model, None);
+        let foreign = message(&mut tx, other, "foreign", &model, Some(&vec768(&[1.0])));
+        let content = format!("decision {tag}");
+        let n = sourced_note(
+            &mut tx,
+            &content,
+            &project,
+            conv,
+            &model,
+            Some(&vec768(&[1.0])),
+        );
+        let emb = query_embedding(&model);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), Some(&emb)).unwrap();
+        let h = &r.hits[position(&r, n).unwrap()];
+        let ev = h.evidence.as_ref().expect("evidence");
+        assert_eq!(ev.message_id, m);
+        assert_ne!(ev.message_id, far);
+        assert_ne!(ev.message_id, foreign);
+        assert_eq!(ev.excerpt.chars().count(), 240);
+        let want = 1.0 / (1.0f64 + 0.01).sqrt();
+        let g = h.why.grounding.expect("grounding");
+        assert!((g - want).abs() < 1e-4, "grounding {g} vs {want}");
+        assert_eq!(r.degraded, None);
+        assert_eq!(r.mode, "grounded");
+    }
+
+    #[test]
+    fn recall_grounded_skips_notes_without_a_source() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_grounded_skips_notes_without_a_source: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        message(
+            &mut tx,
+            conv,
+            &format!("pinned {tag}"),
+            &model,
+            Some(&vec768(&[1.0])),
+        );
+        let content = format!("pinned {tag}");
+        let mut pin = Seed::new(&content, long_ago());
+        pin.project = Some(&project);
+        pin.source_type = "ui_pin";
+        let pin_id = seed(&mut tx, &pin);
+        // source_id points at a conversation that does not exist
+        let gone = sourced_note(&mut tx, &content, &project, 987_654_321_000, &model, None);
+        let ok = sourced_note(&mut tx, &content, &project, conv, &model, None);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
+        assert!(position(&r, pin_id).is_none());
+        assert!(position(&r, gone).is_none());
+        assert!(position(&r, ok).is_some());
+    }
+
+    #[test]
+    fn recall_grounded_follows_the_chain_to_the_source() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_grounded_follows_the_chain_to_the_source: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        let m = message(&mut tx, conv, "the origin", &model, Some(&vec768(&[1.0])));
+        let ca = format!("old {tag}");
+        let cb = format!("new {tag}");
+        let a = sourced_note(&mut tx, &ca, &project, conv, &model, None);
+        let mut sb = Seed::new(&cb, long_ago());
+        sb.project = Some(&project);
+        sb.source_type = "ui_pin";
+        let b = seed(&mut tx, &sb);
+        embed(&mut tx, b, &model, &vec768(&[1.0]));
+        replace(&mut tx, a, b);
+        let emb = query_embedding(&model);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), Some(&emb)).unwrap();
+        assert!(position(&r, a).is_none());
+        let h = &r.hits[position(&r, b).unwrap()];
+        assert_eq!(h.evidence.as_ref().unwrap().message_id, m);
+        assert_eq!(h.conversation_id, Some(conv));
+    }
+
+    #[test]
+    fn recall_grounded_without_embedding_uses_the_word_share() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_without_embedding_uses_the_word_share: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        message(&mut tx, conv, "Kubernetes only", &model, None);
+        let best = message(
+            &mut tx,
+            conv,
+            "the kubernetes ROLLOUT checklist",
+            &model,
+            None,
+        );
+        message(&mut tx, conv, "nothing", &model, None);
+        let content = format!("kubernetes rollout checklist {tag}");
+        let n = sourced_note(&mut tx, &content, &project, conv, &model, None);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
+        assert_eq!(r.degraded.as_deref(), Some("no_embeddings"));
+        let h = &r.hits[position(&r, n).unwrap()];
+        assert_eq!(h.evidence.as_ref().unwrap().message_id, best);
+        let g = h.why.grounding.unwrap();
+        assert!((g - 0.75).abs() < 1e-9, "grounding {g}");
+    }
+
+    #[test]
+    fn recall_grounded_falls_back_per_note_without_a_vector() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_falls_back_per_note_without_a_vector: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        // conversation one has message vectors, conversation two has none
+        let c1 = conversation(&mut tx, &tag);
+        let c2 = conversation(&mut tx, &tag);
+        message(&mut tx, c1, "vector message", &model, Some(&vec768(&[1.0])));
+        let words = message(&mut tx, c2, "kubernetes rollout here", &model, None);
+        let content = format!("kubernetes rollout {tag}");
+        // note without a vector in c1, note with a vector in c2
+        let no_vec = sourced_note(&mut tx, &content, &project, c1, &model, None);
+        let no_msgs = sourced_note(
+            &mut tx,
+            &content,
+            &project,
+            c2,
+            &model,
+            Some(&vec768(&[1.0])),
+        );
+        let emb = query_embedding(&model);
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), Some(&emb)).unwrap();
+        // c1 has no word match at all: the lexical rule gives 0 and no evidence
+        assert!(position(&r, no_vec).is_none());
+        let h = &r.hits[position(&r, no_msgs).unwrap()];
+        assert_eq!(h.evidence.as_ref().unwrap().message_id, words);
+        assert!((h.why.grounding.unwrap() - 2.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recall_grounded_drops_hits_without_evidence_before_the_limit() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_drops_hits_without_evidence_before_the_limit: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let empty = conversation(&mut tx, &tag);
+        let full = conversation(&mut tx, &tag);
+        message(&mut tx, full, "grounded", &model, Some(&vec768(&[1.0])));
+        // the note without messages is newer and ranks higher
+        let c = format!("hollow {tag}");
+        let mut hollow = Seed::new(&c, Utc::now());
+        hollow.project = Some(&project);
+        hollow.source_type = "conversation";
+        hollow.source_id = Some(empty);
+        hollow.confidence = 1.0;
+        let hollow_id = seed(&mut tx, &hollow);
+        let c2 = format!("solid {tag}");
+        let solid = sourced_note(&mut tx, &c2, &project, full, &model, Some(&vec768(&[1.0])));
+        let emb = query_embedding(&model);
+        let r = recall(&mut tx, &grounded(&tag, &project, 1), Some(&emb)).unwrap();
+        assert!(position(&r, hollow_id).is_none());
+        assert_eq!(r.hits.len(), 1);
+        assert_eq!(r.hits[0].id, solid);
+    }
+
+    #[test]
+    fn recall_grounded_orders_by_score_then_id() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_grounded_orders_by_score_then_id: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let conv = conversation(&mut tx, &tag);
+        message(&mut tx, conv, &format!("both {tag}"), &model, None);
+        let c = format!("both {tag}");
+        // the same instant for all three, so only confidence and id decide
+        let when = long_ago();
+        let mut ids = vec![];
+        for confidence in [0.8, 0.8, 0.1] {
+            let mut s = Seed::new(&c, when);
+            s.project = Some(&project);
+            s.source_type = "conversation";
+            s.source_id = Some(conv);
+            s.confidence = confidence;
+            ids.push(seed(&mut tx, &s));
+        }
+        let r = recall(&mut tx, &grounded(&tag, &project, 10), None).unwrap();
+        let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
+        assert_eq!(got, ids);
     }
 }
