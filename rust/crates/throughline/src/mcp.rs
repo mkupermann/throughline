@@ -1,5 +1,6 @@
 //! Minimal MCP stdio server (JSON-RPC 2.0) exposing memory tools.
 
+use crate::mcp_protocol::{negotiate_legacy, Transport, METHOD_NOT_FOUND};
 use crate::search;
 use crate::server::{
     supersede_memory, validate_supersede, Successor, SupersedeError, SupersedeKind,
@@ -9,7 +10,32 @@ use postgres::GenericClient;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
-pub fn run_stdio<C: GenericClient>(client: &mut C) -> Result<()> {
+/// What a transport needs to know besides the message itself.
+pub struct McpContext {
+    pub transport: Transport,
+    /// Carried only; hiding write tools is not done here yet.
+    pub read_only: bool,
+}
+
+/// The transport-independent answer: an HTTP-style status and an optional
+/// JSON-RPC body (`None` for notifications).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reply {
+    pub status: u16,
+    pub body: Option<Value>,
+}
+
+/// `THROUGHLINE_MCP_READ_ONLY`: `1`, `true`, `yes`, `on`, any case, trimmed.
+pub fn read_only_from(value: Option<&str>) -> bool {
+    value.is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+pub fn run_stdio<C: GenericClient>(client: &mut C, ctx: &McpContext) -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -20,37 +46,52 @@ pub fn run_stdio<C: GenericClient>(client: &mut C) -> Result<()> {
         let Ok(msg) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        let id = msg.get("id").cloned();
-        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
-        let params = msg.get("params").cloned().unwrap_or(Value::Null);
-
-        let result = match method {
-            "initialize" => Ok(json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "throughline", "version": env!("CARGO_PKG_VERSION") }
-            })),
-            "notifications/initialized" => {
-                // no response
-                continue;
-            }
-            "tools/list" => Ok(tools_list()),
-            "tools/call" => call_tool(client, &params),
-            "ping" => Ok(json!({})),
-            other => Err(json!({
-                "code": -32601,
-                "message": format!("method not found: {other}")
-            })),
-        };
-
-        let response = match result {
-            Ok(value) => json!({ "jsonrpc": "2.0", "id": id, "result": value }),
-            Err(err) => json!({ "jsonrpc": "2.0", "id": id, "error": err }),
-        };
-        writeln!(stdout, "{response}")?;
-        stdout.flush()?;
+        if let Some(body) = dispatch(client, &msg, ctx).body {
+            writeln!(stdout, "{body}")?;
+            stdout.flush()?;
+        }
     }
     Ok(())
+}
+
+/// Answer one JSON-RPC message. A message without `id` is a notification
+/// and gets no body, whatever its method.
+pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext) -> Reply {
+    let Some(id) = msg.get("id").cloned() else {
+        return Reply {
+            status: 202,
+            body: None,
+        };
+    };
+    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let params = msg.get("params").cloned().unwrap_or(Value::Null);
+
+    let result = match method {
+        "initialize" => Ok(json!({
+            "protocolVersion": negotiate_legacy(
+                params.get("protocolVersion").and_then(|v| v.as_str()),
+                ctx.transport,
+            ),
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "throughline", "version": env!("CARGO_PKG_VERSION") }
+        })),
+        "tools/list" => Ok(tools_list()),
+        "tools/call" => call_tool(client, &params),
+        "ping" => Ok(json!({})),
+        other => Err(json!({
+            "code": METHOD_NOT_FOUND,
+            "message": format!("method not found: {other}")
+        })),
+    };
+
+    let body = match result {
+        Ok(value) => json!({ "jsonrpc": "2.0", "id": id, "result": value }),
+        Err(err) => json!({ "jsonrpc": "2.0", "id": id, "error": err }),
+    };
+    Reply {
+        status: 200,
+        body: Some(body),
+    }
 }
 
 fn tools_list() -> Value {
@@ -456,7 +497,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             }
         }
         other => Err(json!({
-            "code": -32601,
+            "code": -32602,
             "message": format!("unknown tool: {other}")
         })),
     }
@@ -465,6 +506,97 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ctx() -> McpContext {
+        McpContext {
+            transport: Transport::Http,
+            read_only: false,
+        }
+    }
+
+    #[test]
+    fn initialize_echoes_negotiated_version() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping initialize_echoes_negotiated_version: no PostgreSQL reachable");
+            return;
+        };
+        for (asked, answered) in [("2025-06-18", "2025-06-18"), ("2025-03-26", "2025-11-25")] {
+            let reply = dispatch(
+                &mut client,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                         "params": { "protocolVersion": asked } }),
+                &ctx(),
+            );
+            assert_eq!(reply.status, 200);
+            let body = reply.body.expect("body");
+            assert_eq!(body["result"]["protocolVersion"], answered, "{body}");
+            assert_eq!(body["result"]["serverInfo"]["name"], "throughline");
+        }
+    }
+
+    #[test]
+    fn notification_gets_no_body() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping notification_gets_no_body: no PostgreSQL reachable");
+            return;
+        };
+        for method in ["notifications/initialized", "something/unknown"] {
+            let reply = dispatch(
+                &mut client,
+                &json!({ "jsonrpc": "2.0", "method": method }),
+                &ctx(),
+            );
+            assert_eq!(
+                reply,
+                Reply {
+                    status: 202,
+                    body: None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_tool_is_invalid_params() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping unknown_tool_is_invalid_params: no PostgreSQL reachable");
+            return;
+        };
+        let reply = dispatch(
+            &mut client,
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": { "name": "nope", "arguments": {} } }),
+            &ctx(),
+        );
+        let body = reply.body.expect("body");
+        assert_eq!(body["error"]["code"], -32602, "{body}");
+        assert_eq!(body["error"]["message"], "unknown tool: nope");
+    }
+
+    #[test]
+    fn unknown_method_in_legacy_is_200_with_method_not_found() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping unknown_method_in_legacy: no PostgreSQL reachable");
+            return;
+        };
+        let reply = dispatch(
+            &mut client,
+            &json!({ "jsonrpc": "2.0", "id": 3, "method": "nope/nope" }),
+            &ctx(),
+        );
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.body.expect("body")["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn read_only_values() {
+        for v in ["1", "true", "YES", " on "] {
+            assert!(read_only_from(Some(v)), "{v}");
+        }
+        for v in [None, Some(""), Some("0"), Some("no")] {
+            assert!(!read_only_from(v), "{v:?}");
+        }
+    }
 
     fn list_names() -> Vec<String> {
         let tools = tools_list();

@@ -1036,7 +1036,13 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            mcp::run_stdio(&mut client)?;
+            let ctx = mcp::McpContext {
+                transport: throughline::mcp_protocol::Transport::Stdio,
+                read_only: mcp::read_only_from(
+                    std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),
+                ),
+            };
+            mcp::run_stdio(&mut client, &ctx)?;
         }
         Command::Serve { host, port } => {
             let client = config::DbConfig::from_env()
