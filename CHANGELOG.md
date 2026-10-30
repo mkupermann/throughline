@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Multilingual embedding model
+
+The default embedding model is now `granite-embedding-multilingual:278m`, so a question in one language finds a note in the other.
+
+- **New default, and why.** On a copy of one real corpus (testset v4, 25 cross-language questions) `nomic-embed-text` found the right note at k = 5 in 8 % of the cross-language cases and 92 % of the same-language ones, granite in 88 % and 100 %, at about 9 ms per question. `embeddinggemma` tied it and lost on a tie-break of 0.665 against 0.657 MRR, a choice other readings of the rule flip. The gap is inflated by the testset, which keeps most questions free of any word shared with their note, and granite reads at most 512 tokens (about 7 % of messages in a sample are cut). Set `OLLAMA_EMBED_MODEL=nomic-embed-text` to keep the old model; its vectors stay either way.
+- **Model profiles.** Each known model (`granite-embedding-multilingual`, `nomic-embed-text`, `embeddinggemma`, `nomic-embed-text-v2-moe`, `qwen3-embedding`) has its own prefixes, dimensions, column and thresholds, applied to questions and documents. Granite uses 0.68 for `as_of` recall and 0.93 for consolidation, the others 0.5 and 0.92. An unknown model is probed and accepted at 768 or 1536 dimensions only. `qwen3-embedding` (1024) is refused until a migration adds its column.
+- **Target model and progress.** `THROUGHLINE_EMBED_TARGET_MODEL` makes `embed` fill a second model beside the active one, so you can switch without a gap. `throughline doctor` prints `embedding target:` and `embedding missing:`. A target that cannot be used prints `target model: <error>` and `embed` still exits 0. The switch takes five steps, see the usage guide.
+- **Candidate rule fixed.** `embed` and the progress count now use the same candidates: notes and messages with no non-null vector for the model, notes of every status except forgotten, so replaced and merged notes are embedded too.
+- **`consolidate --min-similarity` default.** It now comes from the active model's profile (0.93 for the default model) instead of a fixed 0.92.
+- **Pulling the model.** The usage guide describes how to fetch the model from Docker Hub when `ollama pull` fails.
+
 ### Agent access over HTTP
 
 Claude Code, Codex and other MCP clients can now reach Throughline over HTTP, with the same tools as stdio.
