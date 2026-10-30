@@ -209,7 +209,7 @@ throughline embed --backend openai
 ```bash
 brew install ollama
 brew services start ollama
-ollama pull nomic-embed-text          # embeddings, ~275 MB
+ollama pull nomic-embed-text          # embeddings, ~275 MB; see USAGE.md "Embedding model" for the multilingual default
 ollama pull qwen3.5:9b                # generation, ~6.6 GB
 throughline embed --backend ollama
 ```
@@ -222,7 +222,7 @@ placeholder, because Docker refuses to bind-mount a source path that does not
 exist.
 
 Two models, two jobs. An embedding model cannot answer a question or extract
-memory, so a machine with only `nomic-embed-text` has working semantic search
+memory, so a machine with only an embedding model has working semantic search
 and nothing else — `throughline doctor` reports both backends separately for
 exactly that reason.
 
