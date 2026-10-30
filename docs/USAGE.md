@@ -147,7 +147,7 @@ contradict newer ones, facts that have gone stale:
 
 ```bash
 throughline reflect                     # all four modes
-throughline reflect --mode dedup
+throughline reflect --mode dedup       # merges near-duplicates, see below
 throughline reflect --dry-run           # see what it would do
 throughline conflicts                   # cross-tool disagreements
 ```
@@ -157,6 +157,45 @@ To remove something for good, use **Curate → Forget** in the UI or the
 embeddings, repairs dangling `superseded_by` references, and writes an audit
 row to `memory_reflections` with your reason — so what was removed, and why,
 stays answerable afterwards.
+
+## How often a note is used, and how strong it is
+
+Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall` and `project_context`, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. They do not change for HTTP `GET /api/recall`, `GET /api/context` or browsing in the UI.
+
+From that Throughline derives a strength between 0.05 and 1:
+
+```text
+strength   = 0.05 + 0.95 * 2^(-days / half_life)
+half_life  = 30 * (1 + ln(1 + uses)) days
+```
+
+Pinned notes and decisions get a half-life four times as long. `days` counts from the last use, or from `valid_from` if the note was never used. This is the Ebbinghaus forgetting curve with the spacing effect (every use slows the fading), which is established, not new.
+
+Strength only affects `rank=weighted`, where it replaces the old fixed 0.5 in its 0.10 share. Full text is the default ranking and ignores it. So by default, use and age change nothing about what `recall` returns.
+
+## Merging similar notes
+
+```bash
+throughline consolidate --dry-run               # list groups, change nothing
+throughline consolidate --dry-run --json
+throughline consolidate --dry-run --min-similarity 0.95
+throughline consolidate --apply                 # merge every group
+```
+
+Candidates are notes that are valid now, have a vector, belong to the same project and have a cosine similarity of at least 0.92 (`--min-similarity`). Notes that are linked by such pairs form one group. The command needs the embedding model. Run `throughline embed` first.
+
+A merge creates a new note with the longest text of the group. Its `source_type` is `consolidation` and `merged_from` holds the source ids. The sources become superseded and their text never changes. A forgotten note stays forgotten. A star on a source moves to the new note. `--apply` exits non-zero if any group failed; the other groups are still merged.
+
+`reflect --mode dedup` now works the same way. It never rewrites a note, it merges. The Reflect action in the UI reports how many groups it merged and how many failed.
+
+Over HTTP:
+
+- `GET /api/consolidation/candidates?min_similarity=` lists the groups.
+- `POST /api/consolidate` merges one group of ids. 422 means the request is not valid, 404 that a note does not exist, 409 that a note is no longer current.
+- `GET /api/consolidation/proposal` asks a local model for a merged text. It never uses a cloud model. If the model fails or is missing, it falls back to the longest note. The UI waits 120 seconds for it.
+- `GET /api/damaged-notes` lists notes whose text looks cut off or broken, so you can replace them.
+
+Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model on a remote host. Such a model is never treated as local either. Name one explicitly if you want it.
 
 ## Notes and the time they were valid
 
@@ -193,7 +232,7 @@ Full text is the default because the first measurement (below) did not show the 
 
 The four modes differ in what they admit and how they rank:
 
-- `current` (the default) admits notes that hold now: not replaced, merged, forgotten or expired, from the given project and from notes without a project. It ranks by full text unless you ask for `rank=weighted`, a weighted sum of cosine similarity (0.45), word overlap (0.20), recency (0.10, a decay with a 90-day scale), reliability (0.10), strength (0.10, a fixed placeholder of 0.5 for now) and provenance (0.05).
+- `current` (the default) admits notes that hold now: not replaced, merged, forgotten or expired, from the given project and from notes without a project. It ranks by full text unless you ask for `rank=weighted`, a weighted sum of cosine similarity (0.45), word overlap (0.20), recency (0.10, a decay with a 90-day scale), reliability (0.10), strength (0.10, from use and age, see above) and provenance (0.05).
 - `as_of` needs `valid_at` or `known_at`. It admits notes that held on that day and match the question by words or by cosine of at least 0.5, keeps the `limit` best of them by the rank, and sorts those by `valid_from`. It shows the chain fields, so you see what replaced what.
 - `associative` takes the best current notes by the rank as seeds and adds neighbours through a replacement chain, the same conversation, the same file, or a merge, with at most two hops. A neighbour scores max(its own score, seed score × 0.8^hops); its own score uses the same rank as the seeds. A replaced neighbour is labelled "superseded", one whose validity or expiry has passed or that is stale is labelled "expired". It returns up to twice the limit.
 - `grounded` admits only notes whose chain started in a conversation that still exists, and attaches the source message that matches best (by cosine, by words if there is no vector). It walks the ranking a few notes at a time and stops once the limit has evidence. That checks a note against Throughline's own transcripts, not against the world.

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Memory lifecycle: use counts, strength and merging similar notes
+
+Notes now remember whether anyone used them, fade with time, and near-duplicates can be merged on your approval. Nothing is deleted and no note text is rewritten.
+
+- **Use is counted.** A note handed to an agent or to the CLI gets `access_count` plus one and a new `last_accessed`: the MCP tools `recall` and `project_context`, the CLI commands `recall` and `context`, and keeping a note. HTTP `/api/recall`, `/api/context` and browsing in the UI do not count, because a person looking is not an agent relying on it.
+- **Strength.** `strength = 0.05 + 0.95 * 2^(-days / half_life)`, with `half_life = 30 * (1 + ln(1 + uses))` days. Pinned notes and decisions get four times the half-life. Days run from the last use, else from `valid_from`. This is the Ebbinghaus forgetting curve with the spacing effect, which is established, not new. It replaces the fixed 0.5 in the weighted ranking only. The default full-text ranking is unchanged, so most recall results look the same as before.
+- **`throughline consolidate`.** `--dry-run` lists groups of valid notes in one project whose vectors have a cosine of at least 0.92 (`--min-similarity`, `--json`). `--apply` merges each group into a new note (`source_type` consolidation, `merged_from` lists the sources) and supersedes the sources. Their text never changes, forgotten notes stay forgotten and stars move to the new note. It exits non-zero if a group failed.
+- **`reflect` dedup merges the same way.** It no longer rewrites a note, and the UI Reflect action reports how many groups it merged and how many failed.
+- **New endpoints.** `GET /api/consolidation/candidates`, `POST /api/consolidate` (422, 404, 409), `GET /api/consolidation/proposal` and `GET /api/damaged-notes`.
+- **Review tab.** "Similar notes" suggests a merged text and merges after you confirm. "Damaged notes" lists notes whose text is cut off or broken and lets you replace them.
+- **No cloud model by accident.** Automatic choice of the generation model never picks a cloud model (a `:cloud` name or a remote host), and a `:cloud` model is never treated as local. A merge suggestion runs on a local model only and times out after 120 seconds in the UI. If it fails, the longest note is offered.
+
 ### With a task, matching decisions lead the context pack
 
 When you give `context` a task, the Decisions section now starts with the decisions that match it, best full-text match first, and then the rest newest first. On a project with many decisions the budget used to fill with the newest ones whatever the task said. Without a task the order is unchanged, and so are the sections, the budget rules and the line format.

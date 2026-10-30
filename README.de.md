@@ -248,11 +248,11 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Einrichtung und Gesundheit | `migrate`, `serve`, `status`, `doctor` |
 | Import und Abruf | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Anreicherung | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
 | Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
 | Schützen und integrieren | `backup`, `retention`, `mcp` |
 
-Das sind alle 31 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
+Das sind alle 32 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
 
 Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkeiten und Nebenwirkungen. Verfügbarkeit heißt nicht, dass jeder Befehl gegen jede Schema-Variante getestet wurde.
 
