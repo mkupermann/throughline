@@ -1200,8 +1200,11 @@ async fn context_handler(
         Err((status, code, detail)) => return api_error(status, code, detail),
     };
     // The default ranking is full text and needs no question vector.
-    match with_db(&state, move |client| {
-        crate::context_pack::build_context(
+    // An error that is the caller's input (a header too large for the budget) travels as the
+    // inner `Err`, so it is not reported as a database failure.
+    match with_db(
+        &state,
+        move |client| match crate::context_pack::build_context(
             client,
             &crate::context_pack::ContextRequest {
                 project: &parsed.project,
@@ -1209,11 +1212,16 @@ async fn context_handler(
                 budget: parsed.budget,
             },
             None,
-        )
-    })
+        ) {
+            Ok(pack) => Ok(Ok(pack)),
+            Err(e) if crate::context_pack::input_error(&e).is_some() => Ok(Err(e.to_string())),
+            Err(e) => Err(e),
+        },
+    )
     .await
     {
-        Ok(pack) => Json(pack).into_response(),
+        Ok(Ok(pack)) => Json(pack).into_response(),
+        Ok(Err(detail)) => api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", detail),
         Err(resp) => resp,
     }
 }
@@ -3798,6 +3806,30 @@ mod tests {
         assert_eq!((lo.budget, lo.task), (64, None));
         let hi = parse_context_params(&p(Some("P"), None, Some(32_768))).unwrap();
         assert_eq!(hi.budget, 32_768);
+    }
+
+    #[test]
+    fn context_handler_oversized_header_is_422() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping context_handler_oversized_header_is_422: no PostgreSQL reachable");
+            return;
+        };
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params = ContextParams {
+            project: Some("word ".repeat(200)),
+            task: None,
+            budget: Some(64),
+        };
+        let resp = rt.block_on(context_handler(State(state.clone()), Query(params)));
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(v["error"], "validation_error", "{v}");
     }
 
     #[test]

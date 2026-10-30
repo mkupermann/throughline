@@ -304,7 +304,10 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 },
                 None,
             )
-            .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            .map_err(|e| match crate::context_pack::input_error(&e) {
+                Some(_) => invalid(&e.to_string()),
+                None => json!({ "code": -32000, "message": e.to_string() }),
+            })?;
             Ok(text_result(serde_json::to_string(&pack).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))
@@ -564,6 +567,24 @@ mod tests {
             .expect_err("refused");
             assert_eq!(err["code"], -32602, "{bad}: {err}");
         }
+    }
+
+    #[test]
+    fn mcp_project_context_oversized_header_is_invalid_params() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_project_context_oversized_header: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let err = call_tool(
+            &mut tx,
+            &json!({
+                "name": "project_context",
+                "arguments": { "project": "word ".repeat(200), "budget": 64 }
+            }),
+        )
+        .expect_err("refused");
+        assert_eq!(err["code"], -32602, "{err}");
     }
 
     fn call_text(client: &mut impl GenericClient, name: &str, args: Value) -> Value {
