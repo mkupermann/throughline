@@ -200,8 +200,10 @@ consolidation path), **contradictions** (find chunks that disagree) and **stale*
 `expires_at` on time-bound facts and mark expired ones). Similar but different notes are
 the job of the separate `throughline consolidate` command: it finds notes of one project
 with a cosine of at least 0.92 and merges them only on approval or with `--apply`; the
-sources stay in history as superseded notes. Every action is
-written to `memory_reflections` with its reasoning. Nothing is hard-deleted by the engine —
+sources stay in history as superseded notes. `reflect` and `consolidate` write no
+`memory_reflections` rows: their changes show in `memory_chunks` itself (status,
+`superseded_by`, `valid_to`, `expires_at`, a lowered confidence). The retention run
+writes a summary row to `memory_reflections`. Nothing is hard-deleted by the engine —
 chunks are superseded or marked, and the previous state stays queryable. `--dry-run`
 reports without writing.
 

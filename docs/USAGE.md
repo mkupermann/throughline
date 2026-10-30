@@ -146,7 +146,7 @@ The reflection engine handles the routine cases — near-duplicates, chunks that
 contradict newer ones, facts that have gone stale:
 
 ```bash
-throughline reflect                     # all four modes
+throughline reflect                     # all three modes (dedup, stale, contradictions)
 throughline reflect --mode dedup       # merges exact-prefix duplicates, see below
 throughline reflect --dry-run           # see what it would do
 throughline conflicts                   # cross-tool disagreements
@@ -195,7 +195,9 @@ Over HTTP:
 - `GET /api/consolidation/proposal` asks a local model for a merged text. It never uses a cloud model. If the model fails or is missing, it falls back to the longest note. The UI waits 120 seconds for it.
 - `GET /api/damaged-notes` lists current notes the old reflect glued together: the text holds a `---` separator line and the note lists itself in `merged_from`. Replace lets you write the clean text.
 
-Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model served from a remote host. A model whose name ends in `:cloud` is never treated as local. Name one explicitly if you want it.
+Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model served from a remote host. A model whose name ends in `:cloud` or `-cloud`, and any Ollama backend on ollama.com, is never treated as local. Name one explicitly if you want it.
+
+Privacy: a model you name explicitly (`THROUGHLINE_ANSWER_MODEL`) or a remote `THROUGHLINE_ANSWER_BASE_URL` receives transcript and note text. That covers `extract-memory` (also the hourly job, when you enable it), `generate-titles`, the contradiction check of `reflect` and `ask`. Only the merge proposal refuses a backend that is not local; it falls back to the longest note.
 
 ## Notes and the time they were valid
 
