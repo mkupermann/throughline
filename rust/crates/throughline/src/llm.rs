@@ -120,9 +120,15 @@ fn compat_backend(base: &str, model: String, api_key: Option<String>) -> Generat
     }
 }
 
+/// Ollama names its cloud models with a ":cloud" or "-cloud" suffix.
+fn has_cloud_suffix(name: &str) -> bool {
+    let n = name.trim().to_lowercase();
+    n.ends_with(":cloud") || n.ends_with("-cloud")
+}
+
 /// A model served by Ollama's cloud: it runs off this machine.
 fn is_cloud_model(name: &str, entry: &serde_json::Value) -> bool {
-    name.ends_with(":cloud")
+    has_cloud_suffix(name)
         || entry["remote_host"]
             .as_str()
             .is_some_and(|h| !h.trim().is_empty())
@@ -296,7 +302,7 @@ pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -
 pub fn is_local(backend: &GenerationBackend) -> bool {
     let host = backend.base_url.to_lowercase();
     if backend.kind == BackendKind::Ollama {
-        return !backend.model.ends_with(":cloud");
+        return !has_cloud_suffix(&backend.model) && !host.contains("ollama.com");
     }
     host.contains("localhost") || host.contains("127.0.0.1") || host.contains("::1")
 }
@@ -375,6 +381,25 @@ mod tests {
         assert!(is_local(&local));
         let cloud = ollama_backend("http://localhost:11434", "glm-5.2:cloud".into()).unwrap();
         assert!(!is_local(&cloud));
+    }
+
+    #[test]
+    fn dash_cloud_models_and_ollama_com_are_not_local() {
+        let dash = ollama_backend("http://localhost:11434", "gpt-oss:120b-cloud".into()).unwrap();
+        assert!(!is_local(&dash));
+        let upper = ollama_backend("http://localhost:11434", "GPT-OSS:120B-CLOUD".into()).unwrap();
+        assert!(!is_local(&upper));
+        let local = ollama_backend("http://localhost:11434", "qwen3.6:27b".into()).unwrap();
+        assert!(is_local(&local));
+        let hosted = ollama_backend("https://ollama.com", "qwen3.6:27b".into()).unwrap();
+        assert!(!is_local(&hosted));
+        let tags = serde_json::json!({"models": [
+            {"name": "gpt-oss:120b-cloud"},
+            {"name": "qwen3.6:27b"}
+        ]});
+        assert_eq!(pick_ollama_model(&tags, None).unwrap(), "qwen3.6:27b");
+        let only = serde_json::json!({"models": [{"name": "gpt-oss:120b-cloud"}]});
+        assert!(pick_ollama_model(&only, None).is_err());
     }
 
     #[test]
