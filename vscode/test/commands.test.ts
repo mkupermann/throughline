@@ -138,3 +138,54 @@ test("copy_context_uses_project_context_with_clamped_budget", async () => {
   assert.deepEqual(JSON.parse(srv.requests[0].body).params.arguments, { project: "demo", budget: 32768 });
   assert.deepEqual(log.clip, ["PACK"]);
 });
+
+function agentDeps(ui: cmd.Ui, commands: string[], calls: string[]): cmd.Deps {
+  const d = deps(ui, "demo", "k");
+  d.agents = {
+    commands: async () => commands,
+    host: {
+      executeCommand: async (id) => void calls.push(`exec:${id}`),
+      openScratchDocument: async () => void calls.push("open"),
+      selectAll: async () => void calls.push("selectAll"),
+      clipboard: async (t) => void calls.push(`clip:${t}`),
+      info: () => {},
+    },
+  };
+  return d;
+}
+
+test("send_to_agent_command_picks_by_available_agents", async () => {
+  const rpc = () => srv.respond(200, { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "PACK" }] } });
+  // exactly one agent: no question
+  srv.requests.length = 0;
+  rpc();
+  let calls: string[] = [];
+  let a = fakeUi({ input: async () => "" });
+  await cmd.sendToAgent(agentDeps(a.ui, ["cline.addToChat"], calls));
+  assert.deepEqual(a.log.picks, []);
+  assert.deepEqual(calls, ["open", "selectAll", "exec:cline.addToChat"]);
+  assert.equal(JSON.parse(srv.requests[0].body).params.name, "project_context");
+  // both: offer a pick
+  rpc();
+  calls = [];
+  a = fakeUi({ input: async () => "", pick: async (items) => { a.log.picks.push(items); return "Continue"; } });
+  await cmd.sendToAgent(agentDeps(a.ui, ["cline.addToChat", "continue.focusContinueInputWithoutClear"], calls));
+  assert.deepEqual(a.log.picks, [["Cline", "Continue", "Clipboard"]]);
+  assert.deepEqual(calls, ["clip:PACK", "exec:continue.focusContinueInputWithoutClear"]);
+  // none: straight to the clipboard
+  rpc();
+  calls = [];
+  a = fakeUi({ input: async () => "" });
+  await cmd.sendToAgent(agentDeps(a.ui, [], calls));
+  assert.deepEqual(a.log.picks, []);
+  assert.deepEqual(calls, ["clip:PACK"]);
+});
+
+test("send_to_agent_without_key_offers_set_key", async () => {
+  const a = fakeUi({ input: async () => "" });
+  const d = agentDeps(a.ui, [], []);
+  d.mcp = new McpClient(srv.baseUrl, async () => undefined);
+  await cmd.sendToAgent(d);
+  assert.equal(a.log.errors.length, 1);
+  assert.deepEqual(a.log.actions, [cmd.SET_KEY]);
+});

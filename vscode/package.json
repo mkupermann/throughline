@@ -97,6 +97,10 @@
       {
         "command": "throughline.copyContext",
         "title": "Throughline: Copy Context"
+      },
+      {
+        "command": "throughline.sendToAgent",
+        "title": "Throughline: Send Context to Agent"
       }
     ],
     "viewsContainers": {
