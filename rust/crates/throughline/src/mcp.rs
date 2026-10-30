@@ -550,6 +550,18 @@ mod tests {
             .filter(|c| c["kind"] == "memory" && c["id"].as_i64() == Some(id))
             .count();
         assert_eq!(cited, 1, "{out}");
+        let padded = call_text(
+            &mut tx,
+            "project_context",
+            json!({ "project": format!("  {project}  "), "task": "   ", "budget": 1000 }),
+        );
+        assert!(
+            padded["text"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("Context for {project} · ")),
+            "{padded}"
+        );
         for bad in [
             json!({}),
             json!({ "project": 5 }),
@@ -559,6 +571,8 @@ mod tests {
             json!({ "project": project, "budget": 40000 }),
             json!({ "project": project, "task": 7 }),
             json!({ "project": project, "task": "x".repeat(2001) }),
+            json!({ "project": "   " }),
+            json!({ "project": "\n\t " }),
         ] {
             let err = call_tool(
                 &mut tx,
