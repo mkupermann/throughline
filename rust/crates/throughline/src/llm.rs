@@ -298,13 +298,42 @@ pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -
     })
 }
 
-/// Whether this backend keeps data on the machine.
+/// The host of `scheme://[userinfo@]host[:port]/...`, lowercased, without
+/// IPv6 brackets. `None` when there is no scheme or no host.
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.trim().split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let hostport = authority.rsplit('@').next()?;
+    let host = if let Some(inner) = hostport.strip_prefix('[') {
+        inner.split(']').next()?
+    } else {
+        hostport.split(':').next()?
+    };
+    let host = host.trim_end_matches('.').to_lowercase();
+    (!host.is_empty()).then_some(host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host == "localhost"
+        || host == "::1"
+        || host == "host.docker.internal"
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.octets()[0] == 127)
+}
+
+/// Whether this backend keeps data on the machine. An Ollama server counts as
+/// local wherever it runs, unless the model is a cloud model or the server is
+/// ollama.com. An OpenAI-compatible endpoint is local only on this machine.
 pub fn is_local(backend: &GenerationBackend) -> bool {
-    let host = backend.base_url.to_lowercase();
+    let host = url_host(&backend.base_url);
     if backend.kind == BackendKind::Ollama {
-        return !has_cloud_suffix(&backend.model) && !host.contains("ollama.com");
+        let cloud_host = host
+            .as_deref()
+            .is_some_and(|h| h == "ollama.com" || h.ends_with(".ollama.com"));
+        return !has_cloud_suffix(&backend.model) && !cloud_host;
     }
-    host.contains("localhost") || host.contains("127.0.0.1") || host.contains("::1")
+    host.as_deref().is_some_and(is_loopback_host)
 }
 
 /// `THROUGHLINE_ALLOW_REMOTE_LLM`: only `1`, `true`, `yes`, `on` allow it.
@@ -315,14 +344,32 @@ fn remote_allowed(value: Option<&str>) -> bool {
     )
 }
 
+/// A text-sending path was refused because the backend is not local and
+/// `THROUGHLINE_ALLOW_REMOTE_LLM` is not set. Handlers recognise it by type.
+#[derive(Debug)]
+pub struct RemoteLlmNotAllowed {
+    pub label: String,
+}
+
+impl std::fmt::Display for RemoteLlmNotAllowed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "refusing to send text to {}: the model is not local. Set THROUGHLINE_ALLOW_REMOTE_LLM=1 to allow it, or use a local model",
+            self.label
+        )
+    }
+}
+
+impl std::error::Error for RemoteLlmNotAllowed {}
+
 fn check_local_or_allowed(backend: &GenerationBackend, allowed: bool) -> Result<()> {
     if allowed || is_local(backend) {
         return Ok(());
     }
-    Err(anyhow!(
-        "refusing to send text to {}: the model is not local. Set THROUGHLINE_ALLOW_REMOTE_LLM=1 to allow it, or use a local model",
-        backend.label
-    ))
+    Err(anyhow::Error::new(RemoteLlmNotAllowed {
+        label: backend.label.clone(),
+    }))
 }
 
 /// Refuse a non-local backend unless `THROUGHLINE_ALLOW_REMOTE_LLM` is truthy.
@@ -378,6 +425,58 @@ mod tests {
             model: model.into(),
             api_key: None,
         }
+    }
+
+    #[test]
+    fn is_local_compares_the_host_exactly() {
+        let compat = |u: &str| backend(BackendKind::OpenAiCompatible, u, "m");
+        for u in [
+            "http://127.0.0.1:8000/v1",
+            "http://localhost:1234",
+            "http://[::1]:8080",
+            "http://host.docker.internal:11434",
+            "http://user:pw@127.0.0.5/v1",
+        ] {
+            assert!(is_local(&compat(u)), "{u} should be local");
+        }
+        for u in [
+            "https://localhost.evil.example/v1",
+            "https://x.example/?h=localhost",
+            "https://127.0.0.1.evil.example/v1",
+            "http://localhost@evil.example/v1",
+            "https://api.example.com/v1",
+        ] {
+            assert!(!is_local(&compat(u)), "{u} should not be local");
+        }
+        let ollama = |u: &str, m: &str| backend(BackendKind::Ollama, u, m);
+        assert!(is_local(&ollama(
+            "http://gpu-box.corp:11434",
+            "qwen3.6:27b"
+        )));
+        assert!(!is_local(&ollama("https://ollama.com", "qwen3.6:27b")));
+        assert!(!is_local(&ollama(
+            "https://api.ollama.com:443/x",
+            "qwen3.6:27b"
+        )));
+        assert!(is_local(&ollama(
+            "http://notollama.com.corp:11434",
+            "qwen3.6:27b"
+        )));
+        assert!(!is_local(&ollama(
+            "http://localhost:11434",
+            "gpt-oss:120b-cloud"
+        )));
+    }
+
+    #[test]
+    fn refusal_is_a_typed_error() {
+        let b = backend(
+            BackendKind::OpenAiCompatible,
+            "https://api.example.com/v1",
+            "m",
+        );
+        let err = check_local_or_allowed(&b, false).unwrap_err();
+        assert!(err.downcast_ref::<RemoteLlmNotAllowed>().is_some());
     }
 
     #[test]

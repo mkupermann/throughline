@@ -150,7 +150,15 @@ where
         Ok(Ok(value)) => Ok(value),
         Ok(Err(e)) => {
             let msg = e.to_string();
-            if msg.contains("lock poisoned") {
+            if e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+                .is_some()
+            {
+                Err(api_error(
+                    StatusCode::FORBIDDEN,
+                    "remote_llm_not_allowed",
+                    msg,
+                ))
+            } else if msg.contains("lock poisoned") {
                 Err(api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "lock_poisoned",
