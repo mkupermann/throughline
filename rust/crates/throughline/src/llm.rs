@@ -301,7 +301,9 @@ pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -
 /// The host of `scheme://[userinfo@]host[:port]/...`, lowercased, without
 /// IPv6 brackets. `None` when there is no scheme or no host.
 fn url_host(url: &str) -> Option<String> {
-    let rest = url.trim().split_once("://")?.1;
+    let url = url.trim();
+    // A value like `host:11434` has no scheme: its authority starts at the front.
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next()?;
     let hostport = authority.rsplit('@').next()?;
     let host = if let Some(inner) = hostport.strip_prefix('[') {
@@ -328,10 +330,11 @@ fn is_loopback_host(host: &str) -> bool {
 pub fn is_local(backend: &GenerationBackend) -> bool {
     let host = url_host(&backend.base_url);
     if backend.kind == BackendKind::Ollama {
-        let cloud_host = host
+        // An unparsable host fails closed: it is not treated as local.
+        let local_host = host
             .as_deref()
-            .is_some_and(|h| h == "ollama.com" || h.ends_with(".ollama.com"));
-        return !has_cloud_suffix(&backend.model) && !cloud_host;
+            .is_some_and(|h| h != "ollama.com" && !h.ends_with(".ollama.com"));
+        return !has_cloud_suffix(&backend.model) && local_host;
     }
     host.as_deref().is_some_and(is_loopback_host)
 }
@@ -466,6 +469,20 @@ mod tests {
             "http://localhost:11434",
             "gpt-oss:120b-cloud"
         )));
+    }
+
+    #[test]
+    fn a_base_url_without_a_scheme_is_checked_too() {
+        let ollama = |u: &str| backend(BackendKind::Ollama, u, "qwen3.6:27b");
+        let compat = |u: &str| backend(BackendKind::OpenAiCompatible, u, "m");
+        assert!(!is_local(&ollama("ollama.com:11434")));
+        assert!(!is_local(&ollama("api.ollama.com")));
+        assert!(is_local(&ollama("gpu-box.corp:11434")));
+        assert!(is_local(&compat("localhost:8000/v1")));
+        assert!(!is_local(&compat("evil.example:8000")));
+        // No host at all: fail closed.
+        assert!(!is_local(&ollama("")));
+        assert!(!is_local(&ollama("http://")));
     }
 
     #[test]
