@@ -2214,6 +2214,16 @@ td .empty {
         <div id="memory-review-panel" hidden>
           <div class="meta" id="review-summary" style="margin-bottom:12px" data-i18n="mem.review.loading">Loading review candidates…</div>
           <div class="history list-anim" id="review-list"></div>
+          <section id="similar-section" aria-labelledby="similar-title" style="margin-top:28px">
+            <h2 id="similar-title" style="font-size:1.1rem;margin:0 0 4px" data-i18n="sim.title">Similar notes</h2>
+            <p class="meta" style="margin:0 0 12px" data-i18n="sim.sub">Notes in the same project that say nearly the same thing. Merging writes one new note; the sources stay in History.</p>
+            <div class="history" id="similar-list"></div>
+          </section>
+          <section id="damaged-section" aria-labelledby="damaged-title" style="margin-top:28px" hidden>
+            <h2 id="damaged-title" style="font-size:1.1rem;margin:0 0 4px" data-i18n="dmg.title">Damaged notes</h2>
+            <p class="meta" style="margin:0 0 12px" data-i18n="dmg.sub">Notes the old reflect job glued together. Replace each one with a clean text.</p>
+            <div class="history" id="damaged-list"></div>
+          </section>
         </div>
       </section>
 
@@ -2755,6 +2765,32 @@ td .empty {
       "mem.notes": "Notes",
       "mem.review": "Review",
       "mem.review.title": "Stale candidates",
+      "sim.title": "Similar notes",
+      "sim.sub": "Notes in the same project that say nearly the same thing. Merging writes one new note; the sources stay in History.",
+      "sim.loading": "Looking for similar notes…",
+      "sim.none": "No similar notes found.",
+      "sim.degraded": "No embedding model is reachable, so similar notes cannot be found. Start Ollama with nomic-embed-text.",
+      "sim.loadFailed": "Could not load similar notes: ",
+      "sim.group": " similar notes",
+      "sim.similarity": "similarity from ",
+      "sim.text": "Text of the merged note",
+      "sim.suggest": "Suggest with Ollama",
+      "sim.suggesting": "Asking Ollama…",
+      "sim.sourceLlm": "Suggestion from Ollama. Check it before you merge.",
+      "sim.sourceLongest": "Ollama gave no answer; this is the longest note.",
+      "sim.suggestFailed": "Suggestion failed: ",
+      "sim.merge": "Merge",
+      "sim.confirmTitle": "Merge these notes?",
+      "sim.confirm1": "These ",
+      "sim.confirm2": " notes become one new note with the text above. The sources stay in History with their text unchanged.",
+      "sim.empty": "The merged note needs text.",
+      "sim.done": "Merged into note #",
+      "sim.failed": "Merge failed: ",
+      "dmg.title": "Damaged notes",
+      "dmg.sub": "Notes the old reflect job glued together. Replace each one with a clean text.",
+      "dmg.none": "No damaged notes.",
+      "dmg.replace": "Replace",
+      "dmg.loadFailed": "Could not load damaged notes: ",
       "mem.search": "Search",
       "mem.search.ph": "decision, rule, preference…",
       "mem.category": "Category",
@@ -3415,6 +3451,32 @@ td .empty {
       "mem.notes": "Notizen",
       "mem.review": "Prüfung",
       "mem.review.title": "Veraltete Kandidaten",
+      "sim.title": "Ähnliche Notizen",
+      "sim.sub": "Notizen im selben Projekt, die fast dasselbe sagen. Beim Zusammenführen entsteht eine neue Notiz; die Quellen bleiben in der Historie.",
+      "sim.loading": "Ähnliche Notizen werden gesucht…",
+      "sim.none": "Keine ähnlichen Notizen gefunden.",
+      "sim.degraded": "Kein Embedding-Modell erreichbar, ähnliche Notizen lassen sich nicht finden. Ollama mit nomic-embed-text starten.",
+      "sim.loadFailed": "Ähnliche Notizen konnten nicht geladen werden: ",
+      "sim.group": " ähnliche Notizen",
+      "sim.similarity": "Ähnlichkeit ab ",
+      "sim.text": "Text der zusammengeführten Notiz",
+      "sim.suggest": "Vorschlag von Ollama",
+      "sim.suggesting": "Ollama wird gefragt…",
+      "sim.sourceLlm": "Vorschlag von Ollama. Vor dem Zusammenführen prüfen.",
+      "sim.sourceLongest": "Ollama hat nicht geantwortet; das ist die längste Notiz.",
+      "sim.suggestFailed": "Vorschlag fehlgeschlagen: ",
+      "sim.merge": "Zusammenführen",
+      "sim.confirmTitle": "Diese Notizen zusammenführen?",
+      "sim.confirm1": "Diese ",
+      "sim.confirm2": " Notizen werden zu einer neuen Notiz mit dem Text oben. Die Quellen bleiben mit unverändertem Text in der Historie.",
+      "sim.empty": "Die zusammengeführte Notiz braucht Text.",
+      "sim.done": "Zusammengeführt zu Notiz #",
+      "sim.failed": "Zusammenführen fehlgeschlagen: ",
+      "dmg.title": "Beschädigte Notizen",
+      "dmg.sub": "Notizen, die der alte Reflect-Lauf zusammengeklebt hat. Jede durch einen sauberen Text ersetzen.",
+      "dmg.none": "Keine beschädigten Notizen.",
+      "dmg.replace": "Ersetzen",
+      "dmg.loadFailed": "Beschädigte Notizen konnten nicht geladen werden: ",
       "mem.search": "Suche",
       "mem.search.ph": "Entscheidung, Regel, Präferenz…",
       "mem.category": "Kategorie",
@@ -6930,6 +6992,7 @@ td .empty {
           closePinDialog();
           toast(t("supersede.done") + pinOldId + t("supersede.done2") + r.new_id);
           loadMemory();
+          loadReview();
           loadStatus();
         } else {
           const r = await postJson("/api/memory", { content, category });
@@ -6984,6 +7047,8 @@ td .empty {
     const el = $("review-list");
     const summary = $("review-summary");
     if (!el) return;
+    loadSimilar();
+    loadDamaged();
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
     try {
       const d = await fetchJson("/api/stale-digest");
@@ -7030,6 +7095,137 @@ td .empty {
         '<button type="button" class="btn btn-primary" id="review-empty-retry">' + t("review.retry") + '</button>');
       const rt = $("review-empty-retry");
       if (rt) rt.addEventListener("click", loadReview);
+    }
+  }
+  // --- similar notes: review and approve merges ----------------
+  function similarNoteHtml(n) {
+    return "<li>" +
+      '<span class="chip">#' + n.id + "</span> " +
+      '<span class="chip">' + escapeHtml(n.category || "insight") + "</span> " +
+      (n.project_name ? '<span class="chip">' + escapeHtml(n.project_name) + "</span> " : "") +
+      escapeHtml((n.content || "").slice(0, 280)) + "</li>";
+  }
+  async function loadSimilar() {
+    const el = $("similar-list");
+    if (!el) return;
+    el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.loading")) + "</div>";
+    try {
+      const d = await fetchJson("/api/consolidation/candidates");
+      const groups = d.groups || [];
+      if (d.degraded) {
+        el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.degraded")) + "</div>";
+        return;
+      }
+      if (!groups.length) {
+        el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.none")) + "</div>";
+        return;
+      }
+      el.innerHTML = groups.map((g) => {
+        const ids = g.notes.map((n) => n.id).join(",");
+        return '<article class="review-card similar-group" data-ids="' + escapeHtml(ids) + '">' +
+          '<div class="card-top" style="margin:0 0 8px">' +
+          '<span class="chip">' + g.notes.length + escapeHtml(t("sim.group")) + "</span>" +
+          '<span class="chip">' + escapeHtml(t("sim.similarity")) + Math.floor(g.min_similarity * 100) + " %</span>" +
+          "</div>" +
+          '<ul class="similar-notes" style="margin:0 0 10px;padding-left:18px">' + g.notes.map(similarNoteHtml).join("") + "</ul>" +
+          '<textarea class="similar-text" rows="5" style="width:100%" aria-label="' + escapeHtml(t("sim.text")) + '">' + escapeHtml(g.proposal || "") + "</textarea>" +
+          '<div class="meta similar-source" style="min-height:1.2em" aria-live="polite"></div>' +
+          '<div class="review-actions">' +
+          '<button type="button" class="btn" data-similar-suggest>' + escapeHtml(t("sim.suggest")) + "</button>" +
+          '<button type="button" class="btn btn-primary" data-similar-merge>' + escapeHtml(t("sim.merge")) + "</button>" +
+          "</div>" +
+          '<div class="similar-confirm"></div>' +
+          "</article>";
+      }).join("");
+      wireSimilar(el);
+    } catch (e) {
+      el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.loadFailed") + e.message) + "</div>";
+    }
+  }
+  function wireSimilar(root) {
+    root.querySelectorAll(".similar-group").forEach((card) => {
+      const ids = card.getAttribute("data-ids");
+      const area = card.querySelector(".similar-text");
+      const source = card.querySelector(".similar-source");
+      const box = card.querySelector(".similar-confirm");
+      const suggest = card.querySelector("[data-similar-suggest]");
+      suggest.addEventListener("click", async () => {
+        suggest.disabled = true;
+        source.textContent = t("sim.suggesting");
+        try {
+          const r = await fetchJson("/api/consolidation/proposal?ids=" + encodeURIComponent(ids));
+          area.value = r.text || "";
+          source.textContent = r.source === "llm" ? t("sim.sourceLlm") : t("sim.sourceLongest");
+        } catch (e) {
+          source.textContent = t("sim.suggestFailed") + e.message;
+        } finally {
+          suggest.disabled = false;
+        }
+      });
+      card.querySelector("[data-similar-merge]").addEventListener("click", () => {
+        if (!area.value.trim()) { toast(t("sim.empty")); return; }
+        const n = ids.split(",").length;
+        box.innerHTML =
+          '<div class="result-block confirm-block" role="alertdialog">' +
+          "<strong>" + escapeHtml(t("sim.confirmTitle")) + "</strong>" +
+          "<p>" + escapeHtml(t("sim.confirm1") + n + t("sim.confirm2")) + "</p>" +
+          '<div class="confirm-actions">' +
+          '<button type="button" class="btn btn-primary" data-similar-confirm>' + escapeHtml(t("op.confirmRun")) + "</button>" +
+          '<button type="button" class="btn" data-similar-cancel>' + escapeHtml(t("op.confirmCancel")) + "</button>" +
+          "</div></div>";
+        const run = box.querySelector("[data-similar-confirm]");
+        run.focus();
+        box.querySelector("[data-similar-cancel]").addEventListener("click", () => { box.innerHTML = ""; });
+        run.addEventListener("click", async () => {
+          run.disabled = true;
+          try {
+            const r = await postJson("/api/consolidate", { ids: ids.split(",").map(Number), content: area.value });
+            toast(t("sim.done") + r.new_id);
+            loadReview();
+            loadMemory();
+            loadStatus();
+          } catch (e) {
+            toast(t("sim.failed") + e.message);
+            box.innerHTML = "";
+          }
+        });
+      });
+    });
+  }
+  async function loadDamaged() {
+    const sec = $("damaged-section");
+    const el = $("damaged-list");
+    if (!el || !sec) return;
+    try {
+      const items = await fetchJson("/api/damaged-notes");
+      sec.hidden = !items.length;
+      el.innerHTML = items.map((it) =>
+        '<article class="review-card" data-damaged-id="' + it.id + '">' +
+        '<div class="card-top" style="margin:0 0 8px">' +
+        '<span class="chip">#' + it.id + "</span>" +
+        '<span class="chip">' + escapeHtml(it.category || "insight") + "</span>" +
+        (it.project_name ? '<span class="chip">' + escapeHtml(it.project_name) + "</span>" : "") +
+        "</div>" +
+        '<p style="margin:0;white-space:pre-wrap">' + escapeHtml(it.content || "") + "</p>" +
+        '<div class="review-actions">' +
+        '<button type="button" class="btn btn-primary" data-damaged-replace="' + it.id + '">' + escapeHtml(t("dmg.replace")) + "</button>" +
+        "</div></article>"
+      ).join("");
+      el.querySelectorAll("[data-damaged-replace]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          const id = Number(b.getAttribute("data-damaged-replace"));
+          try {
+            // The list shows a shortened text; the dialog gets the whole note.
+            const full = await fetchJson("/api/memory/" + id);
+            openPinDialog({ mode: "supersede", oldId: id, content: full.content || "", category: full.category });
+          } catch (e) {
+            toast(t("supersede.failed") + e.message);
+          }
+        });
+      });
+    } catch (e) {
+      sec.hidden = false;
+      el.innerHTML = '<div class="meta">' + escapeHtml(t("dmg.loadFailed") + e.message) + "</div>";
     }
   }
   function wireReviewCards(root) {
