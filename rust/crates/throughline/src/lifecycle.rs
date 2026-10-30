@@ -8,8 +8,16 @@ use postgres::GenericClient;
 use serde::Serialize;
 use std::collections::HashMap;
 
-/// Cosine at or above which two notes count as the same thing said twice.
+/// Cosine at or above which two notes count as the same thing said twice,
+/// for the baseline model. The active model's profile decides in practice,
+/// see [`default_min_similarity`].
 pub const MIN_SIMILARITY: f64 = 0.92;
+
+/// Consolidation threshold of the active embedding model; the baseline
+/// constant when no backend is available.
+pub fn default_min_similarity(backend: Option<&crate::embedding::EmbeddingBackend>) -> f64 {
+    backend.map_or(MIN_SIMILARITY, |b| b.profile.consolidation_min_similarity)
+}
 
 /// Lowest cosine a caller may ask for. Below it nearly every pair of notes
 /// links up and the groups stop meaning anything.
@@ -354,6 +362,26 @@ pub fn record_use_or_log<C: GenericClient>(client: &mut C, ids: &[i64]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn consolidation_threshold_follows_the_profile() {
+        let backend = |model: &str| {
+            let profile = crate::embedding::profile_for(model, 768).unwrap();
+            crate::embedding::EmbeddingBackend {
+                name: "ollama".into(),
+                model: model.into(),
+                base_url: "http://127.0.0.1:11434".into(),
+                column: profile.column,
+                dim: profile.dim,
+                profile,
+            }
+        };
+        let granite = backend("granite-embedding-multilingual:278m");
+        assert_eq!(default_min_similarity(Some(&granite)), 0.93);
+        let base = backend("nomic-embed-text");
+        assert_eq!(default_min_similarity(Some(&base)), 0.92);
+        assert_eq!(default_min_similarity(None), MIN_SIMILARITY);
+    }
+
     use super::*;
 
     fn test_db() -> Option<postgres::Client> {

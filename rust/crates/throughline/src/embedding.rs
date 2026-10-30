@@ -21,14 +21,141 @@ where
     }
 }
 
+/// Model used when `OLLAMA_EMBED_MODEL` is not set. Chosen by the
+/// multilingual measurement (block 7).
+pub const DEFAULT_EMBED_MODEL: &str = "granite-embedding-multilingual:278m";
+
+/// Columns of `embeddings` that exist today. A dimension without a column is
+/// refused until a migration adds one.
+const AVAILABLE_COLUMNS: [(usize, &str); 2] = [(768, "embedding_768"), (1536, "embedding_1536")];
+
+/// Per-model settings: prefixes, vector size, column and the two cosine
+/// thresholds that depend on how the model spreads its scores.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelProfile {
+    pub query_prefix: &'static str,
+    pub document_prefix: &'static str,
+    pub dim: usize,
+    pub column: &'static str,
+    /// `as_of` recall admits a note at or above this cosine.
+    pub as_of_min_cosine: f64,
+    /// Consolidation treats two notes at or above this cosine as one.
+    pub consolidation_min_similarity: f64,
+}
+
+/// Baseline thresholds: today's constants, measured for `nomic-embed-text`.
+const BASE_AS_OF: f64 = 0.5;
+const BASE_CONSOLIDATION: f64 = 0.92;
+
+const fn profile(
+    query_prefix: &'static str,
+    document_prefix: &'static str,
+    dim: usize,
+    column: &'static str,
+    as_of_min_cosine: f64,
+    consolidation_min_similarity: f64,
+) -> ModelProfile {
+    ModelProfile {
+        query_prefix,
+        document_prefix,
+        dim,
+        column,
+        as_of_min_cosine,
+        consolidation_min_similarity,
+    }
+}
+
+/// Profile by model name; the tag (`:278m`) is ignored.
+pub fn model_profile(model: &str) -> Option<ModelProfile> {
+    let name = model.split(':').next().unwrap_or(model);
+    Some(match name {
+        "nomic-embed-text" => profile("", "", 768, "embedding_768", BASE_AS_OF, BASE_CONSOLIDATION),
+        // Winner of the multilingual measurement; thresholds measured.
+        "granite-embedding-multilingual" => profile("", "", 768, "embedding_768", 0.68, 0.93),
+        // The three profiles below were measured for ranking only; their
+        // thresholds were not, so they keep the baseline values.
+        "embeddinggemma" => profile(
+            "task: search result | query: ",
+            "title: none | text: ",
+            768,
+            "embedding_768",
+            BASE_AS_OF,
+            BASE_CONSOLIDATION,
+        ),
+        "nomic-embed-text-v2-moe" => profile(
+            "search_query: ",
+            "search_document: ",
+            768,
+            "embedding_768",
+            BASE_AS_OF,
+            BASE_CONSOLIDATION,
+        ),
+        "qwen3-embedding" => profile(
+            "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+            "",
+            1024,
+            "embedding_1024",
+            BASE_AS_OF,
+            BASE_CONSOLIDATION,
+        ),
+        _ => return None,
+    })
+}
+
+/// Profile for `model` with the vector size its first embed call returned.
+/// A known model keeps its profile (a size mismatch is an error); an unknown
+/// one gets empty prefixes, the baseline thresholds and the column of its
+/// dimension, if there is one.
+pub fn profile_for(model: &str, dim: usize) -> Result<ModelProfile> {
+    let p = match model_profile(model) {
+        Some(p) => p,
+        None => {
+            let column = AVAILABLE_COLUMNS
+                .iter()
+                .find(|(d, _)| *d == dim)
+                .map(|(_, c)| *c)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "embedding model {model} returns {dim} dimensions; \
+                         supported are 768 and 1536"
+                    )
+                })?;
+            profile("", "", dim, column, BASE_AS_OF, BASE_CONSOLIDATION)
+        }
+    };
+    if p.dim != dim {
+        return Err(anyhow!(
+            "embedding model {model} returned {dim} dimensions, its profile says {}",
+            p.dim
+        ));
+    }
+    if !AVAILABLE_COLUMNS.iter().any(|(_, c)| *c == p.column) {
+        return Err(anyhow!(
+            "embedding model {model} needs column {} ({dim} dimensions), which no migration \
+             has added yet",
+            p.column
+        ));
+    }
+    Ok(p)
+}
+
+/// Whether a text is a search question or a stored text; some models want a
+/// different prefix for each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextKind {
+    Query,
+    Document,
+}
+
 #[derive(Debug, Clone)]
 pub struct EmbeddingBackend {
     pub name: String,
     pub model: String,
     pub base_url: String,
-    /// Which embeddings column to use (768 for nomic-class local models).
+    /// Which embeddings column to use (from the profile).
     pub column: &'static str,
     pub dim: usize,
+    pub profile: ModelProfile,
 }
 
 pub fn resolve() -> Result<EmbeddingBackend> {
@@ -43,11 +170,11 @@ pub fn resolve() -> Result<EmbeddingBackend> {
         .to_string();
     let ollama_model = std::env::var("OLLAMA_EMBED_MODEL")
         .or_else(|_| std::env::var("THROUGHLINE_EMBED_MODEL"))
-        .unwrap_or_else(|_| "nomic-embed-text".into());
+        .unwrap_or_else(|_| DEFAULT_EMBED_MODEL.into());
 
     match preference.as_str() {
         "openai" | "openai-compatible" | "hosted" => Err(anyhow!(
-            "hosted OpenAI embeddings are disabled; use Ollama (nomic-embed-text) locally"
+            "hosted OpenAI embeddings are disabled; use Ollama ({DEFAULT_EMBED_MODEL}) locally"
         )),
         _ => ollama(&ollama_url, &ollama_model),
     }
@@ -58,37 +185,56 @@ fn ollama(base: &str, model: &str) -> Result<EmbeddingBackend> {
     crate::llm::ensure_ollama_local_or_allowed(base, model)?;
     let base = base.to_string();
     let model = model.to_string();
-    isolated_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()?;
-        let tags: serde_json::Value = client
-            .get(format!("{base}/api/tags"))
-            .send()
-            .map_err(|_| anyhow!("ollama unreachable at {base}"))?
-            .json()?;
-        let available = tags["models"]
-            .as_array()
-            .map(|a| {
-                a.iter().any(|m| {
-                    m["name"]
-                        .as_str()
-                        .map(|n| n.starts_with(&model) || n == model)
-                        == Some(true)
+    let found = {
+        let (base, model) = (base.clone(), model.clone());
+        isolated_blocking(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()?;
+            let tags: serde_json::Value = client
+                .get(format!("{base}/api/tags"))
+                .send()
+                .map_err(|_| anyhow!("ollama unreachable at {base}"))?
+                .json()?;
+            let available = tags["models"]
+                .as_array()
+                .map(|a| {
+                    a.iter().any(|m| {
+                        m["name"]
+                            .as_str()
+                            .map(|n| n.starts_with(&model) || n == model)
+                            == Some(true)
+                    })
                 })
-            })
-            .unwrap_or(false);
-        if !available {
-            return Err(anyhow!("ollama is missing embedding model {model}"));
-        }
-        Ok(EmbeddingBackend {
-            name: "ollama".into(),
-            model: model.to_string(),
-            base_url: base.to_string(),
-            column: "embedding_768",
-            dim: 768,
+                .unwrap_or(false);
+            if !available {
+                return Err(anyhow!("ollama is missing embedding model {model}"));
+            }
+            Ok(())
         })
-    })
+    };
+    found?;
+    let mut backend = EmbeddingBackend {
+        name: "ollama".into(),
+        model: model.clone(),
+        base_url: base,
+        column: "embedding_768",
+        dim: 768,
+        profile: profile("", "", 768, "embedding_768", BASE_AS_OF, BASE_CONSOLIDATION),
+    };
+    let profile = match model_profile(&model) {
+        // Known model: trust the profile, no extra request.
+        Some(p) => profile_for(&model, p.dim)?,
+        // Unknown model: its dimension comes from one real embed call.
+        None => {
+            let dim = embed_text(&backend, "dimension probe", TextKind::Document)?.len();
+            profile_for(&model, dim)?
+        }
+    };
+    backend.column = profile.column;
+    backend.dim = profile.dim;
+    backend.profile = profile;
+    Ok(backend)
 }
 
 /// Ollama `/api/embed` returns `{"embeddings":[[...]]}`; legacy
@@ -99,16 +245,24 @@ struct OllamaEmbedResponse {
     embedding: Option<Vec<f32>>,
 }
 
-pub fn embed_text(backend: &EmbeddingBackend, text: &str) -> Result<Vec<f32>> {
+/// Request body for `/api/embed`: the text with the profile's prefix for `kind`.
+pub fn embed_body(backend: &EmbeddingBackend, text: &str, kind: TextKind) -> serde_json::Value {
+    let prefix = match kind {
+        TextKind::Query => backend.profile.query_prefix,
+        TextKind::Document => backend.profile.document_prefix,
+    };
+    serde_json::json!({ "model": backend.model, "input": format!("{prefix}{text}") })
+}
+
+pub fn embed_text(backend: &EmbeddingBackend, text: &str, kind: TextKind) -> Result<Vec<f32>> {
     // Every caller sends text through here, so the lock is checked before the POST.
     crate::llm::ensure_ollama_local_or_allowed(&backend.base_url, &backend.model)?;
     let backend = backend.clone();
-    let text = text.to_string();
+    let body = embed_body(&backend, text, kind);
     isolated_blocking(move || {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
-        let body = serde_json::json!({ "model": backend.model, "input": text });
         let resp: OllamaEmbedResponse = client
             .post(format!("{}/api/embed", backend.base_url))
             .json(&body)
@@ -135,6 +289,110 @@ pub fn label(backend: &EmbeddingBackend) -> String {
 mod tests {
     use super::*;
 
+    fn backend_for(model: &str) -> EmbeddingBackend {
+        let profile = profile_for(model, 768).expect("profile");
+        EmbeddingBackend {
+            name: "ollama".into(),
+            model: model.into(),
+            base_url: "http://127.0.0.1:11434".into(),
+            column: profile.column,
+            dim: profile.dim,
+            profile,
+        }
+    }
+
+    #[test]
+    fn profile_known_models() {
+        let base = model_profile("nomic-embed-text").expect("base");
+        assert_eq!((base.dim, base.column), (768, "embedding_768"));
+        assert_eq!((base.query_prefix, base.document_prefix), ("", ""));
+        assert_eq!(
+            (base.as_of_min_cosine, base.consolidation_min_similarity),
+            (0.5, 0.92)
+        );
+        let win = model_profile("granite-embedding-multilingual:278m").expect("winner");
+        assert_eq!((win.dim, win.column), (768, "embedding_768"));
+        assert_eq!(
+            (win.as_of_min_cosine, win.consolidation_min_similarity),
+            (0.68, 0.93)
+        );
+        assert_eq!(win.query_prefix, "");
+        let v2 = model_profile("nomic-embed-text-v2-moe:475m").expect("v2");
+        assert_eq!(v2.query_prefix, "search_query: ");
+        assert_eq!(v2.document_prefix, "search_document: ");
+        let gemma = model_profile("embeddinggemma:300m-q8").expect("gemma");
+        assert_eq!(gemma.document_prefix, "title: none | text: ");
+        let qwen = model_profile("qwen3-embedding:0.6b-f16").expect("qwen");
+        assert_eq!(qwen.dim, 1024);
+        assert!(qwen.query_prefix.starts_with("Instruct: "));
+        assert!(model_profile("something-else").is_none());
+        assert_eq!(DEFAULT_EMBED_MODEL, "granite-embedding-multilingual:278m");
+    }
+
+    #[test]
+    fn unknown_model_falls_back_to_default_profile_only_when_dim_matches() {
+        let p = profile_for("mystery-model", 768).expect("768");
+        assert_eq!((p.query_prefix, p.document_prefix), ("", ""));
+        assert_eq!(p.column, "embedding_768");
+        assert_eq!(
+            (p.as_of_min_cosine, p.consolidation_min_similarity),
+            (0.5, 0.92)
+        );
+        assert_eq!(
+            profile_for("mystery-model", 1536).unwrap().column,
+            "embedding_1536"
+        );
+    }
+
+    #[test]
+    fn unknown_dimension_is_refused() {
+        let err = profile_for("mystery-model", 384).unwrap_err();
+        assert!(err.to_string().contains("384"), "{err}");
+        // 1024 has no column until a migration adds one.
+        let err = profile_for("mystery-model", 1024).unwrap_err();
+        assert!(err.to_string().contains("1024"), "{err}");
+    }
+
+    #[test]
+    fn embed_text_adds_the_prefix() {
+        let b = backend_for("embeddinggemma:300m-q8");
+        let q = embed_body(&b, "wo liegt es", TextKind::Query);
+        assert_eq!(q["input"], "task: search result | query: wo liegt es");
+        assert_eq!(q["model"], "embeddinggemma:300m-q8");
+        let d = embed_body(&b, "ein Text", TextKind::Document);
+        assert_eq!(d["input"], "title: none | text: ein Text");
+        let g = backend_for(DEFAULT_EMBED_MODEL);
+        assert_eq!(embed_body(&g, "x", TextKind::Query)["input"], "x");
+    }
+
+    #[test]
+    fn long_document_still_embeds() {
+        let base = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+        let reachable = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap()
+            .get(format!("{base}/api/tags"))
+            .send()
+            .is_ok();
+        if !reachable {
+            eprintln!("skipped: ollama unreachable at {base}");
+            return;
+        }
+        let mut b = backend_for(DEFAULT_EMBED_MODEL);
+        b.base_url = base;
+        let text = "Ein langer Absatz über Speicherorte und Entscheidungen. ".repeat(80);
+        assert!(text.chars().count() >= 4000);
+        match embed_text(
+            &b,
+            &text[..text.char_indices().nth(4000).unwrap().0],
+            TextKind::Document,
+        ) {
+            Ok(v) => assert_eq!(v.len(), 768),
+            Err(e) => eprintln!("skipped: model not usable here: {e}"),
+        }
+    }
+
     #[test]
     fn embed_text_refuses_before_sending() {
         let backend = EmbeddingBackend {
@@ -143,8 +401,9 @@ mod tests {
             base_url: "http://ollama.com:1".into(),
             column: "embedding_768",
             dim: 768,
+            profile: model_profile("nomic-embed-text").unwrap(),
         };
-        let err = embed_text(&backend, "secret").unwrap_err();
+        let err = embed_text(&backend, "secret", TextKind::Document).unwrap_err();
         assert!(err
             .downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
             .is_some());

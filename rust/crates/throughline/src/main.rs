@@ -241,9 +241,10 @@ enum Command {
         /// Merge every group into one new note holding the longest text.
         #[arg(long)]
         apply: bool,
-        /// Cosine at or above which two notes belong together.
-        #[arg(long, default_value_t = lifecycle::MIN_SIMILARITY)]
-        min_similarity: f64,
+        /// Cosine at or above which two notes belong together (default: the
+        /// active embedding model's profile, 0.92 for the baseline).
+        #[arg(long)]
+        min_similarity: Option<f64>,
         /// Print the groups as JSON (with --dry-run).
         #[arg(long)]
         json: bool,
@@ -820,9 +821,13 @@ fn main() -> Result<()> {
                      (for example: throughline consolidate --dry-run)"
                 );
             }
-            lifecycle::check_min_similarity(min_similarity).map_err(|m| anyhow::anyhow!(m))?;
+            if let Some(v) = min_similarity {
+                lifecycle::check_min_similarity(v).map_err(|m| anyhow::anyhow!(m))?;
+            }
             let backend = embedding::resolve()
                 .context("consolidate needs the embedding model to find similar notes")?;
+            let min_similarity =
+                min_similarity.unwrap_or_else(|| lifecycle::default_min_similarity(Some(&backend)));
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
