@@ -815,6 +815,7 @@ fn main() -> Result<()> {
                      (for example: throughline consolidate --dry-run)"
                 );
             }
+            lifecycle::check_min_similarity(min_similarity).map_err(|m| anyhow::anyhow!(m))?;
             let backend = embedding::resolve()
                 .context("consolidate needs the embedding model to find similar notes")?;
             let mut client = config::DbConfig::from_env()

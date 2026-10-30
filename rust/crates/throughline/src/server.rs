@@ -1951,12 +1951,8 @@ async fn consolidation_candidates_handler(
     let min_similarity = params
         .min_similarity
         .unwrap_or(crate::lifecycle::MIN_SIMILARITY);
-    if !(0.0..=1.0).contains(&min_similarity) {
-        return api_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "validation_error",
-            "min_similarity must be between 0 and 1",
-        );
+    if let Err(msg) = crate::lifecycle::check_min_similarity(min_similarity) {
+        return api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", &msg);
     }
     let backend = tokio::task::spawn_blocking(crate::embedding::resolve)
         .await

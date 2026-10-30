@@ -11,6 +11,21 @@ use std::collections::HashMap;
 /// Cosine at or above which two notes count as the same thing said twice.
 pub const MIN_SIMILARITY: f64 = 0.92;
 
+/// Lowest cosine a caller may ask for. Below it nearly every pair of notes
+/// links up and the groups stop meaning anything.
+pub const MIN_SIMILARITY_FLOOR: f64 = 0.5;
+
+/// Accept a caller-chosen threshold only between the floor and 1.0.
+pub fn check_min_similarity(v: f64) -> Result<f64, String> {
+    if (MIN_SIMILARITY_FLOOR..=1.0).contains(&v) {
+        Ok(v)
+    } else {
+        Err(format!(
+            "min_similarity must be between {MIN_SIMILARITY_FLOOR} and 1"
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct GroupNote {
     pub id: i64,
@@ -214,7 +229,7 @@ pub fn consolidate<C: GenericClient>(
     }
     let mut tx = client.transaction()?;
     let rows = tx.query(
-        "SELECT id, category::text, project_name, status, superseded_by,
+        "SELECT id, category::text, project_name, COALESCE(status, 'active'), superseded_by,
                 confidence::float8, length(content)
          FROM memory_chunks WHERE id = ANY($1) ORDER BY id FOR UPDATE",
         &[&ids],
@@ -298,6 +313,13 @@ pub fn consolidate<C: GenericClient>(
 
 /// Count one use for each note in `ids`. A repeated id counts once. Only
 /// `access_count` and `last_accessed` change. Returns the rows updated.
+/// Row locks are taken in id order, as `consolidate` does, so two writers
+/// touching overlapping notes cannot deadlock.
+const RECORD_USE_SQL: &str = "UPDATE memory_chunks mc \
+         SET access_count = COALESCE(mc.access_count, 0) + 1, last_accessed = now() \
+         FROM (SELECT id FROM memory_chunks WHERE id = ANY($1) ORDER BY id FOR UPDATE) s \
+         WHERE mc.id = s.id";
+
 pub fn record_use<C: GenericClient>(client: &mut C, ids: &[i64]) -> anyhow::Result<u64> {
     let mut ids = ids.to_vec();
     ids.sort_unstable();
@@ -305,12 +327,7 @@ pub fn record_use<C: GenericClient>(client: &mut C, ids: &[i64]) -> anyhow::Resu
     if ids.is_empty() {
         return Ok(0);
     }
-    Ok(client.execute(
-        "UPDATE memory_chunks \
-         SET access_count = COALESCE(access_count, 0) + 1, last_accessed = now() \
-         WHERE id = ANY($1)",
-        &[&ids],
-    )?)
+    Ok(client.execute(RECORD_USE_SQL, &[&ids])?)
 }
 
 /// How strong a note is: it fades with the days since its last use and
@@ -843,5 +860,67 @@ mod tests {
         assert_eq!(row.get::<_, String>(0), "forgotten");
         assert!(row.get::<_, bool>(1));
         assert_eq!(row.get::<_, Option<i64>>(2), Some(new_id));
+    }
+
+    #[test]
+    fn min_similarity_below_the_floor_is_rejected() {
+        assert!(check_min_similarity(0.49).is_err());
+        assert!(check_min_similarity(0.0).is_err());
+        assert!(check_min_similarity(1.01).is_err());
+        assert!(check_min_similarity(f64::NAN).is_err());
+        assert_eq!(check_min_similarity(0.5), Ok(0.5));
+        assert_eq!(check_min_similarity(0.92), Ok(0.92));
+        assert_eq!(check_min_similarity(1.0), Ok(1.0));
+    }
+
+    #[test]
+    fn consolidate_accepts_a_source_with_null_status() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping consolidate_accepts_a_source_with_null_status: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_full(&mut tx, &format!("null A {tag}"), "decision", None, 1.0);
+        let b = seed_full(&mut tx, &format!("null B {tag}"), "decision", None, 1.0);
+        tx.execute(
+            "UPDATE memory_chunks SET status = NULL WHERE id = $1",
+            &[&b],
+        )
+        .expect("null status");
+        let new_id = consolidate(&mut tx, &[a, b], &format!("null merged {tag}"), None)
+            .expect("consolidate");
+        let row = tx
+            .query_one(
+                "SELECT status, superseded_by FROM memory_chunks WHERE id = $1",
+                &[&b],
+            )
+            .expect("row");
+        assert_eq!(row.get::<_, String>(0), "superseded");
+        assert_eq!(row.get::<_, Option<i64>>(1), Some(new_id));
+    }
+
+    #[test]
+    fn record_use_locks_rows_in_id_order() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping record_use_locks_rows_in_id_order: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_full(&mut tx, &format!("lock A {tag}"), "decision", None, 1.0);
+        let b = seed_full(&mut tx, &format!("lock B {tag}"), "decision", None, 1.0);
+        let c = seed_full(&mut tx, &format!("lock C {tag}"), "decision", None, 1.0);
+        // Unsorted input with a repeat: still one use each.
+        assert_eq!(record_use(&mut tx, &[c, a, b, a]).expect("use"), 3);
+        for id in [a, b, c] {
+            assert_eq!(count(&mut tx, id).0, 1);
+        }
+        // The statement must take its row locks in id order (deadlock safety
+        // against consolidate, which locks ORDER BY id).
+        let sql = RECORD_USE_SQL.to_lowercase();
+        assert!(sql.contains("order by id for update"), "{sql}");
     }
 }
