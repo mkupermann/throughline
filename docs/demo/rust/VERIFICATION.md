@@ -41,7 +41,7 @@ Updated 2026-10-24 after the presentation-readiness program (M2 to M5). The orig
 | Rust router has no application authentication/role layer. | Local trusted deployment only; Python team settings are not claimed to protect it. |
 | Ask resolves its backend before entering the generation fallback. | No unconditional offline-answer promise. |
 | CSV requests up to 50,000 matching records. | Described as bounded conversation export, not a database backup. |
-| Conversation role toggle uses `tool`, while stored tool-result messages use `tool_result`. | The captured conversation omits that role; Browse/message detail is used to inspect tool output. |
+| Conversation role toggle used `tool`, while stored tool-result messages use `tool_result`. | Fixed: the Tool toggle covers both roles, tool results show collapsed in the session, and the fixture puts each tool call on the assistant message that makes it. |
 
 ## Not established by this pass
 
