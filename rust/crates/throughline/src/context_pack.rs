@@ -160,12 +160,21 @@ impl std::fmt::Display for PackError {
             PackError::BudgetOutOfRange(n) => {
                 write!(f, "budget {n} is outside {MIN_BUDGET}..={MAX_BUDGET}")
             }
-            PackError::HeaderTooLarge => write!(f, "the header does not fit the budget"),
+            PackError::HeaderTooLarge => write!(
+                f,
+                "the header does not fit the budget; use a shorter project name or a larger budget"
+            ),
         }
     }
 }
 
 impl std::error::Error for PackError {}
+
+/// The input problem behind a `build_context` error, if there is one: a header that cannot fit
+/// the budget (a very long project name) is the caller's doing, not a database failure.
+pub fn input_error(e: &anyhow::Error) -> Option<&PackError> {
+    e.downcast_ref::<PackError>()
+}
 
 pub struct ContextRequest<'a> {
     pub project: &'a str,
@@ -357,7 +366,7 @@ pub fn build_context<C: GenericClient>(
     review(client, req.project, &shown, &mut lines)?;
 
     // Sources: the sessions behind the lines that made it into the pack, first appearance first.
-    let first = pack(&header, &lines, req.budget).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let first = pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?;
     let mut sources: Vec<Line> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
     for item in &first.items {
