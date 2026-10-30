@@ -321,6 +321,13 @@ BEGIN
 END $$;
 "#;
 
+/// Recall looks up successors (`superseded_by = id`) per candidate and per
+/// associative step. Only replaced notes carry the column, so the index is
+/// partial.
+const MEMORY_SUPERSEDED_BY_INDEX: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_memory_superseded_by ON memory_chunks (superseded_by) WHERE superseded_by IS NOT NULL;
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -336,6 +343,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("010_memory_extracted_until.sql", MEMORY_EXTRACTED_UNTIL),
     ("011_memory_source_ui_pin.sql", MEMORY_SOURCE_UI_PIN),
     ("012_memory_valid_time.sql", MEMORY_VALID_TIME),
+    (
+        "013_memory_superseded_by_index.sql",
+        MEMORY_SUPERSEDED_BY_INDEX,
+    ),
 ];
 
 /// `migration_name` matches the Python package's `applied_migrations` table
@@ -529,5 +540,31 @@ mod tests {
             .map(|i| instant(&mut tx, *i))
             .collect();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn superseded_by_index_is_the_last_migration() {
+        let (name, sql) = MIGRATIONS.last().expect("migrations");
+        assert_eq!(*name, "013_memory_superseded_by_index.sql");
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping superseded_by_index_is_the_last_migration: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        // twice: a second run is a no-op
+        tx.batch_execute(sql).expect("first run");
+        tx.batch_execute(sql).expect("second run");
+        let def: String = tx
+            .query_one(
+                "SELECT indexdef FROM pg_indexes \
+                 WHERE tablename = 'memory_chunks' AND indexname = 'idx_memory_superseded_by'",
+                &[],
+            )
+            .expect("index exists")
+            .get(0);
+        assert!(def.contains("(superseded_by)"), "{def}");
+        assert!(def.contains("WHERE (superseded_by IS NOT NULL)"), "{def}");
     }
 }

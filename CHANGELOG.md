@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Recall: ask for notes by meaning
+
+Notes now take part in the embedding run, and a new `recall` finds them by full text or, on request, by a weighted ranking built on meaning. `throughline embed` embeds every memory note except forgotten ones before it turns to messages. Full text in mode `current` needs no Ollama. The weighted ranking, `as_of` and `grounded` use the question's vector; without Ollama they answer with `degraded: "no_embeddings"` and fall back to word matching.
+
+- **Four modes.** `current` ranks the notes that hold today. `as_of` takes a date (`valid_at` or `known_at`), keeps the best matches among the notes that held then and lists them oldest first, with the chain of replacements. `associative` starts from the best current notes and follows links to neighbours, up to two hops, and marks replaced neighbours as "superseded" and neighbours that no longer hold as "expired". `grounded` keeps only notes that trace back to a conversation still in the database and shows the source message that matches best. Every hit carries `source_at`, the date of its source.
+- **Three ways in.** `throughline recall <text>` with `--project`, `--mode`, `--rank`, `--at`, `--known-at`, `--limit` and `--json`. `GET /api/recall` with `q`, `project`, `mode`, `rank`, `valid_at`, `known_at` and `limit`; a bad mode, rank or date, `as_of` without a date, or a question over 2,000 characters gives 422 `validation_error`. An MCP tool `recall` with the same arguments. The memory view has a "By meaning" toggle, which uses the weighted ranking.
+- **MCP search honours `project`.** The `search` tool ignored its `project` argument before.
+- **Full text is the default ranking, because the weighted one did not beat it.** `throughline recall-eval --set <file> --k 5` compares the rankings with cosine, phrase match and random. In a first test on 30 questions the weighted ranking reached 66.7 % hit@5, the same as full text. It put the right note higher on average (MRR 0.62 against 0.53), but the bar set before the run, five points over the better alternative, was not met. The rule set with that bar says the simpler alternative then becomes the default, so `current` now ranks by full text (`ts_rank` of the question words, the method that was measured). Ask for the weighted ranking with `rank=weighted`, `--rank weighted` or the MCP argument `rank`. `recall-eval` reports `current` (now full text) and `weighted` side by side.
+- **Migration 013** adds a partial index on `memory_chunks.superseded_by`, which recall uses to find successors.
+
 ### Memory notes know when they were valid
 
 Every note now carries the time it was true, apart from the time it was recorded. Migration 012 adds `valid_from` and `valid_to` to `memory_chunks`. Notes from before the migration start at their source date, or at their creation date. New notes start when they were pinned or written, at the source date for extracted notes, and at the file's modification time for agent memory. Superseded or merged notes end where their successor begins.

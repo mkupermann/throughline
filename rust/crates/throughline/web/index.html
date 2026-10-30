@@ -650,6 +650,7 @@ select option { background: var(--bg-elevated); color: var(--text); }
   max-width: 100%;
 }
 .chip[hidden] { display: none; }
+.pager[hidden], .meta[hidden] { display: none; }
 .chip strong {
   color: var(--text);
   font-weight: 600;
@@ -2163,12 +2164,14 @@ td .empty {
               <option value="asc" data-i18n="sort.oldNew">Old to new</option>
             </select>
           </label>
+          <button class="btn btn-ghost togglable" id="memory-meaning" type="button" aria-pressed="false" data-i18n="mem.meaning">By meaning</button>
           <button class="btn btn-ghost togglable fav-toggle" id="memory-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
           <button class="btn btn-primary" id="memory-go" type="button" data-i18n="mem.searchBtn">Search</button>
           <button class="btn btn-ghost" id="memory-ingest" type="button" data-i18n="mem.ingest">Import memory</button>
         </div>
+        <div class="meta" id="memory-degraded" hidden></div>
         <div class="history list-anim" id="memory-list"></div>
-        <div class="pager">
+        <div class="pager" id="memory-pager">
           <button class="btn btn-ghost" id="memory-prev" type="button" data-i18n="mem.prev">← Prev</button>
           <div id="memory-page-info">-</div>
           <button class="btn btn-ghost" id="memory-next" type="button" data-i18n="mem.next">Next</button>
@@ -2737,6 +2740,9 @@ td .empty {
       "mem.neverValid": "never valid (correction)",
       "mem.sourceAt": "source from ",
       "mem.asof": "As of",
+      "mem.meaning": "By meaning",
+      "mem.score": "score ",
+      "mem.degraded": "Ollama not reachable — ranked without meaning",
       "mem.asof.valid": "was valid",
       "mem.asof.known": "was known",
       "supersede.kind": "Kind",
@@ -3382,6 +3388,9 @@ td .empty {
       "mem.neverValid": "nie gültig (Korrektur)",
       "mem.sourceAt": "Quelle vom ",
       "mem.asof": "Stand am",
+      "mem.meaning": "Nach Bedeutung",
+      "mem.score": "Score ",
+      "mem.degraded": "Ollama nicht erreichbar, Rangfolge ohne Bedeutung",
       "mem.asof.valid": "galt",
       "mem.asof.known": "war bekannt",
       "supersede.kind": "Art",
@@ -6457,10 +6466,54 @@ td .empty {
   })();
 
   // Agent Memory
+  function meaningOn() {
+    const b = $("memory-meaning");
+    return !!b && b.getAttribute("aria-pressed") === "true";
+  }
+
+  // "By meaning": the weighted recall ranking over current notes, no paging.
+  async function loadMemoryMeaning(el) {
+    const note = $("memory-degraded");
+    const pager = $("memory-pager");
+    if (pager) pager.hidden = true;
+    if (note) note.hidden = true;
+    const p = new URLSearchParams({ mode: "current", rank: "weighted", limit: "50", q: state.memory.q });
+    try {
+      const data = await fetchJson("/api/recall?" + p.toString());
+      const hits = data.hits || [];
+      if (note) {
+        note.textContent = data.degraded ? t("mem.degraded") : "";
+        note.hidden = !data.degraded;
+      }
+      el.innerHTML = hits.map((h) => {
+        const proj = h.project_name ? '<span class="chip">' + escapeHtml(h.project_name) + "</span>" : "";
+        return (
+          '<article class="card mem-card" data-mem-id="' + Number(h.id) + '" data-mem-score="' +
+          escapeHtml(Number(h.score).toFixed(2)) + '">' +
+          '<div class="card-top" style="margin:0 0 8px">' +
+          '<span class="chip">' + escapeHtml(h.category || "insight") + "</span>" + proj +
+          '<span class="chip">#' + Number(h.id) + "</span>" +
+          '<span class="chip" data-mem-score-chip>' + escapeHtml(t("mem.score") + Number(h.score).toFixed(2)) + "</span>" +
+          "</div>" +
+          '<p class="mem-preview" style="margin:0;white-space:pre-wrap">' + escapeHtml(h.content || "") + "</p>" +
+          "</article>"
+        );
+      }).join("") || emptyBox(t("mem.noMemory"), t("mem.ingestNotes"));
+      $("memory-count").textContent = hits.length.toLocaleString();
+    } catch (e) {
+      el.innerHTML = emptyBox(t("mem.couldNotLoad"), e.message);
+    }
+  }
+
   async function loadMemory() {
     const el = $("memory-list");
     if (!el) return;
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+    if (meaningOn() && state.memory.q) return loadMemoryMeaning(el);
+    const pg = $("memory-pager");
+    if (pg) pg.hidden = false;
+    const dg = $("memory-degraded");
+    if (dg) dg.hidden = true;
     const p = new URLSearchParams();
     p.set("limit", String(state.memory.limit));
     p.set("offset", String(state.memory.offset));
@@ -6659,6 +6712,11 @@ td .empty {
       state.memory.offset = 0;
       loadMemory();
     }
+    const meaning = $("memory-meaning");
+    if (meaning) meaning.addEventListener("click", () => {
+      meaning.setAttribute("aria-pressed", meaningOn() ? "false" : "true");
+      apply();
+    });
     if (go) go.addEventListener("click", apply);
     if (q) q.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); apply(); }

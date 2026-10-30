@@ -54,8 +54,14 @@ pub fn blended_score(base: f32, kind: &str, created_at: DateTime<Utc>) -> f32 {
     base + kind_bonus(kind) + recency_bonus(created_at)
 }
 
-/// ILIKE ranking over message text.
-pub fn search<C: GenericClient>(client: &mut C, query: &str, limit: i32) -> Result<Vec<SearchHit>> {
+/// ILIKE ranking over message text. With a project, only that project's
+/// conversations are searched and configs (which carry no project) are left out.
+pub fn search<C: GenericClient>(
+    client: &mut C,
+    query: &str,
+    limit: i32,
+    project: Option<&str>,
+) -> Result<Vec<SearchHit>> {
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let rows = client.query(
         r#"
@@ -70,10 +76,11 @@ pub fn search<C: GenericClient>(client: &mut C, query: &str, limit: i32) -> Resu
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id
         WHERE m.content ILIKE $1
+          AND ($3::text IS NULL OR c.project_name = $3)
         ORDER BY m.created_at DESC
         LIMIT $2::bigint
         "#,
-        &[&like, &(limit as i64)],
+        &[&like, &(limit as i64), &project],
     )?;
 
     let mut hits: Vec<SearchHit> = rows
@@ -95,6 +102,9 @@ pub fn search<C: GenericClient>(client: &mut C, query: &str, limit: i32) -> Resu
             }
         })
         .collect();
+    if project.is_some() {
+        return Ok(hits);
+    }
     let rows = client.query(
         r#"
         SELECT id, name, kind, left(content, 240), imported_at
@@ -190,7 +200,7 @@ pub fn hybrid<C: GenericClient>(
             }
         }
     }
-    let mut lex = search(client, query, limit)?;
+    let mut lex = search(client, query, limit, None)?;
     hits.append(&mut lex);
     // Durable notes (agent memory, project instructions) are first-class hits —
     // otherwise Find never surfaces MiMo/agent memory in the GUI.
@@ -212,7 +222,7 @@ pub fn hybrid<C: GenericClient>(
 }
 
 /// Lexical hits from `memory_chunks` and indexed instruction files.
-fn memory_hits<C: GenericClient>(
+pub(crate) fn memory_hits<C: GenericClient>(
     client: &mut C,
     query: &str,
     limit: i32,
@@ -339,7 +349,7 @@ pub fn search_from<C: GenericClient>(
     source: SearchSource,
 ) -> Result<Vec<SearchHit>> {
     if source == SearchSource::Messages {
-        return search(client, query, limit);
+        return search(client, query, limit, None);
     }
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let mut hits = Vec::new();
@@ -385,7 +395,7 @@ pub fn search_from<C: GenericClient>(
         }));
     }
     if source == SearchSource::All {
-        hits.extend(search(client, query, limit)?);
+        hits.extend(search(client, query, limit, None)?);
         // Project instruction files (AGENTS.md, CLAUDE.md, …) live in prompts.
         let rows = client.query(
             r#"

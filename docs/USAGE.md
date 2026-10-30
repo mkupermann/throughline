@@ -177,6 +177,37 @@ The agent-memory import follows the same rules. A changed section becomes a succ
 
 Replacing a forgotten note keeps it forgotten. It points at its successor and gets an end date, but it shows up neither in History nor in an answer about a date. The import leaves a forgotten note forgotten when its section vanishes.
 
+## Recall: finding notes by meaning
+
+`recall` finds memory notes for a question and says why each one came up. By default it ranks by full text. The weighted ranking, which also weighs meaning, recency and reliability, is there on request and needs embeddings. `throughline embed` now embeds memory notes (every status except forgotten) before it turns to messages, so run it once after upgrading.
+
+```bash
+throughline recall "how do we deploy" --project demo --mode current --limit 5
+throughline recall "how do we deploy" --rank weighted
+throughline recall "deployment target" --mode as_of --at 2026-01-15 --json
+```
+
+Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `rank` (`fulltext` or `weighted`), `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`). A mode or rank that does not exist, a date that does not parse, `as_of` without a date, or a question longer than 2,000 characters gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `rank`, `valid_at`, `known_at` and `limit`; bad values give error -32602. The MCP `search` tool also honours `project` now.
+
+Full text is the default because the first measurement (below) did not show the gain for the weighted ranking that the bar set beforehand asked for, and that bar came with the rule that the simpler alternative then becomes the default. Full text here means `ts_rank` of the question's words, joined by OR: notes that share words come first, the others follow by id. Pass `rank=weighted` (CLI `--rank weighted`) to rank by the weighted sum instead. Either way, `why` lists the weighted parts, and `why.fulltext` holds the `ts_rank` when full text ranked the hits.
+
+The four modes differ in what they admit and how they rank:
+
+- `current` (the default) admits notes that hold now: not replaced, merged, forgotten or expired, from the given project and from notes without a project. It ranks by full text unless you ask for `rank=weighted`, a weighted sum of cosine similarity (0.45), word overlap (0.20), recency (0.10, a decay with a 90-day scale), reliability (0.10), strength (0.10, a fixed placeholder of 0.5 for now) and provenance (0.05).
+- `as_of` needs `valid_at` or `known_at`. It admits notes that held on that day and match the question by words or by cosine of at least 0.5, keeps the `limit` best of them by the rank, and sorts those by `valid_from`. It shows the chain fields, so you see what replaced what.
+- `associative` takes the best current notes by the rank as seeds and adds neighbours through a replacement chain, the same conversation, the same file, or a merge, with at most two hops. A neighbour scores max(its own score, seed score × 0.8^hops); its own score uses the same rank as the seeds. A replaced neighbour is labelled "superseded", one whose validity or expiry has passed or that is stale is labelled "expired". It returns up to twice the limit.
+- `grounded` admits only notes whose chain started in a conversation that still exists, and attaches the source message that matches best (by cosine, by words if there is no vector). It walks the ranking a few notes at a time and stops once the limit has evidence. That checks a note against Throughline's own transcripts, not against the world.
+
+Each hit carries `source_at`, the date of its source: the source date of the first note in its chain, else the start of its conversation. The CLI prints it after the session title.
+
+Without Ollama no vector exists for the question. Full text in `current` does not need one and answers normally. The weighted ranking, `as_of` and `grounded` answer with `"degraded": "no_embeddings"` and rank by words only. In the memory view, "By meaning" uses the weighted ranking and shows the same notice.
+
+### Measuring recall
+
+`throughline recall-eval --set <file> --k 5 [--seed 7] [--json]` runs a set of questions with known answers through `current`, `weighted`, plain cosine, full text, phrase match and random, and reports hit@k and the mean reciprocal rank (MRR). `current` uses the default rank, so it equals `fulltext` by construction; `weighted` is the weighted ranking. The set is a file you write from your own notes. Keep it outside the repository if the notes are private.
+
+A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5 with MRR 0.62, full text 66.7 % with MRR 0.53, cosine 63.3 % with MRR 0.57, random 3.3 %. So the weighted ranking did not beat plain full text on hits. It ranked the right note higher on average, but the bar set beforehand was five points over the better alternative, and that was not reached. Following the rule that came with the bar, full text became the default. Thirty questions from one corpus is a small sample; a larger measurement will look at the weighted ranking again.
+
 ## Leaving things out of the ingest
 
 Some paths and projects should never reach the corpus at all. The ingest
