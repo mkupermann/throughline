@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Context pack: a project briefing that fits a budget
+
+`context` packs what an assistant should know about a project into a token budget you choose, so a new session can start from it. It reads the current notes, the recent sessions and, if you give a task, the notes that match it. Every line carries its source. It needs no Ollama.
+
+- **Fixed order, hard budget.** Decisions come first, then notes relevant to the task, recent sessions, open questions, notes that need review and the sources. A line that does not fit is skipped, never cut. The total never exceeds the budget; a property test checks that on random input.
+- **Three ways in.** `throughline context --project P [--task "…"] [--budget N] [--json]`, `GET /api/context?project=&task=&budget=` and the MCP tool `project_context`.
+- **Budget 64 to 32,768, default 2,000.** Outside that range, or with a header that does not fit, the answer is an error (422 over HTTP, -32602 over MCP).
+
 ### A new look: the Ink theme
 
 The interface was restyled with the Hallmark theme Ink. Layout, texts and every id, class and script hook stayed as they were.

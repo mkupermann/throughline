@@ -208,6 +208,56 @@ Without Ollama no vector exists for the question. Full text in `current` does no
 
 A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5 with MRR 0.62, full text 66.7 % with MRR 0.53, cosine 63.3 % with MRR 0.57, random 3.3 %. So the weighted ranking did not beat plain full text on hits. It ranked the right note higher on average, but the bar set beforehand was five points over the better alternative, and that was not reached. Following the rule that came with the bar, full text became the default. Thirty questions from one corpus is a small sample; a larger measurement will look at the weighted ranking again.
 
+## Context pack
+
+`context` builds a briefing for one project that fits a token budget: what a new session should know before it starts. Where `handoff` carries one session forward, the context pack reads the project's current notes. It needs no Ollama.
+
+```bash
+throughline context --project demo
+throughline context --project demo --task "fix the login redirect" --budget 1200
+throughline context --project demo --json
+```
+
+Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`. Over MCP, the `project_context` tool takes `project` (required), `task` and `budget`. The answer holds `text` (the briefing), `items` (each line with its section, token cost and citation), `citations`, `tokens_used`, `budget`, `within_budget`, `skipped` and `estimate`.
+
+### What goes in, and in which order
+
+Notes that hold now are used: not replaced, forgotten, merged or expired, from the project plus notes without a project. Sections appear in this order and only when they have a line.
+
+1. **Decisions**: current notes of the categories decision, preference and project_context, newest first. They come before everything else, so they are the last to be crowded out.
+2. **Relevant to the task**: only with a task. Up to 20 notes ranked by full text, without the ones already shown.
+3. **Recent sessions**: the 8 newest conversations of the project.
+4. **Open questions**: up to 5 notes that contain a question mark, "todo" or "open".
+5. **Needs review**: up to 5 stale notes, or notes whose validity lapsed without a successor.
+6. **Sources**: the sessions behind the notes that made it in.
+
+### The budget
+
+The budget is in estimated tokens, 64 to 32,768, default 2,000. The estimate is the larger of the word count and the character count divided by four (rounded up), at least 1, plus 1 for each line break. A section heading costs the same as a line. Throughline has no tokenizer for your model, so this is a rule of thumb; leave some room if the limit is tight.
+
+The pack is filled line by line in the order above. A line that would push the total over the budget is skipped whole, and a shorter line after it can still fit. Lines are never cut. `skipped` counts the lines left out. `tokens_used` never exceeds `budget`. A budget below 64, or above 32,768, gives 422 `validation_error` over HTTP and error -32602 over MCP. A header that does not fit gives the same.
+
+### Line format
+
+The first line is the header: project, date and budget. A note reads `- [m#42 · 2026-03-02 · decision] text (source: session "Title", 2026-03-02)`, where `m#` is the note id and the part in parentheses is left out for a note that does not come from a conversation. A session reads `- [s#17 · 2026-03-02 · claude_code] Title`. Line breaks inside a note become spaces. Every `m#` and `s#` id exists in the database; `citations` lists each one once.
+
+### Example
+
+Invented data, budget 400:
+
+```text
+Context for Atlas-demo · 2026-10-30 · budget 400 tokens (estimated)
+## Decisions
+- [m#118 · 2026-10-02 · decision] Deploy with Docker Compose on the staging host. (source: session "Pick a deploy target", 2026-10-02)
+- [m#97 · 2026-09-21 · preference] Keep migrations small and reversible.
+## Recent sessions
+- [s#31 · 2026-10-28 · claude_code] Fix the login redirect
+## Open questions
+- [m#121 · 2026-10-05 · project_context] Should the export job run nightly? TODO
+## Sources
+- [s#12 · 2026-10-02] "Pick a deploy target"
+```
+
 ## Leaving things out of the ingest
 
 Some paths and projects should never reach the corpus at all. The ingest
