@@ -184,7 +184,7 @@ throughline consolidate --dry-run --min-similarity 0.95
 throughline consolidate --apply                 # merge every group
 ```
 
-Candidates are notes that are valid now, have a vector, belong to the same project and have a cosine similarity of at least 0.93 for the default model, 0.92 for `nomic-embed-text` (`--min-similarity`). Notes that are linked by such pairs form one group. The command needs the embedding model. Run `throughline embed` first.
+Candidates are notes that are valid now, have a vector, belong to the same project and have a cosine similarity of at least the active model's threshold, 0.92 for the default `nomic-embed-text` and 0.93 for granite (`--min-similarity`). Notes that are linked by such pairs form one group. The command needs the embedding model. Run `throughline embed` first.
 
 A merge creates a new note with the longest text of the group. Its `source_type` is `consolidation` and `merged_from` holds the source ids. The sources become superseded and their text never changes. A forgotten note stays forgotten. A star on a source moves to the new note. `--apply` exits non-zero if any group failed; the other groups are still merged.
 
@@ -237,7 +237,7 @@ Full text is the default because the first measurement (below) did not show the 
 The four modes differ in what they admit and how they rank:
 
 - `current` (the default) admits notes that hold now: not replaced, merged, forgotten or expired, from the given project and from notes without a project. It ranks by full text unless you ask for `rank=weighted`, a weighted sum of cosine similarity (0.45), word overlap (0.20), recency (0.10, a decay with a 90-day scale), reliability (0.10), strength (0.10, from use and age, see above) and provenance (0.05).
-- `as_of` needs `valid_at` or `known_at`. It admits notes that held on that day and match the question by words or by cosine of at least the model's threshold (0.68 for the default model, see "Embedding model"), keeps the `limit` best of them by the rank, and sorts those by `valid_from`. It shows the chain fields, so you see what replaced what.
+- `as_of` needs `valid_at` or `known_at`. It admits notes that held on that day and match the question by words or by cosine of at least the model's threshold (0.5 for the default `nomic-embed-text`, 0.68 for granite, see "Embedding model"), keeps the `limit` best of them by the rank, and sorts those by `valid_from`. It shows the chain fields, so you see what replaced what.
 - `associative` takes the best current notes by the rank as seeds and adds neighbours through a replacement chain, the same conversation, the same file, or a merge, with at most two hops. A neighbour scores max(its own score, seed score × 0.8^hops); its own score uses the same rank as the seeds. A replaced neighbour is labelled "superseded", one whose validity or expiry has passed or that is stale is labelled "expired". It returns up to twice the limit.
 - `grounded` admits only notes whose chain started in a conversation that still exists, and attaches the source message that matches best (by cosine, by words if there is no vector). It walks the ranking a few notes at a time and stops once the limit has evidence. That checks a note against Throughline's own transcripts, not against the world.
 
@@ -253,52 +253,67 @@ A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5
 
 ## Embedding model
 
-Recall by meaning, `consolidate` and the `as_of` mode all work on vectors from one embedding model. The default is `granite-embedding-multilingual:278m` (768 dimensions), so a German question can find an English note and the other way round. Set `OLLAMA_EMBED_MODEL=nomic-embed-text` to stay on the English-first model an older install used.
+Recall by meaning, `consolidate` and the `as_of` mode all work on vectors from one embedding model. The default is `nomic-embed-text` (768 dimensions), an English-first model, so an existing install keeps its model and its vectors on restart.
+
+The measured recommendation for notes in more than one language is granite (768 dimensions). It is opt-in: with it, a German question can find an English note and the other way round. That happens wherever vectors rank: "By meaning" in the memory view and `--rank weighted`, the `as_of` and `grounded` modes, semantic search and `ask`. The default recall (`current` with full text) ranks by shared words, so with any model it finds a note in another language only through words both share, such as names.
+
+Granite comes under two names, and both get the same profile:
+
+- `granite-embedding:278m` from the Ollama library: `ollama pull granite-embedding:278m`. Not `granite-embedding:30m`, which is an English model with another dimension and has no profile.
+- `granite-embedding-multilingual:278m`, imported from Docker Hub when `ollama pull` fails (see below).
+
+The thresholds were measured on the Docker Hub file (562,765,696 bytes, digest `984f398c…`). The Ollama library file (562,765,632 bytes, digest `a658c903…`) is the same model family and quantisation, but not byte-identical, so its scores can differ slightly. To use granite, fill its vectors first and then switch, as described under "Switching models without losing recall".
 
 Each model has a profile in `rust/crates/throughline/src/embedding.rs`: prefixes, dimensions, column and two thresholds. Throughline adds the prefix itself, to questions and to documents, so you never put it in the text.
 
 | Model | Question prefix | Document prefix | as_of cosine | consolidate cosine |
 | --- | --- | --- | --- | --- |
-| `granite-embedding-multilingual` (default) | none | none | 0.68 | 0.93 |
-| `nomic-embed-text` | none | none | 0.5 | 0.92 |
+| `nomic-embed-text` (default) | none | none | 0.5 | 0.92 |
+| `granite-embedding-multilingual`, `granite-embedding:278m` | none | none | 0.68 | 0.93 |
 | `embeddinggemma` | `task: search result \| query:` | `title: none \| text:` | 0.5 | 0.92 |
 | `nomic-embed-text-v2-moe` | `search_query:` | `search_document:` | 0.5 | 0.92 |
 | `qwen3-embedding` (1024 dimensions) | an `Instruct:` line | none | 0.5 | 0.92 |
 
 Only the first two rows were measured for their thresholds. The other three profiles carry the baseline values. `qwen3-embedding` is refused for now: it needs a 1024-dimension column, and no migration adds one yet. A model without a profile is probed once with a real embed call and gets no prefixes and the baseline thresholds. It works only if it returns 768 or 1536 dimensions.
 
-Vectors are keyed by model. Switching models never overwrites or deletes anything: the old vectors stay in `embeddings`, and each command reads only the vectors of the active model. Notes count as candidates when they have no non-null vector for that model and are not forgotten. Replaced and merged notes are embedded too, because `as_of` and `associative` recall read them.
+Vectors are keyed by the exact model string. Switching models never overwrites or deletes anything: the old vectors stay in `embeddings`, and each command reads only the vectors of the active model. Notes count as candidates when they have no non-null vector for that model and are not forgotten. Replaced and merged notes are embedded too, because `as_of` and `associative` recall read them.
 
-`throughline consolidate --min-similarity` now defaults to the active model's threshold (0.93 for the default model, 0.92 for the others). The `as_of` mode admits a note by words or by the model's cosine threshold.
+`throughline consolidate --min-similarity` now defaults to the active model's threshold (0.92 for the default `nomic-embed-text`, 0.93 for granite). The `as_of` mode admits a note by words or by the model's cosine threshold.
 
 ### Switching models without losing recall
 
 A new model has no vectors at first, so switching at once would leave recall empty until `embed` caught up. Fill the new model beside the old one, then switch:
 
-1. Set `THROUGHLINE_EMBED_TARGET_MODEL` to the new model and restart.
+1. Set `THROUGHLINE_EMBED_TARGET_MODEL` to the new model in `.env` and run `docker compose up -d web`.
 2. Let `throughline embed` run. It fills the active model first, then the target. The hourly job does this on its own. If the target model cannot be used, `embed` prints `target model: <error>` and still exits 0.
-3. Run `throughline doctor` until it prints `embedding target: <model>: complete, switch OLLAMA_EMBED_MODEL and restart web`. While it runs you see `embedding target: <model>: notes <done>/<total>, messages <done>/<total>`.
+3. Run `throughline doctor` until it prints `embedding target: <model>: complete, set OLLAMA_EMBED_MODEL to it, remove the target and run docker compose up -d web`. While it runs you see `embedding target: <model>: notes <done>/<total>, messages <done>/<total>`.
 4. Set `OLLAMA_EMBED_MODEL` to the new model.
-5. Remove `THROUGHLINE_EMBED_TARGET_MODEL` and restart `web`.
+5. Remove `THROUGHLINE_EMBED_TARGET_MODEL` and run `docker compose up -d web`.
 
-`doctor` also prints `embedding missing:` for the active model: `complete`, or how many notes and messages still have no vector. Both variables are in `.env.example` and forwarded by `docker-compose.yml`. A large corpus takes hours to embed, so do step 2 in the background.
+Use `docker compose up -d web`, not `docker compose restart web`: a restart keeps the container's old environment, so the change in `.env` would not reach it.
+
+`doctor` also prints `embedding missing:` for the active model: `complete`, or how many notes and messages still have no vector. Both variables are in `.env.example`, and `docker-compose.yml` forwards both to the `web` service. A large corpus takes hours to embed, so do step 2 in the background.
+
+Write the model string identically everywhere: the same string for the target and, after the switch, for the active model, and the same string in every process that reads or writes vectors, that is `web`, the native CLI and the MCP server over stdio. Vectors are keyed by the exact string, so `granite-embedding:278m` and `granite-embedding-multilingual:278m` are two sets of vectors although they share a profile, and so are `nomic-embed-text` and `nomic-embed-text:latest`.
 
 ### When `ollama pull` fails
 
-Behind a corporate proxy `ollama pull` can fail. The same GGUF files are published on Docker Hub under `ai/` as Docker Model Runner artifacts. Fetch the model layer (media type `application/vnd.docker.ai.gguf.v3`) through the registry API with a pull token, check its sha256, then import it:
+Behind a proxy `ollama pull` can fail. The same GGUF files are published on Docker Hub under `ai/` as Docker Model Runner artifacts; for granite that is `ai/granite-embedding-multilingual:278M-F16`. Fetch the model layer (media type `application/vnd.docker.ai.gguf.v3`) through the registry API with a pull token, check its sha256, then import it:
 
 ```bash
 printf 'FROM ./model.gguf\n' > Modelfile
 ollama create granite-embedding-multilingual:278m -f Modelfile
 ```
 
+Then use `granite-embedding-multilingual:278m` as the model name, in `OLLAMA_EMBED_MODEL` and in the target.
+
 ### What the measurement showed, and its limits
 
-On a copy of one real corpus (1,591 notes, 60 questions, testset v4), the English baseline `nomic-embed-text` found the right note across languages in 8 % of the cases at k = 5 and in 92 % within one language. `granite-embedding-multilingual:278m` reached 88 % and 100 %. Embedding a question took about 9 ms. `embeddinggemma` scored the same 88 % and 100 %; granite won on the rule set beforehand by a mean reciprocal rank across languages of 0.665 against 0.657, and other readings of the tie rule flip that choice.
+On a copy of one real corpus (1,591 notes, 60 questions, testset v4), the English baseline `nomic-embed-text` found the right note across languages in 8 % of the cases at k = 5 and in 92 % within one language. `granite-embedding-multilingual:278m` (the Docker Hub file) reached 88 % and 100 %. Embedding a question took about 9 ms. `embeddinggemma` scored the same 88 % and 100 %; granite won on the rule set beforehand by a mean reciprocal rank across languages of 0.665 against 0.657, and other readings of the tie rule flip that choice.
 
-Read the gap with care. The testset was built so that the questions share no words with their notes: 18 of the 25 cross-language questions have no word in common with their note, which favours a multilingual model more than daily use does. Each cross-language group had 25 questions, so the intervals are wide. A first run on an earlier testset was invalid because identifiers appear in every language and full text alone reached 52 %.
+Read the gap with care. 18 of the 25 cross-language questions were translated for the testset and share no word with their note, which favours a multilingual model more than daily use does. On the other 7, taken over unchanged, the baseline found 2 and granite all 7. Each cross-language group had 25 questions, so the intervals are wide. A first run on an earlier testset was invalid because identifiers appear in every language and full text alone reached 52 %.
 
-Granite reads at most 512 tokens. Longer text is cut silently by Ollama: 2 of the 1,591 notes and about 7 % of messages in a sample. `nomic-embed-text` reads 2,048 tokens.
+Granite reads at most 512 tokens. Longer text is cut silently by Ollama: 2 of the 1,591 notes and about 7 % of messages in a sample. For `nomic-embed-text`, `ollama show nomic-embed-text` lists a context length of 2,048 tokens.
 
 ## Context pack
 
