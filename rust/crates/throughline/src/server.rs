@@ -181,9 +181,15 @@ where
 {
     let db = state.db.clone();
     let joined = tokio::task::spawn_blocking(move || {
-        let mut client = db
-            .lock()
-            .map_err(|_| anyhow::anyhow!("database lock poisoned"))?;
+        // A panic in an earlier request poisons the lock but leaves the client
+        // usable. End the transaction it may have left open and go on, so one
+        // panic does not take every route down until a restart.
+        let mut client = db.lock().unwrap_or_else(|poisoned| {
+            db.clear_poison();
+            let mut client = poisoned.into_inner();
+            let _ = client.batch_execute("ROLLBACK");
+            client
+        });
         f(&mut client)
     })
     .await;
@@ -197,12 +203,6 @@ where
                 Err(api_error(
                     StatusCode::FORBIDDEN,
                     "remote_llm_not_allowed",
-                    msg,
-                ))
-            } else if msg.contains("lock poisoned") {
-                Err(api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "lock_poisoned",
                     msg,
                 ))
             } else {
@@ -1537,7 +1537,8 @@ fn list_memory_rows<C: GenericClient>(
 /// The detail fields of `GET /api/memory/{id}`, or `None` for an unknown id.
 pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
     let row = client.query_opt(
-        "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at, mc.status,
+        "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at,
+                COALESCE(mc.status, 'active'),
                 mc.superseded_by, mc.superseded_at,
                 (SELECT o.id FROM memory_chunks o
                   WHERE o.superseded_by = mc.id
@@ -1550,7 +1551,8 @@ pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Opt
         let content: String = r.get(0);
         let category: String = r.get(1);
         let project_name: Option<String> = r.get(2);
-        let created_at: chrono::DateTime<chrono::Utc> = r.get(3);
+        // Both columns allow NULL; an old row must not panic the request.
+        let created_at: Option<chrono::DateTime<chrono::Utc>> = r.get(3);
         let status: String = r.get(4);
         let superseded_by: Option<i64> = r.get(5);
         let superseded_at: Option<chrono::DateTime<chrono::Utc>> = r.get(6);
@@ -1599,7 +1601,7 @@ pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result
                   WHERE id = c.id AND superseded_by IS NOT NULL
              ) n
          )
-         SELECT m.id, m.status, m.valid_from, m.valid_to, m.content
+         SELECT m.id, COALESCE(m.status, 'active'), m.valid_from, m.valid_to, m.content
          FROM memory_chunks m JOIN chain USING (id)
          ORDER BY m.valid_from NULLS FIRST, m.id",
         &[&id],
@@ -3990,6 +3992,43 @@ mod tests {
             .expect("lock")
             .batch_execute("ROLLBACK")
             .expect("rollback");
+    }
+
+    #[test]
+    fn with_db_recovers_a_poisoned_lock() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping with_db_recovers_a_poisoned_lock: no PostgreSQL reachable");
+            return;
+        };
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        // A panic inside a request leaves a poisoned lock and an open transaction.
+        let crashed = rt.block_on(with_db(&state, |client| -> anyhow::Result<()> {
+            client.batch_execute("BEGIN; CREATE TEMP TABLE tl_poison_probe (x int)")?;
+            panic!("simulated panic inside a request");
+        }));
+        assert!(crashed.is_err());
+        assert!(
+            state.db.is_poisoned(),
+            "the panic must poison the lock, or the test proves nothing"
+        );
+        let rolled_back = rt.block_on(with_db(&state, |client| {
+            Ok(client
+                .query_one(
+                    "SELECT to_regclass('pg_temp.tl_poison_probe') IS NULL",
+                    &[],
+                )?
+                .get::<_, bool>(0))
+        }));
+        assert!(
+            matches!(rolled_back, Ok(true)),
+            "the next request must run, on a rolled-back client"
+        );
+        assert!(!state.db.is_poisoned());
     }
 
     #[test]
