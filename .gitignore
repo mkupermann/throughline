@@ -128,3 +128,8 @@ docs/STATUS-AUTONOMOUS.md
 skills-lock.json
 web/output/
 throughline-operate-quality-pass.png
+
+# VS Code extension
+vscode/node_modules
+vscode/dist
+vscode/*.vsix
