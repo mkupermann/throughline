@@ -176,6 +176,8 @@ services:
       # under the name the application itself reads makes the host's own
       # server report no embedding and no generation backend.
       OLLAMA_HOST: "${THROUGHLINE_OLLAMA_URL:-http://ollama:11434}"
+      # Active embedding model (see .env.example); empty means the code default.
+      OLLAMA_EMBED_MODEL: "${OLLAMA_EMBED_MODEL:-}"
       # Second embedding model to fill beside the active one (see .env.example);
       # empty means none.
       THROUGHLINE_EMBED_TARGET_MODEL: "${THROUGHLINE_EMBED_TARGET_MODEL:-}"
