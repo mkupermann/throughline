@@ -7,6 +7,32 @@ on:
     branches: [main]
 
 jobs:
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The public history was rebuilt once to drop co-author and AI-session
+      # trailers; this keeps them out of every pull request and push.
+      - name: No co-author or AI-session trailers
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$BASE..$HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            range="$AFTER"
+          else
+            range="$BEFORE..$AFTER"
+          fi
+          python3 scripts/check_commit_messages.py "$range"
+
   rust:
     name: Rust fmt, clippy and tests (Postgres)
     runs-on: ubuntu-latest
