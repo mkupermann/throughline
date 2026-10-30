@@ -323,7 +323,12 @@ pub fn recall<C: GenericClient>(
 ) -> Result<RecallResult> {
     let filter = match q.mode {
         RecallMode::Current => CandidateFilter::Current,
-        RecallMode::AsOf => CandidateFilter::AsOf,
+        RecallMode::AsOf => {
+            if q.valid_at.is_none() && q.known_at.is_none() {
+                bail!("as_of needs valid_at or known_at");
+            }
+            CandidateFilter::AsOf
+        }
         other => bail!("recall mode {} is not available yet", other.as_str()),
     };
     let now = Utc::now();
@@ -335,7 +340,17 @@ pub fn recall<C: GenericClient>(
             (s, why, c)
         })
         .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
+    if q.mode == RecallMode::AsOf {
+        // Only notes that match the question; the order is the timeline.
+        scored.retain(|(_, why, _)| why.lexical > 0.0 || why.cosine.is_some_and(|c| c >= 0.5));
+        scored.sort_by(|a, b| {
+            a.2.valid_from
+                .cmp(&b.2.valid_from)
+                .then(a.2.id.cmp(&b.2.id))
+        });
+    } else {
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
+    }
     scored.truncate(q.limit.clamp(1, MAX_LIMIT));
     let hits = scored
         .into_iter()
@@ -729,5 +744,100 @@ mod tests {
         assert_eq!(h.session_title.as_deref(), Some(title.as_str()));
         assert_eq!(h.supersedes, Some(a));
         assert_eq!(h.source_type, "ui_pin");
+    }
+
+    fn at(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        chrono::TimeZone::with_ymd_and_hms(&Utc, y, m, d, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn recall_as_of_follows_the_chain() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_as_of_follows_the_chain: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let content_a = format!("retention is seven days {tag}");
+        let content_b = format!("retention is thirty days {tag}");
+        let mut sa = Seed::new(&content_a, at(2026, 1, 1));
+        sa.project = Some(&project);
+        let a = seed(&mut tx, &sa);
+        let (_, b) = crate::server::supersede_memory(
+            &mut tx,
+            a,
+            &crate::server::Successor {
+                content: &content_b,
+                category: None,
+                source_type: "ui_pin",
+                kind: crate::server::SupersedeKind::Update,
+                valid_from: Some(at(2026, 3, 1)),
+                valid_from_is_date: false,
+                confidence: 1.0,
+                tags: vec![],
+                source_at: None,
+            },
+        )
+        .unwrap();
+        let mut q = query(&tag, Some(&project));
+        q.mode = RecallMode::AsOf;
+        q.valid_at = Some(at(2026, 2, 15));
+        let r = recall(&mut tx, &q, None).unwrap();
+        assert_eq!(r.mode, "as_of");
+        assert_eq!(r.hits.len(), 1);
+        assert_eq!(r.hits[0].id, a);
+        assert_eq!(r.hits[0].superseded_by, Some(b));
+        q.valid_at = Some(at(2026, 3, 15));
+        let r = recall(&mut tx, &q, None).unwrap();
+        assert_eq!(r.hits.len(), 1);
+        assert_eq!(r.hits[0].id, b);
+        assert_eq!(r.hits[0].supersedes, Some(a));
+    }
+
+    #[test]
+    fn recall_as_of_sorts_by_valid_from_and_drops_non_matches() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_as_of_sorts_by_valid_from_and_drops_non_matches: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let (c1, c2, c3) = (
+            format!("zebra {tag} late"),
+            format!("zebra {tag} early"),
+            "unrelated note".to_string(),
+        );
+        let mut s1 = Seed::new(&c1, at(2026, 2, 1));
+        s1.project = Some(&project);
+        s1.source_type = "ui_pin";
+        let mut s2 = Seed::new(&c2, at(2026, 1, 1));
+        s2.project = Some(&project);
+        let mut s3 = Seed::new(&c3, at(2026, 1, 15));
+        s3.project = Some(&project);
+        let (i1, i2, i3) = (seed(&mut tx, &s1), seed(&mut tx, &s2), seed(&mut tx, &s3));
+        let text = format!("zebra {tag}");
+        let mut q = query(&text, Some(&project));
+        q.mode = RecallMode::AsOf;
+        q.known_at = Some(Utc::now());
+        q.valid_at = Some(at(2026, 6, 1));
+        let r = recall(&mut tx, &q, None).unwrap();
+        let ids: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
+        assert_eq!(ids, vec![i2, i1]);
+        assert!(!ids.contains(&i3));
+    }
+
+    #[test]
+    fn recall_as_of_requires_a_date() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_as_of_requires_a_date: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let mut q = query("anything", None);
+        q.mode = RecallMode::AsOf;
+        let err = recall(&mut tx, &q, None).unwrap_err();
+        assert!(err.to_string().contains("as_of needs valid_at or known_at"));
     }
 }
