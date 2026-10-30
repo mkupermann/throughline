@@ -201,6 +201,7 @@ a { color: var(--text); font-weight: 600; text-decoration: underline; text-decor
 a:hover { text-decoration-color: var(--accent); }
 ::selection { background: var(--accent-soft); color: var(--accent-soft-ink); }
 :focus:not(:focus-visible) { outline: none; }
+h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus { outline: none; }
 .sr {
   position: absolute;
   width: 1px; height: 1px;
@@ -248,6 +249,10 @@ select option { background: var(--bg-elevated); color: var(--text); }
 .brand-mark {
   flex: 0 0 auto;
 }
+.brand-mark .bm-tile { fill: var(--text); }
+.brand-mark .bm-thread { stroke: var(--bg); }
+.brand-mark .bm-node { fill: var(--bg); }
+.brand-mark .bm-core { fill: var(--accent); }
 .brand-name {
   font-weight: 700;
   font-size: var(--text-md);
@@ -872,7 +877,7 @@ table.sessions tr:focus-visible td {
   background: var(--bg-hover);
 }
 table.sessions tr.active td { background: var(--accent-soft); color: var(--accent-soft-ink); }
-.td-id, .td-num, .td-date {
+td.td-id, td.td-num, td.td-date {
   font-family: var(--mono);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -1789,26 +1794,14 @@ td .empty {
   <aside class="sidebar">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 64 64" width="40" height="40" aria-label="Throughline logo" role="img">
-        <defs>
-          <linearGradient id="tlg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#2dd4a7"/>
-            <stop offset="55%" stop-color="#22c55e"/>
-            <stop offset="100%" stop-color="#38bdf8"/>
-          </linearGradient>
-          <linearGradient id="tls" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0%" stop-color="#0b0e14" stop-opacity=".15"/>
-            <stop offset="100%" stop-color="#0b0e14" stop-opacity=".05"/>
-          </linearGradient>
-        </defs>
-        <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#tlg)"/>
-        <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#tls)"/>
+        <rect class="bm-tile" x="2" y="2" width="60" height="60" rx="14"/>
         <!-- continuous throughline: thread through memory nodes -->
-        <path d="M14 44 C22 44 22 30 30 30 C38 30 38 18 50 18"
-              fill="none" stroke="#042116" stroke-width="4.5" stroke-linecap="round"/>
-        <circle cx="14" cy="44" r="4.2" fill="#042116"/>
-        <circle cx="30" cy="30" r="4.2" fill="#042116"/>
-        <circle cx="50" cy="18" r="4.2" fill="#042116"/>
-        <circle cx="30" cy="30" r="2" fill="#9ff0d4"/>
+        <path class="bm-thread" d="M14 44 C22 44 22 30 30 30 C38 30 38 18 50 18"
+              fill="none" stroke-width="4.5" stroke-linecap="round"/>
+        <circle class="bm-node" cx="14" cy="44" r="4.2"/>
+        <circle class="bm-node" cx="30" cy="30" r="4.2"/>
+        <circle class="bm-node" cx="50" cy="18" r="4.2"/>
+        <circle class="bm-core" cx="30" cy="30" r="2"/>
       </svg>
       <div>
         <div class="brand-name">Throughline</div>
@@ -2297,9 +2290,9 @@ td .empty {
           <div class="panel-title">
             <h2 data-i18n="tl.calTitle">Activity calendar</h2>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-ghost" type="button" id="cal-prev" data-i18n-attr="aria-label:tl.prevMonth" aria-label="Previous month">&#8249;</button>
+              <button class="btn btn-ghost" type="button" id="cal-prev" data-i18n-attr="aria-label:tl.prevMonth" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
               <div class="meta" id="cal-month-label"></div>
-              <button class="btn btn-ghost" type="button" id="cal-next" data-i18n-attr="aria-label:tl.nextMonth" aria-label="Next month">&#8250;</button>
+              <button class="btn btn-ghost" type="button" id="cal-next" data-i18n-attr="aria-label:tl.nextMonth" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
               <button class="btn btn-ghost" type="button" id="cal-today" data-i18n="tl.today">Today</button>
             </div>
           </div>
