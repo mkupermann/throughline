@@ -278,6 +278,7 @@ pub(crate) struct Candidate {
     pub tags: Vec<String>,
     pub source_id: Option<i64>,
     pub merged_from: Vec<i64>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// All notes that pass `filter` and the project filter, with their cosine to
@@ -347,7 +348,8 @@ fn load_candidates<C: GenericClient>(
                (SELECT min(p.id) FROM memory_chunks p WHERE p.superseded_by = mc.id),
                COALESCE(mc.confidence::float8, 0.5),
                {cosine},
-               COALESCE(mc.tags, '{{}}'), mc.source_id, COALESCE(mc.merged_from, '{{}}')
+               COALESCE(mc.tags, '{{}}'), mc.source_id, COALESCE(mc.merged_from, '{{}}'),
+               mc.expires_at
         FROM memory_chunks mc
         LEFT JOIN LATERAL (
             WITH RECURSIVE up(id, source_type, source_id, depth) AS (
@@ -385,6 +387,7 @@ fn load_candidates<C: GenericClient>(
             tags: r.get(14),
             source_id: r.get(15),
             merged_from: r.get(16),
+            expires_at: r.get(17),
         })
         .collect())
 }
@@ -523,7 +526,8 @@ fn neighbour_edges<C: GenericClient>(
 /// away. A neighbour scores `max(own score, seed score * 0.8^steps)`, its own
 /// score by the rank of the query, with the
 /// spread in `why.spread`; reached twice, the higher score stays. Neighbours
-/// may be replaced or merged notes (relation "superseded"), never forgotten
+/// may be replaced or merged notes (relation "superseded") or notes that no
+/// longer hold, closed, expired or stale (relation "expired"), never forgotten
 /// ones, and keep the project filter of the query. One query loads the notes
 /// of a step.
 fn associate<C: GenericClient>(
@@ -569,9 +573,19 @@ fn associate<C: GenericClient>(
                 let total = own.max(spread);
                 let replaced = c.superseded_by.is_some()
                     || matches!(c.status.as_str(), "superseded" | "merged");
+                let lapsed = c.valid_to.is_some_and(|t| t <= now)
+                    || c.expires_at.is_some_and(|t| t <= now)
+                    || c.status == "stale";
+                let relation = if replaced {
+                    "superseded"
+                } else if lapsed {
+                    "expired"
+                } else {
+                    rel
+                };
                 next.insert(c.id, spread);
                 if found.get(&c.id).is_none_or(|(best, _, _)| total > *best) {
-                    relations.insert(c.id, if replaced { "superseded" } else { rel }.to_string());
+                    relations.insert(c.id, relation.to_string());
                     found.insert(c.id, (total, why, c));
                 }
             }
@@ -2085,6 +2099,42 @@ mod tests {
             let r = recall(&mut tx, &q, None).unwrap();
             let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
             assert_eq!(got, vec![ids[4], ids[3]], "{rank:?}");
+        }
+    }
+
+    #[test]
+    fn recall_associative_marks_neighbours_that_no_longer_hold() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_associative_marks_neighbours_that_no_longer_hold: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let cases = [
+            ("", "same_conversation"),
+            ("valid_to = now() - interval '1 day'", "expired"),
+            ("expires_at = now() - interval '1 day'", "expired"),
+            ("status = 'stale'", "expired"),
+            (
+                "valid_to = now() - interval '1 day', status = 'superseded'",
+                "superseded",
+            ),
+        ];
+        for (set, want) in cases {
+            let tag = uuid::Uuid::new_v4().simple().to_string();
+            let project = format!("p-{tag}");
+            let (s, o) = conversation_pair(&mut tx, &project, Some(&project), &tag);
+            if !set.is_empty() {
+                tx.execute(
+                    &format!("UPDATE memory_chunks SET {set} WHERE id = $1"),
+                    &[&o],
+                )
+                .unwrap();
+            }
+            let q = associative(&format!("lemur {tag}"), &project, 1);
+            let r = recall(&mut tx, &q, None).unwrap();
+            assert_eq!(r.hits[position(&r, s).unwrap()].relation, None);
+            let ho = &r.hits[position(&r, o).unwrap_or_else(|| panic!("{set}"))];
+            assert_eq!(ho.relation.as_deref(), Some(want), "{set}");
         }
     }
 }
