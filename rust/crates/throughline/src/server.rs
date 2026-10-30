@@ -1146,9 +1146,14 @@ async fn recall_handler(
         })
         .into_response();
     }
+    // Embed before taking the shared DB lock: a slow Ollama must not stall
+    // other requests. The call blocks, so it gets its own blocking task.
+    let embed_text = text.clone();
+    let emb = tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text))
+        .await
+        .ok()
+        .flatten();
     match with_db(&state, move |client| {
-        // with_db runs on a blocking thread; the embedding call is isolated too.
-        let emb = crate::recall::query_embedding(&text);
         let q = crate::recall::RecallQuery {
             text: &text,
             project: project.as_deref(),
