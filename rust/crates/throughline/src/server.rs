@@ -128,14 +128,19 @@ pub(crate) fn api_error(status: StatusCode, code: &str, detail: impl Into<String
         .into_response()
 }
 
-/// Whether the call comes from an agent. No `Authorization` header is the UI: `Ok(false)`, nothing
-/// counts. An accepted key is `Ok(true)`. Any other header is a 401 that never names the key.
+/// Whether the call comes from an agent. Only the Bearer scheme marks one: no `Authorization`
+/// header, or another scheme such as `Basic` from an auth proxy, is the UI: `Ok(false)`, nothing
+/// counts. An accepted key is `Ok(true)`. A Bearer header with a wrong or empty key, or while
+/// agent access is off, is a 401 that never names the key.
 #[allow(clippy::result_large_err)]
 fn agent_call(state: &AppState, headers: &HeaderMap) -> Result<bool, Response> {
     let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
         return Ok(false);
     };
-    // A header that is not text is checked as an empty value and fails.
+    if !crate::agent_key::is_bearer_scheme(value.as_bytes()) {
+        return Ok(false);
+    }
+    // A Bearer header that is not text is checked as an empty value and fails.
     let check =
         crate::agent_key::check_bearer(&state.agent_key, Some(value.to_str().unwrap_or("")));
     if check == crate::agent_key::KeyCheck::Accepted {
@@ -3908,8 +3913,14 @@ mod tests {
         let resp = call(bearer("Bearer wrong-key-wrong-key-wrong-key-wrong"));
         assert_unauthorized(&rt, resp);
         assert_eq!(uses(&state, a), 1, "wrong key counts nothing");
-        let resp = call(bearer(&format!("Basic {TEST_AGENT_KEY}")));
+        // An auth proxy's Basic header is the UI: answered, not counted.
+        let resp = call(bearer("Basic dXNlcjpwYXNz"));
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(uses(&state, a), 1, "a Basic header counts nothing");
+        // A Bearer header without credentials is an unusable key, not the UI.
+        let resp = call(bearer("Bearer"));
         assert_unauthorized(&rt, resp);
+        assert_eq!(uses(&state, a), 1, "an empty Bearer counts nothing");
         state
             .db
             .lock()
@@ -3970,6 +3981,53 @@ mod tests {
         let resp = call(bearer("Bearer wrong-key-wrong-key-wrong-key-wrong"));
         assert_unauthorized(&rt, resp);
         assert_eq!(uses(&state, a), 1, "wrong key counts nothing");
+        let resp = call(bearer("Basic dXNlcjpwYXNz"));
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(uses(&state, a), 1, "a Basic header counts nothing");
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
+    }
+
+    #[test]
+    fn api_recall_with_key_off_serves_basic_and_refuses_bearer() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping api_recall_with_key_off_serves_basic: no PostgreSQL reachable");
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_note(&mut client, &format!("keyless-recall ibis {tag}"), "decision");
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let call = |headers: HeaderMap| {
+            rt.block_on(recall_handler(
+                State(state.clone()),
+                headers,
+                Query(RecallParams {
+                    q: Some(format!("ibis {tag}")),
+                    project: None,
+                    mode: None,
+                    valid_at: None,
+                    known_at: None,
+                    limit: None,
+                    rank: None,
+                }),
+            ))
+        };
+        let resp = call(bearer("Basic dXNlcjpwYXNz"));
+        assert_eq!(resp.status(), StatusCode::OK, "the UI behind a Basic proxy");
+        assert_eq!(uses(&state, a), 0);
+        let resp = call(bearer(&format!("Bearer {TEST_AGENT_KEY}")));
+        assert_unauthorized(&rt, resp);
+        assert_eq!(uses(&state, a), 0);
         state
             .db
             .lock()
