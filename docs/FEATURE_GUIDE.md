@@ -52,7 +52,7 @@ Search durable notes, filter category, page results and expand individual cards.
 
 Each card shows when the note became valid ("valid since") and, once something replaced it, when it stopped ("valid until"). The source chip reads "source from" when the conversation date is known. The "As of" filter takes a date and a choice: "was valid" lists the notes that held on that day, "was known" lists what Throughline had recorded by then. While a date is set, the status filter is disabled. The replace dialog has two more fields. "Valid from" is the start of the new note and stays empty for today. The choice between Update and Correction says whether the old note was right until then or never right. A start date in the future is refused and the dialog stays open.
 
-The "By meaning" toggle (German: "Nach Bedeutung") searches notes by meaning instead of by words, through `recall`. It uses the current notes of the selected project. Without embeddings from Ollama the view shows a notice that the answer is based on words only.
+The "By meaning" toggle (German: "Nach Bedeutung") searches notes by meaning instead of by words, through `recall` with the weighted ranking (`rank=weighted`). It looks at the current notes of all projects; this view has no project filter. Without embeddings from Ollama the view shows a notice that the answer is based on words only. Elsewhere `recall` ranks by full text by default, because the first measurement did not show the gain for the weighted ranking that the bar set beforehand asked for. CLI, HTTP and MCP take `rank=weighted` (CLI `--rank weighted`) to choose it.
 
 ![Memory](media/rust/memory.png)
 
