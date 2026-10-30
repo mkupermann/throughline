@@ -2356,7 +2356,7 @@ async fn operate_handler(
             }
             "reflect" => {
                 let s = crate::reflect_memory::dedup(client, false)?;
-                format!("reflect/dedup: acted={}", s.acted)
+                format!("reflect/dedup: {}", s.counts())
             }
             "agent-memory" | "mimo-memory" => {
                 let (files, chunks) = crate::agent_memory::ingest_agent_memory(client)?;
