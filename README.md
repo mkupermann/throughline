@@ -248,11 +248,11 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Setup and health | `migrate`, `serve`, `status`, `doctor` |
 | Import and retrieve | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
 | Carry context forward | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
 | Protect and integrate | `backup`, `retention`, `mcp` |
 
-These are all 31 commands. There is no restore command. A dump from `backup` goes back in with `psql`. `retention --apply` deletes conversations and their notes after archiving them, and it is a dry run without `--apply`.
+These are all 32 commands. There is no restore command. A dump from `backup` goes back in with `psql`. `retention --apply` deletes conversations and their notes after archiving them, and it is a dry run without `--apply`.
 
 The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies and side effects. Availability is not a claim that every command was tested against every schema variant.
 

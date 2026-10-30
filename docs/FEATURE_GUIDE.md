@@ -57,6 +57,8 @@ Each card shows when the note became valid ("valid since") and, once something r
 
 The "By meaning" toggle (German: "Nach Bedeutung") searches notes by meaning instead of by words, through `recall` with the weighted ranking (`rank=weighted`). It looks at the current notes of all projects; this view has no project filter. Without embeddings from Ollama the view shows a notice that the answer is based on words only. Elsewhere `recall` ranks by full text by default, because the first measurement did not show the gain for the weighted ranking that the bar set beforehand asked for. CLI, HTTP and MCP take `rank=weighted` (CLI `--rank weighted`) to choose it.
 
+Review has two sections for upkeep. "Similar notes" lists groups of notes that say nearly the same thing. **Suggest** asks a local model for a merged text (it never uses a cloud model, waits up to 120 seconds and falls back to the longest note), you can edit it, and **Merge** runs only after you confirm. The sources are superseded, not deleted. "Damaged notes" lists notes whose text looks cut off or broken, with a replace dialog. Nothing in either section changes a note by itself. Strength, which fades unused notes, only affects the weighted ranking.
+
 ![Memory](media/rust/memory.png)
 
 ## Search
@@ -114,7 +116,7 @@ The provider status panel is a separate view of discovery/import state. The demo
 
 ## CLI functions
 
-All 31 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
+All 32 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
 
 | Command | Function and relevant boundary |
 | --- | --- |
@@ -140,6 +142,7 @@ All 31 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `reflect` | Run memory maintenance modes; inspect `--dry-run` where applicable. |
 | `stale-digest` | Report memory requiring renewed attention. |
 | `answer-eval` | Evaluate supplied/default cases with citation and phrase checks. |
+| `consolidate` | Find groups of near-identical current notes (cosine at least 0.92). `--dry-run` lists them, `--apply` merges each group into a new note and supersedes the sources. Needs embeddings. |
 | `recall-eval` | Measure hit@k and MRR of the recall rankers against a question set from `--set`. Needs embeddings. |
 | `repair-timestamps` | Clamp message times later than the conversation end; dry run without `--apply`. |
 | `scan-instructions` | Index local project instruction files into the store. |
