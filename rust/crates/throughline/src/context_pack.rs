@@ -67,6 +67,15 @@ pub struct ContextPack {
     pub estimate: &'static str,
 }
 
+/// The notes a pack cites (kind `memory`); these are the ones a use counts for.
+pub fn cited_note_ids(pack: &ContextPack) -> Vec<i64> {
+    pack.citations
+        .iter()
+        .filter(|c| c.kind == "memory")
+        .map(|c| c.id)
+        .collect()
+}
+
 #[derive(Debug, PartialEq)]
 pub enum PackError {
     BudgetOutOfRange(usize),

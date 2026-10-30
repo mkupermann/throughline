@@ -437,12 +437,7 @@ fn main() -> Result<()> {
                 },
                 None,
             )?;
-            let ids: Vec<i64> = pack
-                .citations
-                .iter()
-                .filter(|c| c.kind == "memory")
-                .map(|c| c.id)
-                .collect();
+            let ids = context_pack::cited_note_ids(&pack);
             lifecycle::record_use_or_log(&mut client, &ids);
             if json {
                 println!("{}", serde_json::to_string_pretty(&pack)?);
