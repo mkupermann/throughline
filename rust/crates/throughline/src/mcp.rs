@@ -122,7 +122,9 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
     let body = match result {
         Ok(mut value) => {
             if modern {
-                value["resultType"] = json!("complete");
+                if let Some(o) = value.as_object_mut() {
+                    o.insert("resultType".into(), json!("complete"));
+                }
             }
             json!({ "jsonrpc": "2.0", "id": id, "result": value })
         }
@@ -1601,6 +1603,25 @@ mod tests {
         )
         .expect_err("bad id");
         assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn get_note_reads_null_status_and_created_at() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping get_note_reads_null_status_and_created_at: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        tx.execute(
+            "UPDATE memory_chunks SET status = NULL, created_at = NULL WHERE id = $1",
+            &[&id],
+        )
+        .expect("null fields");
+        let note = call_text(&mut tx, "get_note", json!({ "id": id }));
+        assert_eq!(note["status"], "active", "{note}");
+        assert!(note["created_at"].is_null(), "{note}");
+        assert_eq!(note["chain"][0]["status"], "active", "{note}");
     }
 
     #[test]
