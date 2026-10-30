@@ -37,6 +37,9 @@ services:
     environment:
       # Embeddings (embedding.rs) and generation (llm.rs resolve_backend).
       OLLAMA_HOST: http://ollama:11434
+      # The model models-pull fetches; named so the demo does not depend on
+      # the code default.
+      OLLAMA_EMBED_MODEL: nomic-embed-text
       THROUGHLINE_ANSWER_BACKEND: ollama
       THROUGHLINE_ANSWER_MODEL: *instruct-model
 
