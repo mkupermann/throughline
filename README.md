@@ -175,7 +175,7 @@ Search notes, filter categories and expand cards. **Ingest agent memory** reads 
 
 Each note shows when it became valid and, once replaced, when it stopped, apart from when it was recorded. **As of** takes a date and answers what was valid or what was known on that day. Replacing a note asks whether it is an update or a correction. **By meaning** ranks the current notes by meaning through `recall`, and without Ollama it says so and falls back to words.
 
-Recall works across languages: with the default embedding model a German question finds an English note and the other way round. The measurement and how to switch models are in [docs/USAGE.md](docs/USAGE.md#embedding-model).
+Recall by meaning can cross languages. With the multilingual model `granite-embedding:278m`, which you switch on yourself, a German question finds an English note and the other way round in **By meaning**, `--rank weighted`, `as_of`, `grounded`, semantic search and Ask. The default recall ranks by full text and finds a note in another language only through words both share. The measurement and how to switch models are in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 
@@ -289,7 +289,7 @@ Without the second file the demo stays model-free. Nothing leaves your machine e
 | --- | --- |
 | Database | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |
 | Ollama endpoint | `OLLAMA_HOST`, e.g. `http://host.docker.internal:11434` on Docker Desktop |
-| Embeddings | `THROUGHLINE_EMBED_BACKEND=ollama`, `OLLAMA_EMBED_MODEL` (default `granite-embedding-multilingual:278m`, 768 dimensions) |
+| Embeddings | `THROUGHLINE_EMBED_BACKEND=ollama`, `OLLAMA_EMBED_MODEL` (default `nomic-embed-text`, 768 dimensions; multilingual: `granite-embedding:278m`, see [docs/USAGE.md](docs/USAGE.md#embedding-model)) |
 | Ollama generation | `THROUGHLINE_ANSWER_BACKEND=ollama`, `THROUGHLINE_ANSWER_MODEL=<installed-model>` |
 | Ollama generation limits | `THROUGHLINE_OLLAMA_THINK=false`, `THROUGHLINE_OLLAMA_NUM_CTX=16384`, `THROUGHLINE_LLM_TIMEOUT_SECS` (default 180) |
 | Compatible generation | `THROUGHLINE_ANSWER_BACKEND=compatible`, `THROUGHLINE_ANSWER_BASE_URL`, `THROUGHLINE_ANSWER_MODEL`, optionally `THROUGHLINE_ANSWER_API_KEY` |

@@ -175,7 +175,7 @@ Durchsuche Notizen, filtere Kategorien und klappe Karten auf. **Ingest agent mem
 
 Jede Notiz zeigt, ab wann sie gilt und, sobald sie ersetzt ist, bis wann. Das ist getrennt vom Zeitpunkt der Erfassung. **Stand am** nimmt ein Datum und beantwortet mit „galt“ oder „war bekannt“, was an diesem Tag galt oder was Throughline bis dahin erfasst hatte. Beim Ersetzen fragt der Dialog, ob es eine Aktualisierung oder eine Korrektur ist. **Nach Bedeutung** ordnet die aktuellen Notizen über `recall` nach Bedeutung. Ohne Ollama sagt die Ansicht das und fällt auf Wörter zurück.
 
-Der Abruf funktioniert über Sprachgrenzen hinweg: Mit dem Standard-Embedding-Modell findet eine deutsche Frage eine englische Notiz und umgekehrt. Messung und Umschalten des Modells stehen in [docs/USAGE.md](docs/USAGE.md#embedding-model).
+Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachigen Modell `granite-embedding:278m`, das Du selbst einschaltest, findet eine deutsche Frage eine englische Notiz und umgekehrt, und zwar in **Nach Bedeutung**, `--rank weighted`, `as_of`, `grounded`, der semantischen Suche und Ask. Der Standard-Abruf ordnet nach Volltext und findet eine Notiz in einer anderen Sprache nur über Wörter, die beide teilen. Messung und Umschalten des Modells stehen in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
 ![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 
@@ -289,7 +289,7 @@ Ohne die zweite Datei bleibt die Demo modellfrei. In beiden Fällen verlässt ni
 | --- | --- |
 | Datenbank | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` |
 | Ollama-Endpunkt | `OLLAMA_HOST`, z. B. `http://host.docker.internal:11434` auf Docker Desktop |
-| Embeddings | `THROUGHLINE_EMBED_BACKEND=ollama`, `OLLAMA_EMBED_MODEL` (Standard `granite-embedding-multilingual:278m`, 768 Dimensionen) |
+| Embeddings | `THROUGHLINE_EMBED_BACKEND=ollama`, `OLLAMA_EMBED_MODEL` (Standard `nomic-embed-text`, 768 Dimensionen; mehrsprachig: `granite-embedding:278m`, siehe [docs/USAGE.md](docs/USAGE.md#embedding-model)) |
 | Ollama-Generierung | `THROUGHLINE_ANSWER_BACKEND=ollama`, `THROUGHLINE_ANSWER_MODEL=<installiertes-Modell>` |
 | Grenzen der Ollama-Generierung | `THROUGHLINE_OLLAMA_THINK=false`, `THROUGHLINE_OLLAMA_NUM_CTX=16384`, `THROUGHLINE_LLM_TIMEOUT_SECS` (Standard 180) |
 | Kompatible Generierung | `THROUGHLINE_ANSWER_BACKEND=compatible`, `THROUGHLINE_ANSWER_BASE_URL`, `THROUGHLINE_ANSWER_MODEL`, optional `THROUGHLINE_ANSWER_API_KEY` |
