@@ -189,6 +189,18 @@ const SESSION_TITLE_CHARS: usize = 120;
 const QUESTION_LIMIT: usize = 5;
 const REVIEW_LIMIT: i64 = 5;
 
+/// A session title for one line: whitespace collapsed, at most `SESSION_TITLE_CHARS` characters,
+/// "…" appended when it was cut.
+fn session_label(raw: &str) -> String {
+    let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= SESSION_TITLE_CHARS {
+        return flat;
+    }
+    let mut cut: String = flat.chars().take(SESSION_TITLE_CHARS).collect();
+    cut.push('…');
+    cut
+}
+
 fn ymd(d: DateTime<Utc>) -> String {
     d.format("%Y-%m-%d").to_string()
 }
@@ -233,7 +245,7 @@ fn note_line(section: Section, n: &NoteView, origins: &mut HashMap<i64, Origin>)
     if let Some(conv) = n.conversation_id {
         let o = Origin {
             id: conv,
-            title: n.session_title.clone(),
+            title: n.session_title.as_deref().map(session_label),
             date: n.source_at,
         };
         text.push_str(&format!(
@@ -250,7 +262,7 @@ fn note_line(section: Section, n: &NoteView, origins: &mut HashMap<i64, Origin>)
             kind: "memory",
             id: n.id,
             date: Some(date),
-            title: n.session_title.clone(),
+            title: n.session_title.as_deref().map(session_label),
         }),
     }
 }
@@ -300,6 +312,8 @@ pub fn build_context<C: GenericClient>(
         ymd(Utc::now()),
         req.budget
     );
+    // The header must fit before any query runs.
+    pack(&header, &[], req.budget).map_err(anyhow::Error::new)?;
     let mut lines: Vec<Line> = Vec::new();
     let mut origins: HashMap<i64, Origin> = HashMap::new();
     let mut shown: HashSet<i64> = HashSet::new();
@@ -369,6 +383,20 @@ pub fn build_context<C: GenericClient>(
     let first = pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?;
     let mut sources: Vec<Line> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
+    // A session is dated by its start, the same date its own citation carries.
+    let ids: Vec<i64> = origins.values().map(|o| o.id).collect();
+    let mut started: HashMap<i64, DateTime<Utc>> = HashMap::new();
+    for r in client.query(
+        "SELECT id, started_at FROM conversations WHERE id = ANY($1)",
+        &[&ids],
+    )? {
+        started.insert(r.get(0), r.get(1));
+    }
+    for o in origins.values_mut() {
+        if let Some(d) = started.get(&o.id) {
+            o.date = Some(*d);
+        }
+    }
     for item in &first.items {
         let Some(cite) = &item.cite else { continue };
         let origin = match cite.kind {
@@ -400,7 +428,7 @@ pub fn build_context<C: GenericClient>(
         return Ok(first);
     }
     lines.extend(sources);
-    pack(&header, &lines, req.budget).map_err(|e| anyhow::anyhow!("{e}"))
+    pack(&header, &lines, req.budget).map_err(anyhow::Error::new)
 }
 
 /// Recent human sessions of the project: the summary as title, else the first user message.
@@ -430,14 +458,7 @@ fn sessions<C: GenericClient>(
         let first_message: Option<String> = r.get(4);
         let title = summary
             .or(first_message)
-            .map(|t| {
-                t.split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .take(SESSION_TITLE_CHARS)
-                    .collect::<String>()
-            })
+            .map(|t| session_label(&t))
             .unwrap_or_else(|| format!("session {id}"));
         lines.push(Line {
             section: Section::Sessions,
@@ -972,6 +993,104 @@ mod tests {
         assert!(out
             .text
             .contains("(source: session \"Root session\", 2026-03-02)"));
+    }
+
+    #[test]
+    fn session_titles_are_capped_everywhere() {
+        db_tx!("session_titles_are_capped_everywhere", tx);
+        let p = proj();
+        let long = (0..100)
+            .map(|i| format!("w{i:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(long.chars().count() > 400);
+        let g = conv(&mut tx, &p, Some(&long), 2);
+        let mut s = seed("titled decision", Some(&p), "decision", 5);
+        s.source = Some(g);
+        insert(&mut tx, &s);
+        let out = ctx(&mut tx, &p, None);
+        let mut checked = 0;
+        for c in out.citations.iter().filter(|c| c.title.is_some()) {
+            let t = c.title.as_deref().unwrap();
+            assert!(t.chars().count() <= SESSION_TITLE_CHARS + 1, "{t}");
+            assert!(!t.contains(['\n', '\r']), "{t:?}");
+            checked += 1;
+        }
+        assert!(
+            checked >= 2,
+            "memory and session citation: {:?}",
+            out.citations
+        );
+        let mut quoted = 0;
+        for l in out.text.lines() {
+            if let Some(i) = l.find("session \"") {
+                let rest = &l[i + 9..];
+                let t = &rest[..rest.find('"').unwrap()];
+                assert!(t.chars().count() <= SESSION_TITLE_CHARS + 1, "{l}");
+                quoted += 1;
+            }
+            if l.starts_with("- [s#") && l.contains(" · 2026-03-02] \"") {
+                let t = l.split('"').nth(1).unwrap();
+                assert!(t.chars().count() <= SESSION_TITLE_CHARS + 1, "{l}");
+                quoted += 1;
+            }
+        }
+        assert!(quoted >= 2, "note line and Sources line: {}", out.text);
+    }
+
+    #[test]
+    fn session_label_flattens_and_cuts() {
+        assert_eq!(session_label("  a\n b \t c "), "a b c");
+        let cut = session_label(&"ä ".repeat(200));
+        assert_eq!(cut.chars().count(), SESSION_TITLE_CHARS + 1);
+        assert!(cut.ends_with('…'));
+        assert_eq!(session_label(&"x".repeat(120)), "x".repeat(120));
+    }
+
+    #[test]
+    fn sources_show_the_session_start_not_the_note_source_date() {
+        db_tx!("sources_show_the_session_start", tx);
+        let p = proj();
+        let g = conv(&mut tx, &p, Some("Kickoff"), 2);
+        let mut s = seed("dated decision", Some(&p), "decision", 5);
+        s.source = Some(g);
+        let id = insert(&mut tx, &s);
+        tx.execute(
+            "UPDATE memory_chunks SET source_at = $2 WHERE id = $1",
+            &[&id, &day(9)],
+        )
+        .unwrap();
+        let out = ctx(&mut tx, &p, None);
+        let sources = &out.text[pos(&out, "## Sources")..];
+        assert!(
+            sources.contains(&format!("- [s#{g} · 2026-03-02] \"Kickoff\"")),
+            "{sources}"
+        );
+        let c = out
+            .citations
+            .iter()
+            .find(|c| c.kind == "session" && c.id == g)
+            .unwrap();
+        assert_eq!(c.date, Some(day(2)));
+    }
+
+    #[test]
+    fn an_oversized_header_fails_before_any_query() {
+        db_tx!("an_oversized_header_fails_before_any_query", tx);
+        // A failed statement poisons the transaction: any later query would error differently.
+        assert!(tx.execute("SELECT 1/0", &[]).is_err());
+        let project = "word ".repeat(200);
+        let e = build_context(
+            &mut tx,
+            &ContextRequest {
+                project: &project,
+                task: Some("x"),
+                budget: 64,
+            },
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(input_error(&e), Some(&PackError::HeaderTooLarge), "{e}");
     }
 
     #[test]
