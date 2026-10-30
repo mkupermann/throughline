@@ -9,5 +9,8 @@ First local release, installed from a VSIX. Not on the marketplace.
 - Throughline view with the context pack and the last recall. A click opens the note.
 - Status bar with the project and the connection, or the reason it is not connected. Embedding status on click. No polling.
 - Send Context to Agent hands the pack to Cline or Continue through their chat commands and always keeps a copy on the clipboard. Without either, the clipboard is the result.
-- Calls only `throughline.url`. No telemetry.
+- Calls only `throughline.url`, which is a user setting (`machine` scope) a workspace cannot override, and only over `http` or `https`. No telemetry.
+- Status bar item at the bottom right. An older server without `/mcp` shows as "server has no /mcp endpoint".
+- The agent key must be printable ASCII without spaces. Error messages never show the key; an echoed key appears as `***`.
+- The Cline scratch tab is selected through its own editor and closes without a save prompt.
 - Unit tests in CI, an end-to-end run in a real VS Code against a test instance (`npm run test:integration`, local only).
