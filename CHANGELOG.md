@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Recall: ask for notes by meaning
+
+Notes now take part in the embedding run, and a new `recall` finds them by meaning instead of by words. `throughline embed` embeds every memory note except forgotten ones before it turns to messages. Without Ollama, every recall answers with `degraded: "no_embeddings"` and falls back to word matching.
+
+- **Four modes.** `current` ranks the notes that hold today. `as_of` takes a date (`valid_at` or `known_at`) and lists what held then, oldest first, with the chain of replacements. `associative` starts from the best current notes and follows links to neighbours, up to two hops, and marks replaced neighbours as "superseded". `grounded` keeps only notes that trace back to a conversation still in the database and shows the source message that matches best.
+- **Three ways in.** `throughline recall <text>` with `--project`, `--mode`, `--at`, `--known-at`, `--limit` and `--json`. `GET /api/recall` with `q`, `project`, `mode`, `valid_at`, `known_at` and `limit`; a bad mode or date, or `as_of` without a date, gives 422 `validation_error`. An MCP tool `recall`. The memory view has a "By meaning" toggle.
+- **MCP search honours `project`.** The `search` tool ignored its `project` argument before.
+- **Measured, and not better than plain full text.** `throughline recall-eval --set <file> --k 5` compares the weighted ranking with cosine, full text, phrase match and random. In a first test on 30 questions the weighted ranking reached 66.7 % hit@5, the same as full text. It put the right note higher on average (MRR 0.62 against 0.53), but the pre-registered bar of five points over the better alternative was not met. The default ranking may change.
+
 ### Memory notes know when they were valid
 
 Every note now carries the time it was true, apart from the time it was recorded. Migration 012 adds `valid_from` and `valid_to` to `memory_chunks`. Notes from before the migration start at their source date, or at their creation date. New notes start when they were pinned or written, at the source date for extracted notes, and at the file's modification time for agent memory. Superseded or merged notes end where their successor begins.
