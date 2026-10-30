@@ -1,8 +1,8 @@
 //! Context pack: header, section headings and cited lines packed into a hard token budget.
 
 use crate::recall::{
-    candidates, recall, Candidate, CandidateFilter, QueryEmbedding, Rank, RecallHit, RecallMode,
-    RecallQuery, MAX_QUERY_CHARS,
+    candidates, fulltext_ranks, query_words, recall, Candidate, CandidateFilter, QueryEmbedding,
+    Rank, RecallHit, RecallMode, RecallQuery, MAX_QUERY_CHARS,
 };
 use chrono::{DateTime, Utc};
 use postgres::GenericClient;
@@ -335,15 +335,26 @@ pub fn build_context<C: GenericClient>(
         .collect();
     current.sort_by(|a, b| b.valid_from.cmp(&a.valid_from).then(a.id.cmp(&b.id)));
 
-    for c in current
+    let mut decisions: Vec<&Candidate> = current
         .iter()
         .filter(|c| DECISION_CATEGORIES.contains(&c.category.as_str()))
-    {
+        .collect();
+    let task = req.task.map(str::trim).filter(|t| !t.is_empty());
+    if let Some(task) = task {
+        // With a task, decisions that match it lead: full-text rank descending, ties and the
+        // rest newest first. The stable sort keeps the newest-first order inside each group.
+        let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
+        let ids: Vec<i64> = decisions.iter().map(|c| c.id).collect();
+        let ranks = fulltext_ranks(client, &query_words(&text), &ids)?;
+        let rank = |c: &Candidate| ranks.get(&c.id).copied().unwrap_or(0.0).max(0.0);
+        decisions.sort_by(|a, b| rank(b).total_cmp(&rank(a)));
+    }
+    for c in decisions {
         shown.insert(c.id);
         lines.push(candidate_line(Section::Decisions, c, &mut origins));
     }
 
-    if let Some(task) = req.task.map(str::trim).filter(|t| !t.is_empty()) {
+    if let Some(task) = task {
         let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
         let q = RecallQuery {
             text: &text,
@@ -929,6 +940,119 @@ mod tests {
         let with = ctx(&mut tx, &p, Some("quokka"));
         assert!(with.text.contains("## Relevant to the task"));
         assert!(with.text.contains("quokka detail"));
+    }
+
+    /// Six decisions: the three newest do not mention the task words, two older ones do
+    /// (the day-3 one with both words, so the higher rank), one old one does not.
+    fn seed_task_first<C: GenericClient>(tx: &mut C, p: &str) {
+        insert(
+            tx,
+            &seed(
+                "newest unrelated choice about logging",
+                Some(p),
+                "decision",
+                20,
+            ),
+        );
+        insert(
+            tx,
+            &seed(
+                "second unrelated choice about caching",
+                Some(p),
+                "decision",
+                19,
+            ),
+        );
+        insert(
+            tx,
+            &seed(
+                "third unrelated choice about retries",
+                Some(p),
+                "decision",
+                18,
+            ),
+        );
+        insert(
+            tx,
+            &seed("quokka only matches one word", Some(p), "decision", 4),
+        );
+        insert(
+            tx,
+            &seed("quokka habitat matches both words", Some(p), "decision", 3),
+        );
+        insert(
+            tx,
+            &seed(
+                "oldest unrelated choice about naming",
+                Some(p),
+                "decision",
+                2,
+            ),
+        );
+    }
+
+    fn decision_lines(out: &ContextPack) -> Vec<&str> {
+        out.text
+            .lines()
+            .skip_while(|l| *l != "## Decisions")
+            .skip(1)
+            .take_while(|l| l.starts_with("- "))
+            .collect()
+    }
+
+    #[test]
+    fn with_a_task_matching_decisions_come_first() {
+        db_tx!("with_a_task_matching_decisions_come_first", tx);
+        let p = proj();
+        seed_task_first(&mut tx, &p);
+        let out = ctx(&mut tx, &p, Some("quokka habitat"));
+        let d = decision_lines(&out);
+        assert_eq!(d.len(), 6, "{}", out.text);
+        assert!(d[0].contains("quokka habitat matches both words"), "{d:#?}");
+        assert!(d[1].contains("quokka only matches one word"), "{d:#?}");
+        assert!(d[2].contains("newest unrelated"), "{d:#?}");
+        assert!(d[3].contains("second unrelated"), "{d:#?}");
+        assert!(d[4].contains("third unrelated"), "{d:#?}");
+        assert!(d[5].contains("oldest unrelated"), "{d:#?}");
+    }
+
+    #[test]
+    fn without_a_task_decisions_stay_newest_first() {
+        db_tx!("without_a_task_decisions_stay_newest_first", tx);
+        let p = proj();
+        seed_task_first(&mut tx, &p);
+        let out = ctx(&mut tx, &p, None);
+        let d = decision_lines(&out);
+        let want = [
+            "newest",
+            "second",
+            "third",
+            "quokka only",
+            "quokka habitat",
+            "oldest",
+        ];
+        assert_eq!(d.len(), 6, "{}", out.text);
+        for (line, w) in d.iter().zip(want) {
+            assert!(line.contains(w), "{w}: {d:#?}");
+        }
+    }
+
+    #[test]
+    fn task_first_order_respects_the_budget() {
+        db_tx!("task_first_order_respects_the_budget", tx);
+        let p = proj();
+        seed_task_first(&mut tx, &p);
+        let req = ContextRequest {
+            project: &p,
+            task: Some("quokka habitat"),
+            budget: 70,
+        };
+        let out = build_context(&mut tx, &req, None).unwrap();
+        let d = decision_lines(&out);
+        assert!(out.within_budget);
+        assert_eq!(d.len(), 2, "{}", out.text);
+        assert!(d[0].contains("quokka habitat"), "{d:#?}");
+        assert!(d[1].contains("quokka only"), "{d:#?}");
     }
 
     #[test]
