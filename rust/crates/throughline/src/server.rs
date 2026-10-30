@@ -22,6 +22,8 @@ pub type Db = Arc<Mutex<postgres::Client>>;
 pub struct AppState {
     pub db: Db,
     pub agent_key: Arc<crate::agent_key::KeyState>,
+    /// `THROUGHLINE_MCP_READ_ONLY`, read once at start.
+    pub mcp_read_only: bool,
 }
 
 #[derive(Serialize)]
@@ -114,7 +116,7 @@ struct ConversationSummary {
     favorite: bool,
 }
 
-fn api_error(status: StatusCode, code: &str, detail: impl Into<String>) -> Response {
+pub(crate) fn api_error(status: StatusCode, code: &str, detail: impl Into<String>) -> Response {
     (
         status,
         Json(serde_json::json!({
@@ -144,12 +146,17 @@ fn agent_call(state: &AppState, headers: &HeaderMap) -> Result<bool, Response> {
         }
         _ => "invalid credentials",
     };
+    Err(unauthorized(detail))
+}
+
+/// 401 with the Bearer challenge. `detail` never names the key.
+pub(crate) fn unauthorized(detail: &str) -> Response {
     let mut resp = api_error(StatusCode::UNAUTHORIZED, "unauthorized", detail);
     resp.headers_mut().insert(
         axum::http::header::WWW_AUTHENTICATE,
         axum::http::HeaderValue::from_static("Bearer realm=\"throughline\""),
     );
-    Err(resp)
+    resp
 }
 
 /// Run blocking `postgres` work off the async runtime.
@@ -161,7 +168,7 @@ fn agent_call(state: &AppState, headers: &HeaderMap) -> Result<bool, Response> {
 // `Response` (axum) is the error type and inherently larger than the lint
 // threshold; boxing it would churn every call site for no benefit.
 #[allow(clippy::result_large_err)]
-async fn with_db<T, F>(state: &AppState, f: F) -> Result<T, Response>
+pub(crate) async fn with_db<T, F>(state: &AppState, f: F) -> Result<T, Response>
 where
     T: Send + 'static,
     F: FnOnce(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
@@ -3226,7 +3233,7 @@ fn host_of(authority: &str) -> String {
 /// The Host check stops DNS rebinding, the Origin check stops cross-site
 /// writes, and `Sec-Fetch-Site` keeps other sites from calling the API even
 /// with GET (an `<img>` pointing at a job route). Requests without a Host
-/// header are refused for `/api/` paths. Clients without Origin or
+/// header are refused for `/api/` paths and `/mcp`. Clients without Origin or
 /// `Sec-Fetch-Site`, such as curl or the CLI, pass.
 fn refuse_reason(
     host: Option<&str>,
@@ -3235,7 +3242,8 @@ fn refuse_reason(
     path: &str,
     allowed: &[String],
 ) -> Option<&'static str> {
-    if host.is_none() && path.starts_with("/api/") {
+    let guarded = path.starts_with("/api/") || path == "/mcp";
+    if host.is_none() && guarded {
         return Some("missing host");
     }
     if host.is_some_and(|h| !allowed.contains(&host_of(h))) {
@@ -3259,8 +3267,7 @@ fn refuse_reason(
             return Some("cross-origin request");
         }
     }
-    if path.starts_with("/api/") && !matches!(fetch_site, None | Some("same-origin") | Some("none"))
-    {
+    if guarded && !matches!(fetch_site, None | Some("same-origin") | Some("none")) {
         return Some("cross-site request");
     }
     None
@@ -3357,6 +3364,12 @@ pub fn app(state: AppState) -> Router {
             get(assistants_imported_file_handler),
         )
         .route("/api/assistants/{tool}", get(assistants_tool_handler))
+        .route(
+            "/mcp",
+            post(crate::mcp_http::mcp_post)
+                .get(crate::mcp_http::mcp_other)
+                .delete(crate::mcp_http::mcp_other),
+        )
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(allowed, request_guard))
 }
@@ -3365,6 +3378,9 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
     let state = AppState {
         db: Arc::new(Mutex::new(client)),
         agent_key: Arc::new(crate::agent_key::key_state()),
+        mcp_read_only: crate::mcp::read_only_from(
+            std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),
+        ),
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -3467,6 +3483,32 @@ mod tests {
         assert_eq!(
             refuse_reason(host, None, Some("same-origin"), "/api/status", &a),
             None
+        );
+    }
+
+    #[test]
+    fn mcp_refuses_foreign_origin_and_missing_host() {
+        let a = loopback();
+        let host = Some("127.0.0.1:8788");
+        assert_eq!(refuse_reason(host, None, None, "/mcp", &a), None);
+        assert_eq!(
+            refuse_reason(None, None, None, "/mcp", &a),
+            Some("missing host")
+        );
+        assert_eq!(
+            refuse_reason(host, Some("https://evil.example"), None, "/mcp", &a),
+            Some("cross-origin request")
+        );
+        for site in ["cross-site", "same-site"] {
+            assert_eq!(
+                refuse_reason(host, None, Some(site), "/mcp", &a),
+                Some("cross-site request"),
+                "{site}"
+            );
+        }
+        assert_eq!(
+            refuse_reason(Some("evil.example"), None, None, "/mcp", &a),
+            Some("host not allowed")
         );
     }
 
@@ -3686,6 +3728,7 @@ mod tests {
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = RecallParams {
@@ -3742,6 +3785,7 @@ mod tests {
         AppState {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::key_state_from(Some(TEST_AGENT_KEY))),
+            mcp_read_only: false,
         }
     }
 
@@ -4064,6 +4108,7 @@ mod tests {
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         for params in [
@@ -4431,6 +4476,7 @@ mod tests {
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = ContextParams {
