@@ -118,7 +118,7 @@ Exports land in the mounted `./exports` unless you change `THROUGHLINE_EXPORT_DI
 
 ## The product tour
 
-All nine menus and their supporting views are shown below, captured from the running demo. The [visual feature guide](docs/FEATURE_GUIDE.md) covers alternate views, detail screens, every maintenance action and the CLI.
+All ten menus and their supporting views are shown below, captured from the running demo. The [visual feature guide](docs/FEATURE_GUIDE.md) covers alternate views, detail screens, every maintenance action and the CLI.
 
 | Menu | Purpose | Chord |
 | --- | --- | --- |
@@ -135,9 +135,13 @@ All nine menus and their supporting views are shown below, captured from the run
 
 Press `Ctrl+K` / `Cmd+K` for the command palette. A chord means press `g`, then the second key.
 
+**Design.** The interface uses the Ink theme: plain paper, a black without hue, the Epilogue typeface and hairline rules, with teal reserved for state. **Theme** switches between light, dark and the system setting, and both modes are designed in their own right. The fonts ship with the server under `/fonts/`, so the page makes no request to an outside font service.
+
+**Favorites.** Every session, message, memory note, project and AI configuration entry carries a star, and so do the session and message details. A click sets or removes it at once. Each of these lists has a **Favorites only** toggle that remembers its state per view, and the Overview counts all favorites. The API is `GET /api/favorites`, `POST /api/favorites` and `DELETE /api/favorites/{kind}/{ref}`, and every list takes `favorites=1`.
+
 ### Overview. Recover the thread
 
-Click a metric to drill into the corpus. Inspect activity, recent sessions and the offline handoff. **Hide empty** cleans the session listing, **Browse all** opens the messages. The model-free demo visibly reports missing Ollama in its notices. Nothing is hidden.
+Click a metric to drill into the corpus. The **Favorites** metric opens Sessions filtered to your stars. Inspect activity, recent sessions and the offline handoff. **Hide empty** cleans the session listing, **Browse all** opens the messages. The model-free demo visibly reports missing Ollama in its notices. Nothing is hidden.
 
 ![Overview and handoff](docs/media/rust/home.png)
 
@@ -162,6 +166,8 @@ Filter by text, role, tool name or session ID, or select **Tool calls only**. A 
 ### Memory. Keep durable context accessible
 
 Search notes, filter categories and expand cards. **Ingest agent memory** reads local Markdown memory files. `THROUGHLINE_AGENT_MEMORY_DIR` selects their location. Categories cover decisions, preferences, patterns, insights, error solutions, project context and workflows.
+
+Each note shows when it became valid and, once replaced, when it stopped, apart from when it was recorded. **As of** takes a date and answers what was valid or what was known on that day. Replacing a note asks whether it is an update or a correction. **By meaning** ranks the current notes by meaning through `recall`, and without Ollama it says so and falls back to words.
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 

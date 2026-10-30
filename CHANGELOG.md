@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A new look: the Ink theme
+
+The interface was restyled with the Hallmark theme Ink. Layout, texts and every id, class and script hook stayed as they were.
+
+- **Light by default, dark in its own right.** Plain paper and a black without hue in light, a re-derived dark rendering with the same hue, no glow, no gradients and no resting shadows. **Theme** chooses light, dark or the system setting.
+- **Local fonts.** Epilogue and IBM Plex Mono (SIL Open Font License) ship with the server under `/fonts/`. The page makes no request to an outside font service.
+- **Calmer controls.** Labels in sentence case, pressed controls filled in ink, teal only for state, field edges at 3:1 or more, focus shown as an outline. Role pills in a session no longer use a colour per role.
+- **Logo and favicon** in ink with a paper thread and one teal node.
+- **Small copy changes.** "See all →" and "Next →" lose the arrow, the key hint uses commas instead of a chain of middle dots.
+- **README media** (screenshots in English and German, tour as MP4 and GIF) were recaptured in the dark rendering.
+
+### Favorites
+
+- **A star on every entry.** Sessions, messages, memory notes, projects and AI configuration entries, plus session and message detail. A click sets or removes it at once.
+- **Favorites only.** Each of these lists has the toggle, and the filter sits before paging, so counts and pages match. The Overview shows a Favorites metric that opens Sessions filtered to favorites.
+- **API.** `GET /api/favorites?kind=`, `POST /api/favorites` (idempotent, 201) and `DELETE /api/favorites/{kind}/{ref}` (204). The list routes take `favorites=1` and return `favorite` per entry. Migration 009 adds the table `favorites`.
+
 ### Recall: ask for notes by meaning
 
 Notes now take part in the embedding run, and a new `recall` finds them by full text or, on request, by a weighted ranking built on meaning. `throughline embed` embeds every memory note except forgotten ones before it turns to messages. Full text in mode `current` needs no Ollama. The weighted ranking, `as_of` and `grounded` use the question's vector; without Ollama they answer with `degraded: "no_embeddings"` and fall back to word matching.

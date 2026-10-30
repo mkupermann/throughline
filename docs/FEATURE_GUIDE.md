@@ -15,12 +15,15 @@ The left navigation contains Overview, Sessions, Messages, Search, Memory, Proje
 | Search everything | Opens the palette. |
 | Browse all | Opens individual messages and tool calls. |
 | Hide empty | Toggles empty-session visibility. |
+| Theme | Light, dark or the system setting. Both are renderings of the Ink theme with their own tokens. Fonts (Epilogue, IBM Plex Mono, OFL) are served from `/fonts/`. |
+| Star (☆ / ★) | On every session, message, memory note, project and AI configuration entry, and in session and message detail. Sets or removes a favorite at once; `aria-pressed` follows. |
+| Favorites only | One toggle per list, state kept per view in the browser. Adds `favorites=1` to the list request. |
 | Health indicator | Reports current database connectivity/version; not a backup or model-quality check. |
 | `g` followed by `h/s/b/m/f/j/k/t/a/p` | Overview / Sessions / Messages / Memory / Search / Projects / AI configuration / Timeline / Research / Import and status. |
 
 ## Overview
 
-Counts for conversations, messages, memory, vectors and projects link to the relevant surface. Activity covers recent days; source labels identify tools. Recovery hints reflect runtime configuration. The offline handoff contains recorded context, not a fresh inspection of files or task completion.
+Counts for conversations, messages, memory, vectors, projects and favorites link to the relevant surface. Favorites opens Sessions with Favorites only switched on. Activity covers recent days; source labels identify tools. Recovery hints reflect runtime configuration. The offline handoff contains recorded context, not a fresh inspection of files or task completion.
 
 ![Overview](media/rust/home.png)
 

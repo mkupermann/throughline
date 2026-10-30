@@ -118,7 +118,7 @@ Exporte landen im gemounteten `./exports`, solange Du `THROUGHLINE_EXPORT_DIR` n
 
 ## Die Produkt-Tour
 
-Alle neun Menüs und ihre Nebenansichten sind unten abgebildet, aufgenommen aus der laufenden Demo. Der [visuelle Funktionsleitfaden](docs/FEATURE_GUIDE.md) zeigt zusätzlich Alternativ-Ansichten, Detailseiten, jede Wartungsaktion und die CLI.
+Alle zehn Menüs und ihre Nebenansichten sind unten abgebildet, aufgenommen aus der laufenden Demo. Der [visuelle Funktionsleitfaden](docs/FEATURE_GUIDE.md) zeigt zusätzlich Alternativ-Ansichten, Detailseiten, jede Wartungsaktion und die CLI.
 
 | Menü | Zweck | Kürzel |
 | --- | --- | --- |
@@ -135,9 +135,13 @@ Alle neun Menüs und ihre Nebenansichten sind unten abgebildet, aufgenommen aus 
 
 `Ctrl+K` / `Cmd+K` öffnet die Befehls-Palette. Ein Kürzel heißt: erst `g`, dann die zweite Taste.
 
+**Design.** Die Oberfläche nutzt das Theme Ink: helles Papier, ein Schwarz ohne Farbton, die Schrift Epilogue und feine Linien. Teal steht nur für einen Zustand. **Design** wechselt zwischen Hell, Dunkel und der Systemeinstellung. Beide Modi sind eigenständig gestaltet. Die Schriften liefert der Server selbst unter `/fonts/` aus, die Seite ruft keinen fremden Schriftdienst auf.
+
+**Favoriten.** Jede Sitzung, Nachricht, Memory-Notiz, jedes Projekt und jeder Eintrag der KI-Konfiguration hat einen Stern, ebenso Sitzungs- und Nachrichtendetail. Ein Klick setzt oder entfernt ihn sofort. Jede dieser Listen hat den Umschalter **Nur Favoriten**, der seinen Zustand je Ansicht behält. Die Übersicht zählt alle Favoriten. Die API ist `GET /api/favorites`, `POST /api/favorites` und `DELETE /api/favorites/{kind}/{ref}`, jede Liste nimmt `favorites=1`.
+
 ### Übersicht. Den Faden wieder aufnehmen
 
-Klick auf eine Kennzahl und steig in den Datenbestand ein. Prüfe Aktivität, letzte Sitzungen und die Offline-Übergabe. **Leere ausblenden** räumt die Sitzungsliste auf, **Alle durchsuchen** öffnet die Nachrichten. Die modellfreie Demo meldet das fehlende Ollama sichtbar in den Hinweisen. Nichts wird versteckt.
+Klick auf eine Kennzahl und steig in den Datenbestand ein. Die Kennzahl **Favoriten** öffnet die Sitzungen gefiltert auf Ihre Sterne. Prüfe Aktivität, letzte Sitzungen und die Offline-Übergabe. **Leere ausblenden** räumt die Sitzungsliste auf, **Alle durchsuchen** öffnet die Nachrichten. Die modellfreie Demo meldet das fehlende Ollama sichtbar in den Hinweisen. Nichts wird versteckt.
 
 ![Übersicht mit Übergabe](docs/media/rust/de/home.png)
 
@@ -162,6 +166,8 @@ Filtere nach Text, Rolle, Werkzeugname oder Sitzungs-ID, oder wähle **Nur Werkz
 ### Memory. Dauerhaften Kontext griffbereit halten
 
 Durchsuche Notizen, filtere Kategorien und klappe Karten auf. **Ingest agent memory** liest lokale Markdown-Memory-Dateien. `THROUGHLINE_AGENT_MEMORY_DIR` bestimmt deren Ort. Die Kategorien decken Entscheidungen, Präferenzen, Muster, Erkenntnisse, Fehlerlösungen, Projektkontext und Workflows ab.
+
+Jede Notiz zeigt, ab wann sie gilt und, sobald sie ersetzt ist, bis wann. Das ist getrennt vom Zeitpunkt der Erfassung. **Stand am** nimmt ein Datum und beantwortet mit „galt“ oder „war bekannt“, was an diesem Tag galt oder was Throughline bis dahin erfasst hatte. Beim Ersetzen fragt der Dialog, ob es eine Aktualisierung oder eine Korrektur ist. **Nach Bedeutung** ordnet die aktuellen Notizen über `recall` nach Bedeutung. Ohne Ollama sagt die Ansicht das und fällt auf Wörter zurück.
 
 ![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 
@@ -234,9 +240,9 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Bereich | Befehle |
 | --- | --- |
 | Einrichtung und Gesundheit | `migrate`, `serve`, `status`, `doctor` |
-| Import und Abruf | `ingest`, `search`, `ask`, `handoff` |
+| Import und Abruf | `ingest`, `search`, `recall`, `ask`, `handoff` |
 | Anreicherung | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval` |
+| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `stale-digest`, `answer-eval`, `recall-eval` |
 | Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown` |
 | Schützen und integrieren | `backup`, `mcp` |
 
@@ -246,7 +252,7 @@ Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkei
 
 Starte `throughline mcp` aus einem kompatiblen Client über stdio, mit den Datenbank-Variablen in dessen Prozess-Umgebung. Das Container-Pendant ist `docker compose run -i --rm mcp`.
 
-Der Rust-Server bietet `search`, `list_projects`, `stats`, `write` und `forget` an. Alle fünf Aktionen laufen gegen ein frisches Schema. Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
+Der Rust-Server bietet `search`, `recall`, `list_projects`, `stats`, `write`, `forget` und `supersede` an. `recall`, `supersede` und `write` brauchen das aktuelle Schema (Migration 012 oder neuer). Der ältere Python-MCP-Server hat einen anderen Tool-Vertrag.
 
 ### Optionale Modelle
 
