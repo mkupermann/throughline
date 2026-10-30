@@ -27,6 +27,7 @@ pub mod ingest_run;
 pub mod lifecycle;
 pub mod llm;
 pub mod mcp;
+pub mod mcp_http;
 pub mod mcp_protocol;
 pub mod memory_writeback;
 pub mod migrate;
