@@ -14,7 +14,7 @@ pub fn estimate_tokens(s: &str) -> usize {
     words.max(chars.div_ceil(4)).max(1)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Section {
     Header,
@@ -26,7 +26,7 @@ pub enum Section {
     Sources,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Citation {
     pub kind: &'static str,
     pub id: i64,
@@ -41,7 +41,7 @@ pub struct Line {
     pub cite: Option<Citation>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct PackedItem {
     pub section: Section,
     pub text: String,
@@ -49,7 +49,7 @@ pub struct PackedItem {
     pub cite: Option<Citation>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ContextPack {
     pub text: String,
     pub items: Vec<PackedItem>,
@@ -80,18 +80,24 @@ fn heading(section: Section) -> Option<&'static str> {
 }
 
 /// Packs the header and then the lines, in order, into at most `budget` tokens.
+/// The header is flattened like any line; a header that is blank after flattening is emitted as a
+/// single space (one line, estimate 1), so that the accounting below holds for every `Ok` result.
 /// Every emitted text line costs `estimate_tokens(line) + 1` (the newline).
 /// Lines that do not fit are skipped; lines that are blank after flattening are dropped silently.
 pub fn pack(header: &str, lines: &[Line], budget: usize) -> Result<ContextPack, PackError> {
     if !(MIN_BUDGET..=MAX_BUDGET).contains(&budget) {
         return Err(PackError::BudgetOutOfRange(budget));
     }
-    let header_cost = estimate_tokens(header) + 1;
+    let mut header = header.replace(['\n', '\r'], " ");
+    if header.trim().is_empty() {
+        header = " ".to_string();
+    }
+    let header_cost = estimate_tokens(&header) + 1;
     if header_cost > budget {
         return Err(PackError::HeaderTooLarge);
     }
     let mut used = header_cost;
-    let mut out: Vec<String> = vec![header.to_string()];
+    let mut out: Vec<String> = vec![header];
     let mut items = Vec::new();
     let mut citations: Vec<Citation> = Vec::new();
     let mut skipped = 0;
@@ -174,6 +180,7 @@ mod tests {
         assert_eq!(estimate_tokens("abcdefghi"), 3);
         assert_eq!(estimate_tokens("😀"), 1);
         assert_eq!(estimate_tokens(""), 1);
+        assert_eq!(estimate_tokens(&"x".repeat(40)), 10);
     }
 
     #[test]
@@ -241,6 +248,51 @@ mod tests {
         assert_eq!(p.citations.len(), 2);
     }
 
+    fn r1_sum(p: &ContextPack) -> usize {
+        p.text.lines().map(|l| estimate_tokens(l) + 1).sum()
+    }
+
+    #[test]
+    fn multiline_header_becomes_one_line() {
+        let p = pack("a\n\n\n\n\n\n\n\n", &[], 64).unwrap();
+        assert_eq!(p.text.lines().count(), 1);
+        assert!(!p.text.contains('\n'));
+        assert_eq!(p.tokens_used, r1_sum(&p));
+        assert!(p.tokens_used <= 64);
+    }
+
+    #[test]
+    fn empty_header_keeps_the_accounting_exact() {
+        for h in ["", "\n", "  \r\n "] {
+            let p = pack(h, &[line(Section::Decisions, "x", None)], 64).unwrap();
+            assert_eq!(p.text.lines().next().map(estimate_tokens), Some(1), "{h:?}");
+            assert_eq!(p.tokens_used, r1_sum(&p), "{h:?}");
+        }
+        let p = pack("", &[], 64).unwrap();
+        assert_eq!(p.tokens_used, r1_sum(&p));
+    }
+
+    #[test]
+    fn a_header_that_exactly_fills_the_budget_is_ok() {
+        let p = pack(&words(63), &[], 64).unwrap();
+        assert_eq!(p.tokens_used, 64);
+        assert!(p.within_budget);
+        assert_eq!(
+            pack(&words(64), &[], 64).err().unwrap(),
+            PackError::HeaderTooLarge
+        );
+    }
+
+    #[test]
+    fn a_line_landing_exactly_on_the_budget_is_included() {
+        // header cost 2 + heading "## Decisions" (12 chars -> 3 tokens, cost 4) + line of 57 words (cost 58) = 64
+        let p = pack("h", &[line(Section::Decisions, &words(57), None)], 64).unwrap();
+        assert_eq!(p.tokens_used, 64);
+        assert_eq!(p.items.len(), 1);
+        let p = pack("h", &[line(Section::Decisions, &words(58), None)], 64).unwrap();
+        assert_eq!(p.skipped, 1);
+    }
+
     struct Rng(u64);
     impl Rng {
         fn next(&mut self) -> u64 {
@@ -252,6 +304,15 @@ mod tests {
         fn range(&mut self, lo: usize, hi_incl: usize) -> usize {
             lo + (self.next() % (hi_incl - lo + 1) as u64) as usize
         }
+    }
+
+    /// 1..=max words of 1..=12 characters each, so both estimate branches occur.
+    fn mixed(rng: &mut Rng, max: usize) -> String {
+        let n = rng.range(1, max);
+        (0..n)
+            .map(|_| "x".repeat(rng.range(1, 12)))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
@@ -267,15 +328,15 @@ mod tests {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         for case in 0..1_000 {
             let budget = rng.range(64, 4096);
-            let header = words(rng.range(1, 400));
+            let header = mixed(&mut rng, 400);
             let n = rng.range(0, 40);
             let mut idx: Vec<usize> = (0..n).map(|_| rng.range(0, 5)).collect();
             idx.sort();
             let lines: Vec<Line> = idx
                 .iter()
-                .map(|&s| line(sections[s], &words(rng.range(1, 400)), None))
+                .map(|&s| line(sections[s], &mixed(&mut rng, 400), None))
                 .collect();
-            let header_fits = estimate_tokens(&header) < budget;
+            let header_fits = estimate_tokens(&header.replace(['\n', '\r'], " ")) < budget;
             match pack(&header, &lines, budget) {
                 Ok(p) => {
                     assert!(header_fits, "case {case}: Ok with oversized header");
