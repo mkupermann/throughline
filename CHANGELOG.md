@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### With a task, matching decisions lead the context pack
+
+When you give `context` a task, the Decisions section now starts with the decisions that match it, best full-text match first, and then the rest newest first. On a project with many decisions the budget used to fill with the newest ones whatever the task said. Without a task the order is unchanged, and so are the sections, the budget rules and the line format.
+
 ### Context pack: a project briefing that fits a budget
 
 `context` packs what an assistant should know about a project into a token budget you choose, so a new session can start from it. It reads the current notes, the recent sessions and, if you give a task, the notes that match it. Every line carries its source. It needs no Ollama.
