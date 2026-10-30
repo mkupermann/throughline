@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 When you give `context` a task, the Decisions section now starts with the decisions that match it, best full-text match first, and then the rest newest first. On a project with many decisions the budget used to fill with the newest ones whatever the task said. Without a task the order is unchanged, and so are the sections, the budget rules and the line format.
 
+### Actions that change data need POST and a confirmation
+
+An audit on 30.10.2026 found that four GET routes changed data. A link or an image on another page could have started a job.
+
+- **POST only.** `/api/operate`, `/api/writeback`, `/api/agent-memory/ingest` and `/api/mimo-memory/ingest` accept only POST. GET returns 405. Scripts that called them with GET need `curl -X POST`.
+- **No Host, no API.** An API request without a Host header is refused with 403.
+- **Confirmation in the browser.** Ingest, Import AI configuration, Embed, Reflect, Backup and Write to AGENTS.md show what they will change and run only after **Run**. Cancel and Escape send nothing. The palette goes through the same step. Read-only actions run at once and come first in the grid.
+
 ### Context pack: a project briefing that fits a budget
 
 `context` packs what an assistant should know about a project into a token budget you choose, so a new session can start from it. It reads the current notes, the recent sessions and, if you give a task, the notes that match it. Every line carries its source. It needs no Ollama.

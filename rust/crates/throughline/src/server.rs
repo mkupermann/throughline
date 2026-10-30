@@ -2900,8 +2900,9 @@ fn host_of(authority: &str) -> String {
 ///
 /// The Host check stops DNS rebinding, the Origin check stops cross-site
 /// writes, and `Sec-Fetch-Site` keeps other sites from calling the API even
-/// with GET (an `<img>` pointing at a job route). Clients without these
-/// headers, such as curl or the CLI, pass.
+/// with GET (an `<img>` pointing at a job route). Requests without a Host
+/// header are refused for `/api/` paths. Clients without Origin or
+/// `Sec-Fetch-Site`, such as curl or the CLI, pass.
 fn refuse_reason(
     host: Option<&str>,
     origin: Option<&str>,
@@ -2909,6 +2910,9 @@ fn refuse_reason(
     path: &str,
     allowed: &[String],
 ) -> Option<&'static str> {
+    if host.is_none() && path.starts_with("/api/") {
+        return Some("missing host");
+    }
     if host.is_some_and(|h| !allowed.contains(&host_of(h))) {
         return Some("host not allowed");
     }
@@ -2982,8 +2986,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/memory/{id}/forget", post(memory_forget))
         .route("/api/memory/{id}/keep", post(memory_keep))
         .route("/api/memory/{id}/supersede", post(memory_supersede))
-        .route("/api/mimo-memory/ingest", get(agent_memory_ingest))
-        .route("/api/agent-memory/ingest", get(agent_memory_ingest))
+        .route("/api/mimo-memory/ingest", post(agent_memory_ingest))
+        .route("/api/agent-memory/ingest", post(agent_memory_ingest))
         .route("/api/conversations", get(recent))
         .route("/api/conversations/{id}", get(conversation))
         .route("/api/projects", get(projects_handler))
@@ -2998,14 +3002,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/timeline", get(timeline_handler))
         .route("/api/conflicts", get(conflicts_handler))
         .route("/api/ask", get(ask_handler))
-        .route("/api/operate", get(operate_handler))
+        .route("/api/operate", post(operate_handler))
         .route("/api/handoff", get(handoff_handler))
         .route("/api/costs", get(costs_handler))
         .route("/api/ingest-status", get(ingest_status_handler))
         .route("/api/audit", get(audit_handler))
         .route("/api/stale-digest", get(stale_digest_handler))
         .route("/api/answer-eval", get(answer_eval_handler))
-        .route("/api/writeback", get(writeback_handler))
+        .route("/api/writeback", post(writeback_handler))
         .route("/api/health-recovery", get(health_recovery_handler))
         .route("/api/assistants", get(assistants_handler))
         .route(
@@ -3060,7 +3064,11 @@ mod tests {
                 "{host}"
             );
         }
-        assert_eq!(refuse_reason(None, None, None, "/api/status", &a), None);
+        assert_eq!(
+            refuse_reason(None, None, None, "/api/status", &a),
+            Some("missing host")
+        );
+        assert_eq!(refuse_reason(None, None, None, "/", &a), None);
     }
 
     #[test]
@@ -3187,6 +3195,29 @@ mod tests {
             &a
         )
         .is_some());
+    }
+
+    #[test]
+    fn requests_without_host_are_refused_for_api() {
+        let a = loopback();
+        assert_eq!(
+            refuse_reason(None, None, None, "/api/operate", &a),
+            Some("missing host")
+        );
+        assert_eq!(
+            refuse_reason(None, None, None, "/api/writeback", &a),
+            Some("missing host")
+        );
+        assert_eq!(
+            refuse_reason(None, None, None, "/api/agent-memory/ingest", &a),
+            Some("missing host")
+        );
+        assert_eq!(
+            refuse_reason(None, None, None, "/api/mimo-memory/ingest", &a),
+            Some("missing host")
+        );
+        // Non-API paths still pass without a Host header.
+        assert_eq!(refuse_reason(None, None, None, "/", &a), None);
     }
 
     #[test]
