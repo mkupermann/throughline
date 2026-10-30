@@ -683,15 +683,24 @@ fn ground<C: GenericClient>(
     if word_list.is_empty() {
         return Ok(found);
     }
+    // Each message is lowered once and each word searched once per
+    // conversation, however many notes share them.
     let rows = client.query(
-        "SELECT DISTINCT ON (x.note_id) x.note_id, m.id, left(m.content, 240), m.created_at, x.hits
-         FROM (
-            SELECT w.note_id, m.id AS message_id, count(*)::float8 AS hits
-            FROM unnest($1::bigint[], $2::bigint[], $3::text[]) AS w(note_id, conv_id, word)
-            JOIN messages m ON m.conversation_id = w.conv_id
-             AND strpos(lower(m.content), w.word) > 0
-            GROUP BY w.note_id, m.id) x
-         JOIN messages m ON m.id = x.message_id
+        "WITH w AS (SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::text[])
+                      AS w(note_id, conv_id, word)),
+              cw AS (SELECT DISTINCT conv_id, word FROM w),
+              msg AS MATERIALIZED (
+                SELECT m.id, m.conversation_id, lower(m.content) AS lc FROM messages m
+                WHERE m.conversation_id IN (SELECT conv_id FROM cw)),
+              hit AS (
+                SELECT cw.conv_id, cw.word, msg.id AS message_id FROM cw
+                JOIN msg ON msg.conversation_id = cw.conv_id AND strpos(msg.lc, cw.word) > 0),
+              x AS (
+                SELECT w.note_id, hit.message_id, count(*)::float8 AS hits FROM w
+                JOIN hit ON hit.conv_id = w.conv_id AND hit.word = w.word
+                GROUP BY w.note_id, hit.message_id)
+         SELECT DISTINCT ON (x.note_id) x.note_id, m.id, left(m.content, 240), m.created_at, x.hits
+         FROM x JOIN messages m ON m.id = x.message_id
          ORDER BY x.note_id, x.hits DESC, m.id",
         &[&word_notes, &word_convs, &word_list],
     )?;
