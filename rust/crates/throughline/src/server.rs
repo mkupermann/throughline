@@ -1983,6 +1983,7 @@ fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<KeepOutcome>
         "#,
         &[&id],
     )?;
+    crate::lifecycle::record_use(&mut tx, &[id])?;
     tx.commit()?;
     Ok(KeepOutcome::Kept)
 }
@@ -3306,6 +3307,84 @@ mod tests {
         .expect("forget");
         assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
         assert_eq!(validity(&mut tx, a).0, "active");
+    }
+
+    #[test]
+    fn keep_counts_once() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping keep_counts_once: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let a = seed_note(&mut tx, "keep-count note", "decision");
+        let b = seed_note(&mut tx, "keep-count note replaced", "decision");
+        supersede_memory(&mut tx, b, &test_successor("keep-count successor")).expect("supersede");
+        let uses = |tx: &mut postgres::Transaction<'_>, id: i64| -> i32 {
+            tx.query_one(
+                "SELECT COALESCE(access_count, 0) FROM memory_chunks WHERE id = $1",
+                &[&id],
+            )
+            .expect("row")
+            .get(0)
+        };
+        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        assert_eq!(uses(&mut tx, a), 1);
+        // a refused keep counts nothing
+        assert_eq!(
+            keep_memory(&mut tx, b).expect("keep"),
+            KeepOutcome::HasSuccessor
+        );
+        assert_eq!(uses(&mut tx, b), 0);
+    }
+
+    #[test]
+    fn api_recall_does_not_count() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping api_recall_does_not_count: no PostgreSQL reachable");
+            return;
+        };
+        // The handler takes the shared client, so the test runs on it inside
+        // a hand-opened transaction and rolls back at the end.
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_note(&mut client, &format!("api-recall wombat {tag}"), "decision");
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params = RecallParams {
+            q: Some(format!("wombat {tag}")),
+            project: None,
+            mode: None,
+            valid_at: None,
+            known_at: None,
+            limit: None,
+            rank: None,
+        };
+        let resp = rt.block_on(recall_handler(State(state.clone()), Query(params)));
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        assert!(
+            v["hits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|h| h["id"].as_i64() == Some(a)),
+            "the note must be a hit, or the test proves nothing: {v}"
+        );
+        let mut client = state.db.lock().expect("lock");
+        let n: i32 = client
+            .query_one(
+                "SELECT COALESCE(access_count, 0) FROM memory_chunks WHERE id = $1",
+                &[&a],
+            )
+            .expect("row")
+            .get(0);
+        client.batch_execute("ROLLBACK").expect("rollback");
+        assert_eq!(n, 0, "the UI recall must not count");
     }
 
     #[test]

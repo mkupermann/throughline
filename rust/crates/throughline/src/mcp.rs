@@ -263,6 +263,8 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             };
             let result = crate::recall::recall(client, &q, emb.as_ref())
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            crate::lifecycle::record_use_or_log(client, &ids);
             Ok(text_result(serde_json::to_string(&result).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))
@@ -308,6 +310,13 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 Some(_) => invalid(&e.to_string()),
                 None => json!({ "code": -32000, "message": e.to_string() }),
             })?;
+            let ids: Vec<i64> = pack
+                .citations
+                .iter()
+                .filter(|c| c.kind == "memory")
+                .map(|c| c.id)
+                .collect();
+            crate::lifecycle::record_use_or_log(client, &ids);
             Ok(text_result(serde_json::to_string(&pack).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))
@@ -636,6 +645,99 @@ mod tests {
         assert!(ids.contains(&id), "{out}");
         // current + full text needs no question vector, Ollama or not
         assert!(out["degraded"].is_null(), "{out}");
+    }
+
+    fn use_count(client: &mut impl GenericClient, id: i64) -> i32 {
+        client
+            .query_one(
+                "SELECT COALESCE(access_count, 0) FROM memory_chunks WHERE id = $1",
+                &[&id],
+            )
+            .expect("row")
+            .get(0)
+    }
+
+    #[test]
+    fn mcp_recall_counts_its_hits() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_counts_its_hits: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let hit = call_text(
+            &mut tx,
+            "write",
+            json!({ "content": format!("quokka{tag} rollout"), "project": project }),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        let miss = call_text(
+            &mut tx,
+            "write",
+            json!({ "content": format!("numbat{tag} burrow"), "project": project }),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        let out = call_text(
+            &mut tx,
+            "recall",
+            json!({ "query": format!("quokka{tag}"), "project": project, "limit": 1 }),
+        );
+        let ids: Vec<i64> = out["hits"]
+            .as_array()
+            .expect("hits")
+            .iter()
+            .map(|h| h["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![hit], "{out}");
+        assert_eq!(use_count(&mut tx, hit), 1);
+        assert_eq!(use_count(&mut tx, miss), 0);
+    }
+
+    #[test]
+    fn mcp_project_context_counts_cited_notes() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_project_context_counts_cited_notes: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let cited = call_text(
+            &mut tx,
+            "write",
+            json!({
+                "content": format!("we chose heron storage {tag}"),
+                "project": project,
+                "category": "decision"
+            }),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        let other = call_text(
+            &mut tx,
+            "write",
+            json!({ "content": format!("elsewhere {tag}"), "project": format!("other-{tag}") }),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        let out = call_text(
+            &mut tx,
+            "project_context",
+            json!({ "project": project, "budget": 1000 }),
+        );
+        assert!(
+            out["citations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["kind"] == "memory" && c["id"].as_i64() == Some(cited)),
+            "{out}"
+        );
+        assert_eq!(use_count(&mut tx, cited), 1);
+        assert_eq!(use_count(&mut tx, other), 0);
     }
 
     #[test]
