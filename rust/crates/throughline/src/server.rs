@@ -2879,6 +2879,8 @@ async fn health_recovery_handler(State(state): State<AppState>) -> Response {
                 "database": r.database,
                 "generation": r.generation,
                 "embeddings": r.embeddings,
+                "embedding_target": r.embedding_target,
+                "embedding_missing": r.embedding_missing,
                 "generation_local": r.generation_local,
                 "notes": r.notes,
                 "actions": actions,
