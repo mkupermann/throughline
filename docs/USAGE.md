@@ -162,7 +162,7 @@ wrote an audit row; the Rust version does not.)
 
 ## How often a note is used, and how strong it is
 
-Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall` and `project_context`, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. They do not change for HTTP `GET /api/recall`, `GET /api/context`, search, ask, browsing in the UI or any other HTTP route.
+Every note keeps `access_count` and `last_accessed`. Both change when a note is handed to an agent or to the command line: the MCP tools `recall`, `project_context`, `get_note` and `keep`, MCP `prompts/get`, MCP `resources/read` for a note or a context pack, the CLI commands `recall` and `context`, and `POST /api/memory/{id}/keep`. `GET /api/recall` and `GET /api/context` count only when the request carries a valid agent key (see [Agent access over HTTP](#agent-access-over-http)); without one they do not, and an `Authorization` header that is not a valid key is refused with 401. These never count: `search` (MCP, HTTP or CLI), `conflicts`, `resources/list`, ask, browsing in the UI and any other HTTP route. Counting is per note. There is no count per agent, key or time of day.
 
 From that Throughline derives a strength between 0.05 and 1:
 
@@ -351,15 +351,107 @@ that is already in the database.
 
 Two routes, and they compose:
 
-**MCP.** `memory_mcp` exposes search, recall, write, supersede and forget over
-the Model Context Protocol, so any MCP-capable client can query the shared
-store mid-session. See [`memory_mcp/README.md`](../memory_mcp/README.md) for
-the tool list and the project-scoping rules.
+**MCP.** The Rust server speaks the Model Context Protocol over stdio
+(`throughline mcp`) and over HTTP (`POST /mcp`), so any MCP-capable client can
+query the shared store mid-session. Both transports run the same code and offer
+the same tools. The next section covers the HTTP side and the tool list. The
+older Python server, `memory_mcp`, has a different tool contract; see
+[`memory_mcp/README.md`](../memory_mcp/README.md).
 
 **SessionStart hook.** `throughline install-hooks` writes a hook into
 `~/.claude/settings.json` that drops a short, project-scoped summary of past
 decisions and preferences into each new session — context without asking for
 it.
+
+## Agent access over HTTP
+
+`POST /mcp` is MCP over Streamable HTTP. It answers with plain JSON: no SSE stream and no sessions. `GET` and `DELETE` on `/mcp` answer 405. A request body may be 1 MiB at most (413 above that), and a JSON batch (an array) is refused.
+
+### Turn it on
+
+`/mcp` is off until you set a key.
+
+```bash
+throughline agent-key        # prints a fresh 64-character hex key, writes nothing
+```
+
+Put it into `.env` as `THROUGHLINE_AGENT_KEY=<key>` and restart the web container. The key must have at least 32 characters after trimming. Unset or shorter, `/mcp` answers 503 `agent_access_off` and the UI keeps working. A missing or wrong key gets 401. `throughline doctor` and the doctor in the UI print `agent access: on` or `agent access: off: <reason>`, never the key. `THROUGHLINE_API_KEY` stays the key of your model provider and is not involved.
+
+### Set up a client
+
+Claude Code:
+
+```bash
+claude mcp add --transport http throughline http://127.0.0.1:8788/mcp \
+  --header "Authorization: Bearer $THROUGHLINE_AGENT_KEY"
+```
+
+Port 8788 is the Compose default (`THROUGHLINE_WEB_PORT`). Run the web server natively and the port is the one you started it on, 8787 by default.
+
+Codex reads MCP servers from `~/.codex/config.toml`. A Streamable HTTP server takes a `url` and, for a bearer token, `bearer_token_env_var`, the name of an environment variable that holds the key:
+
+```toml
+[mcp_servers.throughline]
+url = "http://127.0.0.1:8788/mcp"
+bearer_token_env_var = "THROUGHLINE_AGENT_KEY"
+```
+
+Those keys come from the Codex MCP documentation (read on 2026-10-30), not from a run against Throughline. Any other client needs the same two things: the URL and an `Authorization: Bearer <key>` header.
+
+### Tools
+
+| Tool | What it does | Counts as use |
+| --- | --- | --- |
+| `search` | Keyword search over messages. Arguments: `query`, `limit`, `project`. | no |
+| `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext` or `weighted`. | yes |
+| `project_context` | The context pack of a project (`project`, `task`, `budget`). | yes |
+| `get_note` | One note by `id` with its source and its whole supersede chain, oldest first. | yes |
+| `conflicts` | The conflict report, optionally for one `project`. Each row has a kind: `contradiction` (open), `documented_supersession` (already resolved by a replacement) or `stale_tool_drift` (never-used notes of one tool). | no |
+| `list_projects` | Known project names. | no |
+| `stats` | Corpus counts. | no |
+| `write` | A new note. `category` is one of the allowed categories (use `decision` for a decision); `project` is optional. | no |
+| `forget` | Marks notes forgotten (`ids`). See [Keeping memory trustworthy](#keeping-memory-trustworthy). | no |
+| `supersede` | Replaces a note with a new active one; the old note stays as history. | no |
+| `keep` | Confirms a note: active again, expiry cleared. A note that a newer note replaced stays superseded. | yes |
+
+### Resources and prompts
+
+Resources: `throughline://projects`, and the templates `throughline://project/{name}/context` (the context pack with the default budget) and `throughline://note/{id}`. Reading a note or a context pack counts as use; `resources/list` does not.
+
+Prompts: `before_coding(project, task?)` and `handoff(project)`. Both fetch the context pack and put it inside a `<throughline-data>` block, as data and not as an instruction. In Claude Code they show up as slash commands. Getting a prompt counts as use.
+
+### Protocol versions and errors
+
+The server speaks the modern version `2026-07-28` (per-request `_meta`, the headers `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`, and `server/discover`) and the older `initialize` handshake with `2025-11-25` and `2025-06-18`. Over stdio `2024-11-05` also works. `2025-03-26` is not supported. Modern results carry `"resultType": "complete"`. No session id is issued.
+
+| Code | Meaning |
+| --- | --- |
+| `-32020` | Header missing or different from the body (HTTP 400). |
+| `-32022` | Unsupported modern version (HTTP 400, `data` lists `supported` and `requested`). |
+| `-32601` | Unknown method (HTTP 404 in the modern era, 200 in the legacy one). |
+| `-32602` | Invalid parameters, an unknown tool or one that read-only mode blocks; in the modern era also a resource that does not exist. |
+| `-32002` | Resource not found, legacy era. |
+| `-32700`, `-32600` | Body is not JSON, or is a batch. |
+| `-32000` | Operation refused, for example a remote embedding model without `THROUGHLINE_ALLOW_REMOTE_LLM`. |
+
+A request with a foreign `Origin` gets 403 even with the right key.
+
+### Read-only mode
+
+`THROUGHLINE_MCP_READ_ONLY=1` (also `true`, `yes`, `on`) removes `write`, `forget`, `supersede` and `keep` from `tools/list` on stdio and on HTTP. Calling one answers `-32602`, like any unknown tool. Reading still counts as use, because that is a statistic and not a change to a note.
+
+### Embeddings and the remote-model lock
+
+Embeddings follow `THROUGHLINE_ALLOW_REMOTE_LLM` too. An Ollama host at ollama.com or a cloud embedding model is refused unless the variable allows it. `GET /api/recall` then answers 403 `remote_llm_not_allowed`, and MCP answers `-32000`.
+
+### What the key does not do
+
+Two limits, stated plainly.
+
+- What an agent recalls lands in the context of that agent's model. `THROUGHLINE_ALLOW_REMOTE_LLM` governs Throughline's own model calls and does not govern that. If the agent runs on a hosted model, the notes it reads go there. This is the same over stdio.
+- The key protects `/mcp`, and it marks agent use on `GET /api/recall` and `GET /api/context`. It does not protect the UI or the rest of the API, because the UI calls `/api` from the browser without a key. It does not protect against other programs of the same user either: they can call `/api` and read `.env`.
+
+Throughline writes no log of MCP requests, keys or client names.
 
 ## The continue loop
 

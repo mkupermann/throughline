@@ -116,18 +116,18 @@ The provider status panel is a separate view of discovery/import state. The demo
 
 ## CLI functions
 
-All 32 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
+All 33 commands exposed by the Rust CLI are listed below. Use `<command> --help` for exact options; the older Python CLI differs.
 
 | Command | Function and relevant boundary |
 | --- | --- |
 | `migrate` | Apply Rust schema migrations; `--status` reports the ledger. |
 | `serve` | Start the embedded UI/API; defaults to loopback port 8787. |
 | `status` | Report conversation/message counts. |
-| `doctor` | Inspect database and model/backend availability. |
+| `doctor` | Inspect database and model/backend availability, and whether agent access is on (never the key). |
 | `ingest` | Import `--source all` or a named adapter. See the adapter status table in the README. |
 | `import-config` | Import the assistant configuration inventory with secrets masked. |
 | `search` | Keyword search; optional `--semantic` and `--from` selection. |
-| `recall` | Ranked memory-note recall with a reason per hit; modes `current`, `as_of`, `associative`, `grounded`. |
+| `recall` | Ranked memory-note recall with a reason per hit; modes `current`, `as_of`, `associative`, `grounded`. Counts as use of each note it returns. |
 | `context` | Build a project briefing from current notes that fits a token budget; `--task`, `--budget`, `--json`. No model needed. |
 | `ask` | Retrieve records and generate a cited answer, with conditional excerpt fallback. |
 | `handoff` | Build an offline continuation brief, optionally scoped to a project. |
@@ -151,7 +151,8 @@ All 32 commands exposed by the Rust CLI are listed below. Use `<command> --help`
 | `export-otel` | Write OTLP/JSON traces with `gen_ai.*` attributes, one trace per conversation. Content only with `--include-content`, no redaction, existing files are overwritten. |
 | `backup` | Dump the database to a directory and keep the newest `--keep` dumps. Rotation only touches its own `<database>-YYYYMMDD-HHMMSS.sql` files. There is no restore command. Load a dump with `psql`. |
 | `retention` | Archive and then delete conversations older than `--older-than` days with their notes. Dry run without `--apply`, refuses under 180 days without `--allow-short-retention`. The archive is not redacted. |
-| `mcp` | Serve the Rust MCP tool contract over stdio. |
+| `mcp` | Serve the Rust MCP tool contract over stdio. The same contract is served over HTTP at `POST /mcp` when `THROUGHLINE_AGENT_KEY` is set; see the [usage guide](USAGE.md#agent-access-over-http). |
+| `agent-key` | Print a fresh 64-character key for `THROUGHLINE_AGENT_KEY`. Writes nothing. |
 
 Not all commands have a corresponding browser button. No screenshot can demonstrate the success of an unexecuted CLI command. See the verification record for tested paths.
 

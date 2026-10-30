@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Agent access over HTTP
+
+Claude Code, Codex and other MCP clients can now reach Throughline over HTTP, with the same tools as stdio.
+
+- **`POST /mcp`.** Streamable HTTP MCP with JSON responses only: no SSE, no sessions, `GET` and `DELETE` answer 405, bodies up to 1 MiB. It speaks `2026-07-28` and, through `initialize`, `2025-11-25` and `2025-06-18`. Over stdio `2024-11-05` also works. `2025-03-26` is not supported. A foreign `Origin` gets 403 even with the key.
+- **Agent key.** `THROUGHLINE_AGENT_KEY`, at least 32 characters, sent as `Authorization: Bearer <key>`. Unset or too short: `/mcp` answers 503 `agent_access_off`. Missing or wrong: 401. `throughline agent-key` prints a fresh key and writes nothing. `throughline doctor` and the HTTP doctor say `agent access: on` or `off: <reason>`, never the key. The key guards `/mcp` only, not the UI, the rest of the API or other programs of the same user.
+- **New tools, resources, prompts.** Tools `get_note` (with its supersede chain), `conflicts` (each row says contradiction, documented supersession or stale tool drift) and `keep`. `write` lists its categories. Resources `throughline://projects`, `throughline://project/{name}/context` and `throughline://note/{id}`. Prompts `before_coding` and `handoff`, which wrap the pack in a `<throughline-data>` block.
+- **Error codes.** `-32020` for header mismatch, `-32022` for an unsupported modern version, `-32601` for an unknown method, `-32602` for invalid parameters or an unknown or blocked tool. The stdio server now answers `-32602` for an unknown tool, where it answered `-32601` before.
+- **`THROUGHLINE_MCP_READ_ONLY`.** `1`, `true`, `yes` or `on` hides `write`, `forget`, `supersede` and `keep` on stdio and HTTP.
+- **Use counts.** Now also `get_note`, `keep`, `prompts/get` and `resources/read` for a note or context pack. `GET /api/recall` and `GET /api/context` count when a valid agent key comes with the request, and any other `Authorization` header on them is refused with 401. `search`, `conflicts` and resource lists never count.
+- **Embeddings obey `THROUGHLINE_ALLOW_REMOTE_LLM`.** An Ollama host at ollama.com or a cloud embedding model is refused unless allowed: `/api/recall` answers 403 `remote_llm_not_allowed`, MCP answers `-32000`.
+- **Docs.** What an agent recalls goes into its model's context, and `THROUGHLINE_ALLOW_REMOTE_LLM` does not govern that. The claim that data-changing routes accept only POST is corrected: `PUT /api/assistants/file` and `DELETE /api/favorites/{kind}/{ref}` exist too.
+
 ### No text to a model off this machine unless you allow it
 
 Every command that sends transcript or note text to a generation model now refuses a model that is not local, unless you opt in.
