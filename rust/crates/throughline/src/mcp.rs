@@ -253,7 +253,7 @@ fn tools_list() -> Value {
                         "content": { "type": "string" },
                         "category": {
                             "type": "string",
-                            "enum": crate::server::MEMORY_CATEGORIES,
+                            "enum": crate::extract_memory::CATEGORIES,
                             "default": "insight",
                             "description": "Use decision to record a decision"
                         },
@@ -536,12 +536,14 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             if content.trim().is_empty() {
                 return Err(json!({ "code": -32602, "message": "content required" }));
             }
-            if !crate::server::MEMORY_CATEGORIES.contains(&category.as_str()) {
+            // Every category extraction uses, which is also every label of the
+            // database enum; the UI list leaves out `contact`.
+            if !crate::extract_memory::CATEGORIES.contains(&category.as_str()) {
                 return Err(json!({
                     "code": -32602,
                     "message": format!(
                         "category must be one of {}",
-                        crate::server::MEMORY_CATEGORIES.join(", ")
+                        crate::extract_memory::CATEGORIES.join(", ")
                     )
                 }));
             }
@@ -1807,11 +1809,16 @@ mod tests {
             .find(|t| t["name"] == "write")
             .expect("write tool");
         let category = &tool["inputSchema"]["properties"]["category"];
-        assert_eq!(
-            category["enum"],
-            json!(crate::server::MEMORY_CATEGORIES),
-            "{category}"
-        );
+        let mut listed: Vec<&str> = category["enum"]
+            .as_array()
+            .expect("enum")
+            .iter()
+            .map(|c| c.as_str().unwrap())
+            .collect();
+        listed.sort_unstable();
+        let mut accepted = DB_CATEGORIES.to_vec();
+        accepted.sort_unstable();
+        assert_eq!(listed, accepted, "{category}");
         assert!(
             category["description"]
                 .as_str()
@@ -1819,6 +1826,44 @@ mod tests {
                 .contains("decision"),
             "{category}"
         );
+    }
+
+    /// The labels of the `memory_category` enum in 000_baseline.sql.
+    const DB_CATEGORIES: [&str; 8] = [
+        "decision",
+        "pattern",
+        "insight",
+        "preference",
+        "contact",
+        "error_solution",
+        "project_context",
+        "workflow",
+    ];
+
+    #[test]
+    fn write_accepts_every_extraction_category() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping write_accepts_every_extraction_category: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        for category in DB_CATEGORIES {
+            let id = call_text(
+                &mut tx,
+                "write",
+                json!({ "content": format!("category probe {category}"), "category": category }),
+            )["id"]
+                .as_i64()
+                .expect("id");
+            let stored: String = tx
+                .query_one(
+                    "SELECT category::text FROM memory_chunks WHERE id = $1",
+                    &[&id],
+                )
+                .expect("row")
+                .get(0);
+            assert_eq!(stored, category);
+        }
     }
 
     #[test]

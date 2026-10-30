@@ -22,7 +22,8 @@ pub struct ExtractedMemory {
 }
 
 /// The categories the prompt allows, and the labels of the Python-era enum.
-const CATEGORIES: [&str; 8] = [
+/// MCP `write` accepts exactly these.
+pub(crate) const CATEGORIES: [&str; 8] = [
     "decision",
     "pattern",
     "insight",
