@@ -7,7 +7,7 @@ use crate::search;
 use crate::temporal::as_of_predicate;
 use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -21,6 +21,7 @@ pub type Db = Arc<Mutex<postgres::Client>>;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
+    pub agent_key: Arc<crate::agent_key::KeyState>,
 }
 
 #[derive(Serialize)]
@@ -122,6 +123,33 @@ fn api_error(status: StatusCode, code: &str, detail: impl Into<String>) -> Respo
         })),
     )
         .into_response()
+}
+
+/// Whether the call comes from an agent. No `Authorization` header is the UI: `Ok(false)`, nothing
+/// counts. An accepted key is `Ok(true)`. Any other header is a 401 that never names the key.
+#[allow(clippy::result_large_err)]
+fn agent_call(state: &AppState, headers: &HeaderMap) -> Result<bool, Response> {
+    let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
+        return Ok(false);
+    };
+    // A header that is not text is checked as an empty value and fails.
+    let check =
+        crate::agent_key::check_bearer(&state.agent_key, Some(value.to_str().unwrap_or("")));
+    if check == crate::agent_key::KeyCheck::Accepted {
+        return Ok(true);
+    }
+    let detail = match check {
+        crate::agent_key::KeyCheck::Off | crate::agent_key::KeyCheck::TooShort => {
+            "agent access is not enabled"
+        }
+        _ => "invalid credentials",
+    };
+    let mut resp = api_error(StatusCode::UNAUTHORIZED, "unauthorized", detail);
+    resp.headers_mut().insert(
+        axum::http::header::WWW_AUTHENTICATE,
+        axum::http::HeaderValue::from_static("Bearer realm=\"throughline\""),
+    );
+    Err(resp)
 }
 
 /// Run blocking `postgres` work off the async runtime.
@@ -1201,8 +1229,13 @@ fn parse_context_params(
 
 async fn context_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<ContextParams>,
 ) -> Response {
+    let counted = match agent_call(&state, &headers) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
     let parsed = match parse_context_params(&params) {
         Ok(p) => p,
         Err((status, code, detail)) => return api_error(status, code, detail),
@@ -1221,7 +1254,18 @@ async fn context_handler(
             },
             None,
         ) {
-            Ok(pack) => Ok(Ok(pack)),
+            Ok(pack) => {
+                if counted {
+                    let ids: Vec<i64> = pack
+                        .citations
+                        .iter()
+                        .filter(|c| c.kind == "memory")
+                        .map(|c| c.id)
+                        .collect();
+                    crate::lifecycle::record_use_or_log(client, &ids);
+                }
+                Ok(Ok(pack))
+            }
             Err(e) if crate::context_pack::input_error(&e).is_some() => Ok(Err(e.to_string())),
             Err(e) => Err(e),
         },
@@ -1236,8 +1280,13 @@ async fn context_handler(
 
 async fn recall_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<RecallParams>,
 ) -> Response {
+    let counted = match agent_call(&state, &headers) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
     let parsed = match parse_recall_params(&params) {
         Ok(p) => p,
         Err((status, code, detail)) => return api_error(status, code, detail),
@@ -1282,7 +1331,12 @@ async fn recall_handler(
             limit: parsed.limit,
             rank: parsed.rank,
         };
-        crate::recall::recall(client, &q, emb.as_ref())
+        let result = crate::recall::recall(client, &q, emb.as_ref())?;
+        if counted {
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            crate::lifecycle::record_use_or_log(client, &ids);
+        }
+        Ok(result)
     })
     .await
     {
@@ -3310,6 +3364,7 @@ pub fn app(state: AppState) -> Router {
 pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()> {
     let state = AppState {
         db: Arc::new(Mutex::new(client)),
+        agent_key: Arc::new(crate::agent_key::key_state()),
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -3630,6 +3685,7 @@ mod tests {
         let a = seed_note(&mut client, &format!("api-recall wombat {tag}"), "decision");
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = RecallParams {
@@ -3641,7 +3697,11 @@ mod tests {
             limit: None,
             rank: None,
         };
-        let resp = rt.block_on(recall_handler(State(state.clone()), Query(params)));
+        let resp = rt.block_on(recall_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(params),
+        ));
         assert_eq!(resp.status(), StatusCode::OK);
         let body = rt
             .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
@@ -3665,6 +3725,169 @@ mod tests {
             .get(0);
         client.batch_execute("ROLLBACK").expect("rollback");
         assert_eq!(n, 0, "the UI recall must not count");
+    }
+
+    const TEST_AGENT_KEY: &str = "test-agent-key-0123456789abcdef0123";
+
+    fn bearer(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            axum::http::header::AUTHORIZATION,
+            value.parse().expect("header value"),
+        );
+        h
+    }
+
+    fn keyed_state(client: postgres::Client) -> AppState {
+        AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::key_state_from(Some(TEST_AGENT_KEY))),
+        }
+    }
+
+    fn uses(state: &AppState, id: i64) -> i32 {
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .query_one(
+                "SELECT COALESCE(access_count, 0) FROM memory_chunks WHERE id = $1",
+                &[&id],
+            )
+            .expect("row")
+            .get(0)
+    }
+
+    fn assert_unauthorized(rt: &tokio::runtime::Runtime, resp: Response) {
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            resp.headers().get("www-authenticate").expect("challenge"),
+            "Bearer realm=\"throughline\""
+        );
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
+            .expect("body");
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("unauthorized"), "{text}");
+        assert!(!text.contains(TEST_AGENT_KEY), "the key must not leak");
+    }
+
+    #[test]
+    fn api_recall_counts_only_with_a_valid_key() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping api_recall_counts_only_with_a_valid_key: no PostgreSQL reachable");
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_note(&mut client, &format!("keyed-recall ibis {tag}"), "decision");
+        let state = keyed_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params = || RecallParams {
+            q: Some(format!("ibis {tag}")),
+            project: None,
+            mode: None,
+            valid_at: None,
+            known_at: None,
+            limit: None,
+            rank: None,
+        };
+        let call = |headers: HeaderMap| {
+            rt.block_on(recall_handler(
+                State(state.clone()),
+                headers,
+                Query(params()),
+            ))
+        };
+        let resp = call(HeaderMap::new());
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(uses(&state, a), 0, "no header: nothing counts");
+        let resp = call(bearer(&format!("Bearer {TEST_AGENT_KEY}")));
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        assert!(
+            v["hits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|h| h["id"].as_i64() == Some(a)),
+            "the note must be a hit: {v}"
+        );
+        assert_eq!(uses(&state, a), 1, "valid key counts the hit");
+        let resp = call(bearer("Bearer wrong-key-wrong-key-wrong-key-wrong"));
+        assert_unauthorized(&rt, resp);
+        assert_eq!(uses(&state, a), 1, "wrong key counts nothing");
+        let resp = call(bearer(&format!("Basic {TEST_AGENT_KEY}")));
+        assert_unauthorized(&rt, resp);
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
+    }
+
+    #[test]
+    fn api_context_counts_only_with_a_valid_key() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping api_context_counts_only_with_a_valid_key: no PostgreSQL reachable");
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let a: i64 = client
+            .query_one(
+                "INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status)
+                 VALUES ('manual', $1, 'decision', $2, 1.0, 'active') RETURNING id",
+                &[&format!("we chose heron storage {tag}"), &project],
+            )
+            .expect("seed")
+            .get(0);
+        let state = keyed_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params = || ContextParams {
+            project: Some(project.clone()),
+            task: None,
+            budget: Some(1000),
+        };
+        let call = |headers: HeaderMap| {
+            rt.block_on(context_handler(
+                State(state.clone()),
+                headers,
+                Query(params()),
+            ))
+        };
+        let resp = call(HeaderMap::new());
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(uses(&state, a), 0, "no header: nothing counts");
+        let resp = call(bearer(&format!("Bearer {TEST_AGENT_KEY}")));
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        assert!(
+            v["citations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["kind"] == "memory" && c["id"].as_i64() == Some(a)),
+            "the note must be cited: {v}"
+        );
+        assert_eq!(uses(&state, a), 1, "valid key counts the cited note");
+        let resp = call(bearer("Bearer wrong-key-wrong-key-wrong-key-wrong"));
+        assert_unauthorized(&rt, resp);
+        assert_eq!(uses(&state, a), 1, "wrong key counts nothing");
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
     }
 
     #[test]
@@ -3840,6 +4063,7 @@ mod tests {
         // 400 path never touches the database afterwards.
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         for params in [
@@ -4206,6 +4430,7 @@ mod tests {
         };
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = ContextParams {
@@ -4213,7 +4438,11 @@ mod tests {
             task: None,
             budget: Some(64),
         };
-        let resp = rt.block_on(context_handler(State(state.clone()), Query(params)));
+        let resp = rt.block_on(context_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(params),
+        ));
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let body = rt
             .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
