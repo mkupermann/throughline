@@ -65,8 +65,57 @@
       {
         "command": "throughline.showEmbeddingStatus",
         "title": "Throughline: Show Embedding Status"
+      },
+      {
+        "command": "throughline.recall",
+        "title": "Throughline: Recall"
+      },
+      {
+        "command": "throughline.projectContext",
+        "title": "Throughline: Show Project Context"
+      },
+      {
+        "command": "throughline.openNote",
+        "title": "Throughline: Open Note"
+      },
+      {
+        "command": "throughline.conflicts",
+        "title": "Throughline: Show Conflicts"
+      },
+      {
+        "command": "throughline.openUi",
+        "title": "Throughline: Open Web UI"
+      },
+      {
+        "command": "throughline.rememberSelection",
+        "title": "Throughline: Remember Selection"
+      },
+      {
+        "command": "throughline.quickNote",
+        "title": "Throughline: Quick Note"
+      },
+      {
+        "command": "throughline.copyContext",
+        "title": "Throughline: Copy Context"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "throughline",
+          "title": "Throughline",
+          "icon": "media/throughline.svg"
+        }
+      ]
+    },
+    "views": {
+      "throughline": [
+        {
+          "id": "throughline.memories",
+          "name": "Throughline"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",
