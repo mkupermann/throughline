@@ -53,7 +53,8 @@ pub struct RecallQuery<'a> {
     pub mode: RecallMode,
     pub valid_at: Option<DateTime<Utc>>,
     pub known_at: Option<DateTime<Utc>>,
-    /// 1..=50, default 10.
+    /// 1..=50, default 10. Associative mode returns up to 2 × limit (max 100):
+    /// the seeds fill `limit`, the neighbours get the same room again.
     pub limit: usize,
 }
 
@@ -1160,5 +1161,167 @@ mod tests {
         .unwrap();
         let r3 = recall(&mut tx, &q, None).unwrap();
         assert_eq!(rel(&r3, f).as_deref(), Some("same_file"));
+    }
+
+    /// A seed and a second note of the same conversation, `other` set up by
+    /// the caller. Returns (seed, other).
+    fn conversation_pair<C: GenericClient>(
+        tx: &mut C,
+        project: &str,
+        other_project: Option<&str>,
+        tag: &str,
+    ) -> (i64, i64) {
+        let conv = 987_000_000 + i64::from(uuid::Uuid::new_v4().as_u128() as u32 % 1_000_000);
+        let cs = format!("lemur {tag} seed");
+        let mut ss = Seed::new(&cs, long_ago());
+        ss.project = Some(project);
+        ss.source_type = "conversation";
+        ss.source_id = Some(conv);
+        let mut so = Seed::new("nothing alike", long_ago());
+        so.project = other_project;
+        so.source_type = "conversation";
+        so.source_id = Some(conv);
+        (seed(tx, &ss), seed(tx, &so))
+    }
+
+    #[test]
+    fn recall_associative_never_adds_forgotten_notes() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_associative_never_adds_forgotten_notes: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let (s, f) = conversation_pair(&mut tx, &project, Some(&project), &tag);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&f],
+        )
+        .unwrap();
+        let r = recall(
+            &mut tx,
+            &associative(&format!("lemur {tag}"), &project, 1),
+            None,
+        )
+        .unwrap();
+        assert!(position(&r, s).is_some());
+        assert_eq!(position(&r, f), None);
+    }
+
+    #[test]
+    fn recall_associative_keeps_the_project_filter() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_associative_keeps_the_project_filter: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (project, elsewhere) = (format!("p-{tag}"), format!("q-{tag}"));
+        let (s, o) = conversation_pair(&mut tx, &project, Some(&elsewhere), &tag);
+        let r = recall(
+            &mut tx,
+            &associative(&format!("lemur {tag}"), &project, 1),
+            None,
+        )
+        .unwrap();
+        assert!(position(&r, s).is_some());
+        assert_eq!(position(&r, o), None);
+    }
+
+    #[test]
+    fn recall_associative_does_not_pass_through_forgotten_notes() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_associative_does_not_pass_through_forgotten_notes: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let contents = [
+            format!("civet {tag} head"),
+            "middle".into(),
+            "behind".into(),
+        ];
+        let ids: Vec<i64> = contents
+            .iter()
+            .map(|c| {
+                let mut sd = Seed::new(c, long_ago());
+                sd.project = Some(&project);
+                seed(&mut tx, &sd)
+            })
+            .collect();
+        for w in ids.windows(2) {
+            replace(&mut tx, w[1], w[0]);
+        }
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&ids[1]],
+        )
+        .unwrap();
+        let r = recall(
+            &mut tx,
+            &associative(&format!("civet {tag}"), &project, 5),
+            None,
+        )
+        .unwrap();
+        assert!(position(&r, ids[0]).is_some());
+        assert_eq!(position(&r, ids[1]), None);
+        assert_eq!(position(&r, ids[2]), None);
+    }
+
+    #[test]
+    fn recall_associative_final_score_is_the_larger_of_own_and_spread() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_associative_final_score_is_the_larger_of_own_and_spread: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let conv = 987_000_000 + i64::from(uuid::Uuid::new_v4().as_u128() as u32 % 1_000_000);
+        let (cs, cn) = (
+            format!("gecko {tag} seed"),
+            format!("gecko {tag} neighbour"),
+        );
+        let mut ss = Seed::new(&cs, long_ago());
+        ss.project = Some(&project);
+        ss.source_type = "conversation";
+        ss.source_id = Some(conv);
+        // slightly ahead of the neighbour, so only the seed is a seed
+        ss.confidence = 0.99;
+        let mut sn = Seed::new(&cn, long_ago());
+        sn.project = Some(&project);
+        sn.source_type = "conversation";
+        sn.source_id = Some(conv);
+        sn.confidence = 0.9;
+        let (s, n) = (seed(&mut tx, &ss), seed(&mut tx, &sn));
+        let r = recall(
+            &mut tx,
+            &associative(&format!("gecko {tag}"), &project, 1),
+            None,
+        )
+        .unwrap();
+        let (hs, hn) = (
+            &r.hits[position(&r, s).unwrap()],
+            &r.hits[position(&r, n).unwrap()],
+        );
+        assert_eq!(hn.relation.as_deref(), Some("same_conversation"));
+        let spread = hn.why.spread.unwrap();
+        assert!((spread - hs.score * 0.8).abs() < 1e-9);
+        // own score: no embedding, so the cosine share is scaled away
+        let w = &WEIGHTS;
+        let own = (w.lexical * hn.why.lexical
+            + w.recency * hn.why.recency
+            + w.reliability * hn.why.reliability
+            + w.strength * hn.why.strength
+            + w.provenance * hn.why.provenance)
+            / (1.0 - w.cosine);
+        assert!(own > spread, "own {own} must beat spread {spread}");
+        assert!((hn.score - own).abs() < 1e-9);
     }
 }
