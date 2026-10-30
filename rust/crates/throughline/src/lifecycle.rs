@@ -814,4 +814,34 @@ mod tests {
             .expect("candidates");
         assert!(groups.is_empty(), "{groups:?}");
     }
+
+    #[test]
+    fn consolidate_keeps_a_forgotten_source_forgotten() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping consolidate_keeps_a_forgotten_source_forgotten: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let a = seed_full(&mut tx, &format!("forgot A {tag}"), "decision", None, 1.0);
+        let b = seed_full(&mut tx, &format!("forgot B {tag}"), "decision", None, 1.0);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&b],
+        )
+        .expect("forget");
+        let new_id = consolidate(&mut tx, &[a, b], &format!("forgot merged {tag}"), None)
+            .expect("consolidate");
+        let row = tx
+            .query_one(
+                "SELECT status, valid_to IS NOT NULL, superseded_by FROM memory_chunks WHERE id = $1",
+                &[&b],
+            )
+            .expect("row");
+        assert_eq!(row.get::<_, String>(0), "forgotten");
+        assert!(row.get::<_, bool>(1));
+        assert_eq!(row.get::<_, Option<i64>>(2), Some(new_id));
+    }
 }
