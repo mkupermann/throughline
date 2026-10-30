@@ -11,6 +11,8 @@ pub struct DoctorReport {
     pub generation: String,
     pub embeddings: String,
     pub generation_local: bool,
+    /// Only the text of `agent_key::doctor_line`, never the key.
+    pub agent_access: String,
     pub notes: Vec<String>,
 }
 
@@ -60,6 +62,7 @@ pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
         generation,
         embeddings,
         generation_local,
+        agent_access: crate::agent_key::doctor_line(&crate::agent_key::key_state()),
         notes,
     })
 }

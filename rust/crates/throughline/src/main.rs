@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use throughline::types::IngestSummary;
 use throughline::{
-    adapters, answer_eval, ask, audit, config, conflicts, context_pack, costs, decisions, doctor,
-    embedding, export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles,
-    handoff, ingest_run, lifecycle, llm, mcp, memory_writeback, migrate, ops_jobs,
-    project_instructions, recall, recall_eval, reflect_memory, repair, retention, search, server,
-    stale_digest, temporal, types,
+    adapters, agent_key, answer_eval, ask, audit, config, conflicts, context_pack, costs,
+    decisions, doctor, embedding, export_markdown, export_otel, extract_memory,
+    generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
+    memory_writeback, migrate, ops_jobs, project_instructions, recall, recall_eval, reflect_memory,
+    repair, retention, search, server, stale_digest, temporal, types,
 };
 
 #[derive(Parser)]
@@ -137,6 +137,8 @@ enum Command {
     Status,
     /// Check backends and database.
     Doctor,
+    /// Print a new key for agents that reach Throughline over HTTP.
+    AgentKey,
     /// Print a resume brief for a new agent session.
     Handoff {
         #[arg(long)]
@@ -921,6 +923,10 @@ fn main() -> Result<()> {
                 }
             );
         }
+        Command::AgentKey => {
+            println!("{}", agent_key::generate());
+            println!("Put it into .env as THROUGHLINE_AGENT_KEY and restart the server.");
+        }
         Command::Doctor => {
             let mut client = config::DbConfig::from_env()
                 .connect()
@@ -929,6 +935,7 @@ fn main() -> Result<()> {
             println!("database:   {}", report.database);
             println!("generation: {}", report.generation);
             println!("embeddings: {}", report.embeddings);
+            println!("agent access: {}", report.agent_access);
             for n in report.notes {
                 println!("note: {n}");
             }
