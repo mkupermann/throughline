@@ -23,6 +23,7 @@ pub mod generate_titles;
 pub mod handoff;
 pub mod ignore;
 pub mod ingest_run;
+pub mod lifecycle;
 pub mod llm;
 pub mod mcp;
 pub mod memory_writeback;

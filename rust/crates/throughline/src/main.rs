@@ -6,9 +6,9 @@ use throughline::types::IngestSummary;
 use throughline::{
     adapters, answer_eval, ask, audit, config, conflicts, context_pack, costs, decisions, doctor,
     embedding, export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles,
-    handoff, ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions,
-    recall, recall_eval, reflect_memory, repair, retention, search, server, stale_digest, temporal,
-    types,
+    handoff, ingest_run, lifecycle, llm, mcp, memory_writeback, migrate, ops_jobs,
+    project_instructions, recall, recall_eval, reflect_memory, repair, retention, search, server,
+    stale_digest, temporal, types,
 };
 
 #[derive(Parser)]
@@ -369,6 +369,8 @@ fn main() -> Result<()> {
                 rank,
             };
             let result = recall::recall(&mut client, &q, emb.as_ref())?;
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            lifecycle::record_use_or_log(&mut client, &ids);
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
                 return Ok(());
@@ -416,6 +418,13 @@ fn main() -> Result<()> {
                 },
                 None,
             )?;
+            let ids: Vec<i64> = pack
+                .citations
+                .iter()
+                .filter(|c| c.kind == "memory")
+                .map(|c| c.id)
+                .collect();
+            lifecycle::record_use_or_log(&mut client, &ids);
             if json {
                 println!("{}", serde_json::to_string_pretty(&pack)?);
                 return Ok(());
