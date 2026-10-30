@@ -1614,7 +1614,9 @@ mod tests {
     #[test]
     fn get_note_reads_null_status_and_created_at() {
         let Some(mut client) = test_db() else {
-            eprintln!("skipping get_note_reads_null_status_and_created_at: no PostgreSQL reachable");
+            eprintln!(
+                "skipping get_note_reads_null_status_and_created_at: no PostgreSQL reachable"
+            );
             return;
         };
         let mut tx = client.transaction().unwrap();
@@ -1656,7 +1658,11 @@ mod tests {
         assert_eq!(legacy["error"]["message"], "Resource not found");
         let modern = rpc(&mut tx, "resources/read", json!({ "uri": uri }), true);
         assert_eq!(modern["error"]["code"], -32602, "{modern}");
-        assert_eq!(use_count(&mut tx, id), 0, "a note not served counts nothing");
+        assert_eq!(
+            use_count(&mut tx, id),
+            0,
+            "a note not served counts nothing"
+        );
         // the UI detail still shows it, for restore
         let detail = crate::server::load_note(&mut tx, id)
             .expect("load")
