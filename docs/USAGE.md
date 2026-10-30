@@ -375,7 +375,7 @@ it.
 throughline agent-key        # prints a fresh 64-character hex key, writes nothing
 ```
 
-Put it into `.env` as `THROUGHLINE_AGENT_KEY=<key>` and restart the web container. The key must have at least 32 characters after trimming. Unset or shorter, `/mcp` answers 503 `agent_access_off` and the UI keeps working. A missing or wrong key gets 401. `throughline doctor` and the doctor in the UI print `agent access: on` or `agent access: off: <reason>`, never the key. `THROUGHLINE_API_KEY` stays the key of your model provider and is not involved.
+Put it into `.env` as `THROUGHLINE_AGENT_KEY=<key>` and restart the web container. The key must have at least 32 characters after trimming. Unset or shorter, `/mcp` answers 503 `agent_access_off` and the UI keeps working. A missing or wrong key gets 401. `throughline doctor` prints `agent access: on` or `agent access: off: <reason>`, and the doctor report of `GET /api/health-recovery` carries the same text in its `agent_access` field. Neither shows the key. `THROUGHLINE_API_KEY` stays the key of your model provider and is not involved.
 
 ### Set up a client
 

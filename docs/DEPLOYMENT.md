@@ -41,8 +41,11 @@ docker compose --profile mcp up -d          # MCP server (stdio; see below)
 docker compose --profile embeddings up -d   # local Ollama for embeddings
 ```
 
-The MCP server speaks stdio; MCP clients normally launch it themselves. For a
-containerized client, use `docker compose run -i --rm mcp`.
+The `mcp` profile speaks stdio; MCP clients normally launch it themselves. For a
+containerized client, use `docker compose run -i --rm mcp`. The `web` service
+also serves MCP over HTTP at `POST /mcp` once `THROUGHLINE_AGENT_KEY` is set (see
+[Agent access over HTTP](USAGE.md#agent-access-over-http)). Both the `mcp` profile
+and `web` read `THROUGHLINE_MCP_READ_ONLY`.
 
 Running an ingest inside the stack:
 

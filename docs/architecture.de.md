@@ -24,7 +24,7 @@ Abfragen.
 | Writer | Prüft Hashes, öffnet Transaktionen, schreibt Conversations und Messages und führt den Ingestion Log. |
 | PostgreSQL | Speichert Rohverläufe, Memory Chunks, Embeddings, Knowledge Graph und den Ingestion Log. |
 | CLI | Stellt die installierten Befehle für Ingestion, Pflege, Suche, Diagnose, Backup und Migration bereit. |
-| MCP Server | Stellt projektbezogene Memory Tools über stdio bereit. |
+| MCP Server | Stellt Memory Tools über stdio und über HTTP (`POST /mcp`, mit Agenten-Schlüssel) bereit. Ein Dispatcher ohne Zustand bedient beide Transporte. |
 | Web UI | FastAPI liefert API und React SPA aus einem Prozess. |
 | Scheduler | launchd auf macOS und systemd User Timer auf Linux führen Ingestion, Extraktion und Backup aus. |
 
