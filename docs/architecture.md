@@ -110,7 +110,7 @@ project_context, workflow), `message_role` (user, assistant, system, tool_result
 | `projects` | Project registry with description, contacts and decisions as JSONB, and a lifecycle status. Materialised automatically from observed project names. |
 | `prompts` | Indexed reusable prompt templates (CLAUDE.md files, skill prompts) with variables, source path and usage count. |
 | `skills` | Indexed `SKILL.md` files with version, trigger phrases, filesystem timestamps and usage count. |
-| `memory_reflections` | Audit trail of the reflection engine: what it did, to which chunks, why, and with what confidence. |
+| `memory_reflections` | Summary rows of retention runs (policy, counters, archive path). In the Rust runtime only retention writes here; reflect and consolidate write no rows. |
 
 The view `v_conversation_stats` aggregates sessions, messages, average tokens and cost per
 project.
@@ -272,8 +272,8 @@ contain credentials, client names, and unreleased work. The API has no authentic
 remote bind requires the operator's own authentication and TLS. See [SECURITY.md](../SECURITY.md).
 
 **Supersession rather than deletion.** Memory that turns out to be wrong is marked, not
-erased — `superseded_by`, `status` and `memory_reflections` preserve both the old fact and
-the reason it was replaced. An audit trail of what the system used to believe is worth more
+erased — `superseded_by` and `status` preserve both the old fact and
+the fact that replaced it. An audit trail of what the system used to believe is worth more
 than a clean table, and the explicit `forget` tool remains available for the cases that
 genuinely require removal.
 

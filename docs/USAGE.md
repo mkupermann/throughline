@@ -152,11 +152,13 @@ throughline reflect --dry-run           # see what it would do
 throughline conflicts                   # cross-tool disagreements
 ```
 
-To remove something for good, use **Curate → Forget** in the UI or the
-`memory.forget(ids, reason)` MCP tool. Forgetting cascades through the
-embeddings, repairs dangling `superseded_by` references, and writes an audit
-row to `memory_reflections` with your reason — so what was removed, and why,
-stays answerable afterwards.
+To take a note out of every answer, use **Curate → Forget** in the UI or the
+`forget` MCP tool. Forget sets the note's `status` to `forgotten` and updates
+`updated_at`. Nothing else happens: the row and its text stay in the database,
+the embeddings stay, `superseded_by` links are not repaired, no audit row is
+written and the optional `reason` of the MCP tool is not stored. Forgotten notes
+appear in no answer. (The old Python version also cascaded through embeddings and
+wrote an audit row; the Rust version does not.)
 
 ## How often a note is used, and how strong it is
 
@@ -197,7 +199,7 @@ Over HTTP:
 
 Automatic choice of the generation model never picks a cloud model, that is a name ending in `:cloud` or a model served from a remote host. A model whose name ends in `:cloud` or `-cloud`, and any Ollama backend on ollama.com, is never treated as local. Name one explicitly if you want it.
 
-Privacy: a model you name explicitly (`THROUGHLINE_ANSWER_MODEL`) or a remote `THROUGHLINE_ANSWER_BASE_URL` receives transcript and note text. That covers `extract-memory` (also the hourly job, when you enable it), `generate-titles`, the contradiction check of `reflect` and `ask`. Only the merge proposal refuses a backend that is not local; it falls back to the longest note.
+Privacy: by default nothing is sent to a model that is not local. These commands send transcript or note text to the generation model: `extract-memory` (also the hourly job, when you enable it), `generate-titles`, the contradiction check of `reflect` (`--mode contradictions`, and the model step of `reflect` without a mode), `ask` (also `/api/ask`) and `answer-eval` (also its HTTP route). If the model is not local, they stop with an error that names `THROUGHLINE_ALLOW_REMOTE_LLM`, before any text leaves. A model counts as local when it runs in Ollama on this machine or at a loopback address (`localhost`, `127.0.0.1`); `:cloud` and `-cloud` models and ollama.com are not local. To allow a remote model anyway, set `THROUGHLINE_ALLOW_REMOTE_LLM=1` (`true`, `yes` and `on` also work). The merge proposal never sends text off the machine, even with that setting: it uses a local model only and otherwise offers the longest note.
 
 ## Notes and the time they were valid
 
