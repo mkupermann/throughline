@@ -57,6 +57,16 @@ fn bearer_credentials(header: &str) -> Option<&str> {
     (!credentials.is_empty()).then_some(credentials)
 }
 
+/// Whether an `Authorization` value uses the Bearer scheme, with or without
+/// credentials. Reads raw bytes, so a value that is not text still counts.
+pub(crate) fn is_bearer_scheme(header: &[u8]) -> bool {
+    let blank = |b: &u8| matches!(b, b' ' | b'\t');
+    let start = header.iter().position(|b| !blank(b)).unwrap_or(header.len());
+    let rest = &header[start..];
+    let end = rest.iter().position(blank).unwrap_or(rest.len());
+    rest[..end].eq_ignore_ascii_case(b"bearer")
+}
+
 pub fn check_bearer(state: &KeyState, authorization: Option<&str>) -> KeyCheck {
     let expected = match state {
         KeyState::Off => return KeyCheck::Off,
@@ -187,6 +197,29 @@ mod tests {
         ] {
             assert_eq!(check_bearer(&ready(), Some(&h)), KeyCheck::Missing, "{h}");
         }
+    }
+
+    #[test]
+    fn bearer_scheme_is_told_apart_from_other_schemes() {
+        for h in [
+            format!("Bearer {KEY}"),
+            "bearer x".to_string(),
+            " \tBEARER\tx".to_string(),
+            "Bearer".to_string(),
+            "Bearer   ".to_string(),
+        ] {
+            assert!(is_bearer_scheme(h.as_bytes()), "{h}");
+        }
+        for h in [
+            format!("Basic {KEY}"),
+            KEY.to_string(),
+            "Bearerx y".to_string(),
+            "Token x".to_string(),
+            String::new(),
+        ] {
+            assert!(!is_bearer_scheme(h.as_bytes()), "{h}");
+        }
+        assert!(is_bearer_scheme(b"Bearer \xff"), "a value that is not text");
     }
 
     #[test]
