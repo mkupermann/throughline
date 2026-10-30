@@ -227,31 +227,18 @@ const captureArtwork = async ({ name, view: viewName, waitFor, sourceViewport, c
             body {
               display: grid;
               place-items: center;
-              background:
-                linear-gradient(133deg, transparent 0 10%, rgba(255,255,255,.11) 10% 17%, transparent 17% 37%, rgba(0,54,184,.2) 37% 44%, transparent 44% 68%, rgba(255,255,255,.08) 68% 75%, transparent 75%),
-                linear-gradient(135deg, #0aa9f2 0%, #087cec 42%, #075bda 68%, #0644b8 100%);
+              background: #191816;
             }
-            body::before,
-            body::after {
-              content: "";
-              position: absolute;
-              width: 22%;
-              height: 150%;
-              background: rgba(0,58,180,.18);
-              transform: rotate(42deg);
-            }
-            body::before { left: -10%; top: -45%; }
-            body::after { right: -10%; bottom: -48%; background: rgba(0,38,143,.25); }
             .frame {
               position: relative;
               z-index: 1;
               width: ${frame.width}px;
               height: ${frame.height}px;
               overflow: hidden;
-              border: 1px solid rgba(255,255,255,.58);
-              border-radius: 3px;
-              background: #f8fafc;
-              box-shadow: 0 24px 60px rgba(0,31,111,.46), 0 5px 16px rgba(0,22,85,.26);
+              border: 1px solid #696966;
+              border-radius: 12px;
+              background: #0b0b0a;
+              box-shadow: none;
             }
             img {
               display: block;

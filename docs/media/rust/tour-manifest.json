@@ -1,59 +1,59 @@
 {
-  "captured_at": "2026-10-28T01:03:30.701Z",
+  "captured_at": "2026-10-30T01:42:51.225Z",
   "fictional_data": true,
   "model_calls": false,
-  "duration_seconds": 38.303,
+  "duration_seconds": 38.181,
   "viewport": {
     "width": 1440,
     "height": 900
   },
   "cues": [
     {
-      "at": 0.608,
+      "at": 0.626,
       "text": "Every coding session in one local corpus."
     },
     {
-      "at": 3.816,
+      "at": 3.833,
       "text": "Group the corpus by project."
     },
     {
-      "at": 6.628,
+      "at": 6.637,
       "text": "Open the Atlas-demo sessions, every assistant in one place."
     },
     {
-      "at": 9.834,
+      "at": 9.839,
       "text": "Read the full session with every message expanded."
     },
     {
-      "at": 13.439,
+      "at": 13.446,
       "text": "Inspect tool calls with full request and response detail."
     },
     {
-      "at": 17.047,
+      "at": 17.057,
       "text": "Filter Memory by category."
     },
     {
-      "at": 20.258,
+      "at": 20.26,
       "text": "Search the corpus with lexical mode."
     },
     {
-      "at": 23.46,
+      "at": 23.466,
       "text": "See sessions by day and assistant."
     },
     {
-      "at": 26.275,
+      "at": 26.268,
       "text": "Switch to a calendar view of the same activity."
     },
     {
-      "at": 29.076,
+      "at": 29.08,
       "text": "Run import and maintenance jobs like Status."
     },
     {
-      "at": 32.291,
+      "at": 32.285,
       "text": "Jump anywhere with the command palette."
     },
     {
-      "at": 35.097,
+      "at": 35.088,
       "text": "Everything stays local — a fictional demo corpus."
     }
   ],
