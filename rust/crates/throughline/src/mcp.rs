@@ -16,7 +16,7 @@ use std::io::{BufRead, Write};
 /// What a transport needs to know besides the message itself.
 pub struct McpContext {
     pub transport: Transport,
-    /// Carried only; hiding write tools is not done here yet.
+    /// Hides and refuses the tools that change notes.
     pub read_only: bool,
 }
 
@@ -94,8 +94,14 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
             "capabilities": capabilities(),
             "serverInfo": { "name": "throughline", "version": env!("CARGO_PKG_VERSION") }
         })),
-        "tools/list" => Ok(tools_list()),
-        "tools/call" => call_tool(client, &params),
+        "tools/list" => Ok(tools_list_for(ctx.read_only)),
+        "tools/call" => match params.get("name").and_then(|n| n.as_str()) {
+            Some(name) if ctx.read_only && WRITE_TOOLS.contains(&name) => Err(json!({
+                "code": -32602,
+                "message": format!("tool {name} is not available: the server is read-only")
+            })),
+            _ => call_tool(client, &params),
+        },
         "ping" => Ok(json!({})),
         "server/discover" => Ok(discover_result(capabilities(), ctx.transport)),
         other => Err(json!({
@@ -126,6 +132,19 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
 /// What both `initialize` and `server/discover` report.
 fn capabilities() -> Value {
     json!({ "tools": {} })
+}
+
+/// The tools that change notes; read-only mode hides and refuses them.
+const WRITE_TOOLS: &[&str] = &["write", "forget", "supersede", "keep"];
+
+fn tools_list_for(read_only: bool) -> Value {
+    let mut list = tools_list();
+    if read_only {
+        if let Some(tools) = list["tools"].as_array_mut() {
+            tools.retain(|t| !t["name"].as_str().is_some_and(|n| WRITE_TOOLS.contains(&n)));
+        }
+    }
+    list
 }
 
 fn tools_list() -> Value {
@@ -183,6 +202,32 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "get_note",
+                "description": "Read one memory note by id with its source and its whole supersede chain (older and newer versions, oldest first)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "id": { "type": "integer" } },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "conflicts",
+                "description": "Report notes that disagree. The report has three kinds: contradiction (two notes that seem to contradict each other, open), documented_supersession (a pair already resolved by a replacement, not open) and stale_tool_drift (never-used notes of one tool). Read the kind of each row before acting",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "project": { "type": "string" } }
+                }
+            },
+            {
+                "name": "keep",
+                "description": "Confirm a memory note: back to active, expiry cleared. A note that a newer note replaced stays superseded",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "id": { "type": "integer" } },
+                    "required": ["id"]
+                }
+            },
+            {
                 "name": "list_projects",
                 "description": "List known project names",
                 "inputSchema": { "type": "object", "properties": {} }
@@ -199,7 +244,12 @@ fn tools_list() -> Value {
                     "type": "object",
                     "properties": {
                         "content": { "type": "string" },
-                        "category": { "type": "string" },
+                        "category": {
+                            "type": "string",
+                            "enum": crate::server::MEMORY_CATEGORIES,
+                            "default": "insight",
+                            "description": "Use decision to record a decision"
+                        },
                         "project": { "type": "string" }
                     },
                     "required": ["content"]
@@ -399,6 +449,47 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 |e| json!({ "code": -32000, "message": e.to_string() }),
             )?))
         }
+        "get_note" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| json!({ "code": -32602, "message": "id required" }))?;
+            let note = crate::server::get_note_json(client, id)
+                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
+                .ok_or_else(|| json!({ "code": -32000, "message": "memory chunk not found" }))?;
+            crate::lifecycle::record_use_or_log(client, &[id]);
+            Ok(text_result(note.to_string()))
+        }
+        "conflicts" => {
+            let project = optional_str(&args, "project", "project must be a string")?
+                .filter(|p| !p.is_empty());
+            let report = crate::conflicts::find_conflicts(client, project, 0.85)
+                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            Ok(text_result(serde_json::to_string(&report).map_err(
+                |e| json!({ "code": -32000, "message": e.to_string() }),
+            )?))
+        }
+        "keep" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| json!({ "code": -32602, "message": "id required" }))?;
+            // keep_memory counts the use inside its own transaction.
+            match crate::server::keep_memory(client, id) {
+                Ok(crate::server::KeepOutcome::Kept) => Ok(text_result(
+                    json!({ "id": id, "status": "active" }).to_string(),
+                )),
+                Ok(crate::server::KeepOutcome::NotFound) => Err(json!({
+                    "code": -32000,
+                    "message": "not_found: memory chunk not found"
+                })),
+                Ok(crate::server::KeepOutcome::HasSuccessor) => Err(json!({
+                    "code": -32000,
+                    "message": "has_successor: memory chunk was replaced by a newer note and stays superseded"
+                })),
+                Err(e) => Err(json!({ "code": -32000, "message": e.to_string() })),
+            }
+        }
         "list_projects" => {
             let rows = client
                 .query("SELECT name FROM projects ORDER BY name", &[])
@@ -432,6 +523,15 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .map(|s| s.to_string());
             if content.trim().is_empty() {
                 return Err(json!({ "code": -32602, "message": "content required" }));
+            }
+            if !crate::server::MEMORY_CATEGORIES.contains(&category.as_str()) {
+                return Err(json!({
+                    "code": -32602,
+                    "message": format!(
+                        "category must be one of {}",
+                        crate::server::MEMORY_CATEGORIES.join(", ")
+                    )
+                }));
             }
             let category_type = crate::extract_memory::category_column_type(client)
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
@@ -1235,6 +1335,303 @@ mod tests {
             })),
         )
         .expect("null means the default");
+    }
+
+    fn seed_project_note<C: GenericClient>(client: &mut C, project: &str, content: &str) -> i64 {
+        let category_type =
+            crate::extract_memory::category_column_type(client).expect("category_column_type");
+        client
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, valid_from)
+                     VALUES ('manual', $1, 'decision'::text::{category_type}, $2, 1.0, 'active', '2026-01-01T00:00:00Z')
+                     RETURNING id"
+                ),
+                &[&content, &project],
+            )
+            .expect("seed note")
+            .get(0)
+    }
+
+    fn replace(client: &mut impl GenericClient, old: i64, content: &str) -> i64 {
+        call_text(
+            client,
+            "supersede",
+            json!({ "id": old, "content": content }),
+        )["new_id"]
+            .as_i64()
+            .expect("new_id")
+    }
+
+    #[test]
+    fn get_note_returns_chain_oldest_first() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping get_note_returns_chain_oldest_first: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let old = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let new = replace(&mut tx, old, "mcp chain successor");
+        let note = call_text(&mut tx, "get_note", json!({ "id": new }));
+        assert_eq!(note["id"], json!(new), "{note}");
+        assert_eq!(note["content"], "mcp chain successor");
+        assert_eq!(note["source_type"], "mcp_write");
+        assert!(note.get("source_id").is_some(), "{note}");
+        let chain = note["chain"].as_array().expect("chain");
+        let ids: Vec<i64> = chain.iter().map(|n| n["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, vec![old, new], "{note}");
+        for k in ["id", "status", "valid_from", "valid_to", "content"] {
+            assert!(chain[0].get(k).is_some(), "{k}: {note}");
+        }
+        assert_eq!(chain[0]["status"], "superseded", "{note}");
+        // the same chain from the other end, and a lone note has a chain of one
+        let from_old = call_text(&mut tx, "get_note", json!({ "id": old }));
+        assert_eq!(from_old["chain"], note["chain"]);
+        let lone = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let lone = call_text(&mut tx, "get_note", json!({ "id": lone }));
+        assert_eq!(lone["chain"].as_array().unwrap().len(), 1, "{lone}");
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "get_note", "arguments": { "id": -5 } }),
+        )
+        .expect_err("unknown id");
+        assert_eq!(err["code"], -32000);
+        assert_eq!(err["message"], "memory chunk not found");
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "get_note", "arguments": { "id": "x" } }),
+        )
+        .expect_err("bad id");
+        assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn get_note_counts_use() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping get_note_counts_use: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let other = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        call_text(&mut tx, "get_note", json!({ "id": id }));
+        assert_eq!(use_count(&mut tx, id), 1);
+        assert_eq!(use_count(&mut tx, other), 0);
+        let _ = call_tool(
+            &mut tx,
+            &json!({ "name": "get_note", "arguments": { "id": -5 } }),
+        );
+    }
+
+    #[test]
+    fn conflicts_tool_reports_kinds_and_does_not_count() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping conflicts_tool_reports_kinds: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let old = seed_project_note(&mut tx, &project, &format!("we use heron {tag}"));
+        let new = replace(&mut tx, old, &format!("we use egret {tag}"));
+        let report = call_text(&mut tx, "conflicts", json!({ "project": project }));
+        let rows = report["conflicts"].as_array().expect("conflicts");
+        assert!(
+            rows.iter().any(|c| c["kind"] == "documented_supersession"
+                && c["left_id"].as_i64() == Some(old)
+                && c["right_id"].as_i64() == Some(new)),
+            "{report}"
+        );
+        assert_eq!(use_count(&mut tx, old), 0);
+        assert_eq!(use_count(&mut tx, new), 0);
+        let tools = tools_list();
+        let tool = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "conflicts")
+            .expect("conflicts tool");
+        let text = tool["description"].as_str().unwrap();
+        for kind in [
+            "contradiction",
+            "documented_supersession",
+            "stale_tool_drift",
+        ] {
+            assert!(text.contains(kind), "{kind}: {text}");
+        }
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "conflicts", "arguments": { "project": 5 } }),
+        )
+        .expect_err("non-string project");
+        assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn mcp_keep_counts_once() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_keep_counts_once: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&id],
+        )
+        .unwrap();
+        let out = call_text(&mut tx, "keep", json!({ "id": id }));
+        assert_eq!(out, json!({ "id": id, "status": "active" }));
+        assert_eq!(use_count(&mut tx, id), 1);
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "keep", "arguments": { "id": -5 } }),
+        )
+        .expect_err("unknown");
+        assert_eq!(err["code"], -32000);
+        assert_eq!(err["message"], "not_found: memory chunk not found");
+        let err =
+            call_tool(&mut tx, &json!({ "name": "keep", "arguments": {} })).expect_err("no id");
+        assert_eq!(err["code"], -32602);
+    }
+
+    #[test]
+    fn mcp_keep_on_superseded_note_is_refused() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_keep_on_superseded_note_is_refused: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let old = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        replace(&mut tx, old, "mcp keep successor");
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "keep", "arguments": { "id": old } }),
+        )
+        .expect_err("superseded");
+        assert_eq!(err["code"], -32000);
+        assert_eq!(
+            err["message"],
+            "has_successor: memory chunk was replaced by a newer note and stays superseded"
+        );
+        assert_eq!(use_count(&mut tx, old), 0);
+    }
+
+    #[test]
+    fn write_schema_lists_categories() {
+        let tools = tools_list();
+        let tool = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "write")
+            .expect("write tool");
+        let category = &tool["inputSchema"]["properties"]["category"];
+        assert_eq!(
+            category["enum"],
+            json!(crate::server::MEMORY_CATEGORIES),
+            "{category}"
+        );
+        assert!(
+            category["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("decision"),
+            "{category}"
+        );
+    }
+
+    #[test]
+    fn write_rejects_an_unknown_category() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping write_rejects_an_unknown_category: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let err = call_tool(
+            &mut tx,
+            &json!({ "name": "write", "arguments": { "content": "x", "category": "nonsense" } }),
+        )
+        .expect_err("unknown category");
+        assert_eq!(err["code"], -32602, "{err}");
+    }
+
+    #[test]
+    fn read_only_hides_and_refuses_writes() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping read_only_hides_and_refuses_writes: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let ro = McpContext {
+            transport: Transport::Http,
+            read_only: true,
+        };
+        let listed = dispatch(
+            &mut tx,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            &ro,
+        );
+        let names: Vec<String> = listed.body.unwrap()["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        for hidden in ["write", "forget", "supersede", "keep"] {
+            assert!(!names.contains(&hidden.to_string()), "{hidden}: {names:?}");
+        }
+        for shown in [
+            "search",
+            "recall",
+            "get_note",
+            "conflicts",
+            "project_context",
+        ] {
+            assert!(names.contains(&shown.to_string()), "{shown}: {names:?}");
+        }
+        let count = |tx: &mut postgres::Transaction| -> i64 {
+            tx.query_one("SELECT count(*) FROM memory_chunks", &[])
+                .unwrap()
+                .get(0)
+        };
+        let before = count(&mut tx);
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let before = before + 1;
+        for (name, args) in [
+            ("write", json!({ "content": "blocked" })),
+            ("forget", json!({ "ids": [id] })),
+            ("supersede", json!({ "id": id, "content": "blocked" })),
+            ("keep", json!({ "id": id })),
+        ] {
+            let reply = dispatch(
+                &mut tx,
+                &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                         "params": { "name": name, "arguments": args } }),
+                &ro,
+            );
+            let err = reply.body.unwrap()["error"].clone();
+            assert_eq!(err["code"], -32602, "{name}: {err}");
+            assert_eq!(
+                err["message"],
+                format!("tool {name} is not available: the server is read-only")
+            );
+        }
+        assert_eq!(count(&mut tx), before);
+        let status: String = tx
+            .query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&id])
+            .unwrap()
+            .get(0);
+        assert_eq!(status, "active");
+        // read tools still work and still count
+        let reply = dispatch(
+            &mut tx,
+            &json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                     "params": { "name": "get_note", "arguments": { "id": id } } }),
+            &ro,
+        );
+        assert!(reply.body.unwrap().get("result").is_some());
+        assert_eq!(use_count(&mut tx, id), 1);
     }
 
     #[test]
