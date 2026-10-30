@@ -61,7 +61,10 @@ fn bearer_credentials(header: &str) -> Option<&str> {
 /// credentials. Reads raw bytes, so a value that is not text still counts.
 pub(crate) fn is_bearer_scheme(header: &[u8]) -> bool {
     let blank = |b: &u8| matches!(b, b' ' | b'\t');
-    let start = header.iter().position(|b| !blank(b)).unwrap_or(header.len());
+    let start = header
+        .iter()
+        .position(|b| !blank(b))
+        .unwrap_or(header.len());
     let rest = &header[start..];
     let end = rest.iter().position(blank).unwrap_or(rest.len());
     rest[..end].eq_ignore_ascii_case(b"bearer")

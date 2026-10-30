@@ -4027,10 +4027,7 @@ mod tests {
         );
         let rolled_back = rt.block_on(with_db(&state, |client| {
             Ok(client
-                .query_one(
-                    "SELECT to_regclass('pg_temp.tl_poison_probe') IS NULL",
-                    &[],
-                )?
+                .query_one("SELECT to_regclass('pg_temp.tl_poison_probe') IS NULL", &[])?
                 .get::<_, bool>(0))
         }));
         assert!(
@@ -4048,7 +4045,11 @@ mod tests {
         };
         client.batch_execute("BEGIN").expect("begin");
         let tag = uuid::Uuid::new_v4().simple().to_string();
-        let a = seed_note(&mut client, &format!("keyless-recall ibis {tag}"), "decision");
+        let a = seed_note(
+            &mut client,
+            &format!("keyless-recall ibis {tag}"),
+            "decision",
+        );
         let state = AppState {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
