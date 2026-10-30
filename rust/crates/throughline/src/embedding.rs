@@ -21,9 +21,10 @@ where
     }
 }
 
-/// Model used when `OLLAMA_EMBED_MODEL` is not set. Chosen by the
-/// multilingual measurement (block 7).
-pub const DEFAULT_EMBED_MODEL: &str = "granite-embedding-multilingual:278m";
+/// Model used when `OLLAMA_EMBED_MODEL` is not set. It stays the English-first
+/// model so an existing install does not switch on restart; the multilingual
+/// model is opt-in (see the `granite-embedding` profile).
+pub const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 
 /// Columns of `embeddings` that exist today. A dimension without a column is
 /// refused until a migration adds one.
@@ -65,16 +66,25 @@ const fn profile(
     }
 }
 
-/// Profile by model name; the tag (`:278m`) is ignored.
+/// Profile by model name. The tag (`:278m`) is ignored, except for the
+/// Ollama library name `granite-embedding`, whose tags are different models.
 pub fn model_profile(model: &str) -> Option<ModelProfile> {
-    let name = model.split(':').next().unwrap_or(model);
-    Some(match name {
-        "nomic-embed-text" => profile("", "", 768, "embedding_768", BASE_AS_OF, BASE_CONSOLIDATION),
-        // Winner of the multilingual measurement; thresholds measured.
-        "granite-embedding-multilingual" => profile("", "", 768, "embedding_768", 0.68, 0.93),
+    let (name, tag) = model.split_once(':').unwrap_or((model, ""));
+    Some(match (name, tag) {
+        ("nomic-embed-text", _) => {
+            profile("", "", 768, "embedding_768", BASE_AS_OF, BASE_CONSOLIDATION)
+        }
+        // Winner of the multilingual measurement; thresholds measured on the
+        // Docker Hub file. `granite-embedding:278m` from the Ollama library is
+        // the same model and quantisation, not a byte-identical file. Its
+        // `30m` tag is an English model with another dimension and takes the
+        // unknown-model path.
+        ("granite-embedding-multilingual", _) | ("granite-embedding", "278m") => {
+            profile("", "", 768, "embedding_768", 0.68, 0.93)
+        }
         // The three profiles below were measured for ranking only; their
         // thresholds were not, so they keep the baseline values.
-        "embeddinggemma" => profile(
+        ("embeddinggemma", _) => profile(
             "task: search result | query: ",
             "title: none | text: ",
             768,
@@ -82,7 +92,7 @@ pub fn model_profile(model: &str) -> Option<ModelProfile> {
             BASE_AS_OF,
             BASE_CONSOLIDATION,
         ),
-        "nomic-embed-text-v2-moe" => profile(
+        ("nomic-embed-text-v2-moe", _) => profile(
             "search_query: ",
             "search_document: ",
             768,
@@ -90,7 +100,7 @@ pub fn model_profile(model: &str) -> Option<ModelProfile> {
             BASE_AS_OF,
             BASE_CONSOLIDATION,
         ),
-        "qwen3-embedding" => profile(
+        ("qwen3-embedding", _) => profile(
             "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
             "",
             1024,
@@ -414,7 +424,21 @@ mod tests {
         assert_eq!(qwen.dim, 1024);
         assert!(qwen.query_prefix.starts_with("Instruct: "));
         assert!(model_profile("something-else").is_none());
-        assert_eq!(DEFAULT_EMBED_MODEL, "granite-embedding-multilingual:278m");
+        assert_eq!(DEFAULT_EMBED_MODEL, "nomic-embed-text");
+    }
+
+    #[test]
+    fn granite_profile_matches_both_names_but_not_30m() {
+        let measured = model_profile("granite-embedding-multilingual:278m").expect("hub name");
+        assert_eq!(
+            model_profile("granite-embedding-multilingual"),
+            Some(measured)
+        );
+        assert_eq!(model_profile("granite-embedding:278m"), Some(measured));
+        // The 30m tag is an English model with 384 dimensions: unknown path.
+        assert!(model_profile("granite-embedding:30m").is_none());
+        assert!(model_profile("granite-embedding").is_none());
+        assert!(profile_for("granite-embedding:30m", 384).is_err());
     }
 
     #[test]
