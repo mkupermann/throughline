@@ -249,9 +249,12 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .and_then(|l| l.as_i64())
                 .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
                 .clamp(1, 50) as usize;
-            let emb = crate::recall::needs_embedding(mode, rank)
-                .then(|| crate::recall::query_embedding(query))
-                .flatten();
+            let emb = if crate::recall::needs_embedding(mode, rank) {
+                crate::recall::query_embedding(query)
+                    .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
+            } else {
+                None
+            };
             let q = crate::recall::RecallQuery {
                 text: query,
                 project,

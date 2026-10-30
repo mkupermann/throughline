@@ -328,15 +328,22 @@ fn is_loopback_host(host: &str) -> bool {
 /// local wherever it runs, unless the model is a cloud model or the server is
 /// ollama.com. An OpenAI-compatible endpoint is local only on this machine.
 pub fn is_local(backend: &GenerationBackend) -> bool {
-    let host = url_host(&backend.base_url);
     if backend.kind == BackendKind::Ollama {
-        // An unparsable host fails closed: it is not treated as local.
-        let local_host = host
-            .as_deref()
-            .is_some_and(|h| h != "ollama.com" && !h.ends_with(".ollama.com"));
-        return !has_cloud_suffix(&backend.model) && local_host;
+        return ollama_is_local(&backend.base_url, &backend.model);
     }
-    host.as_deref().is_some_and(is_loopback_host)
+    url_host(&backend.base_url)
+        .as_deref()
+        .is_some_and(is_loopback_host)
+}
+
+/// The Ollama rule, shared by text generation and embeddings: any Ollama
+/// server is local, unless the model is a cloud model or the server is
+/// ollama.com or one of its subdomains. An unparsable host fails closed.
+pub fn ollama_is_local(base_url: &str, model: &str) -> bool {
+    let local_host = url_host(base_url)
+        .as_deref()
+        .is_some_and(|h| h != "ollama.com" && !h.ends_with(".ollama.com"));
+    !has_cloud_suffix(model) && local_host
 }
 
 /// `THROUGHLINE_ALLOW_REMOTE_LLM`: only `1`, `true`, `yes`, `on` allow it.
@@ -373,6 +380,23 @@ fn check_local_or_allowed(backend: &GenerationBackend, allowed: bool) -> Result<
     Err(anyhow::Error::new(RemoteLlmNotAllowed {
         label: backend.label.clone(),
     }))
+}
+
+/// Pure form of [`ensure_ollama_local_or_allowed`] with the flag as a parameter.
+pub fn check_ollama_local_or_allowed(base_url: &str, model: &str, allowed: bool) -> Result<()> {
+    if allowed || ollama_is_local(base_url, model) {
+        return Ok(());
+    }
+    Err(anyhow::Error::new(RemoteLlmNotAllowed {
+        label: format!("ollama/{model}"),
+    }))
+}
+
+/// Refuse a non-local Ollama embedding server or model unless
+/// `THROUGHLINE_ALLOW_REMOTE_LLM` is truthy.
+pub fn ensure_ollama_local_or_allowed(base_url: &str, model: &str) -> Result<()> {
+    let flag = std::env::var("THROUGHLINE_ALLOW_REMOTE_LLM").ok();
+    check_ollama_local_or_allowed(base_url, model, remote_allowed(flag.as_deref()))
 }
 
 /// Refuse a non-local backend unless `THROUGHLINE_ALLOW_REMOTE_LLM` is truthy.
@@ -418,6 +442,34 @@ fn ollama_chat(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ollama_com_embedding_host_is_not_local() {
+        let err = check_ollama_local_or_allowed("https://ollama.com", "nomic-embed-text", false)
+            .unwrap_err();
+        assert!(err.downcast_ref::<RemoteLlmNotAllowed>().is_some());
+    }
+
+    #[test]
+    fn cloud_embedding_model_is_not_local() {
+        let err = check_ollama_local_or_allowed("http://localhost:11434", "foo-embed:cloud", false)
+            .unwrap_err();
+        assert!(err.downcast_ref::<RemoteLlmNotAllowed>().is_some());
+    }
+
+    #[test]
+    fn local_ollama_embedding_passes() {
+        assert!(
+            check_ollama_local_or_allowed("http://ollama:11434", "nomic-embed-text", false).is_ok()
+        );
+    }
+
+    #[test]
+    fn allow_flag_permits_remote_embedding() {
+        assert!(
+            check_ollama_local_or_allowed("https://ollama.com", "nomic-embed-text", true).is_ok()
+        );
+    }
+
     use super::*;
 
     fn backend(kind: BackendKind, base: &str, model: &str) -> GenerationBackend {

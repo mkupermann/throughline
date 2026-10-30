@@ -371,9 +371,11 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let emb = recall::needs_embedding(mode, rank)
-                .then(|| recall::query_embedding(&text))
-                .flatten();
+            let emb = if recall::needs_embedding(mode, rank) {
+                recall::query_embedding(&text)?
+            } else {
+                None
+            };
             let q = recall::RecallQuery {
                 text: &text,
                 project: project.as_deref(),

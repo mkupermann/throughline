@@ -111,7 +111,7 @@ pub fn run_eval<C: GenericClient>(
         if case.expected.is_empty() {
             bail!("test set case without expected ids: {}", case.q);
         }
-        let emb = recall::query_embedding(&case.q);
+        let emb = recall::query_embedding(&case.q)?;
         if emb.is_none() {
             bail!("no query embedding (is Ollama reachable?): {}", case.q);
         }
