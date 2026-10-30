@@ -64,6 +64,18 @@ pub struct QueryEmbedding {
     pub vector: Vec<f32>,
 }
 
+/// Embed the question with the configured backend. Any failure (no Ollama,
+/// model missing, empty vector) is `None`, which the ranking reports as degraded.
+pub fn query_embedding(text: &str) -> Option<QueryEmbedding> {
+    let backend = crate::embedding::resolve().ok()?;
+    let vector = crate::embedding::embed_text(&backend, text).ok()?;
+    Some(QueryEmbedding {
+        model: backend.model,
+        column: backend.column,
+        vector,
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Why {
     pub cosine: Option<f64>,

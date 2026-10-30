@@ -85,9 +85,13 @@ fn migrate_ingest_and_search_roundtrip() {
         "ingest should not error: {stdout}"
     );
 
-    let hits =
-        throughline::search_module::search(&mut client, &format!("rust e2e needle {session}"), 10)
-            .expect("search");
+    let hits = throughline::search_module::search(
+        &mut client,
+        &format!("rust e2e needle {session}"),
+        10,
+        None,
+    )
+    .expect("search");
     assert!(
         hits.iter().any(|h| h.snippet.contains("rust e2e needle")),
         "expected a hit, got {hits:?}"

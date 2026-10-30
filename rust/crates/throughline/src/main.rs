@@ -6,8 +6,8 @@ use throughline::types::IngestSummary;
 use throughline::{
     adapters, answer_eval, ask, audit, config, conflicts, costs, decisions, doctor, embedding,
     export_markdown, export_otel, extract_memory, generate_embeddings, generate_titles, handoff,
-    ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions,
-    reflect_memory, repair, retention, search, server, stale_digest, types,
+    ingest_run, llm, mcp, memory_writeback, migrate, ops_jobs, project_instructions, recall,
+    reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
 };
 
 #[derive(Parser)]
@@ -53,6 +53,27 @@ enum Command {
         /// Source filter: memory | messages | all (default).
         #[arg(long, default_value = "all")]
         from: String,
+    },
+    /// Recall memory notes ranked by meaning, with the reason for each hit.
+    Recall {
+        /// The question or topic.
+        text: String,
+        #[arg(long)]
+        project: Option<String>,
+        /// current | as_of | associative | grounded
+        #[arg(long, default_value = "current")]
+        mode: String,
+        /// Valid-at date (YYYY-MM-DD) for as_of.
+        #[arg(long = "at")]
+        at: Option<String>,
+        /// Known-at date (YYYY-MM-DD) for as_of.
+        #[arg(long = "known-at")]
+        known_at: Option<String>,
+        #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
+        limit: usize,
+        /// Print the full result as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Answer a question from the corpus with citations.
     Ask {
@@ -274,6 +295,71 @@ fn main() -> Result<()> {
                     &rules,
                 )?;
                 print_summary(&summary);
+            }
+        }
+        Command::Recall {
+            text,
+            project,
+            mode,
+            at,
+            known_at,
+            limit,
+            json,
+        } => {
+            let mode: recall::RecallMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            let date =
+                |name: &str, v: Option<String>| -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+                    match v.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                        None => Ok(None),
+                        Some(s) => temporal::parse_as_of_instant(s).map(Some).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "{name} must be YYYY-MM-DD or an RFC 3339 timestamp, got {s:?}"
+                            )
+                        }),
+                    }
+                };
+            let valid_at = date("--at", at)?;
+            let known_at = date("--known-at", known_at)?;
+            let mut client = config::DbConfig::from_env()
+                .connect()
+                .context("connect to PostgreSQL")?;
+            let emb = recall::query_embedding(&text);
+            let q = recall::RecallQuery {
+                text: &text,
+                project: project.as_deref(),
+                mode,
+                valid_at,
+                known_at,
+                limit: limit.clamp(1, 50),
+            };
+            let result = recall::recall(&mut client, &q, emb.as_ref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                return Ok(());
+            }
+            if let Some(note) = &result.degraded {
+                eprintln!("{note}");
+            }
+            if result.hits.is_empty() {
+                println!("no matches");
+            }
+            for h in &result.hits {
+                let source = match (&h.session_title, &h.evidence) {
+                    (Some(t), Some(e)) => {
+                        format!(" (Quelle: {t}, {})", e.created_at.format("%Y-%m-%d"))
+                    }
+                    (Some(t), None) => format!(" (Quelle: {t})"),
+                    _ => String::new(),
+                };
+                println!(
+                    "[m#{} · {} · {} · {:.2}] {}{}",
+                    h.id,
+                    h.valid_from.format("%Y-%m-%d"),
+                    h.category,
+                    h.score,
+                    h.content.replace('\n', " "),
+                    source
+                );
             }
         }
         Command::Search {
