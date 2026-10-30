@@ -564,14 +564,23 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = embedding::resolve()?;
-            let summary = generate_embeddings::embed_pending(&mut client, &backend, limit)?;
-            println!(
-                "embed[{}]: embedded={} skipped={} errors={}",
-                embedding::label(&backend),
-                summary.embedded,
-                summary.skipped,
-                summary.errors
-            );
+            let target = embedding::resolve_target();
+            let job = generate_embeddings::embed_job_with(
+                &mut client,
+                &backend,
+                target,
+                limit,
+                |b, text| embedding::embed_text(b, text, embedding::TextKind::Document),
+            )?;
+            for (label, summary) in &job.runs {
+                println!(
+                    "embed[{label}]: embedded={} skipped={} errors={}",
+                    summary.embedded, summary.skipped, summary.errors
+                );
+            }
+            if let Some(e) = &job.target_error {
+                println!("target model: {e}");
+            }
         }
         Command::GenerateTitles { limit } => {
             let mut client = config::DbConfig::from_env()
@@ -935,6 +944,10 @@ fn main() -> Result<()> {
             println!("database:   {}", report.database);
             println!("generation: {}", report.generation);
             println!("embeddings: {}", report.embeddings);
+            if let Some(t) = &report.embedding_target {
+                println!("embedding target: {t}");
+            }
+            println!("embedding missing: {}", report.embedding_missing);
             println!("agent access: {}", report.agent_access);
             for n in report.notes {
                 println!("note: {n}");

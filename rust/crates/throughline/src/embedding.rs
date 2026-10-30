@@ -180,6 +180,31 @@ pub fn resolve() -> Result<EmbeddingBackend> {
     }
 }
 
+/// Model that `THROUGHLINE_EMBED_TARGET_MODEL` names, to fill beside the
+/// active one before switching. Empty or equal to the active model means
+/// there is no target; an unusable target is an error naming it.
+pub fn resolve_target() -> Result<Option<EmbeddingBackend>> {
+    let active = resolve()?;
+    let value = std::env::var("THROUGHLINE_EMBED_TARGET_MODEL").ok();
+    resolve_target_from(value.as_deref(), &active)
+}
+
+/// [`resolve_target`] for an explicit value. The target uses the active
+/// backend's server, so the same remote-model lock and `/api/tags` check apply.
+pub fn resolve_target_from(
+    value: Option<&str>,
+    active: &EmbeddingBackend,
+) -> Result<Option<EmbeddingBackend>> {
+    let model = match value.map(str::trim) {
+        None | Some("") => return Ok(None),
+        Some(m) if m == active.model => return Ok(None),
+        Some(m) => m,
+    };
+    ollama(&active.base_url, model)
+        .map(Some)
+        .map_err(|e| anyhow!("{model}: {e}"))
+}
+
 fn ollama(base: &str, model: &str) -> Result<EmbeddingBackend> {
     // Fail early: no request, not even the model list, goes to a remote server.
     crate::llm::ensure_ollama_local_or_allowed(base, model)?;
@@ -299,6 +324,42 @@ mod tests {
             dim: profile.dim,
             profile,
         }
+    }
+
+    #[test]
+    fn target_equal_to_active_is_ignored() {
+        let active = backend_for(DEFAULT_EMBED_MODEL);
+        assert!(resolve_target_from(None, &active).unwrap().is_none());
+        assert!(resolve_target_from(Some(""), &active).unwrap().is_none());
+        assert!(resolve_target_from(Some("  "), &active).unwrap().is_none());
+        assert!(resolve_target_from(Some(DEFAULT_EMBED_MODEL), &active)
+            .unwrap()
+            .is_none());
+        assert!(
+            resolve_target_from(Some(&format!(" {DEFAULT_EMBED_MODEL} ")), &active)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bogus_target_names_the_model() {
+        let base = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+        let reachable = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap()
+            .get(format!("{base}/api/tags"))
+            .send()
+            .is_ok();
+        if !reachable {
+            eprintln!("skipped: ollama unreachable at {base}");
+            return;
+        }
+        let mut active = backend_for(DEFAULT_EMBED_MODEL);
+        active.base_url = base;
+        let err = resolve_target_from(Some("does-not-exist"), &active).unwrap_err();
+        assert!(err.to_string().contains("does-not-exist"), "{err}");
     }
 
     #[test]

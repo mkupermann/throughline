@@ -22,6 +22,118 @@ pub fn vector_literal(v: &[f32]) -> String {
     )
 }
 
+/// How far a model's vectors cover the notes and messages that
+/// [`embed_pending`] would embed for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbedProgress {
+    pub model: String,
+    pub notes_done: i64,
+    pub notes_total: i64,
+    pub messages_done: i64,
+    pub messages_total: i64,
+}
+
+impl EmbedProgress {
+    pub fn notes_missing(&self) -> i64 {
+        (self.notes_total - self.notes_done).max(0)
+    }
+
+    pub fn messages_missing(&self) -> i64 {
+        (self.messages_total - self.messages_done).max(0)
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.notes_missing() == 0 && self.messages_missing() == 0
+    }
+}
+
+/// Active notes and messages with text, and how many of them have a vector
+/// for `backend.model` in its column.
+pub fn embed_progress<C: GenericClient>(
+    client: &mut C,
+    backend: &EmbeddingBackend,
+) -> Result<EmbedProgress> {
+    let column = backend.column;
+    let count = |client: &mut C, sql: String, model: Option<&str>| -> Result<i64> {
+        let row = match model {
+            Some(m) => client.query_one(&sql, &[&m])?,
+            None => client.query_one(&sql, &[])?,
+        };
+        Ok(row.get(0))
+    };
+    let notes_total = count(
+        client,
+        "SELECT count(*) FROM memory_chunks \
+         WHERE COALESCE(status, 'active') = 'active' AND COALESCE(content, '') <> ''"
+            .into(),
+        None,
+    )?;
+    let messages_total = count(
+        client,
+        "SELECT count(*) FROM messages WHERE COALESCE(content, '') <> ''".into(),
+        None,
+    )?;
+    let notes_done = count(
+        client,
+        format!(
+            "SELECT count(*) FROM embeddings e \
+             JOIN memory_chunks c ON c.id = e.source_id \
+             WHERE e.source_type = 'memory_chunk' AND e.model = $1 \
+               AND e.{column} IS NOT NULL \
+               AND COALESCE(c.status, 'active') = 'active' AND COALESCE(c.content, '') <> ''"
+        ),
+        Some(&backend.model),
+    )?;
+    let messages_done = count(
+        client,
+        format!(
+            "SELECT count(*) FROM embeddings e \
+             JOIN messages m ON m.id = e.source_id \
+             WHERE e.source_type = 'message' AND e.model = $1 \
+               AND e.{column} IS NOT NULL AND COALESCE(m.content, '') <> ''"
+        ),
+        Some(&backend.model),
+    )?;
+    Ok(EmbedProgress {
+        model: backend.model.clone(),
+        notes_done,
+        notes_total,
+        messages_done,
+        messages_total,
+    })
+}
+
+/// Result of one `embed` job: a run per model, the active one first, and the
+/// target's error when it could not be used.
+#[derive(Debug, Default)]
+pub struct EmbedJob {
+    pub runs: Vec<(String, EmbedSummary)>,
+    pub target_error: Option<String>,
+}
+
+/// Embed for the active model, then for the target with the same `limit`.
+/// A target that failed to resolve never stops the active run.
+pub fn embed_job_with<C: GenericClient, F: Fn(&EmbeddingBackend, &str) -> Result<Vec<f32>>>(
+    client: &mut C,
+    active: &EmbeddingBackend,
+    target: Result<Option<EmbeddingBackend>>,
+    limit: usize,
+    embed: F,
+) -> Result<EmbedJob> {
+    let mut job = EmbedJob::default();
+    let summary = embed_pending_with(client, active, limit, |t| embed(active, t))?;
+    job.runs.push((embedding::label(active), summary));
+    match target {
+        Ok(Some(t)) => {
+            let summary = embed_pending_with(client, &t, limit, |text| embed(&t, text))?;
+            job.runs.push((embedding::label(&t), summary));
+        }
+        Ok(None) => {}
+        Err(e) => job.target_error = Some(e.to_string()),
+    }
+    Ok(job)
+}
+
 /// Embed unembedded memory notes first, then messages with the rest of `limit`.
 pub fn embed_pending<C: GenericClient>(
     client: &mut C,
@@ -313,5 +425,94 @@ mod tests {
         assert_eq!(calls.get(), 2);
         embed_pending_with(&mut tx, &backend, 2, embed).unwrap();
         assert_eq!(calls.get(), 2, "second run must not embed the notes again");
+    }
+
+    fn seed_message<C: GenericClient>(client: &mut C, content: &str) -> i64 {
+        let conversation_id: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, started_at) VALUES ($1, now()) RETURNING id",
+                &[&uuid::Uuid::new_v4()],
+            )
+            .unwrap()
+            .get(0);
+        client
+            .query_one(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user'::text::message_role, $2, now()) RETURNING id",
+                &[&conversation_id, &content],
+            )
+            .unwrap()
+            .get(0)
+    }
+
+    #[test]
+    fn missing_target_does_not_stop_active_embedding() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping missing_target_does_not_stop_active_embedding: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let active = test_backend();
+        let note = seed_note(&mut tx, "note for the active model", "active");
+        // What resolve_target returns for a model Ollama does not have.
+        let target = Err(anyhow::anyhow!(
+            "does-not-exist: ollama is missing embedding model does-not-exist"
+        ));
+        let job =
+            embed_job_with(&mut tx, &active, target, 1, |_, _| Ok(vec![0.1f32; 768])).unwrap();
+        assert_eq!(job.runs.len(), 1);
+        assert_eq!(job.runs[0].1.embedded, 1);
+        let err = job.target_error.expect("target error");
+        assert!(err.contains("does-not-exist"), "{err}");
+        assert!(embedded_rows(&mut tx, &active.model, "memory_chunk").contains(&note));
+    }
+
+    #[test]
+    fn embed_job_fills_both_models() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping embed_job_fills_both_models: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let active = test_backend();
+        let target = test_backend();
+        let note = seed_note(&mut tx, "note for both models", "active");
+        let job = embed_job_with(&mut tx, &active, Ok(Some(target.clone())), 1, |_, _| {
+            Ok(vec![0.1f32; 768])
+        })
+        .unwrap();
+        assert_eq!(job.runs.len(), 2);
+        assert!(job.target_error.is_none());
+        assert_eq!(job.runs[0].1.embedded, 1);
+        assert_eq!(job.runs[1].1.embedded, 1);
+        assert!(embedded_rows(&mut tx, &active.model, "memory_chunk").contains(&note));
+        assert!(embedded_rows(&mut tx, &target.model, "memory_chunk").contains(&note));
+    }
+
+    #[test]
+    fn progress_counts_notes_and_messages() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping progress_counts_notes_and_messages: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let backend = test_backend();
+        let before = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!((before.notes_done, before.messages_done), (0, 0));
+        seed_note(&mut tx, "active one", "active");
+        seed_note(&mut tx, "active two", "active");
+        seed_note(&mut tx, "gone", "forgotten");
+        seed_message(&mut tx, "a message");
+        seed_message(&mut tx, "");
+        let mid = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!(mid.notes_total, before.notes_total + 2);
+        assert_eq!(mid.messages_total, before.messages_total + 1);
+        assert_eq!((mid.notes_done, mid.messages_done), (0, 0));
+        // Fill exactly the new notes and the new message, newest first.
+        embed_pending_with(&mut tx, &backend, 3, |_| Ok(vec![0.1f32; 768])).unwrap();
+        let after = embed_progress(&mut tx, &backend).unwrap();
+        assert_eq!(after.model, backend.model);
+        assert_eq!(after.notes_done, 2);
+        assert_eq!(after.messages_done, 1);
     }
 }
