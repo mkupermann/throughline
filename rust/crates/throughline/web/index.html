@@ -2774,10 +2774,16 @@ td .empty {
       "sim.group": " similar notes",
       "sim.similarity": "similarity from ",
       "sim.text": "Text of the merged note",
-      "sim.suggest": "Suggest with Ollama",
-      "sim.suggesting": "Asking Ollama…",
-      "sim.sourceLlm": "Suggestion from Ollama. Check it before you merge.",
-      "sim.sourceLongest": "Ollama gave no answer; this is the longest note.",
+      "sim.suggest": "Suggest a merged text",
+      "sim.suggesting": "Asking the local model…",
+      "sim.sourceLlm": "Suggestion from the local model. Check it before you merge.",
+      "sim.sourceLongest": "No suggestion from a model; this is the longest note.",
+      "sim.reasonNotLocal": "The configured model runs off this machine, so no note text was sent. This is the longest note.",
+      "sim.reasonNoBackend": "No local model is available. This is the longest note.",
+      "sim.reasonFailed": "The model did not answer. This is the longest note.",
+      "sim.timeout": "The model took longer than 2 minutes. You can still edit the text and merge.",
+      "sim.alt": "Suggestion (your edits stay in the field above):",
+      "sim.useText": "Use this text",
       "sim.suggestFailed": "Suggestion failed: ",
       "sim.merge": "Merge",
       "sim.confirmTitle": "Merge these notes?",
@@ -3460,10 +3466,16 @@ td .empty {
       "sim.group": " ähnliche Notizen",
       "sim.similarity": "Ähnlichkeit ab ",
       "sim.text": "Text der zusammengeführten Notiz",
-      "sim.suggest": "Vorschlag von Ollama",
-      "sim.suggesting": "Ollama wird gefragt…",
-      "sim.sourceLlm": "Vorschlag von Ollama. Vor dem Zusammenführen prüfen.",
-      "sim.sourceLongest": "Ollama hat nicht geantwortet; das ist die längste Notiz.",
+      "sim.suggest": "Text vorschlagen",
+      "sim.suggesting": "Das lokale Modell wird gefragt…",
+      "sim.sourceLlm": "Vorschlag des lokalen Modells. Vor dem Zusammenführen prüfen.",
+      "sim.sourceLongest": "Kein Vorschlag von einem Modell; das ist die längste Notiz.",
+      "sim.reasonNotLocal": "Das eingestellte Modell läuft nicht auf diesem Rechner, deshalb wurde kein Notiztext gesendet. Das ist die längste Notiz.",
+      "sim.reasonNoBackend": "Kein lokales Modell verfügbar. Das ist die längste Notiz.",
+      "sim.reasonFailed": "Das Modell hat nicht geantwortet. Das ist die längste Notiz.",
+      "sim.timeout": "Das Modell hat länger als 2 Minuten gebraucht. Du kannst den Text weiter bearbeiten und zusammenführen.",
+      "sim.alt": "Vorschlag (deine Änderungen bleiben im Feld oben):",
+      "sim.useText": "Diesen Text übernehmen",
       "sim.suggestFailed": "Vorschlag fehlgeschlagen: ",
       "sim.merge": "Zusammenführen",
       "sim.confirmTitle": "Diese Notizen zusammenführen?",
@@ -7105,9 +7117,14 @@ td .empty {
       (n.project_name ? '<span class="chip">' + escapeHtml(n.project_name) + "</span> " : "") +
       escapeHtml((n.content || "").slice(0, 280)) + "</li>";
   }
+  // Requests of the cards on screen. A re-render cancels them, so no answer
+  // arrives for a card that is gone.
+  const similarPending = new Set();
   async function loadSimilar() {
     const el = $("similar-list");
     if (!el) return;
+    similarPending.forEach((c) => c.abort());
+    similarPending.clear();
     el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.loading")) + "</div>";
     try {
       const d = await fetchJson("/api/consolidation/candidates");
@@ -7149,16 +7166,55 @@ td .empty {
       const source = card.querySelector(".similar-source");
       const box = card.querySelector(".similar-confirm");
       const suggest = card.querySelector("[data-similar-suggest]");
+      let original = area.value;
+      const alt = document.createElement("div");
+      card.insertBefore(alt, source);
       suggest.addEventListener("click", async () => {
         suggest.disabled = true;
+        alt.innerHTML = "";
         source.textContent = t("sim.suggesting");
+        const ctl = new AbortController();
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, 120000);
+        similarPending.add(ctl);
         try {
-          const r = await fetchJson("/api/consolidation/proposal?ids=" + encodeURIComponent(ids));
-          area.value = r.text || "";
-          source.textContent = r.source === "llm" ? t("sim.sourceLlm") : t("sim.sourceLongest");
+          const res = await fetch("/api/consolidation/proposal?ids=" + encodeURIComponent(ids), {
+            headers: { Accept: "application/json" }, signal: ctl.signal,
+          });
+          if (!res.ok) {
+            let detail = res.statusText;
+            try { const b = await res.json(); detail = b.detail || b.error || detail; } catch {}
+            throw new Error(detail);
+          }
+          const r = await res.json();
+          const text = r.text || "";
+          if (area.value === original) {
+            area.value = text;
+            original = text;
+          } else if (text && text !== area.value) {
+            const pre = document.createElement("pre");
+            pre.style.cssText = "white-space:pre-wrap;margin:8px 0";
+            pre.textContent = text;
+            const use = document.createElement("button");
+            use.type = "button";
+            use.className = "btn";
+            use.textContent = t("sim.useText");
+            use.addEventListener("click", () => { area.value = text; original = text; alt.innerHTML = ""; });
+            const lead = document.createElement("div");
+            lead.className = "meta";
+            lead.textContent = t("sim.alt");
+            alt.append(lead, pre, use);
+          }
+          const reasons = { not_local: "sim.reasonNotLocal", no_backend: "sim.reasonNoBackend", llm_failed: "sim.reasonFailed" };
+          source.textContent = r.source === "llm" ? t("sim.sourceLlm")
+            : t(reasons[r.reason] || "sim.sourceLongest");
         } catch (e) {
-          source.textContent = t("sim.suggestFailed") + e.message;
+          if (timedOut) source.textContent = t("sim.timeout");
+          else if (e.name === "AbortError") source.textContent = "";
+          else source.textContent = t("sim.suggestFailed") + e.message;
         } finally {
+          clearTimeout(timer);
+          similarPending.delete(ctl);
           suggest.disabled = false;
         }
       });

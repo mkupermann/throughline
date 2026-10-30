@@ -2058,6 +2058,19 @@ fn proposal_or_longest(llm: Result<String>, texts: &[String]) -> (String, &'stat
     }
 }
 
+/// Note texts go only to a backend that keeps data on this machine.
+/// `Err` carries the reason code for the fallback answer.
+fn proposal_backend(
+    resolved: Result<crate::llm::GenerationBackend>,
+) -> Result<crate::llm::GenerationBackend, &'static str> {
+    let backend = resolved.map_err(|_| "no_backend")?;
+    if crate::llm::is_local(&backend) {
+        Ok(backend)
+    } else {
+        Err("not_local")
+    }
+}
+
 const PROPOSAL_SYSTEM: &str = "Merge the given notes into one note. Do not lose any fact and do \
 not add any. Keep it short, write in the language of the notes, and answer with the merged \
 note only.";
@@ -2082,9 +2095,18 @@ async fn consolidation_proposal_handler(
     };
     let wanted = ids.clone();
     let texts = match with_db(&state, move |client| {
+        let predicate = crate::temporal::as_of_predicate("$2", "$3");
+        let now = Some(chrono::Utc::now());
+        let known_at: Option<chrono::DateTime<chrono::Utc>> = None;
         let rows = client.query(
-            "SELECT id, content FROM memory_chunks WHERE id = ANY($1) ORDER BY id",
-            &[&wanted],
+            &format!(
+                "SELECT mc.id, mc.content FROM memory_chunks mc
+                 WHERE mc.id = ANY($1)
+                   AND COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
+                   AND mc.superseded_by IS NULL AND {predicate}
+                 ORDER BY mc.id"
+            ),
+            &[&wanted, &now, &known_at],
         )?;
         Ok(rows
             .iter()
@@ -2096,11 +2118,11 @@ async fn consolidation_proposal_handler(
         Ok(t) => t,
         Err(resp) => return resp,
     };
-    if let Some(missing) = ids.iter().find(|id| !texts.iter().any(|(t, _)| t == *id)) {
+    if let Some(bad) = ids.iter().find(|id| !texts.iter().any(|(t, _)| t == *id)) {
         return api_error(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            format!("memory note {missing} not found"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            format!("memory note {bad} is not a current note"),
         );
     }
     let texts: Vec<String> = texts.into_iter().map(|(_, c)| c).collect();
@@ -2110,15 +2132,18 @@ async fn consolidation_proposal_handler(
         .map(|(i, t)| format!("Note {}:\n{t}", i + 1))
         .collect::<Vec<_>>()
         .join("\n\n");
+    // The backend is resolved and checked inside the task: the probe is a
+    // blocking HTTP call, and a non-local backend gets no request at all.
     let llm = tokio::task::spawn_blocking(move || {
-        let backend = crate::llm::resolve_backend()?;
-        crate::llm::complete(&backend, Some(PROPOSAL_SYSTEM), &user)
+        let backend = proposal_backend(crate::llm::resolve_backend())?;
+        crate::llm::complete(&backend, Some(PROPOSAL_SYSTEM), &user).map_err(|_| "llm_failed")
     })
     .await
-    .map_err(anyhow::Error::from)
-    .and_then(|r| r);
-    let (text, source) = proposal_or_longest(llm, &texts);
-    Json(serde_json::json!({ "text": text, "source": source })).into_response()
+    .unwrap_or(Err("llm_failed"));
+    let reason = llm.as_ref().err().copied();
+    let (text, source) = proposal_or_longest(llm.map_err(anyhow::Error::msg), &texts);
+    let reason = reason.or((source == "longest").then_some("empty"));
+    Json(serde_json::json!({ "text": text, "source": source, "reason": reason })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -5059,6 +5084,38 @@ mod tests {
                 && row.get("valid_from").is_some()
                 && row.get("project_name").is_some()
         );
+    }
+
+    #[test]
+    fn proposal_refuses_backends_off_the_machine() {
+        use crate::llm::{BackendKind, GenerationBackend};
+        let backend = |kind, url: &str, model: &str| GenerationBackend {
+            kind,
+            label: "t".into(),
+            base_url: url.into(),
+            model: model.into(),
+            api_key: None,
+        };
+        let ok = proposal_backend(Ok(backend(
+            BackendKind::Ollama,
+            "http://localhost:11434",
+            "qwen3.6:27b",
+        )));
+        assert!(ok.is_ok());
+        let cloud = proposal_backend(Ok(backend(
+            BackendKind::Ollama,
+            "http://localhost:11434",
+            "glm-5.2:cloud",
+        )));
+        assert_eq!(cloud.err(), Some("not_local"));
+        let remote = proposal_backend(Ok(backend(
+            BackendKind::OpenAiCompatible,
+            "https://api.example.com/v1",
+            "m",
+        )));
+        assert_eq!(remote.err(), Some("not_local"));
+        let none = proposal_backend(Err(anyhow::anyhow!("no llm")));
+        assert_eq!(none.err(), Some("no_backend"));
     }
 
     #[test]
