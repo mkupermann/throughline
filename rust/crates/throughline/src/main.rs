@@ -827,14 +827,21 @@ fn main() -> Result<()> {
                 min_similarity,
             )?;
             if apply {
+                let mut failed = 0usize;
                 for g in &groups {
                     let ids: Vec<i64> = g.notes.iter().map(|n| n.id).collect();
                     match lifecycle::consolidate(&mut client, &ids, &g.proposal, None) {
                         Ok(new_id) => println!("{ids:?} -> {new_id}"),
-                        Err(e) => eprintln!("{ids:?} not merged: {e}"),
+                        Err(e) => {
+                            failed += 1;
+                            eprintln!("{ids:?} not merged: {e}");
+                        }
                     }
                 }
                 println!("{} group(s) found", groups.len());
+                if failed > 0 {
+                    anyhow::bail!("{failed} of {} group(s) could not be merged", groups.len());
+                }
             } else if json {
                 println!("{}", serde_json::to_string_pretty(&groups)?);
             } else {
@@ -962,14 +969,24 @@ fn main() -> Result<()> {
                 }
                 _ => reflect_memory::run_all(&mut client, backend.as_ref(), dry_run, limit)?,
             };
+            let mut failed = 0usize;
             for s in summaries {
                 println!(
-                    "{}: examined={} acted={}{}",
+                    "{}: examined={} acted={}{}{}",
                     s.mode,
                     s.examined,
                     s.acted,
+                    if s.failed > 0 {
+                        format!(" failed={}", s.failed)
+                    } else {
+                        String::new()
+                    },
                     if s.dry_run { " (dry-run)" } else { "" }
                 );
+                failed += s.failed;
+            }
+            if failed > 0 {
+                anyhow::bail!("{failed} group(s) could not be merged");
             }
         }
         Command::Backup { dir, keep } => {

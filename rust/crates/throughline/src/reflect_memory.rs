@@ -9,6 +9,8 @@ pub struct ReflectSummary {
     pub mode: String,
     pub examined: usize,
     pub acted: usize,
+    /// Groups that could not be merged (dedup); the run went on without them.
+    pub failed: usize,
     pub dry_run: bool,
 }
 
@@ -76,8 +78,13 @@ pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectS
         // One new note holds the longest text; the duplicates are closed like
         // a supersede. No existing note changes its content.
         let text = crate::lifecycle::longest_text(contents.iter().map(String::as_str));
-        crate::lifecycle::consolidate(client, &ids, text, None)?;
-        summary.acted += 1;
+        match crate::lifecycle::consolidate(client, &ids, text, None) {
+            Ok(_) => summary.acted += 1,
+            Err(e) => {
+                eprintln!("dedup: group {ids:?} not merged: {e}");
+                summary.failed += 1;
+            }
+        }
     }
     Ok(summary)
 }
@@ -226,6 +233,14 @@ mod tests {
         let second = seed("(second)", "2026-02-01T00:00:00Z");
         dedup(&mut tx, false).expect("dedup");
 
+        let new_note: Option<i64> = tx
+            .query_opt(
+                "SELECT id FROM memory_chunks WHERE source_type = 'consolidation'
+                 AND merged_from = $1",
+                &[&vec![first, second]],
+            )
+            .expect("new note")
+            .map(|r| r.get(0));
         for id in [first, second] {
             let row = tx
                 .query_one(
@@ -234,11 +249,12 @@ mod tests {
                 )
                 .expect("duplicate row");
             assert_eq!(row.get::<_, String>(0), "superseded");
-            assert!(row.get::<_, Option<i64>>(1).is_some());
+            let new_id = new_note.expect("a consolidation note exists");
+            assert_eq!(row.get::<_, Option<i64>>(1), Some(new_id));
+            let valid_to = row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(2);
             assert!(
-                row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(2)
-                    .is_some(),
-                "a merged duplicate needs an end of validity"
+                valid_to.is_some_and(|t| t <= chrono::Utc::now()),
+                "a merged duplicate needs an end of validity, not in the future"
             );
         }
         let pattern = format!("{tag}%");
@@ -353,5 +369,46 @@ mod tests {
         for (_, content, _) in &after_second {
             assert_eq!(content.matches(&head).count(), 1, "text nested: {content}");
         }
+    }
+
+    #[test]
+    fn a_failing_group_does_not_stop_the_others() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping a_failing_group_does_not_stop_the_others: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let bad_head = format!("{tag} bad group the release train leaves every second Thursday");
+        let good_head = format!("{tag} good group alerts go to the on-call channel first");
+        let bad_a = seed_dup(&mut tx, &format!("{bad_head} (a)"));
+        let bad_b = seed_dup(&mut tx, &format!("{bad_head} (b)"));
+        let good_a = seed_dup(&mut tx, &format!("{good_head} (a)"));
+        let good_b = seed_dup(&mut tx, &format!("{good_head} (b)"));
+        // still 'active' for the group query, but already replaced: consolidate refuses it
+        tx.execute(
+            "UPDATE memory_chunks SET superseded_by = $2 WHERE id = $1",
+            &[&bad_b, &bad_a],
+        )
+        .expect("mark replaced");
+        let summary = dedup(&mut tx, false).expect("dedup goes on");
+        assert_eq!(summary.failed, 1, "{summary:?}");
+        let status = |tx: &mut postgres::Transaction, id: i64| -> String {
+            tx.query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&id])
+                .expect("status")
+                .get(0)
+        };
+        assert_eq!(status(&mut tx, bad_a), "active");
+        assert_eq!(status(&mut tx, good_a), "superseded");
+        assert_eq!(status(&mut tx, good_b), "superseded");
+        let merged: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM memory_chunks WHERE source_type = 'consolidation'
+                 AND content LIKE $1",
+                &[&format!("{tag}%")],
+            )
+            .expect("count")
+            .get(0);
+        assert_eq!(merged, 1, "only the good group was merged");
     }
 }
