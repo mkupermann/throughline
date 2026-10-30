@@ -2772,7 +2772,7 @@ td .empty {
       "sim.degraded": "No embedding model is reachable, so similar notes cannot be found. Start Ollama with nomic-embed-text.",
       "sim.loadFailed": "Could not load similar notes: ",
       "sim.group": " similar notes",
-      "sim.similarity": "similarity from ",
+      "sim.similarity": "linked at ≥ ",
       "sim.text": "Text of the merged note",
       "sim.suggest": "Suggest a merged text",
       "sim.suggesting": "Asking the local model…",
@@ -3464,7 +3464,7 @@ td .empty {
       "sim.degraded": "Kein Embedding-Modell erreichbar, ähnliche Notizen lassen sich nicht finden. Ollama mit nomic-embed-text starten.",
       "sim.loadFailed": "Ähnliche Notizen konnten nicht geladen werden: ",
       "sim.group": " ähnliche Notizen",
-      "sim.similarity": "Ähnlichkeit ab ",
+      "sim.similarity": "verknüpft ab ",
       "sim.text": "Text der zusammengeführten Notiz",
       "sim.suggest": "Text vorschlagen",
       "sim.suggesting": "Das lokale Modell wird gefragt…",
@@ -7059,8 +7059,12 @@ td .empty {
     const el = $("review-list");
     const summary = $("review-summary");
     if (!el) return;
-    loadSimilar();
-    loadDamaged();
+    // Candidate lists are costly (vectors, a model lookup): only while the Review tab is open.
+    const reviewPanel = $("memory-review-panel");
+    if (reviewPanel && !reviewPanel.hidden) {
+      loadSimilar();
+      loadDamaged();
+    }
     el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
     try {
       const d = await fetchJson("/api/stale-digest");
@@ -7115,14 +7119,21 @@ td .empty {
       '<span class="chip">#' + n.id + "</span> " +
       '<span class="chip">' + escapeHtml(n.category || "insight") + "</span> " +
       (n.project_name ? '<span class="chip">' + escapeHtml(n.project_name) + "</span> " : "") +
-      escapeHtml((n.content || "").slice(0, 280)) + "</li>";
+      '<span class="similar-note-text" style="white-space:pre-wrap">' + escapeHtml(n.content || "") + "</span></li>";
   }
   // Requests of the cards on screen. A re-render cancels them, so no answer
   // arrives for a card that is gone.
   const similarPending = new Set();
+  // Edited texts by group (its ids), kept across reloads so an action in one
+  // group does not wipe what was typed in another.
+  const similarDrafts = new Map();
   async function loadSimilar() {
     const el = $("similar-list");
     if (!el) return;
+    el.querySelectorAll(".similar-group").forEach((card) => {
+      const area = card.querySelector(".similar-text");
+      if (area && area.value !== area.defaultValue) similarDrafts.set(card.getAttribute("data-ids"), area.value);
+    });
     similarPending.forEach((c) => c.abort());
     similarPending.clear();
     el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.loading")) + "</div>";
@@ -7134,9 +7145,12 @@ td .empty {
         return;
       }
       if (!groups.length) {
+        similarDrafts.clear();
         el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.none")) + "</div>";
         return;
       }
+      const live = new Set(groups.map((g) => g.notes.map((n) => n.id).join(",")));
+      for (const k of [...similarDrafts.keys()]) if (!live.has(k)) similarDrafts.delete(k);
       el.innerHTML = groups.map((g) => {
         const ids = g.notes.map((n) => n.id).join(",");
         return '<article class="review-card similar-group" data-ids="' + escapeHtml(ids) + '">' +
@@ -7154,6 +7168,10 @@ td .empty {
           '<div class="similar-confirm"></div>' +
           "</article>";
       }).join("");
+      el.querySelectorAll(".similar-group").forEach((card) => {
+        const draft = similarDrafts.get(card.getAttribute("data-ids"));
+        if (draft !== undefined) card.querySelector(".similar-text").value = draft;
+      });
       wireSimilar(el);
     } catch (e) {
       el.innerHTML = '<div class="meta">' + escapeHtml(t("sim.loadFailed") + e.message) + "</div>";
@@ -7243,6 +7261,8 @@ td .empty {
           } catch (e) {
             toast(t("sim.failed") + e.message);
             box.innerHTML = "";
+            // The group may be stale (409) or gone (404): show what is current.
+            loadSimilar();
           }
         });
       });
