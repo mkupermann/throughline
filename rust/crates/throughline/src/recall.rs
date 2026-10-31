@@ -219,6 +219,9 @@ pub struct RecallResult {
     pub degraded: Option<String>,
 }
 
+/// Weights of `Rank::Weighted`; `WEIGHTS` is the default, `recall-eval
+/// --weights` passes others.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Weights {
     pub cosine: f64,
     pub lexical: f64,
@@ -486,8 +489,8 @@ pub(crate) fn score(
     words: &[String],
     has_embedding: bool,
     now: DateTime<Utc>,
+    w: &Weights,
 ) -> (f64, Why) {
-    let w = &WEIGHTS;
     let lexical = if words.is_empty() {
         0.0
     } else {
@@ -534,9 +537,10 @@ fn rank_score(
     words: &[String],
     has_embedding: bool,
     now: DateTime<Utc>,
+    weights: &Weights,
     fulltext: Option<&HashMap<i64, f64>>,
 ) -> (f64, Why) {
-    let (weighted, mut why) = score(c, words, has_embedding, now);
+    let (weighted, mut why) = score(c, words, has_embedding, now, weights);
     match fulltext {
         Some(ranks) => {
             let r = ranks.get(&c.id).copied().unwrap_or(0.0);
@@ -617,12 +621,14 @@ fn neighbour_edges<C: GenericClient>(
 /// longer hold, closed, expired or stale (relation "expired"), never forgotten
 /// ones, and keep the project filter of the query. One query loads the notes
 /// of a step.
+#[allow(clippy::too_many_arguments)]
 fn associate<C: GenericClient>(
     client: &mut C,
     q: &RecallQuery,
     emb: Option<&QueryEmbedding>,
     words: &[String],
     now: DateTime<Utc>,
+    weights: &Weights,
     scored: &mut Vec<(f64, Why, Candidate)>,
     relations: &mut HashMap<i64, String>,
 ) -> Result<()> {
@@ -655,7 +661,8 @@ fn associate<C: GenericClient>(
             };
             for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
                 let (spread, rel) = reached[&c.id];
-                let (own, mut why) = rank_score(&c, words, emb.is_some(), now, fulltext.as_ref());
+                let (own, mut why) =
+                    rank_score(&c, words, emb.is_some(), now, weights, fulltext.as_ref());
                 why.spread = Some(spread);
                 let total = own.max(spread);
                 let replaced = c.superseded_by.is_some()
@@ -786,6 +793,19 @@ pub fn recall<C: GenericClient>(
     q: &RecallQuery,
     emb: Option<&QueryEmbedding>,
 ) -> Result<RecallResult> {
+    recall_with(client, q, emb, &WEIGHTS, Utc::now())
+}
+
+/// [`recall`] with the weights of `Rank::Weighted` and the moment recency
+/// and strength are measured from passed in, so an evaluation can try other
+/// weights and score every question at one fixed time.
+pub(crate) fn recall_with<C: GenericClient>(
+    client: &mut C,
+    q: &RecallQuery,
+    emb: Option<&QueryEmbedding>,
+    weights: &Weights,
+    now: DateTime<Utc>,
+) -> Result<RecallResult> {
     if let Err(e) = check_query(q.text) {
         bail!(e);
     }
@@ -800,7 +820,6 @@ pub fn recall<C: GenericClient>(
         RecallMode::Associative => CandidateFilter::Current,
         RecallMode::Grounded => CandidateFilter::Current,
     };
-    let now = Utc::now();
     let words = query_words(q.text);
     let cands = candidates(client, filter, q, emb)?;
     let fulltext = match q.rank {
@@ -813,7 +832,7 @@ pub fn recall<C: GenericClient>(
     let mut scored: Vec<(f64, Why, Candidate)> = cands
         .into_iter()
         .map(|c| {
-            let (s, why) = rank_score(&c, &words, emb.is_some(), now, fulltext.as_ref());
+            let (s, why) = rank_score(&c, &words, emb.is_some(), now, weights, fulltext.as_ref());
             (s, why, c)
         })
         .collect();
@@ -865,7 +884,16 @@ pub fn recall<C: GenericClient>(
     if q.mode == RecallMode::Associative {
         // The seeds already fill `limit`: allow twice as many, so the
         // neighbours that rank high enough are visible.
-        associate(client, q, emb, &words, now, &mut scored, &mut relations)?;
+        associate(
+            client,
+            q,
+            emb,
+            &words,
+            now,
+            weights,
+            &mut scored,
+            &mut relations,
+        )?;
         scored.truncate((2 * limit).min(2 * MAX_LIMIT));
     }
     let hits = scored
@@ -1107,6 +1135,189 @@ mod tests {
 
     fn position(r: &RecallResult, id: i64) -> Option<usize> {
         r.hits.iter().position(|h| h.id == id)
+    }
+
+    fn candidate(now: DateTime<Utc>) -> Candidate {
+        Candidate {
+            id: 1,
+            content: "Kafka retention policy for the audit topic".into(),
+            category: "insight".into(),
+            project_name: None,
+            status: "active".into(),
+            valid_from: now - Duration::days(40),
+            valid_to: None,
+            source_type: "manual".into(),
+            conversation_id: None,
+            session_title: None,
+            superseded_by: None,
+            supersedes: None,
+            confidence: 0.7,
+            cosine: Some(0.62),
+            tags: vec![],
+            source_id: None,
+            merged_from: vec![],
+            expires_at: None,
+            source_at: None,
+            access_count: 3,
+            last_accessed: Some(now - Duration::days(5)),
+        }
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn score_with_custom_weights_matches_default_for_WEIGHTS() {
+        let now = Utc::now();
+        let c = candidate(now);
+        let words = query_words("kafka retention backlog");
+        let same = Weights {
+            cosine: 0.45,
+            lexical: 0.20,
+            recency: 0.10,
+            reliability: 0.10,
+            strength: 0.10,
+            provenance: 0.05,
+        };
+        assert_eq!(same, WEIGHTS);
+        for has_embedding in [true, false] {
+            let (a, _) = score(&c, &words, has_embedding, now, &WEIGHTS);
+            let (b, _) = score(&c, &words, has_embedding, now, &same);
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        // Other weights take effect: the total is their sum over the same parts.
+        let w = Weights {
+            cosine: 0.10,
+            lexical: 0.30,
+            recency: 0.25,
+            reliability: 0.05,
+            strength: 0.20,
+            provenance: 0.10,
+        };
+        let (total, why) = score(&c, &words, true, now, &w);
+        let rest = w.lexical * why.lexical
+            + w.recency * why.recency
+            + w.reliability * why.reliability
+            + w.strength * why.strength
+            + w.provenance * why.provenance;
+        assert_eq!(why.cosine, Some(0.62));
+        assert!((total - (w.cosine * 0.62 + rest)).abs() < 1e-12);
+        let (default_total, _) = score(&c, &words, true, now, &WEIGHTS);
+        assert!((total - default_total).abs() > 1e-3);
+        // Without a question vector the rest is scaled by 1 / (1 - w.cosine).
+        let (scaled, why) = score(&c, &words, false, now, &w);
+        assert_eq!(why.cosine, None);
+        assert!((scaled - rest / (1.0 - w.cosine)).abs() < 1e-12);
+    }
+
+    /// The offline re-ranking `grid_b.py` does on a dump: the same sum in the
+    /// same order as `score`, highest first, the lower id first on a tie.
+    fn rerank(parts: &[crate::recall_eval::CandidateParts], w: &Weights) -> Vec<i64> {
+        let mut s: Vec<(f64, i64)> = parts
+            .iter()
+            .map(|p| {
+                let rest = w.lexical * p.lexical
+                    + w.recency * p.recency
+                    + w.reliability * p.reliability
+                    + w.strength * p.strength
+                    + w.provenance * p.provenance;
+                let total = match p.cosine {
+                    Some(cos) => w.cosine * cos + rest,
+                    None => rest / (1.0 - w.cosine),
+                };
+                (total, p.id)
+            })
+            .collect();
+        s.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        s.into_iter().map(|x| x.1).collect()
+    }
+
+    #[test]
+    fn dump_parts_reproduces_weighted_ranks() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping dump_parts_reproduces_weighted_ranks: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        let text = format!("ledger audit {tag}");
+        let twin = format!("ledger audit {tag} twin");
+        let half = format!("ledger {tag} half");
+        let bare = format!("ledger audit {tag} no vector");
+        let pinned = format!("audit {tag} pinned");
+        let ago = long_ago();
+        let mut s_twin = Seed::new(&twin, ago);
+        s_twin.project = Some(&project);
+        // Two notes with identical parts: the tie goes to the lower id.
+        let t1 = seed(&mut tx, &s_twin);
+        let t2 = seed(&mut tx, &s_twin);
+        let mut s_half = Seed::new(&half, ago - Duration::days(200));
+        s_half.project = Some(&project);
+        s_half.confidence = 0.4;
+        let h = seed(&mut tx, &s_half);
+        let mut s_bare = Seed::new(&bare, ago);
+        s_bare.project = Some(&project);
+        let b = seed(&mut tx, &s_bare);
+        let mut s_pin = Seed::new(&pinned, ago - Duration::days(10));
+        s_pin.project = Some(&project);
+        s_pin.source_type = "ui_pin";
+        let p = seed(&mut tx, &s_pin);
+        embed(&mut tx, t1, &model, &vec768(&[0.7, 0.7]));
+        embed(&mut tx, t2, &model, &vec768(&[0.7, 0.7]));
+        embed(&mut tx, h, &model, &vec768(&[0.9, 0.1]));
+        embed(&mut tx, p, &model, &vec768(&[0.3, 0.9]));
+        let emb = query_embedding(&model);
+        let q = weighted(&text, Some(&project));
+        let words = query_words(&text);
+        let now = Utc::now();
+        let other = Weights {
+            cosine: 0.15,
+            lexical: 0.35,
+            recency: 0.05,
+            reliability: 0.20,
+            strength: 0.05,
+            provenance: 0.20,
+        };
+        for e in [Some(&emb), None] {
+            let cands = candidates(&mut tx, CandidateFilter::Current, &q, e).unwrap();
+            let mut parts = crate::recall_eval::candidate_parts(&cands, &words, e.is_some(), now);
+            assert_eq!(parts.len(), cands.len());
+            let bare_parts = parts.iter().find(|x| x.id == b).unwrap();
+            assert!(!bare_parts.has_vector);
+            // With a question vector a note without one counts cosine 0;
+            // without a question vector every cosine is missing.
+            assert_eq!(bare_parts.cosine, e.map(|_| 0.0));
+            assert_eq!(
+                parts.iter().find(|x| x.id == t1).unwrap().has_vector,
+                e.is_some()
+            );
+            // The offline ranking must not depend on the dump's order.
+            parts.reverse();
+            for w in [&WEIGHTS, &other] {
+                let hits: Vec<i64> = recall_with(&mut tx, &q, e, w, now)
+                    .unwrap()
+                    .hits
+                    .iter()
+                    .map(|x| x.id)
+                    .collect();
+                let offline = rerank(&parts, w);
+                assert_eq!(
+                    offline[..hits.len()],
+                    hits[..],
+                    "weights {w:?}, vector {}",
+                    e.is_some()
+                );
+                // Every question word matches these three, so they are in the top 50.
+                for id in [t1, t2, b] {
+                    assert!(hits.contains(&id), "{id} missing");
+                }
+                let (i1, i2) = (
+                    hits.iter().position(|x| *x == t1).unwrap(),
+                    hits.iter().position(|x| *x == t2).unwrap(),
+                );
+                assert_eq!(i2, i1 + 1, "the twins tie, the lower id first");
+            }
+        }
     }
 
     #[test]
