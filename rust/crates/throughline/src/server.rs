@@ -4524,6 +4524,32 @@ mod tests {
         );
     }
 
+    /// Team mode needs the page's sign-in form and the request token on
+    /// writes; a later edit of the page must not drop them silently.
+    #[test]
+    fn page_has_the_sign_in_form_and_sends_the_request_token() {
+        for needle in [
+            r#"<form class="pin-panel" id="signin-form""#,
+            r#"<input id="signin-username" name="username""#,
+            r#"<input id="signin-password" name="password" type="password""#,
+            r#"<button class="btn btn-primary" id="signin-submit" type="submit""#,
+            r#"apiFetch("/api/login""#,
+            r#"fetch("/api/me""#,
+        ] {
+            assert!(INDEX_HTML.contains(needle), "index.html lacks {needle}");
+        }
+        // The header the page sets is the one `actor_layer` checks.
+        let set = INDEX_HTML
+            .split_once("const REQUEST_TOKEN_HEADER = \"")
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(name, _)| name);
+        assert_eq!(
+            set.map(str::to_ascii_lowercase).as_deref(),
+            Some(REQUEST_TOKEN_HEADER)
+        );
+        assert!(INDEX_HTML.contains("headers.set(REQUEST_TOKEN_HEADER, requestToken)"));
+    }
+
     /// The role table and the registered routes behind a session are the
     /// same set of (method, pattern), both ways: a new route can neither
     /// go without an entry nor fall into one meant for another route.

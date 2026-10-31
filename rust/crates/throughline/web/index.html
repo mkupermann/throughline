@@ -1820,11 +1820,61 @@ td .empty {
   .nav[hidden] + .sidebar-foot { display: none; }
   .metrics { grid-template-columns: 1fr; }
 }
+/* Team mode: buttons above the signed-in account's role are not shown.
+   Local mode sets no data-account-role, so nothing is hidden there. */
+body[data-account-role="viewer"] [data-min-role="editor"],
+body[data-account-role="viewer"] [data-min-role="admin"],
+body[data-account-role="editor"] [data-min-role="admin"] { display: none !important; }
+.app[hidden], .account-box[hidden], .role-notice[hidden], .pin-dialog .pin-check[hidden] { display: none; }
+.signin { background: var(--bg); z-index: 130; }
+.pin-dialog input[type="text"],
+.pin-dialog input[type="password"] {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: var(--space-2) var(--space-3);
+}
+.pin-dialog .pin-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+}
+.form-msg { margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--text-2); }
+.form-msg.is-error { color: var(--danger); }
+.form-msg[hidden] { display: none; }
+.account-box { display: flex; align-items: center; gap: var(--space-2); }
+.account-box .account-name { font-weight: 600; }
+.role-notice {
+  margin: calc(-1 * var(--space-4)) 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
 </style>
 </head>
 <body>
 <a href="#main" id="skip-link" data-i18n="skip">Skip to main content</a>
 <div id="sr-status" class="sr" role="status" aria-live="polite" aria-atomic="true"></div>
+<section class="pin-dialog signin" id="signin" aria-labelledby="signin-title" hidden>
+  <form class="pin-panel" id="signin-form" novalidate>
+    <h2 id="signin-title" data-i18n="auth.title">Sign in</h2>
+    <p class="meta" style="margin:0" data-i18n="auth.sub">This Throughline is shared by a team. Sign in with your account.</p>
+    <label for="signin-username" data-i18n="auth.username">Name</label>
+    <input id="signin-username" name="username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required />
+    <label for="signin-password" data-i18n="auth.password">Password</label>
+    <input id="signin-password" name="password" type="password" autocomplete="current-password" required />
+    <p class="form-msg is-error" id="signin-error" role="alert" hidden></p>
+    <div class="pin-actions">
+      <button class="btn btn-primary" id="signin-submit" type="submit" data-i18n="auth.submit">Sign in</button>
+    </div>
+  </form>
+</section>
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
@@ -1851,9 +1901,9 @@ td .empty {
       <button type="button" data-view="memory"><span class="icon">✎</span><span data-i18n="nav.memory">Memory</span></button>
       <button type="button" data-view="find"><span class="icon">⌕</span><span data-i18n="nav.find">Search</span></button>
       <button type="button" data-view="projects"><span class="icon">▣</span><span data-i18n="nav.projects">Projects</span></button>
-      <button type="button" data-view="assistants"><span class="icon">☷</span><span data-i18n="nav.assistants">AI configuration</span></button>
+      <button type="button" data-view="assistants" data-min-role="admin"><span class="icon">☷</span><span data-i18n="nav.assistants">AI configuration</span></button>
       <button type="button" data-view="timeline"><span class="icon">⌁</span><span data-i18n="nav.timeline">Timeline</span></button>
-      <button type="button" data-view="ask"><span class="icon">✦</span><span data-i18n="nav.ask">Research</span></button>
+      <button type="button" data-view="ask" data-min-role="editor"><span class="icon">✦</span><span data-i18n="nav.ask">Research</span></button>
       <button type="button" data-view="operate"><span class="icon">⇅</span><span data-i18n="nav.operate">Import and status</span></button>
     </nav>
     <div class="sidebar-foot">
@@ -1890,7 +1940,14 @@ td .empty {
         </div>
         <button class="btn btn-ghost" id="btn-hide-empty" type="button" data-i18n="topbar.hideEmpty">Hide empty</button>
         <button class="btn btn-primary" id="btn-browse" type="button" data-i18n="topbar.browseAll">Browse all</button>
+        <div class="account-box" id="account-box" role="group" data-i18n-attr="aria-label:account.aria" aria-label="Account" hidden>
+          <span class="account-name" id="account-name"></span>
+          <span class="chip" id="account-role"></span>
+          <button class="btn btn-ghost" id="account-password" type="button" data-i18n="account.changePassword">Change password</button>
+          <button class="btn btn-ghost" id="account-signout" type="button" data-i18n="account.signOut">Sign out</button>
+        </div>
       </div>
+      <div class="role-notice" id="role-notice" role="status" aria-live="polite" hidden></div>
 
       <!-- HOME -->
       <section id="view-home">
@@ -2024,7 +2081,7 @@ td .empty {
           </label>
           <button class="btn btn-primary" id="hist-apply" type="button" data-i18n="hist.apply">Apply</button>
           <button class="btn btn-ghost" id="hist-reset" type="button" data-i18n="hist.reset">Reset</button>
-          <button class="btn btn-ghost" id="hist-csv" type="button" data-i18n="hist.csv">Export CSV</button>
+          <button class="btn btn-ghost" id="hist-csv" type="button" data-min-role="admin" data-i18n="hist.csv">Export CSV</button>
           <button class="btn btn-ghost" id="hist-save-filter" type="button" data-i18n-attr="title:hist.save.title" title="Save current filter" data-i18n="hist.save">★ Save</button>
           <div class="view-toggle" role="group" data-i18n-attr="aria-label:hist.viewMode" aria-label="View mode">
             <button class="btn btn-ghost togglable" id="hist-table-btn" type="button" aria-pressed="true" data-i18n="hist.table">Table</button>
@@ -2120,7 +2177,7 @@ td .empty {
           <button class="btn btn-ghost" id="msg-back" type="button" data-i18n="msg.back">← Back</button>
           <span id="msg-fav-star"></span>
           <h1 id="msg-title" style="margin:0;font-size:1.45rem;letter-spacing:-0.03em" data-i18n="msg.title">Message</h1>
-          <button class="btn btn-ghost" id="msg-pin" type="button" data-i18n="msg.pin">Pin as note</button>
+          <button class="btn btn-ghost" id="msg-pin" type="button" data-min-role="editor" data-i18n="msg.pin">Pin as note</button>
           <button class="btn btn-ghost" id="msg-copy" type="button" data-i18n="msg.copy">Copy JSON</button>
           <button class="btn btn-ghost" id="msg-open-conv" type="button" data-i18n="msg.open">Open session</button>
         </div>
@@ -2201,7 +2258,7 @@ td .empty {
           <button class="btn btn-ghost togglable" id="memory-meaning" type="button" aria-pressed="false" data-i18n="mem.meaning">By meaning</button>
           <button class="btn btn-ghost togglable fav-toggle" id="memory-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
           <button class="btn btn-primary" id="memory-go" type="button" data-i18n="mem.searchBtn">Search</button>
-          <button class="btn btn-ghost" id="memory-ingest" type="button" data-i18n="mem.ingest">Import memory</button>
+          <button class="btn btn-ghost" id="memory-ingest" type="button" data-min-role="admin" data-i18n="mem.ingest">Import memory</button>
         </div>
         <div class="meta" id="memory-degraded" hidden></div>
         <div class="history list-anim" id="memory-list"></div>
@@ -2387,22 +2444,22 @@ td .empty {
           </div>
         </div>
         <div class="job-grid">
-          <button class="job" data-job="status"><strong data-i18n="op.status">Status</strong><span data-i18n="op.status.sub">Corpus counts</span></button>
+          <button class="job" data-job="status" data-min-role="admin"><strong data-i18n="op.status">Status</strong><span data-i18n="op.status.sub">Corpus counts</span></button>
           <button class="job" data-job="audit"><strong data-i18n="op.audit">Audit</strong><span data-i18n="op.audit.sub">Agent accountability</span></button>
           <button class="job" data-job="stale"><strong data-i18n="op.stale">Stale digest</strong><span data-i18n="op.stale.sub">What went stale since last session</span></button>
-          <button class="job" data-job="answer-eval"><strong data-i18n="op.answerEval">Answer eval</strong><span data-i18n="op.answerEval.sub">Citations and hallucination check</span></button>
-          <button class="job" data-job="ingest" data-mutating="true"><strong data-i18n="op.ingest">Ingest all assistants</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.ingest.sub">Import sessions from every adapter</span></span></button>
-          <button class="job" data-job="import-config" data-mutating="true"><strong data-i18n="op.importConfig">Import AI configuration</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.importConfig.sub">Instructions, skills, agents, configuration</span></span></button>
-          <button class="job" data-job="embed" data-mutating="true"><strong data-i18n="op.embed">Embed</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.embed.sub">Vectorise pending messages</span></span></button>
-          <button class="job" data-job="reflect" data-mutating="true"><strong data-i18n="op.reflect">Reflect</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.reflect.sub">Dedup memory chunks</span></span></button>
-          <button class="job" data-job="backup" data-mutating="true"><strong data-i18n="op.backup">Backup</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.backup.sub">pg_dump snapshot</span></span></button>
-          <button class="job" data-job="writeback" data-mutating="true"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></span></button>
+          <button class="job" data-job="answer-eval" data-min-role="editor"><strong data-i18n="op.answerEval">Answer eval</strong><span data-i18n="op.answerEval.sub">Citations and hallucination check</span></button>
+          <button class="job" data-job="ingest" data-mutating="true" data-min-role="admin"><strong data-i18n="op.ingest">Ingest all assistants</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.ingest.sub">Import sessions from every adapter</span></span></button>
+          <button class="job" data-job="import-config" data-mutating="true" data-min-role="admin"><strong data-i18n="op.importConfig">Import AI configuration</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.importConfig.sub">Instructions, skills, agents, configuration</span></span></button>
+          <button class="job" data-job="embed" data-mutating="true" data-min-role="admin"><strong data-i18n="op.embed">Embed</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.embed.sub">Vectorise pending messages</span></span></button>
+          <button class="job" data-job="reflect" data-mutating="true" data-min-role="admin"><strong data-i18n="op.reflect">Reflect</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.reflect.sub">Dedup memory chunks</span></span></button>
+          <button class="job" data-job="backup" data-mutating="true" data-min-role="admin"><strong data-i18n="op.backup">Backup</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.backup.sub">pg_dump snapshot</span></span></button>
+          <button class="job" data-job="writeback" data-mutating="true" data-min-role="admin"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></span></button>
         </div>
         <div class="panel" id="ingest-status" style="margin-top:16px">
           <div class="panel-title"><h2 data-i18n="op.ingestStatus">Ingestion status</h2><div class="meta" data-i18n="op.perProvider">per assistant</div></div>
           <div id="ingest-status-body" class="history list-anim" data-i18n="op.loading">Loading…</div>
         </div>
-        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="op.ready">Ready for jobs</strong><span data-i18n="op.pickJob">Pick a maintenance job above. Progress and results appear here.</span><div class="empty-action"><button type="button" class="btn btn-primary" data-action="status" data-i18n="op.runStatus">Run status</button></div></div></div>
+        <div id="operate-out" style="margin-top:16px" aria-live="polite" aria-busy="false"><div class="empty"><strong data-i18n="op.ready">Ready for jobs</strong><span data-i18n="op.pickJob">Pick a maintenance job above. Progress and results appear here.</span><div class="empty-action"><button type="button" class="btn btn-primary" data-action="status" data-min-role="admin" data-i18n="op.runStatus">Run status</button></div></div></div>
       </section>
 
       <!-- ASSISTANTS -->
@@ -2528,11 +2585,32 @@ td .empty {
     </div>
     <label for="pin-content" data-i18n="pin.content">Content</label>
     <textarea id="pin-content" data-i18n-attr="aria-label:pin.contentAria" aria-label="Note content"></textarea>
+    <label class="pin-check" id="pin-private-box" hidden>
+      <input id="pin-private" type="checkbox" />
+      <span data-i18n="pin.private">Private: only I can see this note</span>
+    </label>
     <div class="pin-actions">
       <button class="btn btn-ghost" id="pin-cancel" type="button" data-i18n="pin.cancel">Cancel</button>
       <button class="btn btn-primary" id="pin-save" type="button" data-i18n="pin.save">Save note</button>
     </div>
   </div>
+</div>
+
+<div class="pin-dialog" id="password-dialog" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" hidden>
+  <form class="pin-panel" id="password-form" novalidate>
+    <h2 id="password-dialog-title" data-i18n="pw.title">Change password</h2>
+    <label for="pw-current" data-i18n="pw.current">Current password</label>
+    <input id="pw-current" type="password" autocomplete="current-password" />
+    <label for="pw-new" data-i18n="pw.new">New password (15 to 128 characters)</label>
+    <input id="pw-new" type="password" autocomplete="new-password" />
+    <label for="pw-repeat" data-i18n="pw.repeat">Repeat the new password</label>
+    <input id="pw-repeat" type="password" autocomplete="new-password" />
+    <p class="form-msg" id="pw-msg" role="status" aria-live="polite" hidden></p>
+    <div class="pin-actions">
+      <button class="btn btn-ghost" id="pw-cancel" type="button" data-i18n="pw.close">Close</button>
+      <button class="btn btn-primary" id="pw-save" type="submit" data-i18n="pw.save">Change password</button>
+    </div>
+  </form>
 </div>
 
 <script>
@@ -3294,6 +3372,35 @@ td .empty {
       "fav.paletteToggle": "Toggle favorites only",
       "fav.empty": "No favorites yet. Mark entries with the star.",
       "fav.failed": "The favorite could not be saved. Try again.",
+      // team mode: sign-in, account, roles, private notes
+      "auth.title": "Sign in",
+      "auth.sub": "This Throughline is shared by a team. Sign in with your account.",
+      "auth.username": "Name",
+      "auth.password": "Password",
+      "auth.submit": "Sign in",
+      "auth.wrong": "wrong name or password",
+      "auth.tooMany": "too many attempts, try again later",
+      "auth.server": "server error",
+      "auth.signedOut": "Your session has ended. Sign in again.",
+      "account.aria": "Account",
+      "account.changePassword": "Change password",
+      "account.signOut": "Sign out",
+      "account.signOutFailed": "Sign-out failed: ",
+      "pw.title": "Change password",
+      "pw.current": "Current password",
+      "pw.new": "New password (15 to 128 characters)",
+      "pw.repeat": "Repeat the new password",
+      "pw.save": "Change password",
+      "pw.close": "Close",
+      "pw.done": "password changed",
+      "pw.wrongCurrent": "the current password is wrong",
+      "pw.mismatch": "the new passwords do not match",
+      "pw.length": "use a password with 15 to 128 characters",
+      "role.needs": "This needs the ",
+      "role.needs2": " role.",
+      "vis.private": "private",
+      "vis.shared": "shared",
+      "pin.private": "Private: only I can see this note",
     },
     de: {
       "skip": "Zum Hauptinhalt springen",
@@ -3968,6 +4075,35 @@ td .empty {
       "fav.paletteToggle": "Nur Favoriten umschalten",
       "fav.empty": "Noch keine Favoriten. Markieren Sie Einträge mit dem Stern.",
       "fav.failed": "Der Favorit konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      // Team-Modus: Anmeldung, Konto, Rollen, private Notizen
+      "auth.title": "Anmelden",
+      "auth.sub": "Dieses Throughline nutzt ein Team gemeinsam. Melden Sie sich mit Ihrem Konto an.",
+      "auth.username": "Name",
+      "auth.password": "Passwort",
+      "auth.submit": "Anmelden",
+      "auth.wrong": "Name oder Passwort falsch",
+      "auth.tooMany": "zu viele Versuche, bitte später erneut versuchen",
+      "auth.server": "Serverfehler",
+      "auth.signedOut": "Ihre Sitzung ist beendet. Bitte melden Sie sich erneut an.",
+      "account.aria": "Konto",
+      "account.changePassword": "Passwort ändern",
+      "account.signOut": "Abmelden",
+      "account.signOutFailed": "Abmelden fehlgeschlagen: ",
+      "pw.title": "Passwort ändern",
+      "pw.current": "Aktuelles Passwort",
+      "pw.new": "Neues Passwort (15 bis 128 Zeichen)",
+      "pw.repeat": "Neues Passwort wiederholen",
+      "pw.save": "Passwort ändern",
+      "pw.close": "Schließen",
+      "pw.done": "Passwort geändert",
+      "pw.wrongCurrent": "das aktuelle Passwort ist falsch",
+      "pw.mismatch": "die neuen Passwörter stimmen nicht überein",
+      "pw.length": "das Passwort braucht 15 bis 128 Zeichen",
+      "role.needs": "Dafür ist die Rolle ",
+      "role.needs2": " nötig.",
+      "vis.private": "privat",
+      "vis.shared": "geteilt",
+      "pin.private": "Privat: nur ich sehe diese Notiz",
     },
   };
   let currentLang = "en";
@@ -3996,7 +4132,7 @@ td .empty {
   function favStar(kind, ref, on) {
     const isOn = !!on;
     const label = isOn ? t("fav.remove") : t("fav.mark");
-    return '<button type="button" class="fav-star" data-fav-kind="' + escapeHtml(kind) +
+    return '<button type="button" class="fav-star" data-min-role="editor" data-fav-kind="' + escapeHtml(kind) +
       '" data-fav-ref="' + escapeHtml(String(ref)) + '" aria-pressed="' + (isOn ? "true" : "false") +
       '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' +
       (isOn ? "★" : "☆") + "</button>";
@@ -4127,8 +4263,53 @@ td .empty {
     el._t = setTimeout(() => el.classList.remove("show"), 4200);
     return a;
   }
+  // --- team mode: account, request token, roles ---------------
+  // Local mode (GET /api/me answers 503) leaves `account` null: nothing is
+  // hidden, no token is sent. In team mode the request token lives only in
+  // this variable, never in storage.
+  const REQUEST_TOKEN_HEADER = "X-Throughline-Request-Token";
+  const ROLE_RANK = { viewer: 1, editor: 2, admin: 3 };
+  let teamMode = false;
+  let account = null;
+  let requestToken = "";
+  // Set once a session ended in this page: the next sign-in reloads the
+  // page, so nothing of the previous account stays in the DOM.
+  let reloadAfterSignIn = false;
+  function roleAtLeast(min) {
+    if (!account) return true;
+    return (ROLE_RANK[account.role] || 0) >= (ROLE_RANK[min] || 0);
+  }
+  function showRoleNotice(required) {
+    const el = $("role-notice");
+    if (!el) return;
+    el.textContent = t("role.needs") + required + t("role.needs2");
+    el.hidden = false;
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+  /** Every API call of the page goes through here: a write carries the
+   * request token, a 401 in team mode returns to the sign-in page, a 403
+   * `forbidden_role` shows a notice. `opts.keep401` leaves a 401 to the
+   * caller (a wrong current password). */
+  async function apiFetch(path, init, opts) {
+    const req = Object.assign({}, init || {});
+    const method = (req.method || "GET").toUpperCase();
+    const headers = new Headers(req.headers || {});
+    if (requestToken && method !== "GET" && method !== "HEAD") headers.set(REQUEST_TOKEN_HEADER, requestToken);
+    req.headers = headers;
+    const res = await fetch(path, req);
+    if (teamMode && res.status === 401 && !(opts && opts.keep401)) {
+      showSignIn(t("auth.signedOut"));
+    } else if (res.status === 403) {
+      try {
+        const b = await res.clone().json();
+        if (b && b.error === "forbidden_role") showRoleNotice(b.required || "");
+      } catch {}
+    }
+    return res;
+  }
   async function fetchJson(path) {
-    const res = await fetch(path, { headers: { Accept: "application/json" } });
+    const res = await apiFetch(path, { headers: { Accept: "application/json" } });
     if (!res.ok) {
       let detail = res.statusText;
       try {
@@ -4140,7 +4321,7 @@ td .empty {
     return res.json();
   }
   async function postJson(path, body) {
-    const res = await fetch(path, {
+    const res = await apiFetch(path, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
@@ -4200,7 +4381,17 @@ td .empty {
     } catch {}
   }
 
+  // Views above a team-mode role: research calls a model (editor), the AI
+  // configuration reads files of the host (admin).
+  const VIEW_ROLES = { ask: "editor", assistants: "admin" };
+  function allowedView(name) {
+    const need = VIEW_ROLES[name];
+    if (!need || roleAtLeast(need)) return name;
+    showRoleNotice(need);
+    return "home";
+  }
   function showView(name) {
+    name = allowedView(name);
     if (current === "timeline" && name !== "timeline") timelineMonthCache.clear();
     if (name !== "detail" && name !== "msg") previous = name;
     current = name;
@@ -4226,6 +4417,7 @@ td .empty {
 
   /** Open a view and run its loader (nav click, boot and hashchange share this). */
   function openView(name) {
+    name = allowedView(name);
     showView(name);
     if (name === "home") { loadHomeList(); loadStatus(); loadActivity(); }
     if (name === "history") { loadHistory(); loadProjectsFilter(); }
@@ -4361,8 +4553,8 @@ td .empty {
     show(!wasOn);
     const url = "/api/favorites/" + encodeURIComponent(kind) + "/" + encodeURIComponent(ref);
     const req = wasOn
-      ? fetch(url, { method: "DELETE" })
-      : fetch("/api/favorites", {
+      ? apiFetch(url, { method: "DELETE" })
+      : apiFetch("/api/favorites", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: kind, ref: ref }),
@@ -5049,7 +5241,8 @@ td .empty {
         return;
       }
       let cfgIndex = {};
-      if (filteredHits.some((h) => h.kind === "config")) {
+      // The imported configuration is admin-only in team mode.
+      if (roleAtLeast("admin") && filteredHits.some((h) => h.kind === "config")) {
         try {
           const imp = await fetchJson("/api/assistants/imported");
           (Array.isArray(imp.entries) ? imp.entries : []).forEach((e) => { cfgIndex[String(e.id)] = e; });
@@ -5093,7 +5286,7 @@ td .empty {
           ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
           '<div class="row-main"><div class="row-title">' + (hitFavKind(h) ? favStar(hitFavKind(h), h.message_id, hitIsFav(h)) : "") + escapeHtml(h.snippet || "") + "</div>" +
           '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
-          '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-pin="' + pinData + '" aria-label="' + t("find.pinAria") + '">' + t("msg.pin") + '</button></div>' +
+          '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-min-role="editor" data-pin="' + pinData + '" aria-label="' + t("find.pinAria") + '">' + t("msg.pin") + '</button></div>' +
           "</div>"
         );
       }).join("");
@@ -5818,13 +6011,13 @@ td .empty {
     { kind: t("pal.go"), label: t("pal.home"), hint: t("pal.home.hint"), run: () => { showView("home"); loadHomeList(); loadStatus(); loadActivity(); } },
     { kind: t("pal.go"), label: t("pal.history"), hint: t("pal.history.hint"), run: () => { showView("history"); loadHistory(); loadProjectsFilter(); } },
     { kind: t("pal.go"), label: t("pal.memory"), hint: t("pal.memory.hint"), run: () => { showView("memory"); loadMemory(); loadReview(); } },
-    { kind: t("pal.action"), label: t("pal.exportCsv"), hint: t("pal.exportCsv.hint"), run: () => {
+    { kind: t("pal.action"), label: t("pal.exportCsv"), hint: t("pal.exportCsv.hint"), role: "admin", run: () => {
       showView("history");
       loadHistory();
       const b = $("hist-csv");
       if (b) b.click();
     }},
-    { kind: t("pal.action"), label: t("pal.ingestFiles"), hint: t("pal.ingestFiles.hint"), run: async () => {
+    { kind: t("pal.action"), label: t("pal.ingestFiles"), hint: t("pal.ingestFiles.hint"), role: "admin", run: async () => {
       showView("memory");
       try {
         const r = await postJson("/api/agent-memory/ingest");
@@ -5857,7 +6050,7 @@ td .empty {
     }},
     { kind: t("pal.go"), label: t("pal.projects"), hint: t("pal.projects.hint"), run: () => { showView("projects"); loadProjects(); } },
     { kind: t("pal.go"), label: t("pal.timeline"), hint: t("pal.timeline.hint"), run: () => { showView("timeline"); loadTimeline(); } },
-    { kind: t("pal.go"), label: t("pal.ask"), hint: t("pal.ask.hint"), run: () => { showView("ask"); $("ask-q").focus(); } },
+    { kind: t("pal.go"), label: t("pal.ask"), hint: t("pal.ask.hint"), role: "editor", run: () => { showView("ask"); $("ask-q").focus(); } },
     { kind: t("pal.go"), label: t("pal.operate"), hint: t("pal.operate.hint"), run: () => showView("operate") },
     { kind: t("pal.toggle"), label: state.hideEmpty ? t("pal.showEmpty") : t("pal.hideEmpty"), hint: t("pal.hideEmpty.hint"), run: () => {
       state.hideEmpty = !state.hideEmpty;
@@ -5873,9 +6066,9 @@ td .empty {
       if (btn) btn.click();
     }},
     { kind: t("pal.action"), label: t("pal.reload"), hint: t("pal.reload.hint"), run: () => { loadStatus(); loadHealth(); loadHomeList(); toast(t("toast.reloaded")); } },
-    { kind: t("pal.action"), label: t("pal.embed"), hint: t("pal.embed.hint"), run: () => { showView("operate"); runJob("embed"); } },
-    { kind: t("pal.action"), label: t("pal.backup"), hint: t("pal.backup.hint"), run: () => { showView("operate"); runJob("backup"); } },
-  ]; }
+    { kind: t("pal.action"), label: t("pal.embed"), hint: t("pal.embed.hint"), role: "admin", run: () => { showView("operate"); runJob("embed"); } },
+    { kind: t("pal.action"), label: t("pal.backup"), hint: t("pal.backup.hint"), role: "admin", run: () => { showView("operate"); runJob("backup"); } },
+  ].filter((c) => roleAtLeast(c.role || "viewer")); }
   let commands = buildCommands();
 
   function renderPalette(query) {
@@ -6068,7 +6261,7 @@ td .empty {
       };
       if (map[key]) {
         e.preventDefault();
-        const v = map[key];
+        const v = allowedView(map[key]);
         showView(v);
         if (v === "home") { loadHomeList(); loadStatus(); loadActivity(); }
         if (v === "history") { loadHistory(); loadProjectsFilter(); }
@@ -6340,7 +6533,7 @@ td .empty {
     if (!asstEditing) return;
     const { id, sha256 } = asstEditing;
     try {
-      const r = await fetch("/api/assistants/file", {
+      const r = await apiFetch("/api/assistants/file", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: id, content: $("asst-editor").value, sha256: sha256 }),
@@ -6756,7 +6949,7 @@ td .empty {
             c.supersedes + "</button></div>";
         }
         const actions =
-          '<div class="mem-actions">' +
+          '<div class="mem-actions" data-min-role="editor">' +
           (isActive
             ? '<button type="button" class="btn btn-ghost" data-mem-supersede="' + c.id + '">' +
               escapeHtml(t("mem.supersede")) + "</button>"
@@ -6769,7 +6962,7 @@ td .empty {
           '<div class="card-top" style="margin:0 0 8px">' +
           favStar("memory", c.id, c.favorite) +
           '<span class="chip">' + cat + "</span>" + proj +
-          '<span class="chip">#' + c.id + "</span>" +
+          '<span class="chip">#' + c.id + "</span>" + visChip(c) +
           validChips +
           '<span class="chip">' + (c.source_at ? t("mem.sourceAt") : t("mem.recorded")) + date + "</span>" + extracted +
           (isActive ? "" : '<span class="chip">' + escapeHtml(c.status || "") + "</span>") +
@@ -6785,7 +6978,7 @@ td .empty {
       }).join("") || (favOnlyOn("memory")
         ? emptyBox(t("fav.empty"), t("fav.empty"))
         : emptyBox(t("mem.noMemory"), t("mem.ingestNotes"), "",
-            '<button type="button" class="btn btn-primary" id="memory-empty-ingest">' + t("mem.runIngest") + '</button>'));
+            '<button type="button" class="btn btn-primary" id="memory-empty-ingest" data-min-role="admin">' + t("mem.runIngest") + '</button>'));
       const mei = $("memory-empty-ingest");
       if (mei) mei.addEventListener("click", () => $("memory-ingest") && $("memory-ingest").click());
       el.querySelectorAll(".mem-card").forEach((card) => {
@@ -6840,6 +7033,15 @@ td .empty {
     } catch (e) {
       el.innerHTML = emptyBox(t("mem.couldNotLoad"), e.message);
     }
+  }
+
+  /** Team mode only: who owns a note and who sees it ("private · alice",
+   * "shared · alice"; "shared" for a note without an owner). */
+  function visChip(note) {
+    if (!account) return "";
+    const vis = note.visibility === "private" ? "private" : "shared";
+    const text = t("vis." + vis) + (note.owner ? " · " + note.owner : "");
+    return '<span class="chip mem-vis" data-mem-visibility="' + vis + '">' + escapeHtml(text) + "</span>";
   }
 
   /// Scroll to a note on the current page, or switch status filter and reload.
@@ -6958,6 +7160,11 @@ td .empty {
     if (vbox) vbox.hidden = pinMode !== "supersede";
     $("pin-kind").value = "update";
     $("pin-valid-from").value = "";
+    // A new note of a signed-in account may be private; shared by default.
+    // A replacement keeps the old note's owner and visibility (server rule).
+    const privBox = $("pin-private-box");
+    if (privBox) privBox.hidden = !(account && pinMode === "pin");
+    if ($("pin-private")) $("pin-private").checked = false;
     const save = $("pin-save");
     if (save) save.textContent = pinMode === "supersede" ? t("supersede.save") : t("pin.save");
     dlg.hidden = false;
@@ -7007,7 +7214,9 @@ td .empty {
           loadReview();
           loadStatus();
         } else {
-          const r = await postJson("/api/memory", { content, category });
+          const body = { content, category };
+          if (account && $("pin-private") && $("pin-private").checked) body.visibility = "private";
+          const r = await postJson("/api/memory", body);
           closePinDialog();
           const link = toastWithLink(t("pin.pinned") + r.id, "#", t("pin.openMemory"));
           link.addEventListener("click", () => {
@@ -7100,7 +7309,7 @@ td .empty {
         '<span class="chip">#' + it.id + "</span>" +
         "</div>" +
         "<p style=\"margin:0\">" + escapeHtml((it.content || "").slice(0, 280)) + "</p>" +
-        '<div class="review-actions">' +
+        '<div class="review-actions" data-min-role="editor">' +
         '<button type="button" class="btn btn-primary" data-review-keep="' + it.id + '">' + t("review.keep") + '</button>' +
         '<button type="button" class="btn btn-danger" data-review-forget="' + it.id + '">' + t("review.forget") + '</button>' +
         "</div></article>"
@@ -7159,9 +7368,9 @@ td .empty {
           '<span class="chip">' + escapeHtml(t("sim.similarity")) + Math.floor(g.min_similarity * 100) + " %</span>" +
           "</div>" +
           '<ul class="similar-notes" style="margin:0 0 10px;padding-left:18px">' + g.notes.map(similarNoteHtml).join("") + "</ul>" +
-          '<textarea class="similar-text" rows="5" style="width:100%" aria-label="' + escapeHtml(t("sim.text")) + '">' + escapeHtml(g.proposal || "") + "</textarea>" +
+          '<textarea class="similar-text" rows="5" style="width:100%" data-min-role="admin" aria-label="' + escapeHtml(t("sim.text")) + '">' + escapeHtml(g.proposal || "") + "</textarea>" +
           '<div class="meta similar-source" style="min-height:1.2em" aria-live="polite"></div>' +
-          '<div class="review-actions">' +
+          '<div class="review-actions" data-min-role="admin">' +
           '<button type="button" class="btn" data-similar-suggest>' + escapeHtml(t("sim.suggest")) + "</button>" +
           '<button type="button" class="btn btn-primary" data-similar-merge>' + escapeHtml(t("sim.merge")) + "</button>" +
           "</div>" +
@@ -7196,7 +7405,7 @@ td .empty {
         const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, 120000);
         similarPending.add(ctl);
         try {
-          const res = await fetch("/api/consolidation/proposal?ids=" + encodeURIComponent(ids), {
+          const res = await apiFetch("/api/consolidation/proposal?ids=" + encodeURIComponent(ids), {
             headers: { Accept: "application/json" }, signal: ctl.signal,
           });
           if (!res.ok) {
@@ -7283,7 +7492,7 @@ td .empty {
         (it.project_name ? '<span class="chip">' + escapeHtml(it.project_name) + "</span>" : "") +
         "</div>" +
         '<p style="margin:0;white-space:pre-wrap">' + escapeHtml(it.content || "") + "</p>" +
-        '<div class="review-actions">' +
+        '<div class="review-actions" data-min-role="editor">' +
         '<button type="button" class="btn btn-primary" data-damaged-replace="' + it.id + '">' + escapeHtml(t("dmg.replace")) + "</button>" +
         "</div></article>"
       ).join("");
@@ -7617,80 +7826,281 @@ td .empty {
     });
   })();
 
+  // --- team mode: sign-in page, account header, password --------
+  function setAccount(me) {
+    teamMode = true;
+    account = {
+      username: String(me.username || ""),
+      display_name: String(me.display_name || me.username || ""),
+      role: ROLE_RANK[me.role] ? me.role : "viewer",
+    };
+    requestToken = String(me.request_token || "");
+    document.body.setAttribute("data-account-role", account.role);
+    $("account-name").textContent = account.display_name;
+    $("account-role").textContent = account.role;
+    $("account-box").hidden = false;
+    commands = buildCommands();
+  }
+  function closeDialog(id) {
+    const dlg = $(id);
+    if (!dlg) return;
+    dlg.classList.remove("open");
+    dlg.hidden = true;
+  }
+  /** Team mode without a (valid) session: only the sign-in form shows. */
+  function showSignIn(message) {
+    teamMode = true;
+    const box = $("signin");
+    const err = $("signin-error");
+    if (account) reloadAfterSignIn = true;
+    account = null;
+    requestToken = "";
+    if (message) {
+      err.textContent = message;
+      err.hidden = false;
+    }
+    if (!box.hidden) return;
+    closeDialog("pin-dialog");
+    closeDialog("password-dialog");
+    document.querySelector(".app").hidden = true;
+    box.hidden = false;
+    box.classList.add("open");
+    $("signin-password").value = "";
+    $("signin-username").focus();
+  }
+  function hideSignIn() {
+    const box = $("signin");
+    box.classList.remove("open");
+    box.hidden = true;
+    $("signin-error").hidden = true;
+    document.querySelector(".app").hidden = false;
+  }
+  /** GET /api/me: 401 shows the sign-in page, 200 is the signed-in
+   * account, anything else (503 in local mode) keeps the page as it is. */
+  async function resolveAccount() {
+    let res;
+    try {
+      res = await fetch("/api/me", { headers: { Accept: "application/json" } });
+    } catch {
+      return true;
+    }
+    if (res.status === 401) {
+      showSignIn("");
+      return false;
+    }
+    if (res.ok) {
+      let me = {};
+      try { me = await res.json(); } catch {}
+      setAccount(me);
+    }
+    return true;
+  }
+  (function wireAccount() {
+    const form = $("signin-form");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("signin-submit");
+      const err = $("signin-error");
+      const username = $("signin-username").value.trim();
+      const password = $("signin-password").value;
+      btn.disabled = true;
+      err.hidden = true;
+      let res = null;
+      try {
+        res = await apiFetch("/api/login", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username, password: password }),
+        }, { keep401: true });
+      } catch {}
+      btn.disabled = false;
+      $("signin-password").value = "";
+      if (res && res.ok) {
+        let me = null;
+        try { me = await res.json(); } catch {}
+        // After a session ended in this page, start from a fresh page so
+        // nothing of the earlier account stays in the DOM.
+        if (reloadAfterSignIn || !me) {
+          location.reload();
+          return;
+        }
+        setAccount(me);
+        hideSignIn();
+        startApp();
+        return;
+      }
+      err.textContent = res && res.status === 401 ? t("auth.wrong")
+        : res && res.status === 429 ? t("auth.tooMany")
+        : t("auth.server");
+      err.hidden = false;
+      $("signin-password").focus();
+    });
+    $("account-signout").addEventListener("click", async () => {
+      try {
+        const res = await apiFetch("/api/logout", { method: "POST", headers: { Accept: "application/json" } }, { keep401: true });
+        if (!res.ok && res.status !== 401) {
+          toast(t("account.signOutFailed") + res.status);
+          return;
+        }
+      } catch (e) {
+        toast(t("account.signOutFailed") + e.message);
+        return;
+      }
+      location.reload();
+    });
+    const dlg = $("password-dialog");
+    const msg = $("pw-msg");
+    const say = (text, isError) => {
+      msg.textContent = text;
+      msg.classList.toggle("is-error", !!isError);
+      msg.hidden = false;
+    };
+    const clear = () => { ["pw-current", "pw-new", "pw-repeat"].forEach((id) => { $(id).value = ""; }); };
+    let returnFocus = null;
+    const close = () => {
+      closeDialog("password-dialog");
+      clear();
+      if (returnFocus && typeof returnFocus.focus === "function") {
+        try { returnFocus.focus(); } catch {}
+      }
+      returnFocus = null;
+    };
+    $("account-password").addEventListener("click", () => {
+      returnFocus = document.activeElement;
+      clear();
+      msg.hidden = true;
+      dlg.hidden = false;
+      dlg.classList.add("open");
+      $("pw-current").focus();
+    });
+    $("pw-cancel").addEventListener("click", close);
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+      }
+    });
+    $("password-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const current = $("pw-current").value;
+      const next = $("pw-new").value;
+      if (next !== $("pw-repeat").value) return say(t("pw.mismatch"), true);
+      const n = Array.from(next).length;
+      if (n < 15 || n > 128) return say(t("pw.length"), true);
+      const save = $("pw-save");
+      save.disabled = true;
+      try {
+        const res = await apiFetch("/api/password", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ old: current, new: next }),
+        }, { keep401: true });
+        if (res.ok) {
+          clear();
+          say(t("pw.done"), false);
+        } else if (res.status === 401) {
+          say(t("pw.wrongCurrent"), true);
+          // A 401 can also mean the session ended: /api/me tells.
+          apiFetch("/api/me", { headers: { Accept: "application/json" } }).catch(() => {});
+        } else if (res.status === 429) {
+          say(t("auth.tooMany"), true);
+        } else if (res.status === 422) {
+          say(t("pw.length"), true);
+        } else {
+          say(t("auth.server"), true);
+        }
+      } catch {
+        say(t("auth.server"), true);
+      } finally {
+        save.disabled = false;
+      }
+    });
+  })();
+
+  // Loads the data of the page. Local mode and a signed-in account run it
+  // once; the sign-in page runs it after the sign-in.
+  let started = false;
+  function startApp() {
+    if (started) return;
+    started = true;
+    loadHealth();
+    loadStatus();
+    loadActivity();
+    loadHomeList();
+    if ($("timeline-mode-chart")) $("timeline-mode-chart").addEventListener("click", () => setTimelineMode("chart"));
+    if ($("timeline-mode-cal")) $("timeline-mode-cal").addEventListener("click", () => setTimelineMode("calendar"));
+    if ($("cal-prev")) $("cal-prev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCalendar(); });
+    if ($("cal-next")) $("cal-next").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() + 1); renderCalendar(); });
+    if ($("cal-today")) $("cal-today").addEventListener("click", () => { calMonth = new Date(); calMonth.setDate(1); renderCalendar(); });
+    if ($("timeline-range")) $("timeline-range").addEventListener("change", () => loadTimeline());
+    if ($("proj-q")) $("proj-q").addEventListener("input", () => { projQuery = $("proj-q").value; renderProjects(); });
+    {
+      const projSortEl = $("proj-sort");
+      if (projSortEl) {
+        wireSort("projects", projSortEl, () => { projSort = projSortEl.value; renderProjects(); }, "activity");
+        projSort = projSortEl.value;
+      }
+      const findSortEl = $("find-sort");
+      if (findSortEl) wireSort("find", findSortEl, () => {
+        const q = $("find-q") && $("find-q").value;
+        if (q && q.trim()) runFind(q);
+      }, "relevance");
+      const tlSortEl = $("timeline-sort");
+      if (tlSortEl) wireSort("timeline", tlSortEl, () => loadTimeline());
+      const histSortEl = $("hist-sort");
+      if (histSortEl) wireSort("history", histSortEl, null, "recent");
+    }
+    if ($("proj-show-empty")) $("proj-show-empty").addEventListener("click", () => {
+      projShowEmpty = !projShowEmpty;
+      $("proj-show-empty").setAttribute("aria-pressed", projShowEmpty ? "true" : "false");
+      $("proj-show-empty").classList.toggle("active", projShowEmpty);
+      renderProjects();
+    });
+    // Restore favorites-only toggle state from localStorage for each list view
+    ["home", "history", "browse", "memory", "projects", "timeline", "assistants", "find"].forEach((v) => {
+      setFavOnly(v, favOnlyOn(v));
+    });
+    renderAsstSourceToggle();
+    loadHandoff();
+    fetchJson("/api/health-recovery").then((h) => {
+      const box = $("health-recovery");
+      const body = $("health-recovery-body");
+      if (!box || !body) return;
+      if (h.healthy && (!h.actions || !h.actions.length)) { box.hidden = true; return; }
+      box.hidden = false;
+      body.innerHTML = (h.actions || []).map((a) =>
+        '<div class="row row-single" style="cursor:default"><div class="row-main"><div class="row-title">' +
+        escapeHtml(a.label) + '</div><div class="row-meta">' + escapeHtml(a.hint || "") +
+        "</div></div></div>"
+      ).join("") || '<div class="empty">' + t("health.allOk") + '</div>';
+    }).catch(() => {});
+    loadIngestStatus();
+    loadProjectsFilter();
+    $("btn-hide-empty").textContent = t("topbar.hideEmpty");
+    // Deep-links: open the main view named in the URL hash (boot + later hash changes).
+    window.addEventListener("hashchange", () => {
+      const name = (location.hash || "").replace(/^#/, "");
+      const sm = /^session\/(\d+)$/.exec(name);
+      if (sm) {
+        if (!(current === "detail" && state.detail && String(state.detail.id) === sm[1])) openDetail(Number(sm[1]));
+        return;
+      }
+      if (name && name !== current && MAIN_VIEWS.indexOf(name) >= 0) openView(name);
+    });
+    {
+      const bootView = (location.hash || "").replace(/^#/, "");
+      const bm = /^session\/(\d+)$/.exec(bootView);
+      if (bm) openDetail(Number(bm[1]));
+      else if (MAIN_VIEWS.indexOf(bootView) >= 0) openView(bootView);
+    }
+    announce(t("ready"));
+  }
+
   // boot
   initTheme();
   initLang();
-  loadHealth();
-  loadStatus();
-  loadActivity();
-  loadHomeList();
-  if ($("timeline-mode-chart")) $("timeline-mode-chart").addEventListener("click", () => setTimelineMode("chart"));
-  if ($("timeline-mode-cal")) $("timeline-mode-cal").addEventListener("click", () => setTimelineMode("calendar"));
-  if ($("cal-prev")) $("cal-prev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCalendar(); });
-  if ($("cal-next")) $("cal-next").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() + 1); renderCalendar(); });
-  if ($("cal-today")) $("cal-today").addEventListener("click", () => { calMonth = new Date(); calMonth.setDate(1); renderCalendar(); });
-  if ($("timeline-range")) $("timeline-range").addEventListener("change", () => loadTimeline());
-  if ($("proj-q")) $("proj-q").addEventListener("input", () => { projQuery = $("proj-q").value; renderProjects(); });
-  {
-    const projSortEl = $("proj-sort");
-    if (projSortEl) {
-      wireSort("projects", projSortEl, () => { projSort = projSortEl.value; renderProjects(); }, "activity");
-      projSort = projSortEl.value;
-    }
-    const findSortEl = $("find-sort");
-    if (findSortEl) wireSort("find", findSortEl, () => {
-      const q = $("find-q") && $("find-q").value;
-      if (q && q.trim()) runFind(q);
-    }, "relevance");
-    const tlSortEl = $("timeline-sort");
-    if (tlSortEl) wireSort("timeline", tlSortEl, () => loadTimeline());
-    const histSortEl = $("hist-sort");
-    if (histSortEl) wireSort("history", histSortEl, null, "recent");
-  }
-  if ($("proj-show-empty")) $("proj-show-empty").addEventListener("click", () => {
-    projShowEmpty = !projShowEmpty;
-    $("proj-show-empty").setAttribute("aria-pressed", projShowEmpty ? "true" : "false");
-    $("proj-show-empty").classList.toggle("active", projShowEmpty);
-    renderProjects();
-  });
-  // Restore favorites-only toggle state from localStorage for each list view
-  ["home", "history", "browse", "memory", "projects", "timeline", "assistants", "find"].forEach((v) => {
-    setFavOnly(v, favOnlyOn(v));
-  });
-  renderAsstSourceToggle();
-  loadHandoff();
-  fetchJson("/api/health-recovery").then((h) => {
-    const box = $("health-recovery");
-    const body = $("health-recovery-body");
-    if (!box || !body) return;
-    if (h.healthy && (!h.actions || !h.actions.length)) { box.hidden = true; return; }
-    box.hidden = false;
-    body.innerHTML = (h.actions || []).map((a) =>
-      '<div class="row row-single" style="cursor:default"><div class="row-main"><div class="row-title">' +
-      escapeHtml(a.label) + '</div><div class="row-meta">' + escapeHtml(a.hint || "") +
-      "</div></div></div>"
-    ).join("") || '<div class="empty">' + t("health.allOk") + '</div>';
-  }).catch(() => {});
-  loadIngestStatus();
-  loadProjectsFilter();
-  $("btn-hide-empty").textContent = t("topbar.hideEmpty");
-  // Deep-links: open the main view named in the URL hash (boot + later hash changes).
-  window.addEventListener("hashchange", () => {
-    const name = (location.hash || "").replace(/^#/, "");
-    const sm = /^session\/(\d+)$/.exec(name);
-    if (sm) {
-      if (!(current === "detail" && state.detail && String(state.detail.id) === sm[1])) openDetail(Number(sm[1]));
-      return;
-    }
-    if (name && name !== current && MAIN_VIEWS.indexOf(name) >= 0) openView(name);
-  });
-  {
-    const bootView = (location.hash || "").replace(/^#/, "");
-    const bm = /^session\/(\d+)$/.exec(bootView);
-    if (bm) openDetail(Number(bm[1]));
-    else if (MAIN_VIEWS.indexOf(bootView) >= 0) openView(bootView);
-  }
-  announce(t("ready"));
+  resolveAccount().then((ready) => { if (ready) startApp(); });
 })();
 </script>
 </body>
