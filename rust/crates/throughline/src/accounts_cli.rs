@@ -211,8 +211,9 @@ pub fn unlock<C: GenericClient>(client: &mut C, username: &str) -> Result<bool> 
     Ok(removed > 0)
 }
 
-/// Sets a new password and ends the account's sessions; returns how many
-/// ended.
+/// Sets a new password, ends the account's sessions and clears its failed
+/// sign-ins (a reset after a lockout needs no `unlock`); returns how many
+/// sessions ended.
 pub fn set_password<C: GenericClient>(
     client: &mut C,
     username: &str,
@@ -227,6 +228,7 @@ pub fn set_password<C: GenericClient>(
     )
     .map_err(|e| without_detail("store the password", e))?;
     let ended = end_sessions(&mut tx, id)?;
+    access::clear_failures(&mut tx, username)?;
     tx.commit()?;
     Ok(ended)
 }
@@ -459,9 +461,8 @@ mod tests {
 
     const PASSWORD: &str = "correct horse battery staple 1";
 
-    /// A test transaction that takes its lock on `access_users` first, so it
-    /// cannot deadlock with the migration test, which locks that table and
-    /// then upgrades the lock.
+    /// A test transaction that takes its lock on `access_users` first, as
+    /// every test that writes accounts does, so they lock in one order.
     fn begin(client: &mut postgres::Client) -> postgres::Transaction<'_> {
         let mut tx = client.transaction().expect("begin test tx");
         tx.batch_execute("LOCK TABLE access_users IN ROW EXCLUSIVE MODE")
@@ -749,9 +750,25 @@ mod tests {
 
         open_session(&mut tx, id);
         open_session(&mut tx, id);
+        // A locked-out account: the new password also clears the count.
+        let attempts = |tx: &mut postgres::Transaction<'_>| -> i64 {
+            tx.query_one(
+                "SELECT count(*) FROM access_attempts WHERE key = $1",
+                &[&access::attempt_key(&name)],
+            )
+            .unwrap()
+            .get(0)
+        };
+        tx.execute(
+            "INSERT INTO access_attempts (key, attempts) VALUES ($1, 10)",
+            &[&access::attempt_key(&name)],
+        )
+        .unwrap();
+        assert_eq!(attempts(&mut tx), 1);
         let new = "correct horse battery staple 9";
         assert_eq!(set_password(&mut tx, &name, new).expect("password"), 2);
         assert_eq!(sessions(&mut tx, id), 0);
+        assert_eq!(attempts(&mut tx), 0, "the reset clears the failed sign-ins");
         let stored: String = tx
             .query_one(
                 "SELECT password_hash FROM access_users WHERE id = $1",

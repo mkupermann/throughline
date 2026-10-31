@@ -61,6 +61,8 @@ struct HashProbe {
     started: Option<std::time::Instant>,
     finished: Option<std::time::Instant>,
     derivations: Vec<usize>,
+    /// Set by a test: the next check waits for a message before it hashes.
+    pause: Option<std::sync::mpsc::Receiver<()>>,
 }
 
 const CHECKS_PER_MINUTE: u32 = 60;
@@ -486,9 +488,9 @@ async fn search_handler(
         let hits = match m.as_str() {
             "semantic" => match backend.as_ref() {
                 Some(b) => crate::search::semantic(client, b, &q, limit)?,
-                None => crate::search::search(client, &q, limit, None)?,
+                None => crate::search::search(client, &actor, &q, limit, None)?,
             },
-            "lexical" => crate::search::search(client, &q, limit, None)?,
+            "lexical" => crate::search::search(client, &actor, &q, limit, None)?,
             _ => crate::search::hybrid(client, &actor, backend.as_ref(), &q, limit)?,
         };
         let notes: Vec<i64> = hits
@@ -1562,6 +1564,7 @@ async fn memory_handler(
             Ok(v) => v,
             Err((status, code, detail)) => return api_error(status, code, detail),
         };
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
         list_memory_rows(
             client, &actor, q, cat, status, favorites, limit, offset, dir, valid_at, known_at,
@@ -1573,7 +1576,7 @@ async fn memory_handler(
             let chunks: Vec<_> = items
                 .into_iter()
                 .map(|row| {
-                    serde_json::json!({
+                    let mut chunk = serde_json::json!({
                         "id": row.id,
                         "content": row.content,
                         "category": row.category,
@@ -1587,9 +1590,13 @@ async fn memory_handler(
                         "superseded_at": row.superseded_at,
                         "supersedes": row.supersedes,
                         "favorite": row.favorite,
-                        "owner": row.owner,
-                        "visibility": row.visibility,
-                    })
+                    });
+                    // Team mode only: local mode keeps the shape from before.
+                    if team {
+                        chunk["owner"] = serde_json::json!(row.owner);
+                        chunk["visibility"] = serde_json::json!(row.visibility);
+                    }
+                    chunk
                 })
                 .collect();
             Json(serde_json::json!({
@@ -1738,6 +1745,7 @@ fn list_memory_rows<C: GenericClient>(
 
 /// The detail fields of `GET /api/memory/{id}`, or `None` for an unknown id
 /// or a note `actor` does not see. A chain link to such a note is left out.
+/// `owner` and `visibility` only for an account (team mode).
 pub(crate) fn load_note<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
@@ -1778,7 +1786,7 @@ pub(crate) fn load_note<C: GenericClient>(
         let valid_to: Option<chrono::DateTime<chrono::Utc>> = r.get(10);
         let owner: Option<String> = r.get(11);
         let visibility: String = r.get(12);
-        serde_json::json!({
+        let mut note = serde_json::json!({
             "id": id,
             "content": content,
             "category": category,
@@ -1791,9 +1799,14 @@ pub(crate) fn load_note<C: GenericClient>(
             "superseded_by": superseded_by,
             "superseded_at": superseded_at,
             "supersedes": supersedes,
-            "owner": owner,
-            "visibility": visibility,
-        })
+        });
+        // Owner and visibility for accounts only: in local mode the note
+        // keeps the shape it had before team mode.
+        if actor.via != crate::access::Via::Local {
+            note["owner"] = serde_json::json!(owner);
+            note["visibility"] = serde_json::json!(visibility);
+        }
+        note
     }))
 }
 
@@ -3918,8 +3931,33 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
         .filter(|token| crate::access::is_session_token(token))
 }
 
+/// Scheme, lowercased host and port of a URL or an `Origin` value, with
+/// the port of http (80) and https (443) filled in when it is left out.
+/// `None` without `://`, without a host, or with a port that is no number.
+fn url_origin(url: &str) -> Option<(String, String, u16)> {
+    let (scheme, rest) = url.trim().split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host_of(authority);
+    let port = match authority.strip_prefix('[') {
+        Some(v6) => v6.split_once("]:").map(|(_, port)| port),
+        None => authority.split_once(':').map(|(_, port)| port),
+    };
+    let port = match (port, scheme.as_str()) {
+        (Some(port), _) => port.parse().ok()?,
+        (None, "https") => 443,
+        (None, "http") => 80,
+        (None, _) => return None,
+    };
+    (!host.is_empty()).then_some((scheme, host, port))
+}
+
 /// Why a team-mode write must be refused: it needs the session's request
-/// token and an `Origin` on the host of `THROUGHLINE_PUBLIC_URL`.
+/// token and an `Origin` equal to the origin of `THROUGHLINE_PUBLIC_URL`
+/// (scheme, host and port).
 fn write_refusal(
     headers: &HeaderMap,
     request_token: &str,
@@ -3934,9 +3972,8 @@ fn write_refusal(
     let origin = headers
         .get(axum::http::header::ORIGIN)
         .and_then(|v| v.to_str().ok())
-        .map(url_host);
-    let public = public_url.map(url_host).filter(|host| !host.is_empty());
-    match (origin, public) {
+        .and_then(url_origin);
+    match (origin, public_url.and_then(url_origin)) {
         (Some(origin), Some(public)) if origin == public => None,
         _ => Some("the request must come from THROUGHLINE_PUBLIC_URL"),
     }
@@ -3978,14 +4015,15 @@ pub(crate) async fn account_key_actor(
 /// Puts the [`crate::access::Actor`] behind a request into its extensions.
 /// Local mode: [`crate::access::Actor::local`] for everything. Team mode:
 /// everything under `/api` except `/api/health` and `/api/login` needs the
-/// session of the cookie or, without a valid session, an account's agent
-/// key ([`account_key_actor`]); a valid session wins over a Bearer header.
-/// Neither: 401, the same answer for a missing session and a refused key.
-/// Then the role of [`crate::access::required_role`] (403
-/// `forbidden_role`). A session's writes also need its request token and the
-/// public URL's Origin (403); a key's writes do not, see below. The page and
-/// its files pass, so the browser can show the sign-in form; `/mcp` checks
-/// its own key, and its tools check the role.
+/// session of the cookie or, for a read (GET, HEAD) without a valid session,
+/// an account's agent key ([`account_key_actor`]); a valid session wins over
+/// a Bearer header. Agents write through `/mcp`, so a write without a valid
+/// session gets 401 whatever key it carries. Neither: 401, the same answer
+/// for a missing session and a refused key. Then the role of
+/// [`crate::access::required_role`] (403 `forbidden_role`). A write also
+/// needs the session's request token and the public URL's origin (403). The
+/// page and its files pass, so the browser can show the sign-in form; `/mcp`
+/// checks its own key, and its tools check the role.
 async fn actor_layer(
     State(state): State<AppState>,
     mut req: axum::extract::Request,
@@ -4007,8 +4045,13 @@ async fn actor_layer(
         }
         None => None,
     };
+    let read = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
     let (actor, session) = match session {
         Some(session) => (session.actor.clone(), Some(session)),
+        None if !read => return unauthorized("sign in first"),
         None => match account_key_actor(&state, req.headers()).await {
             Ok(Some(actor)) => (actor, None),
             Ok(None) => return unauthorized("sign in first"),
@@ -4025,28 +4068,14 @@ async fn actor_layer(
     if actor.role < needed {
         return forbidden_role(needed);
     }
-    let read = matches!(
-        *req.method(),
-        axum::http::Method::GET | axum::http::Method::HEAD
-    );
-    if !read {
-        match &session {
-            Some(session) => {
-                if let Some(reason) = write_refusal(
-                    req.headers(),
-                    &session.request_token,
-                    state.public_url.as_deref(),
-                ) {
-                    return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
-                }
-            }
-            // Exempt from the request token and Origin check: a request
-            // authenticated by an account's agent key alone. The check
-            // stops cross-site requests riding on a cookie the browser sends
-            // by itself; a Bearer key is never sent that way, and this
-            // request has no valid session. Only `Via::AgentKey` gets here.
-            None if actor.via == crate::access::Via::AgentKey => {}
-            None => return unauthorized("sign in first"),
+    // A write always has a session here.
+    if let Some(session) = session.as_ref().filter(|_| !read) {
+        if let Some(reason) = write_refusal(
+            req.headers(),
+            &session.request_token,
+            state.public_url.as_deref(),
+        ) {
+            return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
         }
     }
     req.extensions_mut().insert(actor);
@@ -4160,8 +4189,14 @@ where
 impl LoginGate {
     fn probe_started(&self) {
         crate::access::take_derivations();
-        let mut probe = self.probe.lock().unwrap_or_else(|p| p.into_inner());
-        probe.started = Some(std::time::Instant::now());
+        let pause = {
+            let mut probe = self.probe.lock().unwrap_or_else(|p| p.into_inner());
+            probe.started = Some(std::time::Instant::now());
+            probe.pause.take()
+        };
+        if let Some(pause) = pause {
+            let _ = pause.recv_timeout(std::time::Duration::from_secs(30));
+        }
     }
 
     fn probe_finished(&self) {
@@ -4354,8 +4389,10 @@ async fn logout_handler(
         return no_session(&state);
     };
     let hash = session.token_hash;
+    // Expired sessions and counts go too, so they wait for no sign-in.
     if let Err(resp) = with_db(&state, move |client| {
-        crate::access::end_session(client, &hash)
+        crate::access::end_session(client, &hash)?;
+        crate::access::sweep_expired(client)
     })
     .await
     {
@@ -4610,6 +4647,21 @@ fn startup_agent_key_note(
     }
 }
 
+/// The database check of [`crate::access::check_startup`]; in team mode
+/// then the sessions and failure counts that expired while the server was
+/// down are deleted, so none waits for the next sign-in.
+fn startup_check(
+    client: &mut postgres::Client,
+    mode: crate::access::AuthMode,
+    public_url: Option<&str>,
+) -> Result<()> {
+    crate::access::check_startup(client, mode, public_url)?;
+    if mode == crate::access::AuthMode::Team {
+        crate::access::sweep_expired(client)?;
+    }
+    Ok(())
+}
+
 pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()> {
     // Before binding. Everything that can fail runs on the blocking pool:
     // the sync client blocks even when an early return drops it (see `with_db`).
@@ -4617,7 +4669,7 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
         let mut client = client;
         let mode =
             crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())?;
-        crate::access::check_startup(
+        startup_check(
             &mut client,
             mode,
             std::env::var("THROUGHLINE_PUBLIC_URL").ok().as_deref(),
@@ -6242,7 +6294,6 @@ mod tests {
                 "content",
                 "created_at",
                 "id",
-                "owner",
                 "project_name",
                 "source_at",
                 "status",
@@ -6250,8 +6301,7 @@ mod tests {
                 "superseded_by",
                 "supersedes",
                 "valid_from",
-                "valid_to",
-                "visibility"
+                "valid_to"
             ]
         );
         assert_eq!(v["id"], serde_json::json!(id));
@@ -7657,12 +7707,11 @@ mod session_tests {
             let mut client = test_db()?;
             match mode {
                 AuthMode::Local => client.batch_execute("BEGIN").expect("begin"),
-                // `access_users` is locked first, as the migration test does,
-                // so copying the four tables cannot deadlock with it.
+                // No lock needed: the migration test changes copies in a
+                // schema of its own, never the shared tables.
                 AuthMode::Team => client
                     .batch_execute(
                         "BEGIN; \
-                         LOCK TABLE public.access_users IN SHARE ROW EXCLUSIVE MODE; \
                          CREATE TEMP TABLE access_users (LIKE public.access_users INCLUDING ALL); \
                          CREATE TEMP TABLE access_sessions (LIKE public.access_sessions INCLUDING ALL); \
                          CREATE TEMP TABLE access_attempts (LIKE public.access_attempts INCLUDING ALL); \
@@ -8226,15 +8275,93 @@ mod session_tests {
         assert_eq!(s.get("/api/me", &alice).status, 200);
     }
 
+    /// The write's Origin must be the public URL's origin: scheme, host and
+    /// port. Another port or scheme on the same host gets past the outer
+    /// guard (a named host, as behind a proxy) and is refused here.
+    #[test]
+    fn write_origin_needs_the_public_scheme_host_and_port() {
+        let Some(s) = Served::start(AuthMode::Team, Some("https://memory.example.com")) else {
+            eprintln!(
+                "skipping write_origin_needs_the_public_scheme_host_and_port: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let alice = s.sign_in("alice", PASSWORD);
+        let body = json!({ "old": PASSWORD, "new": "too short" }).to_string();
+        let send = |origin: &str| {
+            s.send(
+                Method::POST,
+                "/api/password",
+                &[
+                    ("host", "memory.example.com"),
+                    ("cookie", alice.cookie.as_str()),
+                    ("x-throughline-request-token", alice.request_token.as_str()),
+                    ("origin", origin),
+                    ("content-type", "application/json"),
+                ],
+                Some(body.clone()),
+            )
+        };
+        // Control: the public origin, also with its default port spelled out,
+        // gets to the handler, which refuses the short password (422).
+        for origin in [
+            "https://memory.example.com",
+            "https://Memory.Example.com:443",
+        ] {
+            let answer = send(origin);
+            assert_eq!(answer.status, 422, "{origin}: {}", answer.body);
+        }
+        for origin in [
+            "https://memory.example.com:8443",
+            "http://memory.example.com",
+            "http://memory.example.com:443",
+        ] {
+            let answer = send(origin);
+            assert_eq!(answer.status, 403, "{origin}: {}", answer.body);
+            assert_eq!(
+                answer.json()["detail"],
+                "the request must come from THROUGHLINE_PUBLIC_URL",
+                "{origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn url_origin_reads_scheme_host_and_port() {
+        let origin = |scheme: &str, host: &str, port| Some((scheme.into(), host.into(), port));
+        assert_eq!(
+            url_origin("https://Memory.Example.com/"),
+            origin("https", "memory.example.com", 443)
+        );
+        assert_eq!(
+            url_origin("http://localhost:8788"),
+            origin("http", "localhost", 8788)
+        );
+        assert_eq!(
+            url_origin("HTTP://[::1]:8788/x"),
+            origin("http", "::1", 8788)
+        );
+        assert_eq!(url_origin("https://[::1]"), origin("https", "::1", 443));
+        assert_eq!(
+            url_origin("http://localhost@evil.example"),
+            origin("http", "evil.example", 80)
+        );
+        for refused in ["null", "", "https://", "https://host:port", "ftp://host"] {
+            assert_eq!(url_origin(refused), None, "{refused}");
+        }
+    }
+
     #[test]
     fn logout_deletes_the_session_row() {
         let Some(s) = Served::team() else {
             eprintln!("skipping logout_deletes_the_session_row: no PostgreSQL reachable");
             return;
         };
-        s.add_account("alice", Role::Editor);
+        let id = s.add_account("alice", Role::Editor);
         let browser = s.sign_in("alice", PASSWORD);
         assert_eq!(s.sessions_with(&browser.token_hash()), 1);
+        let (expired, lapsed) = stale_sign_in_state(&s, id);
         let out = s.write("/api/logout", &browser, json!({}));
         assert_eq!(out.status, 200, "{}", out.body);
         assert_eq!(
@@ -8247,6 +8374,59 @@ mod session_tests {
             401,
             "the old cookie no longer works"
         );
+        // The sign-out also swept what had expired meanwhile.
+        assert_eq!(s.sessions_with(&expired), 0);
+        assert_eq!(attempts_with(&s, &lapsed), 0);
+    }
+
+    /// An expired session of account `id` and a failure count whose window
+    /// has passed, as a server leaves them when nobody signs in: (session
+    /// hash, attempt key).
+    fn stale_sign_in_state(s: &Served, id: i64) -> (String, String) {
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (session, attempt) = (format!("expired-{tag}"), format!("lapsed-{tag}"));
+        s.db()
+            .execute(
+                "INSERT INTO access_sessions (token_hash, user_id, csrf_token, created_at, expires_at) \
+                 VALUES ($1, $2, 'x', now() - interval '8 days', now() - interval '1 day')",
+                &[&session, &id],
+            )
+            .expect("expired session");
+        s.db()
+            .execute(
+                "INSERT INTO access_attempts (key, attempts, window_start) \
+                 VALUES ($1, 3, now() - interval '1 hour')",
+                &[&attempt],
+            )
+            .expect("lapsed attempts");
+        (session, attempt)
+    }
+
+    fn attempts_with(s: &Served, key: &str) -> i64 {
+        s.count(
+            "SELECT count(*) FROM access_attempts WHERE key = $1",
+            &[&key],
+        )
+    }
+
+    /// A team-mode start deletes expired sessions and lapsed failure counts
+    /// at once; a live session and a running count stay.
+    #[test]
+    fn team_start_sweeps_expired_sign_in_state() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping team_start_sweeps_expired_sign_in_state: no PostgreSQL reachable");
+            return;
+        };
+        let id = s.add_account("admin", Role::Admin);
+        let live = s.sign_in("admin", PASSWORD);
+        assert_eq!(s.login("admin", WRONG).status, 401);
+        let running = access::attempt_key("admin");
+        let (expired, lapsed) = stale_sign_in_state(&s, id);
+        startup_check(&mut s.db(), AuthMode::Team, Some(&s.base)).expect("team starts");
+        assert_eq!(s.sessions_with(&expired), 0);
+        assert_eq!(attempts_with(&s, &lapsed), 0);
+        assert_eq!(s.sessions_with(&live.token_hash()), 1);
+        assert_eq!(attempts_with(&s, &running), 1);
     }
 
     #[test]
@@ -8414,6 +8594,10 @@ mod session_tests {
         assert!(body.contains("detail"), "{body}");
     }
 
+    /// The password check hashes while another request holds the database
+    /// lock: the check waits until that request has the lock, then must
+    /// finish before the lock is given back. If hashing needed the lock, the
+    /// holder would wait in vain and fail. No wall-clock window.
     #[test]
     fn hashing_does_not_hold_the_db_lock() {
         let Some(s) = Served::team() else {
@@ -8421,42 +8605,32 @@ mod session_tests {
             return;
         };
         s.add_account("alice", Role::Editor);
-        // Another request takes the database lock as soon as the password
-        // check starts and keeps it for a second.
+        let (resume, pause) = std::sync::mpsc::channel();
+        s.state.login.probe.lock().expect("probe").pause = Some(pause);
         let (gate, db) = (s.state.login.clone(), s.state.db.clone());
         let holder = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while gate.probe.lock().expect("probe").started.is_none() {
-                assert!(
-                    Instant::now() < deadline,
-                    "the password check never started"
-                );
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let wait = |done: &dyn Fn(&HashProbe) -> bool, what: &str| {
+                while !done(&gate.probe.lock().expect("probe")) {
+                    assert!(Instant::now() < deadline, "{what}");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            };
+            wait(&|p| p.started.is_some(), "the password check never started");
             let guard = db.lock().expect("db lock");
-            let held = Instant::now();
-            std::thread::sleep(Duration::from_secs(1));
+            resume.send(()).expect("let the check hash");
+            wait(
+                &|p| p.finished.is_some(),
+                "the password check waited for the database lock",
+            );
             let released = Instant::now();
             drop(guard);
-            (held, released)
+            released
         });
         let answer = s.login("alice", PASSWORD);
         let answered = Instant::now();
-        let (held, released) = holder.join().expect("lock holder");
+        let released = holder.join().expect("lock holder");
         assert_eq!(answer.status, 200, "{}", answer.body);
-        let finished = s
-            .state
-            .login
-            .probe
-            .lock()
-            .expect("probe")
-            .finished
-            .expect("the check finished");
-        assert!(held < finished, "the check went on while the lock was held");
-        assert!(
-            finished < released,
-            "the check finished within the second the lock was held, not after it"
-        );
         assert!(
             answered >= released,
             "the session itself waits for the lock"
@@ -9026,14 +9200,13 @@ mod session_tests {
         );
         assert_eq!(answer.status, 403, "{}", answer.body);
         assert_eq!(answer.json()["error"], "forbidden_request");
-        // Control: the key alone writes, as B.
-        let answer = with_key(&s, Method::POST, "/api/memory", &key_b, Some(note));
+        // The key alone reads as B, but does not write over `/api`.
+        let answer = with_key(&s, Method::GET, &path, &key_b, None);
         assert_eq!(answer.status, 200, "{}", answer.body);
-        let id = answer.json()["id"].as_i64().expect("id");
-        assert_eq!(
-            s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
-            b
-        );
+        assert_eq!(hit_ids(&answer), vec![theirs], "{}", answer.body);
+        let answer = with_key(&s, Method::POST, "/api/memory", &key_b, Some(note));
+        assert_eq!(answer.status, 401, "{}", answer.body);
+        assert_eq!(answer.json()["error"], "unauthorized");
     }
 
     /// `GET /api/recall` and `/api/context` with an account's key: that
@@ -9117,38 +9290,38 @@ mod session_tests {
         assert_eq!(uses(&s, theirs), 0);
     }
 
-    /// The role of the key's account applies like a session's. A write with
-    /// a key needs no request token or Origin: no cookie, nothing a browser
-    /// could be made to send.
+    /// The role of the key's account applies like a session's on reads. A
+    /// key does not write over `/api`, whatever the role: 401 as without
+    /// any sign-in, and nothing is stored. Agents write through `/mcp`.
     #[test]
-    fn account_key_role_applies_and_skips_the_browser_write_guard() {
+    fn account_key_reads_api_by_role_and_never_writes() {
         let Some(s) = team_with_notes() else {
             eprintln!(
-                "skipping account_key_role_applies_and_skips_the_browser_write_guard: no PostgreSQL reachable"
+                "skipping account_key_reads_api_by_role_and_never_writes: no PostgreSQL reachable"
             );
             return;
         };
         let AccountKey { key: viewer, .. } = account_with_key(&s, Role::Viewer);
-        let AccountKey {
-            user: editor_id,
-            key: editor,
-            ..
-        } = account_with_key(&s, Role::Editor);
+        let AccountKey { key: editor, .. } = account_with_key(&s, Role::Editor);
         let note = || json!({ "content": "pinned by a key", "category": "insight" });
-        let answer = with_key(&s, Method::POST, "/api/memory", &viewer, Some(note()));
-        assert_eq!(answer.status, 403, "{}", answer.body);
-        assert_eq!(answer.json(), forbidden(Role::Editor));
         for key in [&viewer, &editor] {
             let answer = with_key(&s, Method::GET, "/api/assistants", key, None);
             assert_eq!(answer.status, 403, "{}", answer.body);
             assert_eq!(answer.json(), forbidden(Role::Admin));
+            let answer = with_key(&s, Method::GET, "/api/memory", key, None);
+            assert_eq!(answer.status, 200, "{}", answer.body);
+            for method in [Method::POST, Method::PUT, Method::DELETE] {
+                let answer = with_key(&s, method.clone(), "/api/memory", key, Some(note()));
+                assert_eq!(answer.status, 401, "{method}: {}", answer.body);
+                assert_eq!(answer.json()["error"], "unauthorized", "{method}");
+            }
         }
-        let answer = with_key(&s, Method::POST, "/api/memory", &editor, Some(note()));
-        assert_eq!(answer.status, 200, "{}", answer.body);
-        let id = answer.json()["id"].as_i64().expect("id");
         assert_eq!(
-            s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
-            editor_id
+            s.count(
+                "SELECT count(*) FROM memory_chunks WHERE content = 'pinned by a key'",
+                &[]
+            ),
+            0
         );
         // Session routes need a session: a key is no sign-in.
         for (method, path) in [
@@ -9163,16 +9336,15 @@ mod session_tests {
         }
     }
 
-    /// The write guard is skipped for a key only without a valid session.
-    /// A stale or forged session cookie next to a valid key: the key is the
-    /// identity and writes without the request token (the cookie adds
-    /// nothing). A valid session next to the same key: the session's write,
-    /// which needs the token.
+    /// A stale or forged session cookie next to a valid key: no session, so
+    /// the write gets 401 and nothing is stored (the key does not write over
+    /// `/api`, the cookie adds nothing). A valid session next to the same
+    /// key: the session's write, which needs the token.
     #[test]
-    fn stale_session_cookie_with_key_writes_without_token() {
+    fn stale_session_cookie_with_key_does_not_write() {
         let Some(s) = team_with_notes() else {
             eprintln!(
-                "skipping stale_session_cookie_with_key_writes_without_token: no PostgreSQL reachable"
+                "skipping stale_session_cookie_with_key_does_not_write: no PostgreSQL reachable"
             );
             return;
         };
@@ -9205,45 +9377,50 @@ mod session_tests {
             ("expired", stale.cookie.as_str()),
         ] {
             let answer = post(cookie);
-            assert_eq!(answer.status, 200, "{what}: {}", answer.body);
-            let id = answer.json()["id"].as_i64().expect("id");
-            assert_eq!(
-                s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
-                editor.user,
-                "{what}"
-            );
+            assert_eq!(answer.status, 401, "{what}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "unauthorized", "{what}");
         }
+        assert_eq!(
+            s.count(
+                "SELECT count(*) FROM memory_chunks WHERE content = 'pinned with a key'",
+                &[]
+            ),
+            0
+        );
         let answer = post(&valid.cookie);
         assert_eq!(answer.status, 403, "{}", answer.body);
         assert_eq!(answer.json()["error"], "forbidden_request");
     }
 
-    /// An admin's key passes the admin routes, a write among them without
-    /// request token; viewer and editor keys get 403.
+    /// An admin's key passes the admin routes that read; viewer and editor
+    /// keys get 403. A write with any key gets 401 before the role check: a
+    /// key is no sign-in for writes over `/api`.
     #[test]
-    fn admin_key_passes_admin_routes() {
+    fn admin_key_reads_admin_routes_and_no_key_writes() {
         let Some(s) = Served::gate() else {
-            eprintln!("skipping admin_key_passes_admin_routes: no PostgreSQL reachable");
+            eprintln!(
+                "skipping admin_key_reads_admin_routes_and_no_key_writes: no PostgreSQL reachable"
+            );
             return;
         };
         for (role, expected) in [(Role::Viewer, 403), (Role::Editor, 403), (Role::Admin, 200)] {
             let AccountKey { key, .. } = account_with_key(&s, role);
-            for (method, path, body) in [
-                (Method::GET, "/api/assistants", None),
-                (Method::POST, "/api/mimo-memory/ingest", Some(json!({}))),
-            ] {
-                let answer = with_key(&s, method.clone(), path, &key, body);
-                assert_eq!(
-                    answer.status, expected,
-                    "{role:?} {method} {path}: {}",
-                    answer.body
-                );
-                if expected == 200 {
-                    assert_eq!(answer.body, "reached");
-                } else {
-                    assert_eq!(answer.json(), forbidden(Role::Admin));
-                }
+            let answer = with_key(&s, Method::GET, "/api/assistants", &key, None);
+            assert_eq!(answer.status, expected, "{role:?}: {}", answer.body);
+            if expected == 200 {
+                assert_eq!(answer.body, "reached");
+            } else {
+                assert_eq!(answer.json(), forbidden(Role::Admin));
             }
+            let write = with_key(
+                &s,
+                Method::POST,
+                "/api/mimo-memory/ingest",
+                &key,
+                Some(json!({})),
+            );
+            assert_eq!(write.status, 401, "{role:?}: {}", write.body);
+            assert_eq!(write.json()["error"], "unauthorized", "{role:?}");
         }
     }
 
@@ -9528,6 +9705,181 @@ mod session_tests {
                 "{path}: {note}"
             );
         }
+    }
+
+    /// The keys of a note in `GET /api/memory` and of the detail
+    /// (`load_note`) before team mode, as on main.
+    const LOCAL_LIST_KEYS: [&str; 13] = [
+        "category",
+        "content",
+        "created_at",
+        "favorite",
+        "id",
+        "project_name",
+        "source_at",
+        "status",
+        "superseded_at",
+        "superseded_by",
+        "supersedes",
+        "valid_from",
+        "valid_to",
+    ];
+
+    fn keys(note: &Value) -> Vec<String> {
+        let mut keys: Vec<String> = note
+            .as_object()
+            .unwrap_or_else(|| panic!("object: {note}"))
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// Local mode: no note JSON carries `owner` or `visibility`, on the
+    /// memory list and detail, MCP `get_note` and the note resource; list
+    /// and detail have exactly the keys from before team mode. Control:
+    /// team mode adds both on list and detail.
+    #[test]
+    fn note_json_has_no_owner_or_visibility_in_local_mode() {
+        let key = crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = Served::start_with_key(AuthMode::Local, None, key) else {
+            eprintln!(
+                "skipping note_json_has_no_owner_or_visibility_in_local_mode: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let probe = format!("probe{}", uuid::Uuid::new_v4().simple());
+        let id = insert_note(&s, None, "shared", &format!("local {probe}"), "manual");
+        let list = s.send(Method::GET, &format!("/api/memory?q={probe}"), &[], None);
+        assert_eq!(list.status, 200, "{}", list.body);
+        let chunks = list.json()["chunks"].clone();
+        assert_eq!(chunks.as_array().map(Vec::len), Some(1), "{}", list.body);
+        assert_eq!(keys(&chunks[0]), LOCAL_LIST_KEYS);
+        let detail = s.send(Method::GET, &format!("/api/memory/{id}"), &[], None);
+        assert_eq!(detail.status, 200, "{}", detail.body);
+        let detail_keys: Vec<&str> = LOCAL_LIST_KEYS
+            .into_iter()
+            .filter(|k| *k != "favorite")
+            .collect();
+        assert_eq!(keys(&detail.json()), detail_keys);
+        let tool = mcp_call(&s, "tools/call", mcp_tool("get_note", json!({ "id": id })));
+        let resource = mcp_call(
+            &s,
+            "resources/read",
+            json!({ "uri": format!("throughline://note/{id}") }),
+        );
+        for (what, text) in [
+            ("get_note", &tool["result"]["content"][0]["text"]),
+            ("resource", &resource["result"]["contents"][0]["text"]),
+        ] {
+            let note: Value = serde_json::from_str(
+                text.as_str()
+                    .unwrap_or_else(|| panic!("{what}: {tool} {resource}")),
+            )
+            .expect("note json");
+            assert_eq!(note["id"], json!(id), "{what}");
+            let fields = note.as_object().expect("object");
+            assert!(
+                !fields.contains_key("owner") && !fields.contains_key("visibility"),
+                "{what}: {note}"
+            );
+        }
+        drop(s);
+
+        let Some(s) = team_with_notes() else {
+            return;
+        };
+        let viewer = s.browser_with(Role::Viewer);
+        let id = insert_note(&s, None, "shared", &format!("team {probe}"), "manual");
+        let list = s.get(&format!("/api/memory?q={probe}"), &viewer).json();
+        let detail = s.get(&format!("/api/memory/{id}"), &viewer).json();
+        for note in [&list["chunks"][0], &detail] {
+            assert_eq!(note["owner"], Value::Null, "{note}");
+            assert_eq!(note["visibility"], "shared", "{note}");
+        }
+    }
+
+    /// An imported assistant config (a file of the server host) in
+    /// `assistant_configs`, with `text` as its content.
+    fn insert_config(s: &Served, text: &str) {
+        s.db()
+            .execute(
+                "INSERT INTO assistant_configs \
+                 (tool, kind, scope, path, name, content, content_sha256, bytes) \
+                 VALUES ('claude', 'instructions', 'user', $1, 'CLAUDE.md', $2, 'test', 1)",
+                &[&format!("/fictional/{text}/CLAUDE.md"), &text],
+            )
+            .expect("config");
+    }
+
+    /// Team mode: imported assistant configs are admin-only in search, as
+    /// on `/api/assistants`. A viewer and an editor get no config hit and no
+    /// count of one from `GET /api/search` (hybrid and lexical) or MCP
+    /// `search`; an admin gets it. Local mode keeps the hit.
+    #[test]
+    fn config_search_hits_are_admin_only_in_team_mode() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping config_search_hits_are_admin_only_in_team_mode: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.db()
+            .batch_execute(
+                "CREATE TEMP TABLE assistant_configs (LIKE public.assistant_configs \
+                 INCLUDING DEFAULTS INCLUDING IDENTITY)",
+            )
+            .expect("session-local configs");
+        let probe = format!("probe{}", uuid::Uuid::new_v4().simple());
+        insert_config(&s, &format!("mcpServers {probe}"));
+        // Config hits, and whether `total` counts only the hits sent.
+        let configs = |answer: &Answer| -> (usize, bool) {
+            assert_eq!(answer.status, 200, "{}", answer.body);
+            let body = answer.json();
+            let hits = body["hits"].as_array().expect("hits");
+            let found = hits.iter().filter(|h| h["kind"] == "config").count();
+            (found, body["total"] == json!(hits.len()))
+        };
+        for role in [Role::Viewer, Role::Editor, Role::Admin] {
+            let browser = s.browser_with(role);
+            let expected = usize::from(role == Role::Admin);
+            for mode in ["hybrid", "lexical"] {
+                let answer = s.get(&format!("/api/search?q={probe}&mode={mode}"), &browser);
+                assert_eq!(
+                    configs(&answer),
+                    (expected, true),
+                    "{role:?} {mode}: {}",
+                    answer.body
+                );
+            }
+        }
+        for (role, expected) in [(Role::Viewer, false), (Role::Admin, true)] {
+            let AccountKey { key, .. } = account_with_key(&s, role);
+            let body = mcp_call_with(
+                &s,
+                &key,
+                "tools/call",
+                mcp_tool("search", json!({ "query": probe })),
+            );
+            let text = body["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{body}"));
+            assert_eq!(text.contains(&probe), expected, "{role:?}: {text}");
+        }
+        drop(s);
+
+        let Some(s) = Served::start(AuthMode::Local, None) else {
+            return;
+        };
+        insert_config(&s, &format!("mcpServers {probe}"));
+        let answer = s.send(
+            Method::GET,
+            &format!("/api/search?q={probe}&mode=lexical"),
+            &[],
+            None,
+        );
+        assert_eq!(configs(&answer), (1, true), "local mode: {}", answer.body);
     }
 
     /// Two signed-in accounts: (A's id, A, B).

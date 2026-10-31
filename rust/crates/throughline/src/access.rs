@@ -156,6 +156,13 @@ impl Actor {
         }
     }
 
+    /// Whether search may show the imported assistant configs (files from
+    /// the server host): the local operator and admins only, as the
+    /// `/api/assistants` routes.
+    pub fn sees_assistant_configs(&self) -> bool {
+        self.role == Role::Admin
+    }
+
     /// A signed-in account, for tests of the filtered paths.
     #[cfg(test)]
     pub fn for_user(id: i64, username: &str, role: Role) -> Actor {
@@ -765,7 +772,7 @@ pub(crate) mod team_test {
 
     /// Accounts A and B, made the way `throughline account add` makes them,
     /// as signed-in actors. `access_users` is locked first, as in every test
-    /// that writes accounts, so this cannot deadlock with the migration test.
+    /// that writes accounts, so these tests take their locks in one order.
     pub fn two_accounts<C: GenericClient>(client: &mut C) -> (Actor, Actor) {
         client
             .batch_execute("LOCK TABLE access_users IN ROW EXCLUSIVE MODE")
@@ -839,8 +846,8 @@ mod tests {
 
     /// A test transaction that sees no accounts and no private notes.
     /// Repeatable read keeps rows other tests commit meanwhile out of the
-    /// counts. `access_users` is locked first, as in the migration test, so
-    /// the two cannot deadlock.
+    /// counts. `access_users` is locked first, as in every test that writes
+    /// accounts, so these tests take their locks in one order.
     fn without_accounts(client: &mut postgres::Client) -> postgres::Transaction<'_> {
         let mut tx = client
             .build_transaction()

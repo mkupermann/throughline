@@ -8,7 +8,9 @@
 //!
 //! Stars belong to the account that set them (`user_id`); local mode has no
 //! accounts and keeps every star with `user_id` NULL. A star on a memory
-//! note is only listed while the note is visible to its owner.
+//! note is only listed while the note is visible to its owner. An account's
+//! star has no time (`created_at` NULL): team mode keeps no activity times
+//! per account. Local stars keep theirs.
 
 use crate::access::{push_visibility, Actor, Via};
 use postgres::types::ToSql;
@@ -92,8 +94,15 @@ pub struct Favorite {
     pub kind: String,
     #[serde(rename = "ref")]
     pub ref_: String,
-    /// RFC 3339 creation timestamp.
-    pub created_at: String,
+    /// RFC 3339 creation timestamp; none for an account's star.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+/// The `created_at` of a new star of the account bound as `$n`: now for
+/// local mode (no account), NULL for an account.
+pub fn star_time_sql(n: usize) -> String {
+    format!("CASE WHEN ${n}::bigint IS NULL THEN now() END")
 }
 
 /// The condition on the favorites alias `alias` that keeps the stars of
@@ -132,8 +141,11 @@ pub fn add<C: GenericClient>(
         }
     }
     c.execute(
-        "INSERT INTO favorites (kind, ref, user_id) VALUES ($1, $2, $3) \
-         ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING",
+        &format!(
+            "INSERT INTO favorites (kind, ref, user_id, created_at) VALUES ($1, $2, $3, {}) \
+             ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING",
+            star_time_sql(3)
+        ),
         &[&kind.as_str(), &r, &actor.user_id],
     )?;
     Ok(true)
@@ -157,7 +169,8 @@ pub fn remove<C: GenericClient>(
     Ok(n > 0)
 }
 
-/// The favorites of `actor`, newest first. `kind` filters on the item kind
+/// The favorites of `actor`, newest first: by time in local mode, by id for
+/// an account's stars, which have no time. `kind` filters on the item kind
 /// when given. A memory star is listed only while `actor` sees the note.
 pub fn list<C: GenericClient>(
     c: &mut C,
@@ -176,7 +189,7 @@ pub fn list<C: GenericClient>(
                  WHEN f.kind = 'memory' AND f.ref ~ '^[0-9]{{1,18}}$' THEN f.ref::bigint END \
              WHERE ($1::text IS NULL OR f.kind = $1) AND {mine} \
                AND (f.kind <> 'memory' OR {seen}) \
-             ORDER BY f.created_at DESC"
+             ORDER BY f.created_at DESC NULLS LAST, f.id DESC"
         ),
         &params,
     )?;
@@ -185,7 +198,9 @@ pub fn list<C: GenericClient>(
         .map(|r| Favorite {
             kind: r.get(0),
             ref_: r.get(1),
-            created_at: r.get::<_, chrono::DateTime<chrono::Utc>>(2).to_rfc3339(),
+            created_at: r
+                .get::<_, Option<chrono::DateTime<chrono::Utc>>>(2)
+                .map(|at| at.to_rfc3339()),
         })
         .collect())
 }

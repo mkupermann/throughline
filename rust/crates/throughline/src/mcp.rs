@@ -189,13 +189,15 @@ fn internal(actor: &Actor, e: impl Into<anyhow::Error>) -> Value {
     json!({ "code": -32000, "message": "query_failed" })
 }
 
-/// The tool list for this caller. `write` offers `visibility` only to an
-/// account: without one (local mode, the shared agent key) a note is always
-/// shared, and the list stays as it was before team mode.
+/// The tool list for this caller. The write tools are left out on a
+/// read-only server and for a caller below `editor`, who could not call
+/// them. `write` offers `visibility` only to an account: without one (local
+/// mode) a note is always shared, and the list stays as it was before team
+/// mode.
 fn tools_list_for(read_only: bool, actor: &Actor) -> Value {
     let mut list = tools_list();
     if let Some(tools) = list["tools"].as_array_mut() {
-        if read_only {
+        if read_only || actor.role < Role::Editor {
             tools.retain(|t| !t["name"].as_str().is_some_and(|n| WRITE_TOOLS.contains(&n)));
         }
         if actor.user_id.is_some() {
@@ -411,8 +413,8 @@ fn call_tool<C: GenericClient>(
             let limit = args.get("limit").and_then(|l| l.as_i64()).unwrap_or(10) as i32;
             let project = optional_str(&args, "project", "project must be a string")?
                 .filter(|p| !p.is_empty());
-            let hits =
-                search::search(client, query, limit, project).map_err(|e| internal(actor, e))?;
+            let hits = search::search(client, actor, query, limit, project)
+                .map_err(|e| internal(actor, e))?;
             let payload = serde_json::to_string(
                 &hits
                     .iter()
@@ -2567,23 +2569,41 @@ mod tests {
                 .expect("write tool")["inputSchema"]["properties"]
                 .clone()
         };
-        // Without an account the list is the one from before team mode.
-        for actor in [Actor::local(), Actor::shared_only()] {
-            assert_eq!(tools_list_for(false, &actor), tools_list());
-            assert!(write_props(&actor).get("visibility").is_none());
-        }
+        // Local mode: the list from before team mode.
+        assert_eq!(tools_list_for(false, &Actor::local()), tools_list());
+        assert!(write_props(&Actor::local()).get("visibility").is_none());
         let user = Actor::for_user(3, "a", Role::Editor);
         assert_eq!(
             write_props(&user)["visibility"]["enum"],
             json!(["shared", "private"])
         );
-        // Read-only still hides the write tools for accounts.
-        let ro = tools_list_for(true, &user);
-        assert!(ro["tools"]
-            .as_array()
-            .unwrap()
+        let names = |list: &Value| -> Vec<String> {
+            list["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let all = names(&tools_list());
+        let reads: Vec<String> = all
             .iter()
-            .all(|t| t["name"] != "write"));
+            .filter(|n| !WRITE_TOOLS.contains(&n.as_str()))
+            .cloned()
+            .collect();
+        assert_eq!(reads.len() + WRITE_TOOLS.len(), all.len());
+        // A viewer (and a job) sees no tool it could not call; an editor and
+        // an admin see all of them.
+        let viewer = Actor::for_user(4, "v", Role::Viewer);
+        for actor in [&viewer, &Actor::shared_only()] {
+            assert_eq!(names(&tools_list_for(false, actor)), reads);
+        }
+        for role in [Role::Editor, Role::Admin] {
+            let actor = Actor::for_user(5, "e", role);
+            assert_eq!(names(&tools_list_for(false, &actor)), all, "{role:?}");
+        }
+        // Read-only still hides the write tools for accounts.
+        assert_eq!(names(&tools_list_for(true, &user)), reads);
     }
 
     /// `write`, `forget`, `supersede` and `keep` need `editor`: a viewer and

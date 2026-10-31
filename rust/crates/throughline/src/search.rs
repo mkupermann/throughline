@@ -58,8 +58,11 @@ pub fn blended_score(base: f32, kind: &str, created_at: DateTime<Utc>) -> f32 {
 
 /// ILIKE ranking over message text. With a project, only that project's
 /// conversations are searched and configs (which carry no project) are left out.
+/// Configs also stay out for an actor below `admin` (team mode, see
+/// [`Actor::sees_assistant_configs`]).
 pub fn search<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     query: &str,
     limit: i32,
     project: Option<&str>,
@@ -104,7 +107,7 @@ pub fn search<C: GenericClient>(
             }
         })
         .collect();
-    if project.is_some() {
+    if project.is_some() || !actor.sees_assistant_configs() {
         return Ok(hits);
     }
     let rows = client.query(
@@ -203,7 +206,7 @@ pub fn hybrid<C: GenericClient>(
             }
         }
     }
-    let mut lex = search(client, query, limit, None)?;
+    let mut lex = search(client, actor, query, limit, None)?;
     hits.append(&mut lex);
     // Durable notes (agent memory, project instructions) are first-class hits —
     // otherwise Find never surfaces MiMo/agent memory in the GUI.
@@ -224,7 +227,8 @@ pub fn hybrid<C: GenericClient>(
     Ok(hits)
 }
 
-/// Lexical hits from `memory_chunks` and indexed instruction files.
+/// Lexical hits from `memory_chunks` and indexed instruction files, and
+/// imported configs for an actor who may see them.
 pub(crate) fn memory_hits<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
@@ -293,6 +297,9 @@ pub(crate) fn memory_hits<C: GenericClient>(
             kind: "instruction",
         }));
     }
+    if !actor.sees_assistant_configs() {
+        return Ok(hits);
+    }
     if let Ok(rows) = client.query(
         r#"
         SELECT id, name, kind, left(content, 240), imported_at
@@ -359,7 +366,7 @@ pub fn search_from<C: GenericClient>(
     source: SearchSource,
 ) -> Result<Vec<SearchHit>> {
     if source == SearchSource::Messages {
-        return search(client, query, limit, None);
+        return search(client, actor, query, limit, None);
     }
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let mut hits = Vec::new();
@@ -411,7 +418,7 @@ pub fn search_from<C: GenericClient>(
         }));
     }
     if source == SearchSource::All {
-        hits.extend(search(client, query, limit, None)?);
+        hits.extend(search(client, actor, query, limit, None)?);
         // Project instruction files (AGENTS.md, CLAUDE.md, …) live in prompts.
         let rows = client.query(
             r#"
@@ -438,28 +445,30 @@ pub fn search_from<C: GenericClient>(
                 kind: "instruction",
             }
         }));
-        if let Ok(rows) = client.query(
-            r#"
-            SELECT id, name, kind, left(content, 240), imported_at
-            FROM assistant_configs
-            WHERE present AND (content ILIKE $1 OR name ILIKE $1 OR path ILIKE $1)
-            ORDER BY imported_at DESC
-            LIMIT $2::bigint
-            "#,
-            &[&like, &(limit as i64)],
-        ) {
-            hits.extend(rows.into_iter().map(|r| SearchHit {
-                message_id: Some(r.get(0)),
-                conversation_id: 0,
-                session_id: uuid::Uuid::nil(),
-                project_name: Some(r.get(1)),
-                source_tool: Some(r.get(2)),
-                role: "config".into(),
-                snippet: r.get(3),
-                created_at: r.get(4),
-                score: 0.85,
-                kind: "config",
-            }));
+        if actor.sees_assistant_configs() {
+            if let Ok(rows) = client.query(
+                r#"
+                SELECT id, name, kind, left(content, 240), imported_at
+                FROM assistant_configs
+                WHERE present AND (content ILIKE $1 OR name ILIKE $1 OR path ILIKE $1)
+                ORDER BY imported_at DESC
+                LIMIT $2::bigint
+                "#,
+                &[&like, &(limit as i64)],
+            ) {
+                hits.extend(rows.into_iter().map(|r| SearchHit {
+                    message_id: Some(r.get(0)),
+                    conversation_id: 0,
+                    session_id: uuid::Uuid::nil(),
+                    project_name: Some(r.get(1)),
+                    source_tool: Some(r.get(2)),
+                    role: "config".into(),
+                    snippet: r.get(3),
+                    created_at: r.get(4),
+                    score: 0.85,
+                    kind: "config",
+                }));
+            }
         }
     }
     // Sort by blended score (memory > instructions > messages), then recency.
