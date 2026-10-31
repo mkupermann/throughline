@@ -1,5 +1,5 @@
 import { join, send } from "./apiClient";
-import { NO_MCP_ENDPOINT, ThroughlineError } from "./errors";
+import { NO_MCP_ENDPOINT, ThroughlineError, redact } from "./errors";
 
 const PROTOCOL_VERSION = "2026-07-28";
 export const CLIENT_NAME = "throughline-vscode";
@@ -8,14 +8,6 @@ export const CLIENT_VERSION = "0.1.0";
 interface RpcError {
   code?: number;
   message?: string;
-}
-
-/** The same error with every occurrence of the key replaced by ***, so no message can leak it. */
-function redact(e: unknown, key: string): unknown {
-  const clean = (s: string) => s.split(key).join("***");
-  if (e instanceof ThroughlineError) return new ThroughlineError(e.kind, clean(e.message), clean(e.detail));
-  if (e instanceof Error) return new Error(clean(e.message));
-  return new Error(clean(String(e)));
 }
 
 export class McpClient {

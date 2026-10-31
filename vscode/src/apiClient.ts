@@ -1,4 +1,4 @@
-import { ThroughlineError } from "./errors";
+import { ThroughlineError, redact } from "./errors";
 
 export interface Why {
   cosine?: number | null;
@@ -132,7 +132,10 @@ export async function send(url: string, init: RequestInit): Promise<Response> {
 }
 
 export class ApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly key?: () => Promise<string | undefined>,
+  ) {}
 
   recall(q: string, opts: RecallOptions = {}): Promise<RecallResult> {
     const p = new URLSearchParams({ q });
@@ -162,11 +165,26 @@ export class ApiClient {
   }
 
   private async get<T>(pathAndQuery: string): Promise<T> {
-    // No Authorization header: reading through /api is display, not agent use.
-    const res = await send(join(this.baseUrl, pathAndQuery), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
+    const url = join(this.baseUrl, pathAndQuery);
+    const headers: Record<string, string> = { Accept: "application/json" };
+    // The first call carries no key: a local server needs none. Only a 401 triggers one retry with the key.
+    let res = await send(url, { method: "GET", headers });
+    let key: string | undefined;
+    if (res.status === 401 && this.key) {
+      key = (await this.key())?.trim() || undefined;
+      if (key) {
+        await res.text();
+        res = await send(url, { method: "GET", headers: { ...headers, Authorization: `Bearer ${key}` } });
+      }
+    }
+    try {
+      return await this.read<T>(res);
+    } catch (e) {
+      throw key ? redact(e, key) : e;
+    }
+  }
+
+  private async read<T>(res: Response): Promise<T> {
     const text = await res.text();
     if (!res.ok) {
       let detail = text.slice(0, 300);
@@ -175,6 +193,9 @@ export class ApiClient {
         detail = [j.error, j.detail].filter(Boolean).join(": ") || detail;
       } catch {
         /* keep the raw text */
+      }
+      if (res.status === 401) {
+        throw new ThroughlineError("unauthorized", 'Sign-in required. Run "Throughline: Set Agent Key" with the key of your account.', detail);
       }
       const kind = res.status === 403 ? "forbidden" : res.status === 400 || res.status === 422 ? "invalid" : "server";
       throw new ThroughlineError(kind, `Throughline answered ${res.status}`, detail);

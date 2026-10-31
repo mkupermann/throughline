@@ -62,6 +62,12 @@ The status bar item sits at the bottom right. It shows `Throughline: <project> Â
 
 `cline.addToChat` and `continue.focusContinueInputWithoutClear` are not documented by Cline or Continue and may change. That is why the clipboard copy always comes first. The extension writes nothing into the configuration of Cline or Continue and puts no key there.
 
+## Team mode
+
+When the server runs in team mode, every `/api` route needs a signed-in account. Run `Throughline: Set Agent Key` and enter the key of your account. The extension first calls without a key; if the server answers 401, it repeats the call once with `Authorization: Bearer <key>`. A second 401 shows a message that names the command. Without a stored key, the 401 is shown as it is.
+
+In team mode, recall and context calls from the extension count as agent use. Local mode is unchanged.
+
 ## What it does not do
 
 - No marketplace release. The package is a local VSIX.
