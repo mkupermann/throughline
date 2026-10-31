@@ -157,7 +157,7 @@ fn keep_an_admin<C: GenericClient>(client: &mut C, id: i64, username: &str) -> R
 }
 
 fn end_sessions<C: GenericClient>(client: &mut C, id: i64) -> Result<u64> {
-    Ok(client.execute("DELETE FROM access_sessions WHERE user_id = $1", &[&id])?)
+    access::end_all_sessions(client, id)
 }
 
 /// Sets the role and ends the account's sessions; returns how many ended.

@@ -151,6 +151,8 @@ mod tests {
                 agent_key: Arc::new(key),
                 mcp_read_only: false,
                 auth_mode: crate::access::AuthMode::Local,
+                public_url: None,
+                login: Default::default(),
             };
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             let listener = rt

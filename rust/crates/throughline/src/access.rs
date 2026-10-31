@@ -3,7 +3,8 @@
 //!
 //! `local` (the default) is the single-user behaviour: no login, every note
 //! visible. `team` needs accounts. Notes are `shared` or `private` to their
-//! owner, and server-wide jobs run as [`Actor::shared_only`].
+//! owner, and server-wide jobs run as [`Actor::shared_only`]. Sessions and
+//! the failed sign-in counts live here too; their routes are in `server`.
 
 use anyhow::{bail, Context, Result};
 use postgres::GenericClient;
@@ -162,15 +163,10 @@ fn counts<C: GenericClient>(client: &mut C) -> Result<(i64, i64)> {
 
 /// `https`, or `http` on a loopback host (`localhost`, `127.0.0.0/8`, `::1`).
 fn team_url_ok(url: &str) -> bool {
-    let Some((scheme, rest)) = url.trim().split_once("://") else {
+    let Some((scheme, _)) = url.trim().split_once("://") else {
         return false;
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    // `http://localhost@evil.example.com` goes to evil.example.com.
-    let authority = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    let host = crate::server::host_of(authority);
+    let host = crate::server::url_host(url);
     if host.is_empty() {
         return false;
     }
@@ -274,7 +270,7 @@ const LEGACY_COST: Cost = Cost {
 };
 
 /// Passwords have 15 to 128 characters, as in the Python era.
-fn password_length_ok(password: &str) -> bool {
+pub fn password_length_ok(password: &str) -> bool {
     (15..=128).contains(&password.chars().count())
 }
 
@@ -418,10 +414,205 @@ pub fn attempt_key(username: &str) -> String {
     token_hash(&format!("account:{username}"))
 }
 
+/// Whether `encoded` is a Python-era hash (`scrypt$salt$digest`), which a
+/// successful sign-in replaces with the current format.
+pub fn is_legacy_hash(encoded: &str) -> bool {
+    encoded.starts_with("scrypt$")
+}
+
+/// Whether two secrets are equal, compared over their SHA-256 digests so
+/// the time taken does not depend on where they differ.
+pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    let (a, b) = (Sha256::digest(a), Sha256::digest(b));
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |diff, (x, y)| diff | (x ^ y))
+        == 0
+}
+
+/// The session cookie. Its value is the session token.
+pub const SESSION_COOKIE: &str = "throughline_session";
+/// A session lasts seven days from sign-in; the cookie's Max-Age says the same.
+pub const SESSION_SECONDS: i64 = 7 * 24 * 60 * 60;
+/// Failed sign-ins an account may have within 15 minutes.
+const MAX_FAILURES: i32 = 10;
+
+/// 32 random bytes as 64 hex digits: SHA-256 over three random (v4) UUIDs
+/// (366 random bits), the source [`random_salt`] draws from.
+fn random_token() -> String {
+    let mut hasher = Sha256::new();
+    for _ in 0..3 {
+        hasher.update(uuid::Uuid::new_v4().as_bytes());
+    }
+    to_hex(&hasher.finalize())
+}
+
+/// Whether `value` has the shape of a session token: 64 lower-case hex digits.
+pub fn is_session_token(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// A signed-in session, as handlers get it. No `Debug`: it carries the
+/// request token.
+#[derive(Clone)]
+pub struct Session {
+    pub actor: Actor,
+    pub display_name: String,
+    /// Writes send it back in `X-Throughline-Request-Token`.
+    pub request_token: String,
+    /// What `access_sessions` keeps of the cookie.
+    pub token_hash: String,
+}
+
+/// Opens a session for an enabled account: (token, request token, expiry).
+/// The database keeps the token's SHA-256 only; the request token is
+/// stored as is, because it is sent back to the browser on every `me`.
+pub fn new_session<C: GenericClient>(
+    client: &mut C,
+    user_id: i64,
+) -> Result<(String, String, chrono::DateTime<chrono::Utc>)> {
+    let token = random_token();
+    let request_token = random_token();
+    let row = client.query_opt(
+        "INSERT INTO access_sessions (token_hash, user_id, csrf_token, expires_at) \
+         SELECT $1, id, $3, now() + interval '7 days' FROM access_users \
+         WHERE id = $2 AND enabled \
+         RETURNING expires_at",
+        &[&token_hash(&token), &user_id, &request_token],
+    )?;
+    let Some(row) = row else {
+        bail!("no enabled account with id {user_id}");
+    };
+    Ok((token, request_token, row.get(0)))
+}
+
+/// The session behind a cookie value, or `None` for an unknown or expired
+/// token or a disabled account. An expired session is deleted here.
+pub fn session<C: GenericClient>(client: &mut C, token: &str) -> Result<Option<Session>> {
+    if !is_session_token(token) {
+        return Ok(None);
+    }
+    let hash = token_hash(token);
+    let Some(row) = client.query_opt(
+        "SELECT s.expires_at > now(), u.enabled, u.id, u.username, u.display_name, u.role, \
+                s.csrf_token \
+         FROM access_sessions s JOIN access_users u ON u.id = s.user_id \
+         WHERE s.token_hash = $1",
+        &[&hash],
+    )?
+    else {
+        return Ok(None);
+    };
+    if !row.get::<_, bool>(0) {
+        end_session(client, &hash)?;
+        return Ok(None);
+    }
+    if !row.get::<_, bool>(1) {
+        return Ok(None);
+    }
+    Ok(Some(Session {
+        actor: Actor {
+            user_id: Some(row.get(2)),
+            username: Some(row.get(3)),
+            role: Role::parse(row.get(5))?,
+            via: Via::Session,
+        },
+        display_name: row.get(4),
+        request_token: row.get(6),
+        token_hash: hash,
+    }))
+}
+
+/// [`session`]'s actor.
+pub fn session_actor<C: GenericClient>(client: &mut C, token: &str) -> Result<Option<Actor>> {
+    Ok(session(client, token)?.map(|s| s.actor))
+}
+
+/// Ends one session (sign-out); returns how many rows went.
+pub fn end_session<C: GenericClient>(client: &mut C, token_hash: &str) -> Result<u64> {
+    Ok(client.execute(
+        "DELETE FROM access_sessions WHERE token_hash = $1",
+        &[&token_hash],
+    )?)
+}
+
+/// Ends every session of an account; returns how many ended.
+pub fn end_all_sessions<C: GenericClient>(client: &mut C, user_id: i64) -> Result<u64> {
+    Ok(client.execute(
+        "DELETE FROM access_sessions WHERE user_id = $1",
+        &[&user_id],
+    )?)
+}
+
+/// Deletes expired sessions and failure counts whose 15 minutes have
+/// passed. Runs at every sign-in, so neither table keeps what it no longer
+/// needs.
+pub fn sweep_expired<C: GenericClient>(client: &mut C) -> Result<()> {
+    client.batch_execute(
+        "DELETE FROM access_sessions WHERE expires_at <= now(); \
+         DELETE FROM access_attempts WHERE window_start <= now() - interval '15 minutes';",
+    )?;
+    Ok(())
+}
+
+/// Whether `username` may try a password: fewer than 10 failures in the
+/// last 15 minutes. A count whose window has passed is deleted first.
+pub fn login_allowed<C: GenericClient>(client: &mut C, username: &str) -> Result<bool> {
+    let key = attempt_key(username);
+    client.execute(
+        "DELETE FROM access_attempts \
+         WHERE key = $1 AND window_start <= now() - interval '15 minutes'",
+        &[&key],
+    )?;
+    let failures: i32 = client
+        .query_opt(
+            "SELECT attempts FROM access_attempts WHERE key = $1",
+            &[&key],
+        )?
+        .map_or(0, |row| row.get(0));
+    Ok(failures < MAX_FAILURES)
+}
+
+/// Counts a failed sign-in of an existing account. A name without an
+/// account leaves nothing behind. A count whose window has passed starts
+/// over.
+pub fn record_failure<C: GenericClient>(client: &mut C, username: &str) -> Result<()> {
+    client.execute(
+        "INSERT INTO access_attempts (key, attempts, window_start) \
+         SELECT $1, 1, now() WHERE EXISTS (SELECT 1 FROM access_users WHERE username = $2) \
+         ON CONFLICT (key) DO UPDATE SET \
+             attempts = CASE WHEN access_attempts.window_start <= now() - interval '15 minutes' \
+                        THEN 1 ELSE access_attempts.attempts + 1 END, \
+             window_start = CASE WHEN access_attempts.window_start <= now() - interval '15 minutes' \
+                            THEN now() ELSE access_attempts.window_start END",
+        &[&attempt_key(username), &username],
+    )?;
+    Ok(())
+}
+
+/// Forgets an account's failed sign-ins (after a successful one).
+pub fn clear_failures<C: GenericClient>(client: &mut C, username: &str) -> Result<()> {
+    client.execute(
+        "DELETE FROM access_attempts WHERE key = $1",
+        &[&attempt_key(username)],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 thread_local! {
     /// The cost of every scrypt run on this thread, for the timing-shape test.
     static DERIVATIONS: std::cell::RefCell<Vec<Cost>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// How many scrypt runs this thread made since the last call. The server's
+/// sign-in tests read it on the blocking thread that hashed.
+#[cfg(test)]
+pub(crate) fn take_derivations() -> usize {
+    DERIVATIONS.with(|d| std::mem::take(&mut *d.borrow_mut()).len())
 }
 
 #[cfg(test)]
