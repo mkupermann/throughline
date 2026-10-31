@@ -222,7 +222,7 @@ Replacing a forgotten note keeps it forgotten. It points at its successor and ge
 
 ## Recall: finding notes by meaning
 
-`recall` finds memory notes for a question and says why each one came up. By default it ranks by meaning: the cosine of the question's vector to each note's vector. Full text and a weighted ranking are there on request. `throughline embed` now embeds memory notes (every status except forgotten) before it turns to messages, so run it once after upgrading.
+`recall` finds memory notes for a question and says why each one came up. By default it ranks by meaning: the cosine of the question's vector to each note's vector. Full text and a weighted ranking are there on request. A note gets its vector right after it is written: a pin, a write over HTTP or MCP, a replacement, a merge, a kept note, an extracted or imported note. That waits at most 3 seconds for Ollama, and a failure never fails the write. `throughline embed` fills in what this misses: notes from before, notes written while Ollama was down, and every note after a switch of the embedding model. It embeds memory notes (every status except forgotten) before it turns to messages, so run it regularly, for example hourly.
 
 ```bash
 throughline recall "how do we deploy" --project demo --mode current --limit 5
@@ -235,7 +235,9 @@ Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The oth
 
 Cosine has been the default since 2026-10-31. Before that, full text was the default, because the first measurement (below) did not show the gain for the weighted ranking that the bar set beforehand asked for, and that bar came with the rule that the simpler alternative then becomes the default. The second measurement on 74 questions found the right note far more often by cosine than by full text, and by the same rule the default moved to the method with the most hits. Full text means `ts_rank` of the question's words, joined by OR: notes that share words come first, the others follow by id. Pass `rank=fulltext` (CLI `--rank fulltext`) for the old default, or `rank=weighted` to rank by the weighted sum. Either way, `why` lists the weighted parts, and `why.fulltext` holds the `ts_rank` when full text ranked the hits.
 
-`rank=cosine` (CLI `--rank cosine`) orders the notes by the cosine of the question's vector to the note's vector and by nothing else: no shared words, no recency, no reliability. The score is that cosine, also in `why.cosine`. A note without a vector scores 0, so it comes after every note with a positive cosine. If the question gets no vector, because Ollama is not reachable, the embedding model is missing or the embedding call fails, cosine ranks by full text instead: the answer is still HTTP 200, says `"degraded": "no_embeddings"`, and `why.fulltext` holds the score that ranked each hit.
+`rank=cosine` (CLI `--rank cosine`) orders the notes by the cosine of the question's vector to the note's vector and by nothing else: no shared words, no recency, no reliability. The score is that cosine, also in `why.cosine`. A note without a vector yet scores its full-text rank divided by the best full-text rank among the candidates, so a fresh note that holds every word of the question still comes first; its `why.fulltext` holds the raw rank, and the answer says `"degraded": "<n> notes without a vector"`. If the question gets no vector, because Ollama is not reachable, the embedding model is missing or the embedding call fails, cosine ranks by full text instead: the answer is still HTTP 200, says `"degraded": "no_embeddings"`, and `why.fulltext` holds the score that ranked each hit.
+
+When a request names no rank, the default waits at most 3 seconds for the question's vector. After a failure or a timeout it answers by full text, with `degraded`, for the next 60 seconds without asking Ollama again. A named rank, `rank=cosine` included, waits as long as it takes (up to a minute) and has no such pause. HTTP and MCP over HTTP embed the question before they take the database, so a slow Ollama does not hold up other requests. The default applies to every mode, so `as_of`, `associative` and `grounded` without a rank also order by cosine; only `current` was measured. With a cloud embedding model and `THROUGHLINE_ALLOW_REMOTE_LLM` unset, the default recall and every context pack with a task now answer 403 `remote_llm_not_allowed` (over MCP error -32000), where full text answered before; name `rank=fulltext` to avoid the model.
 
 The four modes differ in what they admit and how they rank:
 
@@ -246,11 +248,11 @@ The four modes differ in what they admit and how they rank:
 
 Each hit carries `source_at`, the date of its source: the source date of the first note in its chain, else the start of its conversation. The CLI prints it after the session title.
 
-Without Ollama no vector exists for the question. Full text in `current` does not need one and answers normally. Cosine falls back to full text, the weighted ranking, `as_of` and `grounded` rank by words only, and all of them answer with `"degraded": "no_embeddings"`. In the memory view, "By meaning" uses the default ranking and shows a notice that it ranked by words.
+Without Ollama no vector exists for the question. Full text in `current` does not need one and answers normally. Cosine and the weighted ranking fall back to full text, `as_of` and `grounded` rank by words only, and all of them answer with `"degraded": "no_embeddings"`. In the memory view, "By meaning" uses the default ranking and shows a notice that it ranked by words.
 
 ### Measuring recall
 
-`throughline recall-eval --set <file> --k 5 [--seed 7] [--json]` runs a set of questions with known answers through `current`, `weighted`, plain cosine, full text, phrase match and random, and reports hit@k and the mean reciprocal rank (MRR). `current` is the full-text rank through the recall path (the default until 2026-10-31), so it equals `fulltext` by construction; `weighted` is the weighted ranking, `cosine` the default rank. The set is a file you write from your own notes. Keep it outside the repository if the notes are private.
+`throughline recall-eval --set <file> --k 5 [--seed 7] [--json]` runs a set of questions with known answers through full text, the weighted ranking, plain cosine, phrase match and random, and reports hit@k and the mean reciprocal rank (MRR). `fulltext` and `weighted` go through the recall path itself. Until 2026-10-31 the output called the full-text rank `current` and listed a separately computed `fulltext` beside it, equal by construction; result files from before keep those labels. The set is a file you write from your own notes. Keep it outside the repository if the notes are private.
 
 A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5 with MRR 0.62, full text 66.7 % with MRR 0.53, cosine 63.3 % with MRR 0.57, random 3.3 %. So the weighted ranking did not beat plain full text on hits. It ranked the right note higher on average, but the bar set beforehand was five points over the better alternative, and that was not reached. Following the rule that came with the bar, full text became the default. Thirty questions from one corpus is a small sample.
 
@@ -330,14 +332,14 @@ throughline context --project demo --task "fix the login redirect" --budget 1200
 throughline context --project demo --json
 ```
 
-Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`. Over MCP, the `project_context` tool takes `project` (required), `task` and `budget`. The answer holds `text` (the briefing), `items` (each line with its section, token cost and citation), `citations`, `tokens_used`, `budget`, `within_budget`, `skipped` and `estimate`.
+Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`. Over MCP, the `project_context` tool takes `project` (required), `task` and `budget`. The answer holds `text` (the briefing), `items` (each line with its section, token cost and citation), `citations`, `tokens_used`, `budget`, `within_budget`, `skipped`, `estimate` and `degraded` (why "Relevant to the task" did not rank fully by meaning, as in `recall`; null otherwise).
 
 ### What goes in, and in which order
 
 Notes that hold now are used: not replaced, forgotten, merged or expired, from the project plus notes without a project. A project name that does not exist is not an error: the pack then holds the header and any notes without a project, not an empty pack. Sections appear in this order and only when they have a line.
 
 1. **Decisions**: current notes of the categories decision, preference and project_context, newest first; with a task, the ones that match it by full text come first, best match first. They come before everything else, so they are the last to be crowded out. Stale notes never appear here, only under Needs review.
-2. **Relevant to the task**: only with a task. Up to 20 notes ranked by the default rank, cosine, without the ones already shown and without notes that score 0 (no vector). Without Ollama it ranks by full text and leaves out notes that share no word with the task.
+2. **Relevant to the task**: only with a task. Up to 20 notes ranked by the default rank, cosine, without the ones already shown. A note counts only from the model's own match threshold on, the one `as_of` uses (0.5 for `nomic-embed-text`, 0.68 for granite), so a weak match does not use up the budget. Without Ollama it ranks by full text and leaves out notes that share no word with the task.
 3. **Recent sessions**: the 8 newest human sessions of the project (conversations generated by Throughline itself are left out).
 4. **Open questions**: up to 5 notes that contain a question mark, "todo" or "open".
 5. **Needs review**: up to 5 stale notes, or notes whose validity lapsed without a successor.

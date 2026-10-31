@@ -51,11 +51,12 @@ impl std::str::FromStr for RecallMode {
 pub enum Rank {
     /// `ts_rank` of the question words; the default before 2026-10-31.
     Fulltext,
-    /// The weighted sum of `WEIGHTS`.
+    /// The weighted sum of `WEIGHTS`; full text without a question vector.
     Weighted,
-    /// Cosine of the question's vector to the note's, nothing else; a note
-    /// without a vector scores 0. Without a question vector it ranks by full
-    /// text and the result says `degraded`.
+    /// Cosine of the question's vector to the note's. A note without a
+    /// vector yet scores its full-text rank over the best one of the
+    /// question, and the result says how many did. Without a question vector
+    /// it ranks by full text and the result says `degraded`.
     Cosine,
 }
 
@@ -153,6 +154,76 @@ pub fn query_embedding(text: &str) -> anyhow::Result<Option<QueryEmbedding>> {
     )
 }
 
+/// The question's vector for a request whose rank is `rank`; `None` means the
+/// caller named no rank, so [`DEFAULT_RANK`] applies. The default path waits
+/// at most [`crate::embedding::QUICK_EMBED_TIMEOUT`] and skips Ollama while
+/// `breaker` is open; an explicit rank keeps the long timeouts and ignores
+/// the breaker. A refusal by the remote-model lock is an error either way.
+pub fn question_vector(
+    text: &str,
+    mode: RecallMode,
+    rank: Option<Rank>,
+    breaker: &crate::embedding::EmbedBreaker,
+) -> anyhow::Result<Option<QueryEmbedding>> {
+    let owned = text.to_string();
+    question_vector_with(
+        mode,
+        rank,
+        breaker,
+        crate::embedding::now_ms(),
+        || {
+            crate::embedding::within(crate::embedding::QUICK_EMBED_TIMEOUT, move || {
+                query_embedding(&owned)
+            })
+        },
+        || query_embedding(text),
+    )
+}
+
+/// [`question_vector`] with the clock and both embedders passed in.
+pub(crate) fn question_vector_with(
+    mode: RecallMode,
+    rank: Option<Rank>,
+    breaker: &crate::embedding::EmbedBreaker,
+    now_ms: i64,
+    quick: impl FnOnce() -> anyhow::Result<Option<QueryEmbedding>>,
+    long: impl FnOnce() -> anyhow::Result<Option<QueryEmbedding>>,
+) -> anyhow::Result<Option<QueryEmbedding>> {
+    if !needs_embedding(mode, rank.unwrap_or(DEFAULT_RANK)) {
+        return Ok(None);
+    }
+    match rank {
+        Some(_) => long(),
+        None => default_query_embedding_with(breaker, now_ms, quick),
+    }
+}
+
+/// The default path: no call while `breaker` is open; a failure or a timeout
+/// opens it. Both answer `None`, so the ranking falls back to full text.
+pub(crate) fn default_query_embedding_with(
+    breaker: &crate::embedding::EmbedBreaker,
+    now_ms: i64,
+    embed: impl FnOnce() -> anyhow::Result<Option<QueryEmbedding>>,
+) -> anyhow::Result<Option<QueryEmbedding>> {
+    if breaker.is_open(now_ms) {
+        return Ok(None);
+    }
+    match embed() {
+        Ok(Some(e)) => Ok(Some(e)),
+        Err(e)
+            if e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+                .is_some() =>
+        {
+            Err(e)
+        }
+        // No Ollama, no model, an empty vector or no answer in time.
+        Ok(None) | Err(_) => {
+            breaker.trip(now_ms);
+            Ok(None)
+        }
+    }
+}
+
 /// [`query_embedding`] with resolve and embed passed in, so tests need no Ollama.
 pub fn query_embedding_with(
     resolve: impl FnOnce() -> anyhow::Result<crate::embedding::EmbeddingBackend>,
@@ -188,9 +259,34 @@ pub(crate) mod test_ollama {
     static LOCK: Mutex<()> = Mutex::new(());
 
     /// Runs `f` with `OLLAMA_HOST` on a local port nothing listens on, so
-    /// every embedding call fails as it does when Ollama is down. The old
-    /// value comes back afterwards, also when `f` panics.
+    /// every embedding call fails as it does when Ollama is down.
     pub(crate) fn unreachable<T>(f: impl FnOnce() -> T) -> T {
+        // Bound and dropped at once: the port is closed again.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .expect("free local port")
+            .port();
+        at(&format!("http://127.0.0.1:{port}"), f)
+    }
+
+    /// Runs `f` with `OLLAMA_HOST` on a local port that takes connections
+    /// and never answers, like an Ollama that hangs.
+    pub(crate) fn hanging<T>(f: impl FnOnce() -> T) -> T {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("free local port");
+        let port = listener.local_addr().expect("local addr").port();
+        // The thread keeps every connection open and outlives the test.
+        std::thread::spawn(move || {
+            let mut open = Vec::new();
+            for stream in listener.incoming().flatten() {
+                open.push(stream);
+            }
+        });
+        at(&format!("http://127.0.0.1:{port}"), f)
+    }
+
+    /// Runs `f` with `OLLAMA_HOST` set to `url`. The old value comes back
+    /// afterwards, also when `f` panics.
+    fn at<T>(url: &str, f: impl FnOnce() -> T) -> T {
         struct Restore(Option<String>);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -201,13 +297,8 @@ pub(crate) mod test_ollama {
             }
         }
         let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // Bound and dropped at once: the port is closed again.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .expect("free local port")
-            .port();
         let _restore = Restore(std::env::var("OLLAMA_HOST").ok());
-        std::env::set_var("OLLAMA_HOST", format!("http://127.0.0.1:{port}"));
+        std::env::set_var("OLLAMA_HOST", url);
         f()
     }
 }
@@ -582,31 +673,47 @@ enum Order {
     /// `ts_rank` per note id.
     Fulltext(HashMap<i64, f64>),
     Weighted,
-    Cosine,
+    /// Cosine; a note without a vector scores its `ts_rank` over `best`, the
+    /// highest `ts_rank` among the candidates.
+    Cosine {
+        words: HashMap<i64, f64>,
+        best: f64,
+    },
 }
 
-/// The order of `rank` for the notes `ids`. Cosine without a question vector
-/// orders by full text; the result reports that as degraded.
+/// The order of `rank` for `cands`. Cosine and weighted without a question
+/// vector order by full text; the result reports that as degraded.
 fn order_for<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     rank: Rank,
     has_embedding: bool,
     words: &[String],
-    ids: &[i64],
+    cands: &[Candidate],
 ) -> Result<Order> {
+    let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
     Ok(match rank {
-        Rank::Weighted => Order::Weighted,
-        Rank::Cosine if has_embedding => Order::Cosine,
-        Rank::Fulltext | Rank::Cosine => {
-            Order::Fulltext(fulltext_ranks(client, actor, words, ids)?)
+        Rank::Weighted if has_embedding => Order::Weighted,
+        Rank::Cosine if has_embedding => {
+            // Only when a note lacks a vector are the words needed at all.
+            let words = if cands.iter().any(|c| c.cosine.is_none()) {
+                fulltext_ranks(client, actor, words, &ids)?
+            } else {
+                HashMap::new()
+            };
+            let best = words.values().copied().fold(0.0, f64::max);
+            Order::Cosine { words, best }
+        }
+        Rank::Fulltext | Rank::Weighted | Rank::Cosine => {
+            Order::Fulltext(fulltext_ranks(client, actor, words, &ids)?)
         }
     })
 }
 
 /// Score of one candidate by the order: its `ts_rank` (0 without a match),
-/// the weighted score or its cosine (0 without a vector). The weighted parts
-/// stay in `Why` either way.
+/// the weighted score, or its cosine; under cosine a note without a vector
+/// scores its `ts_rank` over the best one (0 without a match). The weighted
+/// parts stay in `Why` either way.
 fn rank_score(
     c: &Candidate,
     words: &[String],
@@ -623,7 +730,15 @@ fn rank_score(
             (r, why)
         }
         Order::Weighted => (weighted, why),
-        Order::Cosine => (why.cosine.unwrap_or(0.0), why),
+        Order::Cosine { words, best } => match c.cosine {
+            Some(cos) => (cos, why),
+            None => {
+                let r = words.get(&c.id).copied().unwrap_or(0.0);
+                why.cosine = None;
+                why.fulltext = Some(r);
+                (if *best > 0.0 { r / best } else { 0.0 }, why)
+            }
+        },
     }
 }
 
@@ -731,8 +846,9 @@ fn associate<C: GenericClient>(
         let wanted: Vec<i64> = reached.keys().copied().collect();
         let mut next = HashMap::new();
         if !wanted.is_empty() {
-            let order = order_for(client, q.actor, q.rank, emb.is_some(), words, &wanted)?;
-            for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
+            let cands = load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)?;
+            let order = order_for(client, q.actor, q.rank, emb.is_some(), words, &cands)?;
+            for c in cands {
                 let (spread, rel) = reached[&c.id];
                 let (own, mut why) = rank_score(&c, words, emb.is_some(), now, weights, &order);
                 why.spread = Some(spread);
@@ -894,8 +1010,12 @@ pub(crate) fn recall_with<C: GenericClient>(
     };
     let words = query_words(q.text);
     let cands = candidates(client, filter, q, emb)?;
-    let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
-    let order = order_for(client, q.actor, q.rank, emb.is_some(), &words, &ids)?;
+    let order = order_for(client, q.actor, q.rank, emb.is_some(), &words, &cands)?;
+    // Under cosine, the notes that had to be ranked by their words.
+    let without_vector = match order {
+        Order::Cosine { .. } => cands.iter().filter(|c| c.cosine.is_none()).count(),
+        _ => 0,
+    };
     let mut scored: Vec<(f64, Why, Candidate)> = cands
         .into_iter()
         .map(|c| {
@@ -988,8 +1108,13 @@ pub(crate) fn recall_with<C: GenericClient>(
     Ok(RecallResult {
         mode: q.mode.as_str().to_string(),
         hits,
-        degraded: (needs_embedding(q.mode, q.rank) && emb.is_none())
-            .then(|| "no_embeddings".to_string()),
+        degraded: if needs_embedding(q.mode, q.rank) && emb.is_none() {
+            Some("no_embeddings".to_string())
+        } else if without_vector > 0 {
+            Some(format!("{without_vector} notes without a vector"))
+        } else {
+            None
+        },
     })
 }
 
@@ -1371,6 +1496,13 @@ mod tests {
             );
             // The offline ranking must not depend on the dump's order.
             parts.reverse();
+            if e.is_none() {
+                // Without a question vector `weighted` ranks by full text.
+                let r = recall_with(&mut tx, &q, e, &WEIGHTS, now).unwrap();
+                assert_eq!(r.degraded.as_deref(), Some("no_embeddings"));
+                assert!(r.hits.iter().all(|h| h.why.fulltext == Some(h.score)));
+                continue;
+            }
             for w in [&WEIGHTS, &other] {
                 let hits: Vec<i64> = recall_with(&mut tx, &q, e, w, now)
                     .unwrap()
@@ -1592,14 +1724,10 @@ mod tests {
         assert_eq!(r.degraded.as_deref(), Some("no_embeddings"));
         let h = &r.hits[position(&r, id).unwrap()];
         assert_eq!(h.why.cosine, None);
-        let w = &WEIGHTS;
-        let sum = (w.lexical * h.why.lexical
-            + w.recency * h.why.recency
-            + w.reliability * h.why.reliability
-            + w.strength * h.why.strength
-            + w.provenance * h.why.provenance)
-            / (1.0 - w.cosine);
-        assert!((h.score - sum).abs() < 1e-9);
+        // Without a question vector the weighted ranking falls back to full
+        // text, as cosine does.
+        assert!(h.score > 0.0);
+        assert_eq!(h.why.fulltext, Some(h.score));
     }
 
     #[test]
@@ -2116,14 +2244,8 @@ mod tests {
         assert_eq!(hn.relation.as_deref(), Some("same_conversation"));
         let spread = hn.why.spread.unwrap();
         assert!((spread - hs.score * 0.8).abs() < 1e-9);
-        // own score: no embedding, so the cosine share is scaled away
-        let w = &WEIGHTS;
-        let own = (w.lexical * hn.why.lexical
-            + w.recency * hn.why.recency
-            + w.reliability * hn.why.reliability
-            + w.strength * hn.why.strength
-            + w.provenance * hn.why.provenance)
-            / (1.0 - w.cosine);
+        // own score: no embedding, so weighted ranks by full text
+        let own = hn.why.fulltext.expect("full-text score");
         assert!(own > spread, "own {own} must beat spread {spread}");
         assert!((hn.score - own).abs() < 1e-9);
     }
@@ -2543,7 +2665,8 @@ mod tests {
         let project = format!("p-{tag}");
         let model = model_name();
         // `far` shares every question word, `near` only the tag but has the
-        // closer vector; `bare` has no vector at all.
+        // closer vector; `bare` has an orthogonal one. (A note without a
+        // vector: `cosine_rank_scores_vectorless_notes_by_words_and_says_so`.)
         let text = format!("kafka retention backlog {tag}");
         let (cf, cn, cb) = (
             format!("kafka retention backlog {tag} far"),
@@ -2559,6 +2682,7 @@ mod tests {
         let (far, near, bare) = (seed(&mut tx, &sf), seed(&mut tx, &sn), seed(&mut tx, &sb));
         embed(&mut tx, far, &model, &vec768(&[0.2, 0.98]));
         embed(&mut tx, near, &model, &vec768(&[0.95, 0.31]));
+        embed(&mut tx, bare, &model, &vec768(&[0.0, 1.0]));
         let emb = query_embedding(&model);
         let mut q = query(&text, Some(&project));
         q.rank = Rank::Cosine;
@@ -2584,6 +2708,118 @@ mod tests {
         q.rank = Rank::Fulltext;
         let r = recall(&mut tx, &q, Some(&emb)).unwrap();
         assert!(position(&r, far) < position(&r, near));
+    }
+
+    #[test]
+    fn cosine_rank_scores_vectorless_notes_by_words_and_says_so() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping cosine_rank_scores_vectorless_notes_by_words_and_says_so: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        // `fresh` and `half` have no vector yet; `fresh` holds every question
+        // word, `half` two of them. `near` and `far` have vectors.
+        let text = format!("kafka retention backlog {tag}");
+        let contents = [
+            format!("kafka retention backlog {tag} fresh"),
+            format!("kafka {tag} half"),
+            format!("{tag} near"),
+            format!("{tag} far"),
+        ];
+        let ids: Vec<i64> = contents
+            .iter()
+            .map(|c| {
+                let mut s = Seed::new(c, long_ago());
+                s.project = Some(&project);
+                seed(&mut tx, &s)
+            })
+            .collect();
+        let (fresh, half, near, far) = (ids[0], ids[1], ids[2], ids[3]);
+        embed(&mut tx, near, &model, &vec768(&[0.95, 0.31]));
+        embed(&mut tx, far, &model, &vec768(&[0.2, 0.98]));
+        let emb = query_embedding(&model);
+        let mut q = query(&text, Some(&project));
+        q.rank = Rank::Cosine;
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
+        assert_eq!(r.degraded.as_deref(), Some("2 notes without a vector"));
+        let hit = |id: i64| &r.hits[position(&r, id).unwrap()];
+        // A note without a vector scores its full-text rank over the best one.
+        let best = hit(fresh).why.fulltext.unwrap();
+        assert!(best > 0.0);
+        assert_eq!(hit(fresh).score, 1.0);
+        assert_eq!(hit(fresh).why.cosine, None);
+        let part = hit(half).why.fulltext.unwrap();
+        assert!(part > 0.0 && part < best, "{part} vs {best}");
+        assert!((hit(half).score - part / best).abs() < 1e-12);
+        // Notes with a vector keep their cosine.
+        assert_eq!(Some(hit(near).score), hit(near).why.cosine);
+        assert!(position(&r, fresh) < position(&r, near));
+        assert!(position(&r, near) < position(&r, far));
+        // Every candidate with a vector: nothing to report.
+        embed(&mut tx, fresh, &model, &vec768(&[0.5, 0.5]));
+        embed(&mut tx, half, &model, &vec768(&[0.1, 0.9]));
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
+        assert_eq!(r.degraded, None);
+    }
+
+    #[test]
+    fn default_rank_breaker_skips_ollama_for_60s_after_a_failure() {
+        use crate::embedding::{EmbedBreaker, BREAKER_WINDOW_MS};
+        use std::cell::Cell;
+        let breaker = EmbedBreaker::new();
+        let calls = Cell::new(0);
+        let t0 = 1_000_000_000;
+        let failing = || -> Result<Option<QueryEmbedding>> {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        };
+        let working = || -> Result<Option<QueryEmbedding>> {
+            calls.set(calls.get() + 1);
+            Ok(Some(query_embedding("m")))
+        };
+        let ask = |now: i64, quick: &dyn Fn() -> Result<Option<QueryEmbedding>>| {
+            question_vector_with(RecallMode::Current, None, &breaker, now, quick, || {
+                panic!("the default rank never takes the long path")
+            })
+            .unwrap()
+        };
+        assert!(ask(t0, &failing).is_none());
+        assert_eq!(calls.get(), 1);
+        // Inside the minute Ollama is not asked again.
+        assert!(ask(t0 + BREAKER_WINDOW_MS - 1, &working).is_none());
+        assert_eq!(calls.get(), 1);
+        // An explicit rank ignores the breaker and takes the long path.
+        let long = question_vector_with(
+            RecallMode::Current,
+            Some(Rank::Cosine),
+            &breaker,
+            t0 + 1,
+            || panic!("an explicit rank never takes the quick path"),
+            || Ok(Some(query_embedding("m"))),
+        )
+        .unwrap();
+        assert!(long.is_some());
+        // After the minute it asks again.
+        assert!(ask(t0 + BREAKER_WINDOW_MS, &working).is_some());
+        assert_eq!(calls.get(), 2);
+        // A timeout counts as a failure; a refusal stays an error and does not trip.
+        let timed_out = EmbedBreaker::new();
+        let r = default_query_embedding_with(&timed_out, t0, || {
+            Err(anyhow::anyhow!("no answer within 3000 ms"))
+        });
+        assert!(matches!(r, Ok(None)));
+        assert!(timed_out.is_open(t0 + 1));
+        let refused = EmbedBreaker::new();
+        let r = default_query_embedding_with(&refused, t0, || {
+            Err(anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+                label: "ollama/x".into(),
+            }))
+        });
+        assert!(r.is_err());
+        assert!(!refused.is_open(t0 + 1));
     }
 
     #[test]
@@ -2700,16 +2936,15 @@ mod tests {
             })
             .collect();
         let text = format!("zebra kiwi {tag}");
-        for rank in [Rank::Fulltext, Rank::Weighted] {
+        // Without a vector every rank falls back to full text.
+        for rank in [Rank::Fulltext, Rank::Weighted, Rank::Cosine] {
             let mut q = query(&text, Some(&project));
             q.mode = RecallMode::AsOf;
             q.valid_at = Some(at(2026, 6, 1));
             q.known_at = Some(Utc::now());
             q.limit = 2;
             q.rank = rank;
-            // Without a vector the calibrated weights keep only reliability,
-            // equal here; the weights before still count the shared words.
-            let r = recall_with(&mut tx, &q, None, &WEIGHTS_BEFORE_2026_10_31, Utc::now()).unwrap();
+            let r = recall(&mut tx, &q, None).unwrap();
             let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
             assert_eq!(got, vec![ids[4], ids[3]], "{rank:?}");
         }

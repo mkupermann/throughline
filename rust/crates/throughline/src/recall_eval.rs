@@ -2,9 +2,10 @@
 //!
 //! Every method ranks the same candidates as `recall` in mode `current`
 //! (except `phrase`, today's whole-phrase search, which is context only).
-//! `current` is the full-text rank through `recall`, the default until
-//! 2026-10-31, so it equals `fulltext` by construction; `weighted` is the
-//! weighted ranking, `cosine` the default rank since then.
+//! `fulltext` and `weighted` go through `recall` itself; `fulltext` was
+//! labelled `current` until 2026-10-31, when it stopped being the default.
+//! `cosine` sorts the candidates by their cosine, as the default rank does
+//! for notes with a vector.
 
 use crate::access::Actor;
 use crate::recall::{self, Candidate, CandidateFilter, Rank, RecallMode, RecallQuery, Weights};
@@ -186,9 +187,7 @@ fn shuffle(ids: &mut [i64], rng: &mut Rng) {
     }
 }
 
-pub const METHODS: [&str; 6] = [
-    "current", "weighted", "cosine", "fulltext", "phrase", "random",
-];
+pub const METHODS: [&str; 5] = ["fulltext", "weighted", "cosine", "phrase", "random"];
 
 /// Ranks every case by each method. `weighted` uses `weights`; every
 /// question is scored at one `now`. With `parts`, the score parts of all
@@ -231,7 +230,7 @@ pub fn run_eval<C: GenericClient>(
                 .map(|h| h.id)
                 .collect())
         };
-        let current = ranked(&q)?;
+        let fulltext = ranked(&q)?;
         q.rank = Rank::Weighted;
         let weighted = ranked(&q)?;
         q.rank = Rank::Fulltext;
@@ -256,17 +255,6 @@ pub fn run_eval<C: GenericClient>(
         let cosine: Vec<i64> = by_cosine.into_iter().map(|c| c.0).collect();
 
         let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
-        let fulltext = {
-            let ranks =
-                recall::fulltext_ranks(client, &LOCAL, &recall::query_words(&case.q), &ids)?;
-            let mut scored: Vec<(i64, f64)> = ids
-                .iter()
-                .map(|id| (*id, ranks.get(id).copied().unwrap_or(0.0)))
-                .collect();
-            // ts_rank is 0 without a match; those rank after all matches.
-            scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-            scored.into_iter().map(|s| s.0).collect::<Vec<i64>>()
-        };
 
         let phrase: Vec<i64> = search::memory_hits(client, &LOCAL, &case.q, RANK_DEPTH as i32)?
             .iter()
@@ -277,7 +265,7 @@ pub fn run_eval<C: GenericClient>(
         random.sort_unstable();
         shuffle(&mut random, &mut rng);
 
-        let lists = [current, weighted, cosine, fulltext, phrase, random];
+        let lists = [fulltext, weighted, cosine, phrase, random];
         let mut ranks = std::collections::BTreeMap::new();
         for (i, list) in lists.iter().enumerate() {
             let r = rank_of(list, &case.expected);
@@ -342,9 +330,11 @@ mod tests {
 
     #[test]
     fn methods_keep_the_weighted_ranking() {
+        // `current` (full text through `recall`) is reported as `fulltext`
+        // since 2026-10-31; result files before that keep the old label.
         assert_eq!(
             METHODS,
-            ["current", "weighted", "cosine", "fulltext", "phrase", "random"]
+            ["fulltext", "weighted", "cosine", "phrase", "random"]
         );
     }
 

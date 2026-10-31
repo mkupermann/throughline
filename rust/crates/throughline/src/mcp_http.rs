@@ -5,7 +5,7 @@
 
 use crate::access::{Actor, AuthMode};
 use crate::agent_key::{check_bearer, KeyCheck};
-use crate::mcp::{dispatch, McpContext, Reply};
+use crate::mcp::{dispatch_with, McpContext, Reply};
 use crate::mcp_protocol::{classify_http, Transport, INVALID_REQUEST, PARSE_ERROR};
 use crate::server::{account_key_actor, api_error, unauthorized, with_db, AppState};
 use axum::body::Body;
@@ -105,8 +105,19 @@ pub async fn mcp_post(
         read_only: state.mcp_read_only,
         actor,
     };
-    // vereinfacht: Einbetten der Frage läuft unter der DB-Sperre, ausbauen wenn K7 reißt
-    match with_db(&state, move |client| Ok(dispatch(client, &msg, &ctx))).await {
+    // The question of `recall` or a context pack is embedded before the
+    // shared DB lock is taken: a slow Ollama must not stall other requests.
+    let breaker = state.embed_breaker.clone();
+    let probe = msg.clone();
+    let prepared =
+        tokio::task::spawn_blocking(move || crate::mcp::prepare_query_vector(&probe, &breaker))
+            .await
+            .unwrap_or(None);
+    match with_db(&state, move |client| {
+        Ok(dispatch_with(client, &msg, &ctx, prepared))
+    })
+    .await
+    {
         Ok(Reply {
             status,
             body: Some(body),
@@ -175,6 +186,7 @@ mod tests {
                 auth_mode: crate::access::AuthMode::Local,
                 public_url: None,
                 login: Default::default(),
+                embed_breaker: Default::default(),
             };
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             let listener = rt
@@ -469,6 +481,86 @@ mod tests {
         for name in ["recall", "project_context", "search"] {
             assert!(names.contains(&name), "{name} in {names:?}");
         }
+    }
+
+    /// Ollama takes the connection and never answers. The default rank must
+    /// wait for it outside the shared DB lock, give up after the quick
+    /// timeout, answer by full text with `degraded`, and then skip Ollama.
+    #[test]
+    fn default_rank_embeds_outside_the_db_lock() {
+        let Some(server) = TestServer::start(key_state_from(Some(KEY))) else {
+            eprintln!("skipping default_rank_embeds_outside_the_db_lock: no PostgreSQL reachable");
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let auth = bearer();
+        let recall = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "recall", "arguments": { "query": format!("wombat {tag}") } }
+        })
+        .to_string();
+        // (path, MCP body) of each entry point; the default rank on both.
+        let calls = [
+            (format!("/api/recall?q=wombat%20{tag}"), None),
+            ("/mcp".to_string(), Some(recall)),
+        ];
+        crate::recall::test_ollama::hanging(|| {
+            for (path, body) in calls {
+                server.state.embed_breaker.reset();
+                let url = format!("{}{path}", server.base);
+                let send = || {
+                    let (url, auth, body) = (url.clone(), auth.clone(), body.clone());
+                    async move {
+                        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+                        let req = match &body {
+                            Some(b) => client
+                                .post(&url)
+                                .header("accept", "application/json, text/event-stream")
+                                .header(LEGACY.0, LEGACY.1)
+                                .body(b.clone()),
+                            None => client.get(&url),
+                        };
+                        let resp = req.header("authorization", auth).send().await.unwrap();
+                        (resp.status().as_u16(), resp.text().await.unwrap())
+                    }
+                };
+                let start = std::time::Instant::now();
+                let pending = server.rt.spawn(send());
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                assert!(!pending.is_finished(), "{path}: still waiting for Ollama");
+                assert!(
+                    server.state.db.try_lock().is_ok(),
+                    "{path}: the DB lock is free while the question is embedded"
+                );
+                let (status, text) = server.rt.block_on(pending).unwrap();
+                let took = start.elapsed();
+                assert_eq!(status, 200, "{path}: {text}");
+                assert!(
+                    took < std::time::Duration::from_millis(4500),
+                    "{path}: {took:?}"
+                );
+                let degraded = |text: &str| -> Value {
+                    let v: Value = serde_json::from_str(text).unwrap();
+                    match v["result"]["content"][0]["text"].as_str() {
+                        Some(payload) => {
+                            serde_json::from_str::<Value>(payload).unwrap()["degraded"].clone()
+                        }
+                        None => v["degraded"].clone(),
+                    }
+                };
+                assert_eq!(degraded(&text), "no_embeddings", "{path}: {text}");
+                // The failure is remembered: the next call does not wait.
+                let start = std::time::Instant::now();
+                let (status, text) = server.rt.block_on(send());
+                assert_eq!(status, 200, "{path}: {text}");
+                assert_eq!(degraded(&text), "no_embeddings", "{path}: {text}");
+                assert!(
+                    start.elapsed() < std::time::Duration::from_millis(1000),
+                    "{path}: {:?}",
+                    start.elapsed()
+                );
+            }
+        });
     }
 
     #[test]

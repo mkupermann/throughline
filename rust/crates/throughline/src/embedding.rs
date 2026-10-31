@@ -21,6 +21,72 @@ where
     }
 }
 
+/// How long the default rank and a write wait for one embedding: the model
+/// list and the vector together. An explicit rank keeps the long timeouts.
+pub const QUICK_EMBED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How long a failed quick embedding keeps Ollama out of the quick paths.
+pub const BREAKER_WINDOW_MS: i64 = 60_000;
+
+/// `f` on its own thread, given up after `timeout`. The thread runs on to
+/// its own timeouts; its late result is dropped.
+pub fn within<T, F>(timeout: std::time::Duration, f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    let (send, recv) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(f());
+    });
+    match recv.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(_) => Err(anyhow!("no answer within {} ms", timeout.as_millis())),
+    }
+}
+
+/// Remembers when a quick embedding last failed. While that is less than
+/// [`BREAKER_WINDOW_MS`] ago, the quick paths skip Ollama: the default rank
+/// answers by full text with `degraded`, a write leaves the vector to the
+/// `embed` job.
+#[derive(Debug, Default)]
+pub struct EmbedBreaker {
+    /// Milliseconds since the epoch of the last failure; 0 = none.
+    failed_at_ms: std::sync::atomic::AtomicI64,
+}
+
+impl EmbedBreaker {
+    pub const fn new() -> Self {
+        EmbedBreaker {
+            failed_at_ms: std::sync::atomic::AtomicI64::new(0),
+        }
+    }
+
+    pub fn is_open(&self, now_ms: i64) -> bool {
+        let at = self.failed_at_ms.load(std::sync::atomic::Ordering::Relaxed);
+        at != 0 && now_ms - at < BREAKER_WINDOW_MS
+    }
+
+    pub fn trip(&self, now_ms: i64) {
+        self.failed_at_ms
+            .store(now_ms.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub fn reset(&self) {
+        self.failed_at_ms
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The breaker of this process for the paths without a server state: the
+/// CLI, MCP over stdio and the embedding of a note at write time.
+pub static BREAKER: EmbedBreaker = EmbedBreaker::new();
+
+pub fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 /// Model used when `OLLAMA_EMBED_MODEL` is not set. It stays the English-first
 /// model so an existing install does not switch on restart; the multilingual
 /// model is opt-in (see the `granite-embedding` profile).

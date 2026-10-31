@@ -373,6 +373,7 @@ pub fn consolidate<C: GenericClient>(
         &star,
     )?;
     tx.commit()?;
+    crate::generate_embeddings::embed_written_note(client, new_id);
     Ok(new_id)
 }
 

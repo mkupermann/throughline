@@ -328,7 +328,7 @@ pub fn insert_memory<C: GenericClient>(
     conv_id: i64,
     item: &ExtractedMemory,
     source_at: DateTime<Utc>,
-) -> Result<()> {
+) -> Result<i64> {
     // `category` is the memory_category enum in schemas from the Python era and
     // TEXT in a fresh Rust schema; `confidence` is NUMERIC or REAL. Cast the
     // category to whichever type this database uses, and send confidence as
@@ -342,7 +342,7 @@ pub fn insert_memory<C: GenericClient>(
         default_category()
     };
     let category_type = category_column_type(client)?;
-    client.execute(
+    let row = client.query_one(
         &format!(
             r#"
         INSERT INTO memory_chunks
@@ -351,6 +351,7 @@ pub fn insert_memory<C: GenericClient>(
         VALUES ('conversation', $1, $2, $3::text::{category_type},
                 (SELECT project_name FROM conversations WHERE id = $1),
                 $4::float8, $5, 'active', $6, $6)
+        RETURNING id
         "#
         ),
         &[
@@ -362,7 +363,9 @@ pub fn insert_memory<C: GenericClient>(
             &source_at,
         ],
     )?;
-    Ok(())
+    let id: i64 = row.get(0);
+    crate::generate_embeddings::embed_written_note(client, id);
+    Ok(id)
 }
 
 /// Skip transcripts that are Throughline talking to itself.

@@ -73,9 +73,10 @@ enum Command {
         known_at: Option<String>,
         #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
         limit: usize,
-        /// cosine (default) | fulltext | weighted
-        #[arg(long, default_value = recall::DEFAULT_RANK.as_str())]
-        rank: String,
+        /// cosine | fulltext | weighted; without it the default, cosine,
+        /// which waits briefly for Ollama and otherwise ranks by full text.
+        #[arg(long)]
+        rank: Option<String>,
         /// Print the full result as JSON.
         #[arg(long)]
         json: bool,
@@ -565,7 +566,12 @@ fn main() -> Result<()> {
             json,
         } => {
             let mode: recall::RecallMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-            let rank: recall::Rank = rank.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            let asked_rank: Option<recall::Rank> = rank
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(|e: String| anyhow::anyhow!(e))?;
+            let rank = asked_rank.unwrap_or(recall::DEFAULT_RANK);
             recall::check_query(&text).map_err(|e| anyhow::anyhow!(e))?;
             let date =
                 |name: &str, v: Option<String>| -> Result<Option<chrono::DateTime<chrono::Utc>>> {
@@ -583,11 +589,7 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let emb = if recall::needs_embedding(mode, rank) {
-                recall::query_embedding(&text)?
-            } else {
-                None
-            };
+            let emb = recall::question_vector(&text, mode, asked_rank, &embedding::BREAKER)?;
             let local = Actor::local();
             let q = recall::RecallQuery {
                 actor: &local,
@@ -637,7 +639,7 @@ fn main() -> Result<()> {
             if let Some(t) = task {
                 recall::check_query(t).map_err(|e| anyhow::anyhow!(e))?;
             }
-            let emb = context_pack::task_embedding(task)?;
+            let emb = context_pack::task_embedding(task, &embedding::BREAKER)?;
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
@@ -1385,13 +1387,16 @@ mod tests {
 
     #[test]
     fn cli_recall_rank_defaults_to_default_rank() {
-        match Cli::try_parse_from(["throughline", "recall", "x"])
-            .unwrap()
-            .command
-        {
-            Command::Recall { rank, .. } => assert_eq!(rank, recall::DEFAULT_RANK.as_str()),
+        let rank = |argv: &[&str]| match Cli::try_parse_from(argv).unwrap().command {
+            Command::Recall { rank, .. } => rank,
             _ => unreachable!("recall parses to Recall"),
-        }
+        };
+        // No --rank: the command takes `DEFAULT_RANK` on its quick path.
+        assert_eq!(rank(&["throughline", "recall", "x"]), None);
+        assert_eq!(
+            rank(&["throughline", "recall", "x", "--rank", "cosine"]).as_deref(),
+            Some("cosine")
+        );
     }
 
     #[test]

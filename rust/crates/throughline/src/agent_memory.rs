@@ -265,17 +265,21 @@ fn ingest_agent_memory_from<C: GenericClient>(
                     .context("supersede agent memory chunk")?;
                 }
                 None => {
-                    tx.execute(
-                        &format!(
-                            r#"
+                    let id: i64 = tx
+                        .query_one(
+                            &format!(
+                                r#"
                         INSERT INTO memory_chunks
                             (source_type, content, category, project_name, tags, confidence, status, source_at, valid_from)
                         VALUES ('manual', $1, $2::text::{category_type}, $3, $4::text[], 0.85, 'active', $5, $6)
+                        RETURNING id
                         "#
-                        ),
-                        &[&content, &category, &project, &tags, &mtime, &mtime_clamped],
-                    )
-                    .context("insert agent memory chunk")?;
+                            ),
+                            &[&content, &category, &project, &tags, &mtime, &mtime_clamped],
+                        )
+                        .context("insert agent memory chunk")?
+                        .get(0);
+                    crate::generate_embeddings::embed_written_note(&mut tx, id);
                 }
             }
             upserted += 1;

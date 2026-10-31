@@ -42,6 +42,9 @@ pub struct AppState {
     pub public_url: Option<String>,
     /// Sign-in limits, shared by every request.
     pub login: Arc<LoginGate>,
+    /// When the default rank last failed to embed a question; while that is
+    /// under a minute ago it ranks by full text without asking Ollama.
+    pub embed_breaker: Arc<crate::embedding::EmbedBreaker>,
 }
 
 /// At most two password hashes at a time and at most 60 password checks a
@@ -1325,6 +1328,8 @@ struct RecallParams {
 struct ParsedRecall {
     mode: crate::recall::RecallMode,
     rank: crate::recall::Rank,
+    /// The rank the caller named; `None` takes the default's quick path.
+    asked_rank: Option<crate::recall::Rank>,
     valid_at: Option<chrono::DateTime<chrono::Utc>>,
     known_at: Option<chrono::DateTime<chrono::Utc>>,
     limit: usize,
@@ -1345,15 +1350,16 @@ fn parse_recall_params(
         None => crate::recall::RecallMode::Current,
         Some(m) => m.parse().map_err(invalid)?,
     };
-    let rank = match params
+    let asked_rank: Option<crate::recall::Rank> = match params
         .rank
         .as_deref()
         .map(str::trim)
         .filter(|r| !r.is_empty())
     {
-        None => crate::recall::DEFAULT_RANK,
-        Some(r) => r.parse().map_err(invalid)?,
+        None => None,
+        Some(r) => Some(r.parse().map_err(invalid)?),
     };
+    let rank = asked_rank.unwrap_or(crate::recall::DEFAULT_RANK);
     let (valid_at, known_at) = parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref())?;
     if mode == crate::recall::RecallMode::AsOf && valid_at.is_none() && known_at.is_none() {
         return Err(invalid("as_of needs valid_at or known_at".into()));
@@ -1365,6 +1371,7 @@ fn parse_recall_params(
     Ok(ParsedRecall {
         mode,
         rank,
+        asked_rank,
         valid_at,
         known_at,
         limit,
@@ -1436,9 +1443,18 @@ async fn context_handler(
     };
     // The default rank may embed the task: before the shared DB lock, as in
     // `/api/recall`. Without Ollama the pack ranks by full text.
+    // A header too large for the budget is refused before the task is embedded.
+    if let Err(e) = crate::context_pack::check_header(&parsed.project, parsed.budget) {
+        return api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            e.to_string(),
+        );
+    }
+    let breaker = state.embed_breaker.clone();
     let emb = match parsed.task.clone() {
         Some(task) => match tokio::task::spawn_blocking(move || {
-            crate::context_pack::task_embedding(Some(&task))
+            crate::context_pack::task_embedding(Some(&task), &breaker)
         })
         .await
         {
@@ -1510,10 +1526,15 @@ async fn recall_handler(
     // Embed before taking the shared DB lock: a slow Ollama must not stall
     // other requests. The call blocks, so it gets its own blocking task.
     // Full text in mode current needs no vector and never asks Ollama. An
-    // unreachable Ollama gives no vector: cosine then ranks by full text.
+    // unreachable or slow Ollama gives no vector: the rank then falls back to
+    // full text. The default rank waits briefly and remembers a failure.
     let emb = if crate::recall::needs_embedding(parsed.mode, parsed.rank) {
         let embed_text = text.clone();
-        match tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text)).await
+        let (mode, asked, breaker) = (parsed.mode, parsed.asked_rank, state.embed_breaker.clone());
+        match tokio::task::spawn_blocking(move || {
+            crate::recall::question_vector(&embed_text, mode, asked, &breaker)
+        })
+        .await
         {
             Ok(Ok(emb)) => emb,
             Ok(Err(e)) => {
@@ -2183,6 +2204,7 @@ pub fn supersede_memory<C: GenericClient>(
         &star,
     )?;
     tx.commit()?;
+    crate::generate_embeddings::embed_written_note(client, new_id);
     Ok((id, new_id))
 }
 
@@ -2753,7 +2775,9 @@ async fn memory_create(
             ),
             &[&content, &category, &project, &owner, &visibility],
         )?;
-        Ok::<i64, anyhow::Error>(row.get(0))
+        let id: i64 = row.get(0);
+        crate::generate_embeddings::embed_written_note(client, id);
+        Ok::<i64, anyhow::Error>(id)
     })
     .await
     {
@@ -2832,6 +2856,8 @@ pub(crate) fn keep_memory<C: GenericClient>(
     )?;
     crate::lifecycle::record_use(&mut tx, &[id])?;
     tx.commit()?;
+    // A note kept after a forget may never have had a vector.
+    crate::generate_embeddings::embed_written_note(client, id);
     Ok(KeepOutcome::Kept)
 }
 
@@ -4707,6 +4733,7 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
         auth_mode,
         public_url: std::env::var("THROUGHLINE_PUBLIC_URL").ok(),
         login: Default::default(),
+        embed_breaker: Default::default(),
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -5281,6 +5308,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = RecallParams {
@@ -5323,6 +5351,236 @@ mod tests {
         assert_eq!(n, 0, "the UI recall must not count");
     }
 
+    /// Vectors of `model` stored for note `id`.
+    fn note_vectors<C: GenericClient>(client: &mut C, id: i64, model: &str) -> i64 {
+        client
+            .query_one(
+                "SELECT count(*) FROM embeddings WHERE source_type = 'memory_chunk' \
+                 AND source_id = $1 AND model = $2 AND embedding_768 IS NOT NULL",
+                &[&id, &model],
+            )
+            .expect("count")
+            .get(0)
+    }
+
+    #[test]
+    fn new_note_gets_a_vector_at_write_time() {
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let model = format!("test-embed-write-{tag}");
+        // The paths that open their own transaction run on a test transaction,
+        // so each of theirs is a savepoint and everything rolls back.
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping new_note_gets_a_vector_at_write_time: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin");
+        // Raw rows, written before the fixture: no vector.
+        let old = seed_note(&mut tx, &format!("old {tag}"), "decision");
+        let a = seed_note(&mut tx, &format!("merge a {tag}"), "insight");
+        let b = seed_note(&mut tx, &format!("merge b {tag}"), "insight");
+        let kept = seed_note(&mut tx, &format!("kept {tag}"), "insight");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&kept],
+        )
+        .expect("forget");
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES ($1, '/fictional/write-time', now()) RETURNING id",
+                &[&uuid::Uuid::new_v4()],
+            )
+            .expect("conversation")
+            .get(0);
+        for id in [old, a, b, kept] {
+            assert_eq!(note_vectors(&mut tx, id, &model), 0);
+        }
+        crate::generate_embeddings::write_fixture::with(&tag, &model, || {
+            let ctx = crate::mcp::McpContext {
+                actor: Actor::local(),
+                transport: crate::mcp_protocol::Transport::Http,
+                read_only: false,
+            };
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "write", "arguments": { "content": format!("mcp {tag}") } } });
+            let body = crate::mcp::dispatch(&mut tx, &msg, &ctx)
+                .body
+                .expect("body");
+            let text = body["result"]["content"][0]["text"].as_str().expect("text");
+            let written = serde_json::from_str::<serde_json::Value>(text).expect("payload")["id"]
+                .as_i64()
+                .expect("id");
+            let new_text = format!("new {tag}");
+            let (_, successor) =
+                supersede_memory(&mut tx, &Actor::local(), old, &test_successor(&new_text))
+                    .expect("supersede");
+            let merged = crate::lifecycle::consolidate(
+                &mut tx,
+                &Actor::local(),
+                &[a, b],
+                &format!("merged {tag}"),
+                None,
+            )
+            .expect("consolidate");
+            assert_eq!(
+                keep_memory(&mut tx, &Actor::local(), kept).expect("keep"),
+                KeepOutcome::Kept
+            );
+            let item = crate::extract_memory::ExtractedMemory {
+                content: format!("extracted {tag}"),
+                category: "insight".into(),
+                tags: vec![],
+                confidence: 0.8,
+            };
+            let extracted =
+                crate::extract_memory::insert_memory(&mut tx, conv, &item, chrono::Utc::now())
+                    .expect("insert");
+            for (what, id) in [
+                ("mcp write", written),
+                ("successor", successor),
+                ("merge", merged),
+                ("keep", kept),
+                ("extraction", extracted),
+            ] {
+                assert_eq!(note_vectors(&mut tx, id, &model), 1, "{what} #{id}");
+            }
+        });
+        drop(tx);
+
+        // The UI pin over HTTP: the handler takes the shared client, which
+        // runs inside a hand-opened transaction rolled back at the end.
+        let Some(client) = test_db() else {
+            return;
+        };
+        client_begin_pin_check(client, &tag, &model);
+    }
+
+    /// The pin part of `new_note_gets_a_vector_at_write_time`: with the
+    /// fixture the pinned note has a vector, with Ollama unreachable the pin
+    /// still succeeds, without one.
+    fn client_begin_pin_check(mut client: postgres::Client, tag: &str, model: &str) {
+        client.batch_execute("BEGIN").expect("begin");
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+            embed_breaker: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let pin = |content: String| {
+            let resp = rt.block_on(memory_create(
+                State(state.clone()),
+                Extension(Actor::local()),
+                Json(MemoryCreate {
+                    content,
+                    category: "insight".into(),
+                    project_name: None,
+                    visibility: None,
+                }),
+            ));
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
+                .expect("body");
+            serde_json::from_slice::<serde_json::Value>(&body).expect("json")["id"]
+                .as_i64()
+                .expect("id")
+        };
+        let vectors = |id: i64| note_vectors(&mut *state.db.lock().expect("lock"), id, model);
+        let pinned = crate::generate_embeddings::write_fixture::with(tag, model, || {
+            pin(format!("pin {tag}"))
+        });
+        assert_eq!(vectors(pinned), 1, "pin #{pinned}");
+        // Without a reachable Ollama the write still succeeds, with no vector.
+        let bare = crate::recall::test_ollama::unreachable(|| pin(format!("bare {tag}")));
+        assert_eq!(vectors(bare), 0);
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
+    }
+
+    #[test]
+    fn context_pack_answers_degraded_without_ollama() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping context_pack_answers_degraded_without_ollama: no PostgreSQL reachable"
+            );
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("ctx-{tag}");
+        client
+            .execute(
+                "INSERT INTO memory_chunks (source_type, content, category, project_name, status) \
+                 VALUES ('manual', $1, 'insight', $2, 'active')",
+                &[&format!("quokka habitat {tag}"), &project],
+            )
+            .expect("seed");
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+            embed_breaker: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let (http, mcp) = crate::recall::test_ollama::unreachable(|| {
+            let resp = rt.block_on(context_handler(
+                State(state.clone()),
+                Extension(Actor::local()),
+                HeaderMap::new(),
+                Query(ContextParams {
+                    project: Some(project.clone()),
+                    task: Some("quokka habitat".into()),
+                    budget: None,
+                }),
+            ));
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+                .expect("body");
+            let http: serde_json::Value = serde_json::from_slice(&body).expect("json");
+            let mut client = state.db.lock().expect("lock");
+            let ctx = crate::mcp::McpContext {
+                actor: Actor::local(),
+                transport: crate::mcp_protocol::Transport::Http,
+                read_only: false,
+            };
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "project_context",
+                            "arguments": { "project": project, "task": "quokka habitat" } } });
+            let body = crate::mcp::dispatch(&mut *client, &msg, &ctx)
+                .body
+                .expect("body");
+            let text = body["result"]["content"][0]["text"].as_str().expect("text");
+            let mcp: serde_json::Value = serde_json::from_str(text).expect("payload");
+            (http, mcp)
+        });
+        for pack in [&http, &mcp] {
+            assert_eq!(pack["degraded"], "no_embeddings", "{pack}");
+            // ranked by full text meanwhile: the note shares the task's words
+            assert!(
+                pack["text"].as_str().unwrap().contains("quokka habitat"),
+                "{pack}"
+            );
+        }
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
+    }
+
     #[test]
     fn cosine_rank_falls_back_to_fulltext_when_embedder_unreachable() {
         let Some(mut client) = test_db() else {
@@ -5341,6 +5599,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let ask = |rank: Option<&str>| {
@@ -5415,6 +5674,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         }
     }
 
@@ -5587,6 +5847,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         // A panic inside a request leaves a poisoned lock and an open transaction.
@@ -5631,6 +5892,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let call = |headers: HeaderMap| {
@@ -5844,6 +6106,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         for params in [
@@ -6229,6 +6492,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = ContextParams {
@@ -7476,6 +7740,7 @@ mod tests {
             auth_mode: crate::access::AuthMode::Local,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let resp = rt.block_on(memory_create(
@@ -7842,6 +8107,7 @@ mod session_tests {
                 auth_mode: mode,
                 public_url,
                 login: Default::default(),
+                embed_breaker: Default::default(),
             };
             let router = if stand_ins {
                 // Sign-in stays real, so the tests get a session.
@@ -8660,6 +8926,7 @@ mod session_tests {
             auth_mode: AuthMode::Team,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let marker = format!("tl_marker_{}", uuid::Uuid::new_v4().simple());
@@ -10589,6 +10856,7 @@ mod session_tests {
             auth_mode: AuthMode::Team,
             public_url: None,
             login: Default::default(),
+            embed_breaker: Default::default(),
         };
         let fail = |state: &AppState| {
             let resp = rt
