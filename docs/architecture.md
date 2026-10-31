@@ -86,12 +86,15 @@ embeddings and the ingestion ledger. `pgvector` supplies the vector type and HNS
   request passes the request guard (Host, Origin, `Sec-Fetch-Site`) and then a middleware
   that builds an `Actor { user_id, username, role, via }` and hands it to the handler. In
   local mode the actor is the local operator (`admin`, sees every note). In team mode
-  (`THROUGHLINE_AUTH_MODE=team`) it comes from the session cookie or an account's agent key;
-  without either, every `/api` route except `/api/health` and `/api/login` answers 401.
+  (`THROUGHLINE_AUTH_MODE=team`) it comes from the session cookie or, for reads (GET and HEAD),
+  an account's agent key; without either, every `/api` route except `/api/health` and
+  `/api/login` answers 401, and so does every write without a session. Agents write through
+  `/mcp`.
   `access::ROUTE_ROLES` maps each (method, route pattern) to `viewer`, `editor` or `admin`,
   and a route missing from the table needs `admin`: `viewer` reads, `editor` also writes,
   keeps, forgets and supersedes notes, sets stars and asks the model, `admin` also runs jobs,
-  merges, writes back and owns the AI configuration. MCP tools use the same roles. Every query that returns notes or
+  merges, writes back and owns the AI configuration, its hits in search included. MCP tools
+  use the same roles. Note JSON carries `owner` and `visibility` in team mode only. Every query that returns notes or
   computes over them adds `access::visibility_predicate(actor, alias)`:
   `(visibility = 'shared' OR owner_id = $n)` for an account, `TRUE` in local mode,
   shared only for server jobs. Setup and limits:

@@ -25,3 +25,10 @@ Migrations 013–015 add accounts/audit, durable processing and explicit project
 Stop an active pass when upgrading from a pre-durable version: that old process cannot transfer its in-memory progress into the new queue. Committed records remain. After migration, new queued jobs and finished step checkpoints survive restarts. Before rolling back to an older image, stop new processing and restore the verified pre-upgrade backup if that image depends on the previous generated-column behavior. An image rollback alone does not undo assignments or schema changes.
 
 Accounts are opt-in. Local mode remains the default after upgrading. Preserve existing `.env`, provider records, CLI bridge environment and source mounts. To enable team mode, create the first administrator and follow [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md). Configure TLS before inviting colleagues.
+
+## Team mode of the Rust runtime
+
+The migrations above are those of the earlier Python application, and the audit they add is superseded. The Rust runtime brings its own: `014_team_mode.sql` removes that audit (the table `access_audit` with its rows, its functions and triggers) and sets up accounts, sessions and agent keys for the Rust team mode; `015_account_stars_untimed.sql` empties the time of stars set by an account. Back up before you run them. Details are in [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md#upgrading-to-team-mode).
+
+- Rolling the image back after 014 needs the verified backup restored. 014 replaces the unique key of `favorites`, and an older image sets stars with the old key, so starring fails until the backup is back.
+- Do not run the Python migrations against the database afterwards. On a database that has not recorded `013_team_access.sql`, it would create `access_audit` and its triggers again.

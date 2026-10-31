@@ -25,6 +25,7 @@ Abfragen.
 | PostgreSQL | Speichert Rohverläufe, Memory Chunks, Embeddings, Knowledge Graph und den Ingestion Log. |
 | CLI | Stellt die installierten Befehle für Ingestion, Pflege, Suche, Diagnose, Backup und Migration bereit. |
 | MCP Server | Stellt Memory Tools über stdio und über HTTP (`POST /mcp`, mit Agenten-Schlüssel) bereit. Ein Dispatcher ohne Zustand bedient beide Transporte. |
+| Zugriff | Im Rust Webserver (`access.rs`, `server.rs`) baut eine Middleware zu jeder Anfrage einen `Actor` mit Konto, Rolle und Zugangsweg. Im lokalen Modus ist das der lokale Operator mit allen Rechten. Im Team-Modus (`THROUGHLINE_AUTH_MODE=team`) kommt er aus dem Session-Cookie oder, nur zum Lesen, aus dem Agenten-Schlüssel eines Kontos. Ohne beides antwortet jede `/api` Route außer `/api/health` und `/api/login` mit 401. Agenten schreiben über `/mcp`. `access::ROUTE_ROLES` legt für jede Route die Rolle fest (`viewer`, `editor`, `admin`). Eine Route ohne Eintrag braucht `admin`. Jede Abfrage auf Notizen filtert mit `access::visibility_predicate`. Eine private Notiz sieht nur ihr Eigentümer. Details stehen in [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md). |
 | Web UI | FastAPI liefert API und React SPA aus einem Prozess. |
 | Scheduler | launchd auf macOS und systemd User Timer auf Linux führen Ingestion, Extraktion und Backup aus. |
 
@@ -125,11 +126,12 @@ Leer, Fehler und Retry Zustände auf allen acht Route Komponenten.
 
 ## Sicherheit und Betrieb
 
-Die Anwendung ist lokal und für einen Benutzer ausgelegt. Der native Server
-bindet nur an Loopback. Compose veröffentlicht PostgreSQL, Web UI und optional
-Ollama ebenfalls nur auf Loopback. Die API hat keine Anmeldung. Ein Remote Bind
-erfordert deshalb eigene Authentifizierung und TLS und wird nativ ohne
-`THROUGHLINE_ALLOW_REMOTE=1` abgewiesen.
+Die Anwendung ist lokal und im Standard für einen Benutzer ausgelegt. Der
+native Server bindet nur an Loopback. Compose veröffentlicht PostgreSQL, Web UI
+und optional Ollama ebenfalls nur auf Loopback. Im lokalen Modus hat die API
+keine Anmeldung. Ein Remote Bind erfordert deshalb den Team-Modus (Anmeldung,
+Rollen, private Notizen) oder eine eigene Authentifizierung, in beiden Fällen
+mit TLS. Nativ wird er ohne `THROUGHLINE_ALLOW_REMOTE=1` abgewiesen.
 
 `scripts/init_compose_env.py` erstellt oder aktualisiert die ignorierte `.env`.
 Sie enthält ein zufälliges Datenbankpasswort und die numerische UID/GID des

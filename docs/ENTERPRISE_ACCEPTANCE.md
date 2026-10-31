@@ -2,6 +2,8 @@
 
 Target: a controlled internal deployment for one organization and one shared corpus, preserving the existing provider credentials. This is not a multi-tenant SaaS service or a claim of external certification.
 
+> **Superseded in part.** This record describes the earlier Python application. The Rust runtime's migration `014_team_mode.sql` removes its audit (the table `access_audit`, its functions and triggers): team mode in the Rust runtime keeps no audit and no access log, by design. The "Audit" row and the audit parts of the other rows no longer describe the current runtime. See [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md).
+
 | Area | Required evidence | Status |
 | --- | --- | --- |
 | Personal accounts and roles | Anonymous denial, viewer/editor/admin authorization, revocation, CSRF and secret-preservation tests with PostgreSQL | Passed PostgreSQL role, expiry, CSRF, revocation, secret-preservation and real CLI startup tests |
