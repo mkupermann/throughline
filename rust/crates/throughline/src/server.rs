@@ -9051,6 +9051,21 @@ mod session_tests {
             assert_eq!(answer.status, 200, "{}", answer.body);
             serde_json::from_value(answer.json()["notes"].clone()).expect("notes")
         };
+        // Every failed check reads `<check>: unavailable`. In this test only
+        // `agent access` is made to fail; `database` and `embedding progress`
+        // are forced in the doctor's own tests.
+        let checks = [
+            "database:",
+            "embedding progress:",
+            "auth mode:",
+            "agent access:",
+        ];
+        let only_unavailable = |notes: &[String]| {
+            notes
+                .iter()
+                .filter(|n| checks.iter().any(|c| n.starts_with(c)))
+                .all(|n| n.ends_with(": unavailable"))
+        };
         let fine = notes();
         assert!(
             !fine
@@ -9058,6 +9073,7 @@ mod session_tests {
                 .any(|n| n.contains("THROUGHLINE_AGENT_KEY") || n.starts_with("agent access")),
             "{fine:?}"
         );
+        assert!(only_unavailable(&fine), "{fine:?}");
         s.db()
             .batch_execute(
                 "DROP TABLE pg_temp.access_agent_keys; \
@@ -9069,6 +9085,7 @@ mod session_tests {
             broken.iter().any(|n| n == "agent access: unavailable"),
             "{broken:?}"
         );
+        assert!(only_unavailable(&broken), "{broken:?}");
         assert!(
             !broken.iter().any(|n| n.contains("does not exist")
                 || n.contains("column")

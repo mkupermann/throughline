@@ -26,9 +26,10 @@ pub struct DoctorReport {
 
 /// The report for a client of the server (`GET /api/health-recovery`),
 /// running in `mode` with `key`. In team mode the client gets neither the
-/// text of a failed `auth mode` or `agent access` check (it goes to the log,
-/// without row values) nor the note that the host sets
-/// `THROUGHLINE_AGENT_KEY`. Local mode gets what `throughline doctor` gets.
+/// text of a failed check (`database`, `embedding progress`, `auth mode`,
+/// `agent access`: it goes to the log, without row values) nor the note that
+/// the host sets `THROUGHLINE_AGENT_KEY`. Local mode gets what
+/// `throughline doctor` gets.
 pub fn for_client<C: GenericClient>(
     client: &mut C,
     actor: &crate::access::Actor,
@@ -59,7 +60,11 @@ fn report<C: GenericClient>(
     let database = match client.batch_execute("SELECT 1") {
         Ok(()) => "ok".to_string(),
         Err(e) => {
-            notes.push(format!("database: {e}"));
+            notes.push(if team_client {
+                hidden_note("database", &anyhow::Error::new(e))
+            } else {
+                format!("database: {e}")
+            });
             "failed".to_string()
         }
     };
@@ -95,7 +100,11 @@ fn report<C: GenericClient>(
             match embedding_lines(client, actor, &b, target) {
                 Ok((t, m)) => (embedding::label(&b), t, m),
                 Err(e) => {
-                    notes.push(format!("embedding progress: {e}"));
+                    notes.push(if team_client {
+                        hidden_note("embedding progress", &e)
+                    } else {
+                        format!("embedding progress: {e}")
+                    });
                     (embedding::label(&b), None, "unavailable".to_string())
                 }
             }
@@ -142,15 +151,21 @@ fn report<C: GenericClient>(
     })
 }
 
-/// The note of a failed check. A team-mode client gets no error text, which
-/// could repeat database detail; the log gets it without row values.
+/// The note of a failed check. A team-mode client gets [`hidden_note`].
 fn failure_note(what: &str, e: &anyhow::Error, team_client: bool) -> String {
     if team_client {
-        eprintln!("doctor {what}: {}", crate::server::error_for_log(e));
-        format!("{what}: unavailable")
+        hidden_note(what, e)
     } else {
         format!("{what}: {e:#}")
     }
+}
+
+/// A team-mode client's note of a failed check: `<what>: unavailable`,
+/// without the error text, which could repeat database detail. The log gets
+/// the error without row values.
+fn hidden_note(what: &str, e: &anyhow::Error) -> String {
+    eprintln!("doctor {what}: {}", crate::server::error_for_log(e));
+    format!("{what}: unavailable")
 }
 
 /// The `agent access:` line and, when it applies, a note. Local mode (or a
@@ -417,6 +432,71 @@ mod tests {
         assert!(
             cli.iter().all(|n| n.contains("db error")),
             "the CLI shows the error: {cli:?}"
+        );
+    }
+
+    /// A database that does not answer: a team-mode client gets
+    /// `database: unavailable` (and no text in any check note), the CLI
+    /// gets the error. `embedding progress` only runs with a reachable
+    /// embedder, so its note is checked on the helper it uses.
+    #[test]
+    fn team_mode_client_report_hides_database_and_embedding_errors() {
+        use crate::access::{Actor, AuthMode};
+        use crate::agent_key::KeyState;
+        let checks = [
+            "database:",
+            "embedding progress:",
+            "auth mode:",
+            "agent access:",
+        ];
+        let notes = |team_client: bool| -> Option<Vec<String>> {
+            // A connection that ends itself: every later query fails.
+            let mut client = test_db()?;
+            let _ = client.batch_execute("SELECT pg_terminate_backend(pg_backend_pid())");
+            let report = if team_client {
+                for_client(
+                    &mut client,
+                    &Actor::shared_only(),
+                    AuthMode::Team,
+                    &KeyState::Off,
+                )
+            } else {
+                report(
+                    &mut client,
+                    &Actor::shared_only(),
+                    Ok(AuthMode::Team),
+                    &KeyState::Off,
+                    false,
+                )
+            };
+            Some(report.expect("report").notes)
+        };
+        let Some(hidden) = notes(true) else {
+            eprintln!("skipping team_mode_client_report_hides_database_and_embedding_errors: no PostgreSQL");
+            return;
+        };
+        assert!(
+            hidden.iter().any(|n| n == "database: unavailable"),
+            "{hidden:?}"
+        );
+        for note in hidden
+            .iter()
+            .filter(|n| checks.iter().any(|c| n.starts_with(c)))
+        {
+            assert!(note.ends_with(": unavailable"), "{note}: {hidden:?}");
+        }
+        let cli = notes(false).expect("notes");
+        let database = cli
+            .iter()
+            .find(|n| n.starts_with("database:"))
+            .unwrap_or_else(|| panic!("{cli:?}"));
+        assert_ne!(database, "database: unavailable", "the CLI shows the error");
+        assert_eq!(
+            hidden_note(
+                "embedding progress",
+                &anyhow::anyhow!("db error: ERROR: relation \"embeddings\" does not exist")
+            ),
+            "embedding progress: unavailable"
         );
     }
 
