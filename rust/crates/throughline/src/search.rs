@@ -142,13 +142,41 @@ pub fn semantic<C: GenericClient>(
     query: &str,
     limit: i32,
 ) -> Result<Vec<SearchHit>> {
+    semantic_in(client, backend, query, limit, None)
+}
+
+/// [`semantic`], only over the messages of `project`'s conversations when one is given.
+pub fn semantic_in<C: GenericClient>(
+    client: &mut C,
+    backend: &EmbeddingBackend,
+    query: &str,
+    limit: i32,
+    project: Option<&str>,
+) -> Result<Vec<SearchHit>> {
     // Reuse embed + distance query, then hydrate conversation fields.
-    let raw = generate_embeddings::semantic_search(client, backend, query, limit)?;
+    let raw: Vec<(i64, f32)> = match project {
+        None => generate_embeddings::semantic_search(client, backend, query, limit)?
+            .into_iter()
+            .map(|(id, _snippet, score)| (id, score))
+            .collect(),
+        Some(project) => {
+            let vector =
+                crate::embedding::embed_text(backend, query, crate::embedding::TextKind::Query)?;
+            nearest_messages(
+                client,
+                backend.column,
+                &backend.model,
+                &vector,
+                project,
+                limit,
+            )?
+        }
+    };
     if raw.is_empty() {
         return Ok(vec![]);
     }
     let mut hits = Vec::with_capacity(raw.len());
-    for (message_id, _snippet, score) in raw {
+    for (message_id, score) in raw {
         let rows = client.query(
             r#"
             SELECT m.id,
@@ -188,6 +216,40 @@ pub fn semantic<C: GenericClient>(
     Ok(hits)
 }
 
+/// The `limit` messages of `project`'s conversations nearest to `vector`
+/// among those with a vector of `model` in `column`, with their cosine.
+pub fn nearest_messages<C: GenericClient>(
+    client: &mut C,
+    column: &str,
+    model: &str,
+    vector: &[f32],
+    project: &str,
+    limit: i32,
+) -> Result<Vec<(i64, f32)>> {
+    let literal = generate_embeddings::vector_literal(vector);
+    let rows = client.query(
+        &format!(
+            r#"
+            SELECT e.source_id, (e.{column} <=> $1::text::vector) AS dist
+            FROM embeddings e
+            JOIN messages m ON m.id = e.source_id AND e.source_type = 'message'
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE e.model = $2 AND c.project_name = $3
+            ORDER BY e.{column} <=> $1::text::vector, e.source_id
+            LIMIT $4::bigint
+            "#
+        ),
+        &[&literal, &model, &project, &(limit as i64)],
+    )?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let dist: f64 = r.get(1);
+            (r.get(0), 1.0 - dist as f32)
+        })
+        .collect())
+}
+
 /// Lexical + semantic, deduped by message id, sorted by score then recency.
 /// Falls back to lexical when the embedding backend is down.
 pub fn hybrid<C: GenericClient>(
@@ -197,20 +259,33 @@ pub fn hybrid<C: GenericClient>(
     query: &str,
     limit: i32,
 ) -> Result<Vec<SearchHit>> {
+    hybrid_in(client, actor, backend, query, limit, None)
+}
+
+/// [`hybrid`] within one project: its messages and notes, and no configs or
+/// instruction files (they carry no project).
+pub fn hybrid_in<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    backend: Option<&EmbeddingBackend>,
+    query: &str,
+    limit: i32,
+    project: Option<&str>,
+) -> Result<Vec<SearchHit>> {
     let mut hits: Vec<SearchHit> = Vec::new();
     if let Some(backend) = backend {
-        match semantic(client, backend, query, limit) {
+        match semantic_in(client, backend, query, limit, project) {
             Ok(mut sem) => hits.append(&mut sem),
             Err(e) => {
                 eprintln!("search: semantic skipped: {e}");
             }
         }
     }
-    let mut lex = search(client, actor, query, limit, None)?;
+    let mut lex = search(client, actor, query, limit, project)?;
     hits.append(&mut lex);
     // Durable notes (agent memory, project instructions) are first-class hits —
     // otherwise Find never surfaces MiMo/agent memory in the GUI.
-    hits.append(&mut memory_hits(client, actor, query, limit)?);
+    hits.append(&mut memory_hits_in(client, actor, query, limit, project)?);
 
     let mut seen = std::collections::HashSet::new();
     hits.retain(|h| {
@@ -235,10 +310,21 @@ pub(crate) fn memory_hits<C: GenericClient>(
     query: &str,
     limit: i32,
 ) -> Result<Vec<SearchHit>> {
+    memory_hits_in(client, actor, query, limit, None)
+}
+
+/// [`memory_hits`]; with a project, only that project's notes.
+fn memory_hits_in<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    query: &str,
+    limit: i32,
+    project: Option<&str>,
+) -> Result<Vec<SearchHit>> {
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let mut hits = Vec::new();
     let limit64 = limit as i64;
-    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&like, &limit64];
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&like, &limit64, &project];
     let seen = push_visibility(actor, "ch", &mut params);
     let rows = client.query(
         &format!(
@@ -247,6 +333,7 @@ pub(crate) fn memory_hits<C: GenericClient>(
                ch.source_type, 'memory', left(ch.content, 240), ch.created_at
         FROM memory_chunks ch
         WHERE ch.content ILIKE $1 AND ch.status = 'active' AND {seen}
+          AND ($3::text IS NULL OR ch.project_name = $3)
         ORDER BY ch.created_at DESC
         LIMIT $2::bigint
         "#
@@ -274,6 +361,9 @@ pub(crate) fn memory_hits<C: GenericClient>(
         score: 0.9,
         kind: "memory",
     }));
+    if project.is_some() {
+        return Ok(hits);
+    }
     if let Ok(rows) = client.query(
         r#"
         SELECT id, name, category, left(content, 240), updated_at

@@ -3207,7 +3207,7 @@ async fn ask_handler(
     match with_db(&state, move |client| {
         let backend = crate::llm::resolve_backend()?;
         crate::llm::ensure_local_or_allowed(&backend)?;
-        crate::ask::ask(client, &actor, &q, &backend, 12)
+        crate::ask::ask(client, &actor, &q, &backend, 12, None)
     })
     .await
     {

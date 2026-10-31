@@ -139,7 +139,7 @@ pub fn run_eval<C: GenericClient>(
 ) -> Result<EvalReport> {
     let mut results = Vec::new();
     for case in cases {
-        let answer = ask::ask(client, actor, &case.question, backend, 12)?;
+        let answer = ask::ask(client, actor, &case.question, backend, 12, None)?;
         results.push(evaluate_answer(case, &answer));
     }
     let passed = results.iter().filter(|r| r.pass).count();

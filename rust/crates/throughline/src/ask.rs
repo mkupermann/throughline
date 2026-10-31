@@ -74,20 +74,29 @@ fn fail_soft_listing(sources: &[SourceRef], model_label: &str, err: Option<&str>
     }
 }
 
+/// The system prompt of an answer from memory excerpts.
+pub const ANSWER_SYSTEM: &str = "You answer from local memory excerpts. Cite [n] for each claim.";
+
+/// The answer request around `excerpts`.
+pub fn answer_prompt(question: &str, excerpts: &str) -> String {
+    format!(
+        "Answer using ONLY the excerpts. Cite sources as [n]. If the excerpts do not contain the answer, say so.\n\nQuestion: {question}\n\nExcerpts:\n{excerpts}"
+    )
+}
+
+/// Answer `question` from the corpus; with `project`, only from that
+/// project's messages and notes.
 pub fn ask<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     question: &str,
     backend: &GenerationBackend,
     limit: i32,
+    project: Option<&str>,
 ) -> Result<AskAnswer> {
     llm::ensure_local_or_allowed(backend)?;
-    ask_with(client, actor, question, backend, limit, |prompt| {
-        llm::complete(
-            backend,
-            Some("You answer from local memory excerpts. Cite [n] for each claim."),
-            prompt,
-        )
+    ask_with(client, actor, question, backend, limit, project, |prompt| {
+        llm::complete(backend, Some(ANSWER_SYSTEM), prompt)
     })
 }
 
@@ -99,12 +108,14 @@ fn ask_with<C: GenericClient>(
     question: &str,
     backend: &GenerationBackend,
     limit: i32,
+    project: Option<&str>,
     generate: impl FnOnce(&str) -> Result<String>,
 ) -> Result<AskAnswer> {
     // Hybrid retrieval: semantic (when embeddings exist) + lexical + memory/instructions.
     // Pure lexical `search_from` misses natural-language questions (whole-string ILIKE).
     let embed = crate::embedding::resolve().ok();
-    let hits: Vec<SearchHit> = search::hybrid(client, actor, embed.as_ref(), question, limit)?;
+    let hits: Vec<SearchHit> =
+        search::hybrid_in(client, actor, embed.as_ref(), question, limit, project)?;
     let (excerpts, sources) = build_excerpts(&hits);
 
     if sources.is_empty() {
@@ -118,9 +129,7 @@ fn ask_with<C: GenericClient>(
         });
     }
 
-    let prompt = format!(
-        "Answer using ONLY the excerpts. Cite sources as [n]. If the excerpts do not contain the answer, say so.\n\nQuestion: {question}\n\nExcerpts:\n{excerpts}"
-    );
+    let prompt = answer_prompt(question, &excerpts);
     match generate(&prompt) {
         Ok(answer) => {
             // Trim and clean the answer; ensure it cites at least one source.
@@ -240,7 +249,7 @@ mod tests {
             model: "m".into(),
             api_key: None,
         };
-        let err = ask(&mut client, &Actor::local(), "q", &backend, 5).unwrap_err();
+        let err = ask(&mut client, &Actor::local(), "q", &backend, 5, None).unwrap_err();
         assert!(
             err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
             "{err}"
@@ -284,7 +293,7 @@ mod tests {
         };
         let mut asked = |actor: &Actor| {
             let mut prompt = String::new();
-            let answer = ask_with(&mut tx, actor, &tag, &backend, 12, |p| {
+            let answer = ask_with(&mut tx, actor, &tag, &backend, 12, None, |p| {
                 prompt = p.to_string();
                 Ok("from [1]".into())
             })
@@ -297,5 +306,96 @@ mod tests {
         assert_hidden(&prompt, &secret, "the prompt");
         assert_hidden(&format!("{:?}", answer.sources), &secret, "the sources");
         assert!(prompt.contains(&format!("plan {tag} shared")), "{prompt}");
+    }
+
+    #[test]
+    fn ask_project_filter_limits_messages() {
+        use crate::access::team_test::note;
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping ask_project_filter_limits_messages: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let model = format!("test-embed-{tag}");
+        let mut v = vec![0.0f32; 768];
+        v[0] = 1.0;
+        let vector = crate::generate_embeddings::vector_literal(&v);
+        let mine = format!("mine-{tag}");
+        let other = format!("other-{tag}");
+        let mut message = std::collections::HashMap::new();
+        for project in [&mine, &other] {
+            let conv: i64 = tx
+                .query_one(
+                    "INSERT INTO conversations (session_id, project_path, started_at) \
+                     VALUES ($1, $2, now()) RETURNING id",
+                    &[&uuid::Uuid::new_v4(), project],
+                )
+                .unwrap()
+                .get(0);
+            let id: i64 = tx
+                .query_one(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) \
+                     VALUES ($1, 'user', $2, now()) RETURNING id",
+                    &[&conv, &format!("{tag} turn of {project}")],
+                )
+                .unwrap()
+                .get(0);
+            tx.execute(
+                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+                 VALUES ('message', $1, $2, $3::text::vector)",
+                &[&id, &model, &vector],
+            )
+            .unwrap();
+            note(
+                &mut tx,
+                None,
+                "shared",
+                &format!("{tag} note of {project}"),
+                "decision",
+                Some(project),
+            );
+            message.insert(project.clone(), id);
+        }
+        let backend = GenerationBackend {
+            kind: llm::BackendKind::Ollama,
+            label: "fake".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            model: "fake".into(),
+            api_key: None,
+        };
+        let mut asked = |project: Option<&str>| {
+            let mut prompt = String::new();
+            let answer = ask_with(&mut tx, &Actor::local(), &tag, &backend, 12, project, |p| {
+                prompt = p.to_string();
+                Ok("from [1]".into())
+            })
+            .expect("ask");
+            (prompt, answer)
+        };
+        // Unfiltered, both projects' turns and notes reach the prompt.
+        let (prompt, _) = asked(None);
+        assert!(prompt.contains(&format!("turn of {other}")), "{prompt}");
+        // With a project, only its own.
+        let (prompt, answer) = asked(Some(&mine));
+        assert!(prompt.contains(&format!("turn of {mine}")), "{prompt}");
+        assert!(prompt.contains(&format!("note of {mine}")), "{prompt}");
+        assert!(!prompt.contains(&other), "{prompt}");
+        assert!(!answer.sources.is_empty());
+        assert!(
+            answer
+                .sources
+                .iter()
+                .all(|s| s.project_name.as_deref() == Some(mine.as_str())),
+            "{:?}",
+            answer.sources
+        );
+        // The vector half: both messages are equally near, only the project's comes back.
+        let near = search::nearest_messages(&mut tx, "embedding_768", &model, &v, &mine, 10)
+            .expect("nearest");
+        assert_eq!(
+            near.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![message[&mine]]
+        );
     }
 }

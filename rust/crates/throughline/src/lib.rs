@@ -9,6 +9,7 @@ pub mod answer_eval;
 pub mod ask;
 pub mod assistants;
 pub mod audit;
+pub mod bench_answer;
 pub mod config;
 pub mod config_import;
 pub mod conflicts;

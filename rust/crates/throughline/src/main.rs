@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand};
 use throughline::access::Actor;
 use throughline::types::IngestSummary;
 use throughline::{
-    access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, config, conflicts,
-    context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
+    access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, bench_answer, config,
+    conflicts, context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
     extract_memory, generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
     memory_writeback, migrate, ops_jobs, project_instructions, recall, recall_eval, reflect_memory,
     repair, retention, search, server, stale_digest, temporal, types,
@@ -86,6 +86,9 @@ enum Command {
         question: String,
         #[arg(long, default_value_t = 12)]
         limit: i32,
+        /// Only this project's messages and notes.
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Extract durable memory from messages not yet extracted, newest conversations first.
     ExtractMemory {
@@ -283,6 +286,25 @@ enum Command {
         /// Write the six score parts of every candidate per question to this JSON file.
         #[arg(long = "dump-parts")]
         dump_parts: Option<String>,
+    },
+    /// Answer LoCoMo questions (categories 1-4) for the answer benchmark,
+    /// only with PGDATABASE=throughline_bench. Counts no use.
+    BenchAnswer {
+        /// JSON file: {"items": [{"id", "sample_id", "category", "question", "answer"}]}
+        #[arg(long)]
+        qa: String,
+        /// JSON lines, one answer per question; an existing file is resumed.
+        #[arg(long)]
+        out: String,
+        /// A sample stratified by category: this many questions split evenly over 1-4.
+        #[arg(long)]
+        sample: Option<usize>,
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Answer through `ask` (semantic search over the raw messages)
+        /// instead of the context pack.
+        #[arg(long)]
+        raw: bool,
     },
     /// Digest of stale / superseded / never-opened memory.
     StaleDigest {
@@ -734,13 +756,24 @@ fn main() -> Result<()> {
             println!("conversations: {convs}");
             println!("messages:      {msgs}");
         }
-        Command::Ask { question, limit } => {
+        Command::Ask {
+            question,
+            limit,
+            project,
+        } => {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend().context("resolve generation backend")?;
             llm::ensure_local_or_allowed(&backend)?;
-            let answer = ask::ask(&mut client, &Actor::local(), &question, &backend, limit)?;
+            let answer = ask::ask(
+                &mut client,
+                &Actor::local(),
+                &question,
+                &backend,
+                limit,
+                project.as_deref(),
+            )?;
             println!("{}", answer.answer);
             println!();
             println!(
@@ -1105,6 +1138,28 @@ fn main() -> Result<()> {
                 }
                 println!("{} group(s)", groups.len());
             }
+        }
+        Command::BenchAnswer {
+            qa,
+            out,
+            sample,
+            seed,
+            raw,
+        } => {
+            let summary = bench_answer::run(
+                &config::DbConfig::from_env(),
+                &bench_answer::Options {
+                    qa: qa.into(),
+                    out: out.into(),
+                    sample,
+                    seed,
+                    raw,
+                },
+            )?;
+            println!(
+                "answered={} errors={} skipped_done={} questions={}",
+                summary.answered, summary.errors, summary.already_done, summary.selected
+            );
         }
         Command::RecallEval {
             mode,

@@ -171,10 +171,10 @@ pub fn hit_at_k_and_mrr(ranks: &[Option<usize>], k: usize) -> (f64, f64) {
 }
 
 /// Small deterministic generator (xorshift64*), enough for a fixed shuffle.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
     }
     fn next(&mut self) -> u64 {
@@ -185,7 +185,7 @@ impl Rng {
     }
 }
 
-fn shuffle(ids: &mut [i64], rng: &mut Rng) {
+pub(crate) fn shuffle(ids: &mut [i64], rng: &mut Rng) {
     for i in (1..ids.len()).rev() {
         let j = (rng.next() % (i as u64 + 1)) as usize;
         ids.swap(i, j);
@@ -308,6 +308,9 @@ pub fn run_eval<C: GenericClient>(
 /// One question of a LoCoMo QA file, `{"items": [...]}`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct QaItem {
+    /// The question's id in the file, like `<sample>#<n>`.
+    #[serde(default)]
+    pub id: Option<String>,
     /// The dialogue, which is the project of its sessions' notes.
     pub sample_id: String,
     pub category: i64,
@@ -319,6 +322,9 @@ pub struct QaItem {
     /// copy in `evidence`; read in its place, so unreadable ids are counted.
     #[serde(default)]
     pub evidence_raw: Option<Vec<serde_json::Value>>,
+    /// The gold answer (a string or a number; none in category 5).
+    #[serde(default)]
+    pub answer: Option<serde_json::Value>,
 }
 
 impl QaItem {
@@ -334,7 +340,7 @@ struct QaFile {
 
 /// Categories 1 to 4 make the headline; 5 (adversarial) and any other
 /// category are reported on their own.
-const HEADLINE: std::ops::RangeInclusive<i64> = 1..=4;
+pub(crate) const HEADLINE: std::ops::RangeInclusive<i64> = 1..=4;
 const HEADLINE_LABEL: &str = "1-4";
 
 /// One rank and category: `hit[i]` and `coverage[i]` belong to `ks[i]`.
@@ -768,11 +774,13 @@ mod tests {
 
         fn item(&self, category: i64, evidence: serde_json::Value) -> QaItem {
             QaItem {
+                id: None,
                 sample_id: self.sample.clone(),
                 category,
                 question: format!("Where is {}?", self.word),
                 evidence: serde_json::from_value(evidence).unwrap(),
                 evidence_raw: None,
+                answer: None,
             }
         }
     }
