@@ -230,9 +230,11 @@ throughline recall "how do we deploy" --rank weighted
 throughline recall "deployment target" --mode as_of --at 2026-01-15 --json
 ```
 
-Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `rank` (`fulltext` or `weighted`), `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`). A mode or rank that does not exist, a date that does not parse, `as_of` without a date, or a question longer than 2,000 characters gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `rank`, `valid_at`, `known_at` and `limit`; bad values give error -32602. The MCP `search` tool also honours `project` now.
+Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `rank` (`fulltext`, `weighted` or `cosine`), `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`). A mode or rank that does not exist, a date that does not parse, `as_of` without a date, or a question longer than 2,000 characters gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `rank`, `valid_at`, `known_at` and `limit`; bad values give error -32602. The MCP `search` tool also honours `project` now.
 
 Full text is the default because the first measurement (below) did not show the gain for the weighted ranking that the bar set beforehand asked for, and that bar came with the rule that the simpler alternative then becomes the default. Full text here means `ts_rank` of the question's words, joined by OR: notes that share words come first, the others follow by id. Pass `rank=weighted` (CLI `--rank weighted`) to rank by the weighted sum instead. Either way, `why` lists the weighted parts, and `why.fulltext` holds the `ts_rank` when full text ranked the hits.
+
+`rank=cosine` (CLI `--rank cosine`) orders the notes by the cosine of the question's vector to the note's vector and by nothing else: no shared words, no recency, no reliability. The score is that cosine, also in `why.cosine`. A note without a vector scores 0, so it comes after every note with a positive cosine. If the question gets no vector, because Ollama is not reachable, the embedding model is missing or the embedding call fails, cosine ranks by full text instead: the answer is still HTTP 200, says `"degraded": "no_embeddings"`, and `why.fulltext` holds the score that ranked each hit.
 
 The four modes differ in what they admit and how they rank:
 
@@ -243,7 +245,7 @@ The four modes differ in what they admit and how they rank:
 
 Each hit carries `source_at`, the date of its source: the source date of the first note in its chain, else the start of its conversation. The CLI prints it after the session title.
 
-Without Ollama no vector exists for the question. Full text in `current` does not need one and answers normally. The weighted ranking, `as_of` and `grounded` answer with `"degraded": "no_embeddings"` and rank by words only. In the memory view, "By meaning" uses the weighted ranking and shows the same notice.
+Without Ollama no vector exists for the question. Full text in `current` does not need one and answers normally. Cosine falls back to full text, the weighted ranking, `as_of` and `grounded` rank by words only, and all of them answer with `"degraded": "no_embeddings"`. In the memory view, "By meaning" uses the weighted ranking and shows the same notice.
 
 ### Measuring recall
 
@@ -471,7 +473,7 @@ Those keys come from the Codex MCP documentation (read on 2026-10-30), not from 
 | Tool | What it does | Counts as use |
 | --- | --- | --- |
 | `search` | Keyword search over messages. Arguments: `query`, `limit`, `project`. | no |
-| `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext` or `weighted`. | yes |
+| `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext`, `weighted` or `cosine`. | yes |
 | `project_context` | The context pack of a project (`project`, `task`, `budget`). | yes |
 | `get_note` | One note by `id` with its source and its whole supersede chain, oldest first. A forgotten note is not found, and forgotten notes leave the chain. | yes |
 | `conflicts` | The conflict report, optionally for one `project`. Each row has a kind: `contradiction` (open), `documented_supersession` (already resolved by a replacement) or `stale_tool_drift` (never-used notes of one tool). | no |
