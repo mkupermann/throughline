@@ -161,3 +161,33 @@ fn locomo_ingest_refuses_other_databases() {
         assert_eq!(count(client), before, "nothing was written");
     }
 }
+
+/// `recall-eval --mode locomo` reads benchmark questions and must refuse
+/// every database but `throughline_bench`, before it connects anywhere.
+#[test]
+fn locomo_mode_refuses_other_databases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("qa.json");
+    // Synthetic: one invented question.
+    std::fs::write(
+        &path,
+        r#"{"items": [{"sample_id": "demo-9", "category": 1,
+             "question": "Where did Odile travel?", "evidence": ["D1:1"]}]}"#,
+    )
+    .unwrap();
+    let bin = env!("CARGO_BIN_EXE_throughline");
+    for db in [Some("throughline"), Some("not_the_bench"), None] {
+        let mut cmd = Command::new(bin);
+        cmd.args(["recall-eval", "--mode", "locomo", "--qa"])
+            .arg(&path)
+            .args(["--k", "5,10"]);
+        match db {
+            Some(db) => cmd.env("PGDATABASE", db),
+            None => cmd.env_remove("PGDATABASE"),
+        };
+        let out = cmd.output().expect("run recall-eval");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{db:?}: recall-eval ran");
+        assert!(stderr.contains("throughline_bench"), "{db:?}: {stderr}");
+    }
+}

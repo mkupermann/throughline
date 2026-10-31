@@ -256,13 +256,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Measure recall against cosine, full text and random on a test set.
+    /// Measure recall against cosine, full text and random on a test set,
+    /// or (`--mode locomo`) retrieval on LoCoMo questions per rank.
     RecallEval {
+        /// `set`: the test set of `--set`. `locomo`: the questions of `--qa`,
+        /// only with PGDATABASE=throughline_bench.
+        #[arg(long, default_value = "set", value_parser = ["set", "locomo"])]
+        mode: String,
         /// JSON file: [{"q": "...", "project": "..." | null, "expected": [id, ...]}]
         #[arg(long)]
-        set: String,
-        #[arg(long, default_value_t = 5)]
-        k: usize,
+        set: Option<String>,
+        /// JSON file: {"items": [{"sample_id", "category", "question", "evidence": ["D1:3", ...]}]}
+        #[arg(long)]
+        qa: Option<String>,
+        /// One k for `set`; one or more, comma-separated, for `locomo` (5,10).
+        #[arg(long, value_delimiter = ',', default_value = "5")]
+        k: Vec<usize>,
         #[arg(long, default_value_t = 7)]
         seed: u64,
         #[arg(long)]
@@ -1098,13 +1107,49 @@ fn main() -> Result<()> {
             }
         }
         Command::RecallEval {
+            mode,
             set,
+            qa,
+            k,
+            json,
+            weights,
+            dump_parts,
+            ..
+        } if mode == "locomo" => {
+            let db = config::DbConfig::from_env();
+            // Benchmark data never reaches a real store: refuse before connecting.
+            adapters::locomo::check_database(&db.dbname)?;
+            if set.is_some() || weights.is_some() || dump_parts.is_some() {
+                anyhow::bail!("--set, --weights and --dump-parts belong to --mode set");
+            }
+            let qa = qa.ok_or_else(|| anyhow::anyhow!("--mode locomo needs --qa"))?;
+            let items = recall_eval::load_qa(std::path::Path::new(&qa))?;
+            let mut client = db.connect().context("connect to PostgreSQL")?;
+            // Through `recall` itself, never the CLI `recall`: no use is counted.
+            let report = recall_eval::run_locomo(&mut client, &items, &k, recall::query_embedding)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", recall_eval::render_locomo_text(&report));
+            }
+        }
+        Command::RecallEval {
+            set,
+            qa,
             k,
             seed,
             json,
             weights,
             dump_parts,
+            ..
         } => {
+            let set = set.ok_or_else(|| anyhow::anyhow!("--mode set needs --set"))?;
+            if qa.is_some() {
+                anyhow::bail!("--qa belongs to --mode locomo");
+            }
+            let &[k] = k.as_slice() else {
+                anyhow::bail!("--mode set takes one --k");
+            };
             let cases = recall_eval::load_cases(std::path::Path::new(&set))?;
             let mut client = config::DbConfig::from_env()
                 .connect()
@@ -1397,6 +1442,33 @@ mod tests {
             rank(&["throughline", "recall", "x", "--rank", "cosine"]).as_deref(),
             Some("cosine")
         );
+    }
+
+    #[test]
+    fn recall_eval_locomo_mode_takes_qa_and_several_ks() {
+        let cli = Cli::try_parse_from([
+            "throughline",
+            "recall-eval",
+            "--mode",
+            "locomo",
+            "--qa",
+            "qa.json",
+            "--k",
+            "5,10",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::RecallEval { ref mode, qa: Some(ref qa), ref k, set: None, .. }
+                if mode == "locomo" && qa == "qa.json" && k == &[5, 10]
+        ));
+        // Without --mode: the test set, k = 5.
+        let cli = Cli::try_parse_from(["throughline", "recall-eval", "--set", "set.json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::RecallEval { ref mode, ref k, .. } if mode == "set" && k == &[5]
+        ));
+        assert!(Cli::try_parse_from(["throughline", "recall-eval", "--mode", "other"]).is_err());
     }
 
     #[test]

@@ -8,7 +8,8 @@
 //! The data is licensed CC BY-NC and must never reach a real memory store, so
 //! the adapter is not a built-in (`ingest --source all` never sees it), has no
 //! default path (only `THROUGHLINE_LOCOMO_PATH`), and `ingest --source locomo`
-//! refuses every database except `throughline_bench`.
+//! and `recall-eval --mode locomo` refuse every database except
+//! `throughline_bench`.
 
 use super::{stable_uuid_str, Adapter};
 use crate::types::{NormalisedConversation, NormalisedMessage};
@@ -38,10 +39,13 @@ pub fn check_database(dbname: &str) -> Result<()> {
     if dbname == BENCH_DATABASE {
         return Ok(());
     }
-    bail!(
-        "ingest --source locomo writes benchmark data and runs only with \
-         PGDATABASE={BENCH_DATABASE} (got {dbname:?})"
-    )
+    bail!("LoCoMo benchmark data is used only with PGDATABASE={BENCH_DATABASE} (got {dbname:?})")
+}
+
+/// The ids in one evidence string, split on spaces, commas and semicolons.
+pub(crate) fn evidence_tokens(raw: &str) -> impl Iterator<Item = &str> {
+    raw.split(|c: char| c.is_whitespace() || c == ';' || c == ',')
+        .filter(|t| !t.is_empty())
 }
 
 /// Evidence ids of the question-answer items, checked against the turns.
@@ -163,10 +167,7 @@ pub fn parse_dialogues(raw: &str) -> Result<(Vec<NormalisedConversation>, Eviden
             .flat_map(|q| q["evidence"].as_array().map(Vec::as_slice).unwrap_or(&[]))
         {
             let raw_id = raw_id.as_str().unwrap_or("");
-            for token in raw_id
-                .split(|c: char| c.is_whitespace() || c == ';' || c == ',')
-                .filter(|t| !t.is_empty())
-            {
+            for token in evidence_tokens(raw_id) {
                 if !is_turn_id(token) {
                     evidence.malformed += 1;
                 } else if turn_ids.contains(token) {
