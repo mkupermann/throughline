@@ -15,7 +15,6 @@ use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use postgres::types::ToSql;
 use postgres::GenericClient;
@@ -270,8 +269,7 @@ where
                     msg,
                 ))
             } else if team {
-                eprintln!("query failed: {}", error_for_log(&e));
-                Err(without_detail("query_failed"))
+                Err(hidden_failure(&e))
             } else {
                 Err(api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -303,10 +301,17 @@ fn without_detail(code: &str) -> Response {
         .into_response()
 }
 
+/// Team mode's answer to a failed query: `query_failed` without the text,
+/// which goes to the log without row values.
+fn hidden_failure(e: &anyhow::Error) -> Response {
+    eprintln!("query failed: {}", error_for_log(e));
+    without_detail("query_failed")
+}
+
 /// The log line of a failed query in team mode: SQLSTATE and message of a
 /// database error, without its DETAIL (which can repeat a row, with an
 /// account name in it), else the outermost message.
-fn error_for_log(e: &anyhow::Error) -> String {
+pub(crate) fn error_for_log(e: &anyhow::Error) -> String {
     let db = e
         .chain()
         .find_map(|cause| cause.downcast_ref::<postgres::Error>())
@@ -2242,6 +2247,9 @@ async fn memory_supersede(
             "new_id": new_id,
         }))
         .into_response(),
+        Ok(Err(SupersedeError::Db(e))) if state.auth_mode == crate::access::AuthMode::Team => {
+            hidden_failure(&e)
+        }
         Ok(Err(e)) => supersede_error_response(e),
         Err(resp) => resp,
     }
@@ -2282,6 +2290,7 @@ async fn consolidate_handler(
 ) -> Response {
     // Carry ConsolidateError as Ok(payload) so with_db keeps 500 for real
     // connection failures and the typed codes stay exact.
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     let outcome = with_db(&state, move |client| {
         Ok(crate::lifecycle::consolidate(
             client,
@@ -2294,6 +2303,7 @@ async fn consolidate_handler(
     .await;
     match outcome {
         Ok(Ok(new_id)) => Json(serde_json::json!({ "new_id": new_id })).into_response(),
+        Ok(Err(crate::lifecycle::ConsolidateError::Db(e))) if team => hidden_failure(&e),
         Ok(Err(e)) => consolidate_error_response(e),
         Err(resp) => resp,
     }
@@ -3008,12 +3018,19 @@ async fn operate_handler(
         .await
         {
             Ok(Ok(message)) => message,
+            Ok(Err(e)) if state.auth_mode == crate::access::AuthMode::Team => {
+                return hidden_failure(&e)
+            }
             Ok(Err(e)) => {
                 return api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "query_failed",
                     e.to_string(),
                 )
+            }
+            Err(_) if state.auth_mode == crate::access::AuthMode::Team => {
+                eprintln!("the backup task failed");
+                return without_detail("blocking_task_failed");
             }
             Err(join) => {
                 return api_error(
@@ -3742,13 +3759,22 @@ fn write_refusal(
     }
 }
 
+/// Paths that pass without a session in team mode: the page and its
+/// files, `/mcp` (it checks its own key), `/api/health` and `/api/login`.
+fn without_session(path: &str) -> bool {
+    let api = path == "/api" || path.starts_with("/api/");
+    !api || path == "/api/health" || path == "/api/login"
+}
+
 /// Puts the [`crate::access::Actor`] behind a request into its extensions.
 /// Local mode: [`crate::access::Actor::local`] for everything. Team mode:
 /// the session of the cookie; everything under `/api` except `/api/health`
-/// and `/api/login` needs one (401), and writes there also need the
-/// request token and the public URL's Origin (403). The page and its files
-/// pass, so the browser can show the sign-in form; `/mcp` checks its own
-/// key. Agent keys on `/api` come with Task 6.
+/// and `/api/login` needs one (401) and the role of
+/// [`crate::access::required_role`] (403 `forbidden_role`), and writes there
+/// also need the request token and the public URL's Origin (403). The page
+/// and its files pass, so the browser can show the sign-in form; `/mcp`
+/// checks its own key, and its tools check the role. Agent keys on `/api`
+/// come with Task 6.
 async fn actor_layer(
     State(state): State<AppState>,
     mut req: axum::extract::Request,
@@ -3758,9 +3784,7 @@ async fn actor_layer(
         req.extensions_mut().insert(crate::access::Actor::local());
         return next.run(req).await;
     }
-    let path = req.uri().path();
-    let api = path == "/api" || path.starts_with("/api/");
-    if !api || path == "/api/health" || path == "/api/login" {
+    if without_session(req.uri().path()) {
         return next.run(req).await;
     }
     let session = match session_token(req.headers()) {
@@ -3775,6 +3799,10 @@ async fn actor_layer(
     let Some(session) = session else {
         return unauthorized("sign in first");
     };
+    let needed = crate::access::required_role(req.method(), req.uri().path());
+    if session.actor.role < needed {
+        return forbidden_role(needed);
+    }
     let read = matches!(
         *req.method(),
         axum::http::Method::GET | axum::http::Method::HEAD
@@ -3791,6 +3819,19 @@ async fn actor_layer(
     req.extensions_mut().insert(session.actor.clone());
     req.extensions_mut().insert(session);
     next.run(req).await
+}
+
+/// 403 for an account whose role is below `needed`, naming that role.
+fn forbidden_role(needed: crate::access::Role) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "error": "forbidden_role",
+            "detail": format!("this needs the {} role", needed.as_str()),
+            "required": needed.as_str(),
+        })),
+    )
+        .into_response()
 }
 
 /// `Set-Cookie` for the session: the token for `max_age` seconds, or an
@@ -4172,88 +4213,138 @@ async fn password_handler(
     }
 }
 
+/// One route for one method: the method, the path pattern and its handler.
+type Route = (
+    axum::http::Method,
+    &'static str,
+    axum::routing::MethodRouter<AppState>,
+);
+
+/// A [`Route`] whose handler answers `method` only (a GET route answers
+/// HEAD as well, as with `get`).
+fn route<H, T>(method: axum::http::Method, path: &'static str, handler: H) -> Route
+where
+    H: axum::handler::Handler<T, AppState>,
+    T: 'static,
+{
+    let filter =
+        axum::routing::MethodFilter::try_from(method.clone()).expect("GET, POST, PUT or DELETE");
+    (method, path, axum::routing::on(filter, handler))
+}
+
+/// Every route of the server. `app` registers exactly these, and the
+/// tests check the role table of [`crate::access::required_role`] against
+/// them.
+fn routes() -> Vec<Route> {
+    use axum::http::Method as M;
+    vec![
+        route(M::GET, "/", index),
+        route(M::GET, "/favicon.svg", favicon),
+        route(M::GET, "/favicon.ico", favicon),
+        route(M::GET, "/fonts/epilogue-latin.woff2", font_epilogue),
+        route(M::GET, "/fonts/ibm-plex-mono-latin.woff2", font_plex_mono),
+        route(M::GET, "/index.html", index),
+        route(M::GET, "/api/health", health),
+        route(M::POST, "/api/login", login_handler),
+        route(M::POST, "/api/logout", logout_handler),
+        route(M::GET, "/api/me", me_handler),
+        route(M::POST, "/api/password", password_handler),
+        route(M::GET, "/api/status", status),
+        route(M::GET, "/api/search", search_handler),
+        route(M::GET, "/api/recall", recall_handler),
+        route(M::GET, "/api/context", context_handler),
+        route(M::GET, "/api/messages", messages_handler),
+        route(M::GET, "/api/messages/{id}", message_detail),
+        route(M::GET, "/api/tools", tools_handler),
+        route(M::GET, "/api/memory", memory_handler),
+        route(M::POST, "/api/memory", memory_create),
+        route(M::GET, "/api/memory/{id}", memory_detail),
+        route(M::POST, "/api/memory/{id}/forget", memory_forget),
+        route(M::POST, "/api/memory/{id}/keep", memory_keep),
+        route(M::POST, "/api/memory/{id}/supersede", memory_supersede),
+        route(
+            M::GET,
+            "/api/consolidation/candidates",
+            consolidation_candidates_handler,
+        ),
+        route(
+            M::GET,
+            "/api/consolidation/proposal",
+            consolidation_proposal_handler,
+        ),
+        route(M::POST, "/api/consolidate", consolidate_handler),
+        route(M::GET, "/api/damaged-notes", damaged_notes_handler),
+        route(M::POST, "/api/mimo-memory/ingest", agent_memory_ingest),
+        route(M::POST, "/api/agent-memory/ingest", agent_memory_ingest),
+        route(M::GET, "/api/conversations", recent),
+        route(M::GET, "/api/conversations/{id}", conversation),
+        route(M::GET, "/api/projects", projects_handler),
+        route(M::GET, "/api/favorites", favorites_list_handler),
+        route(M::POST, "/api/favorites", favorites_add_handler),
+        route(
+            M::DELETE,
+            "/api/favorites/{kind}/{ref}",
+            favorites_delete_handler,
+        ),
+        route(M::GET, "/api/timeline", timeline_handler),
+        route(M::GET, "/api/conflicts", conflicts_handler),
+        route(M::GET, "/api/ask", ask_handler),
+        route(M::POST, "/api/operate", operate_handler),
+        route(M::GET, "/api/handoff", handoff_handler),
+        route(M::GET, "/api/costs", costs_handler),
+        route(M::GET, "/api/ingest-status", ingest_status_handler),
+        route(M::GET, "/api/audit", audit_handler),
+        route(M::GET, "/api/stale-digest", stale_digest_handler),
+        route(M::GET, "/api/answer-eval", answer_eval_handler),
+        route(M::POST, "/api/writeback", writeback_handler),
+        route(M::GET, "/api/health-recovery", health_recovery_handler),
+        route(M::GET, "/api/assistants", assistants_handler),
+        route(M::GET, "/api/assistants/file", assistants_file_handler),
+        route(M::PUT, "/api/assistants/file", assistants_save_handler),
+        route(
+            M::GET,
+            "/api/assistants/imported",
+            assistants_imported_handler,
+        ),
+        route(
+            M::GET,
+            "/api/assistants/imported/{id}",
+            assistants_imported_file_handler,
+        ),
+        route(M::GET, "/api/assistants/{tool}", assistants_tool_handler),
+        route(M::POST, "/mcp", crate::mcp_http::mcp_post),
+        route(M::GET, "/mcp", crate::mcp_http::mcp_other),
+        route(M::DELETE, "/mcp", crate::mcp_http::mcp_other),
+    ]
+}
+
+/// Method and path of every route `app` registers.
+#[cfg(test)]
+pub(crate) fn route_table() -> Vec<(axum::http::Method, &'static str)> {
+    routes()
+        .into_iter()
+        .map(|(method, path, _)| (method, path))
+        .collect()
+}
+
 pub fn app(state: AppState) -> Router {
+    app_with(routes(), state)
+}
+
+/// `app` around `routes`: the tests put stand-ins in place of the handlers
+/// to check the middleware on every route without running a job.
+fn app_with(routes: Vec<Route>, state: AppState) -> Router {
     let allowed = Arc::new(allowed_hosts(
         state.public_url.as_deref(),
         std::env::var("THROUGHLINE_ALLOWED_HOSTS").ok().as_deref(),
     ));
     let actors = axum::middleware::from_fn_with_state(state.clone(), actor_layer);
-    Router::new()
-        .route("/", get(index))
-        .route("/favicon.svg", get(favicon))
-        .route("/favicon.ico", get(favicon))
-        .route("/fonts/epilogue-latin.woff2", get(font_epilogue))
-        .route("/fonts/ibm-plex-mono-latin.woff2", get(font_plex_mono))
-        .route("/index.html", get(index))
-        .route("/api/health", get(health))
-        .route("/api/login", post(login_handler))
-        .route("/api/logout", post(logout_handler))
-        .route("/api/me", get(me_handler))
-        .route("/api/password", post(password_handler))
-        .route("/api/status", get(status))
-        .route("/api/search", get(search_handler))
-        .route("/api/recall", get(recall_handler))
-        .route("/api/context", get(context_handler))
-        .route("/api/messages", get(messages_handler))
-        .route("/api/messages/{id}", get(message_detail))
-        .route("/api/tools", get(tools_handler))
-        .route("/api/memory", get(memory_handler).post(memory_create))
-        .route("/api/memory/{id}", get(memory_detail))
-        .route("/api/memory/{id}/forget", post(memory_forget))
-        .route("/api/memory/{id}/keep", post(memory_keep))
-        .route("/api/memory/{id}/supersede", post(memory_supersede))
-        .route(
-            "/api/consolidation/candidates",
-            get(consolidation_candidates_handler),
-        )
-        .route(
-            "/api/consolidation/proposal",
-            get(consolidation_proposal_handler),
-        )
-        .route("/api/consolidate", post(consolidate_handler))
-        .route("/api/damaged-notes", get(damaged_notes_handler))
-        .route("/api/mimo-memory/ingest", post(agent_memory_ingest))
-        .route("/api/agent-memory/ingest", post(agent_memory_ingest))
-        .route("/api/conversations", get(recent))
-        .route("/api/conversations/{id}", get(conversation))
-        .route("/api/projects", get(projects_handler))
-        .route(
-            "/api/favorites",
-            get(favorites_list_handler).post(favorites_add_handler),
-        )
-        .route(
-            "/api/favorites/{kind}/{ref}",
-            delete(favorites_delete_handler),
-        )
-        .route("/api/timeline", get(timeline_handler))
-        .route("/api/conflicts", get(conflicts_handler))
-        .route("/api/ask", get(ask_handler))
-        .route("/api/operate", post(operate_handler))
-        .route("/api/handoff", get(handoff_handler))
-        .route("/api/costs", get(costs_handler))
-        .route("/api/ingest-status", get(ingest_status_handler))
-        .route("/api/audit", get(audit_handler))
-        .route("/api/stale-digest", get(stale_digest_handler))
-        .route("/api/answer-eval", get(answer_eval_handler))
-        .route("/api/writeback", post(writeback_handler))
-        .route("/api/health-recovery", get(health_recovery_handler))
-        .route("/api/assistants", get(assistants_handler))
-        .route(
-            "/api/assistants/file",
-            get(assistants_file_handler).put(assistants_save_handler),
-        )
-        .route("/api/assistants/imported", get(assistants_imported_handler))
-        .route(
-            "/api/assistants/imported/{id}",
-            get(assistants_imported_file_handler),
-        )
-        .route("/api/assistants/{tool}", get(assistants_tool_handler))
-        .route(
-            "/mcp",
-            post(crate::mcp_http::mcp_post)
-                .get(crate::mcp_http::mcp_other)
-                .delete(crate::mcp_http::mcp_other),
-        )
+    // A second route on a path joins the first one's methods.
+    let mut router = Router::new();
+    for (_, path, handler) in routes {
+        router = router.route(path, handler);
+    }
+    router
         .with_state(state)
         // The guard runs first (outermost), then the actor.
         .layer(actors)
@@ -4321,6 +4412,85 @@ mod tests {
             actions[0]["hint"],
             "ollama serve && ollama pull granite-embedding:278m"
         );
+    }
+
+    /// Every registered route either passes without a session or has an
+    /// entry of its own in the role table: the `admin` default for unknown
+    /// routes must not stand in for a missing entry.
+    #[test]
+    fn required_role_table_is_complete() {
+        use crate::access::{required_role, route_role, Role};
+        use axum::http::Method;
+        let table = route_table();
+        let mut missing = Vec::new();
+        for (method, path) in &table {
+            if without_session(path) {
+                continue;
+            }
+            match route_role(method, path) {
+                Some(role) => assert_eq!(required_role(method, path), role, "{method} {path}"),
+                None => missing.push(format!("{method} {path}")),
+            }
+        }
+        assert!(missing.is_empty(), "routes without a role: {missing:?}");
+        let open: Vec<String> = table
+            .iter()
+            .filter(|(_, path)| without_session(path))
+            .map(|(method, path)| format!("{method} {path}"))
+            .collect();
+        assert_eq!(
+            open,
+            [
+                "GET /",
+                "GET /favicon.svg",
+                "GET /favicon.ico",
+                "GET /fonts/epilogue-latin.woff2",
+                "GET /fonts/ibm-plex-mono-latin.woff2",
+                "GET /index.html",
+                "GET /api/health",
+                "POST /api/login",
+                "POST /mcp",
+                "GET /mcp",
+                "DELETE /mcp",
+            ]
+        );
+        // The roles the plan names, on patterns and on request paths.
+        for (method, path, role) in [
+            (Method::GET, "/api/status", Role::Viewer),
+            (Method::HEAD, "/api/status", Role::Viewer),
+            (Method::GET, "/api/memory/7", Role::Viewer),
+            (Method::GET, "/api/me", Role::Viewer),
+            (Method::GET, "/api/ask", Role::Editor),
+            (Method::HEAD, "/api/ask", Role::Editor),
+            (Method::GET, "/api/answer-eval", Role::Editor),
+            (Method::POST, "/api/memory/7/forget", Role::Editor),
+            (Method::POST, "/api/memory/{id}/keep", Role::Editor),
+            (Method::POST, "/api/memory/7/supersede", Role::Editor),
+            (Method::POST, "/api/favorites", Role::Editor),
+            (Method::DELETE, "/api/favorites/memory/7", Role::Editor),
+            (Method::POST, "/api/operate", Role::Admin),
+            (Method::POST, "/api/consolidate", Role::Admin),
+            (Method::POST, "/api/writeback", Role::Admin),
+            (Method::POST, "/api/agent-memory/ingest", Role::Admin),
+            (Method::POST, "/api/mimo-memory/ingest", Role::Admin),
+            (Method::PUT, "/api/assistants/file", Role::Admin),
+            (Method::GET, "/api/assistants/file", Role::Viewer),
+        ] {
+            assert_eq!(route_role(&method, path), Some(role), "{method} {path}");
+        }
+        // Unknown routes have no entry and need `admin`.
+        for (method, path) in [
+            (Method::GET, "/api"),
+            (Method::GET, "/api/nope"),
+            (Method::DELETE, "/api/status"),
+            (Method::PATCH, "/api/memory/7"),
+            (Method::PUT, "/api/assistants/claude"),
+            (Method::POST, "/api/memory/7/forget/now"),
+            (Method::GET, "/api/memory/7/forget"),
+        ] {
+            assert_eq!(route_role(&method, path), None, "{method} {path}");
+            assert_eq!(required_role(&method, path), Role::Admin, "{method} {path}");
+        }
     }
 
     fn loopback() -> Vec<String> {
@@ -7117,6 +7287,21 @@ mod session_tests {
             public_url: Option<&str>,
             agent_key: crate::agent_key::KeyState,
         ) -> Option<Served> {
+            Self::start_full(mode, public_url, agent_key, false)
+        }
+
+        /// Team mode with a stand-in for every handler but sign-in, which
+        /// answers `reached`: the middleware runs on every route, no job does.
+        fn gate() -> Option<Served> {
+            Self::start_full(AuthMode::Team, None, crate::agent_key::KeyState::Off, true)
+        }
+
+        fn start_full(
+            mode: AuthMode,
+            public_url: Option<&str>,
+            agent_key: crate::agent_key::KeyState,
+            stand_ins: bool,
+        ) -> Option<Served> {
             // Connect outside any runtime: the sync client blocks.
             let mut client = test_db()?;
             match mode {
@@ -7151,7 +7336,19 @@ mod session_tests {
                 public_url,
                 login: Default::default(),
             };
-            let router = app(state.clone());
+            let router = if stand_ins {
+                // Sign-in stays real, so the tests get a session.
+                let reached = routes()
+                    .into_iter()
+                    .map(|(method, path, handler)| match path {
+                        "/api/login" => (method, path, handler),
+                        _ => route(method, path, || async { "reached" }),
+                    })
+                    .collect();
+                app_with(reached, state.clone())
+            } else {
+                app(state.clone())
+            };
             rt.spawn(async move { axum::serve(listener, router).await.expect("serve") });
             Some(Served { rt, state, base })
         }
@@ -7273,6 +7470,31 @@ mod session_tests {
                 ],
                 Some(body.to_string()),
             )
+        }
+
+        /// `method path` as the UI sends it: cookie, request token and
+        /// Origin, and an empty JSON object as the body of a write.
+        fn call(&self, method: Method, path: &str, browser: &Browser) -> Answer {
+            let mut headers = vec![
+                ("cookie", browser.cookie.as_str()),
+                (
+                    "x-throughline-request-token",
+                    browser.request_token.as_str(),
+                ),
+                ("origin", self.base.as_str()),
+            ];
+            let body = (method != Method::GET).then(|| {
+                headers.push(("content-type", "application/json"));
+                "{}".to_string()
+            });
+            self.send(method, path, &headers, body)
+        }
+
+        /// A new account with `role`, signed in.
+        fn browser_with(&self, role: Role) -> Browser {
+            let name = format!("{}-{}", role.as_str(), uuid::Uuid::new_v4().simple());
+            self.add_account(&name, role);
+            self.sign_in(&name, PASSWORD)
         }
 
         fn count(&self, sql: &str, params: &[&(dyn postgres::types::ToSql + Sync)]) -> i64 {
@@ -7974,9 +8196,9 @@ mod session_tests {
     }
 
     /// In team mode the shared agent key is no account: `/mcp` runs as
-    /// `Actor::shared_only()`. A private note of A's never comes back,
-    /// and a write is shared without an owner. Local mode, same key and
-    /// same note: it comes back. Pins the actor of `mcp_http::mcp_post`.
+    /// `Actor::shared_only()`, a viewer. A private note of A's never comes
+    /// back, and a write is refused. Local mode, same key and same note: it
+    /// comes back. Pins the actor of `mcp_http::mcp_post`.
     #[test]
     fn mcp_agent_key_in_team_mode_sees_shared_notes_only() {
         let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
@@ -8035,25 +8257,21 @@ mod session_tests {
             body["error"].is_object() && !body.to_string().contains(&secret),
             "{body}"
         );
-        // A write through the shared key belongs to nobody and is shared.
+        // The shared key is a viewer until per-account keys come: its
+        // writes are refused and nothing is stored.
+        let notes = || s.count("SELECT count(*) FROM memory_chunks", &[]);
+        let before = notes();
         let body = mcp_call(
             &s,
             "tools/call",
             tool("write", json!({ "content": "by the key" })),
         );
-        let text = body["result"]["content"][0]["text"].as_str().expect("text");
-        let id = serde_json::from_str::<Value>(text).unwrap()["id"]
-            .as_i64()
-            .unwrap();
-        let row = s
-            .db()
-            .query_one(
-                "SELECT owner_id, visibility FROM memory_chunks WHERE id = $1",
-                &[&id],
-            )
-            .expect("row");
-        assert_eq!(row.get::<_, Option<i64>>(0), None);
-        assert_eq!(row.get::<_, String>(1), "shared");
+        assert_eq!(body["error"]["code"], -32602, "{body}");
+        assert_eq!(
+            body["error"]["message"], "tool write needs the editor role",
+            "{body}"
+        );
+        assert_eq!(notes(), before);
         drop(s);
 
         // Local mode with the same key: the same kind of note is returned.
@@ -8239,9 +8457,14 @@ mod session_tests {
             let answer = s.write(&path, &b, body);
             assert_eq!(answer.status, 404, "{path}: {}", answer.body);
         }
+        // Merging needs an admin, and an admin's role does not open
+        // another account's private note either.
+        let name_c = format!("c-{tag}");
+        s.add_account(&name_c, Role::Admin);
+        let c = s.sign_in(&name_c, PASSWORD);
         let answer = s.write(
             "/api/consolidate",
-            &b,
+            &c,
             json!({ "ids": [shared, private], "content": "merged" }),
         );
         assert_eq!(answer.status, 404, "{}", answer.body);
@@ -8294,5 +8517,283 @@ mod session_tests {
             .unwrap()
             .iter()
             .all(|c| c["favorite"] == false));
+    }
+
+    /// The routes behind a session, with the role each needs.
+    fn gated() -> Vec<(Method, &'static str, Role)> {
+        route_table()
+            .into_iter()
+            .filter(|(_, path)| !without_session(path))
+            .map(|(method, path)| {
+                let role = access::required_role(&method, path);
+                (method, path, role)
+            })
+            .collect()
+    }
+
+    /// A request path for a route pattern: `1` for every `{...}` segment.
+    fn concrete(pattern: &str) -> String {
+        pattern
+            .split('/')
+            .map(|segment| {
+                if segment.starts_with('{') {
+                    "1"
+                } else {
+                    segment
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    /// The 403 of a role below `needed`.
+    fn forbidden(needed: Role) -> Value {
+        json!({
+            "error": "forbidden_role",
+            "detail": format!("this needs the {} role", needed.as_str()),
+            "required": needed.as_str(),
+        })
+    }
+
+    /// Signs `browser` in on every gated route: the stand-in answers where
+    /// the role suffices, 403 `forbidden_role` elsewhere. The refused routes.
+    fn walk(s: &Served, browser: &Browser, role: Role) -> Vec<String> {
+        let mut refused = Vec::new();
+        for (method, path, needed) in gated() {
+            let answer = s.call(method.clone(), &concrete(path), browser);
+            if role >= needed {
+                assert_eq!(answer.status, 200, "{method} {path}: {}", answer.body);
+                assert_eq!(answer.body, "reached", "{method} {path}");
+            } else {
+                assert_eq!(answer.status, 403, "{method} {path}: {}", answer.body);
+                assert_eq!(answer.json(), forbidden(needed), "{method} {path}");
+                refused.push(format!("{method} {path}"));
+            }
+        }
+        refused
+    }
+
+    #[test]
+    fn viewer_gets_403_on_writes_and_llm_routes() {
+        let Some(s) = Served::gate() else {
+            eprintln!("skipping viewer_gets_403_on_writes_and_llm_routes: no PostgreSQL reachable");
+            return;
+        };
+        let viewer = s.browser_with(Role::Viewer);
+        let refused = walk(&s, &viewer, Role::Viewer);
+        // Every write but the viewer's own sign-out and password, and both
+        // routes that ask a model.
+        let mut expected: Vec<String> = gated()
+            .into_iter()
+            .filter(|(method, path, _)| {
+                *method != Method::GET && !["/api/logout", "/api/password"].contains(path)
+            })
+            .map(|(method, path, _)| format!("{method} {path}"))
+            .chain(["GET /api/ask".into(), "GET /api/answer-eval".into()])
+            .collect();
+        expected.sort();
+        let mut refused_sorted = refused.clone();
+        refused_sorted.sort();
+        assert_eq!(refused_sorted, expected);
+        assert!(refused.len() > 10, "{refused:?}");
+        // The role is checked before the request token.
+        let bare = s.send(
+            Method::POST,
+            "/api/memory/1/forget",
+            &[("cookie", viewer.cookie.as_str())],
+            None,
+        );
+        assert_eq!(bare.status, 403, "{}", bare.body);
+        assert_eq!(bare.json(), forbidden(Role::Editor));
+        // HEAD is a GET.
+        let head = s.send(
+            Method::HEAD,
+            "/api/ask",
+            &[("cookie", viewer.cookie.as_str())],
+            None,
+        );
+        assert_eq!(head.status, 403);
+        // Without a session it stays 401.
+        for (method, path) in [(Method::GET, "/api/ask"), (Method::POST, "/api/operate")] {
+            let answer = s.send(method.clone(), path, &[("origin", s.base.as_str())], None);
+            assert_eq!(answer.status, 401, "{method} {path}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "unauthorized");
+        }
+        drop(s);
+
+        // The real handlers sit behind the same check.
+        let Some(s) = team_with_notes() else {
+            return;
+        };
+        let viewer = s.browser_with(Role::Viewer);
+        let id = insert_note(&s, None, "shared", "a shared note", "manual");
+        let answer = s.write(&format!("/api/memory/{id}/forget"), &viewer, json!({}));
+        assert_eq!(answer.status, 403, "{}", answer.body);
+        assert_eq!(answer.json(), forbidden(Role::Editor));
+        let note = s.get(&format!("/api/memory/{id}"), &viewer);
+        assert_eq!(note.status, 200, "{}", note.body);
+        assert_eq!(note.json()["status"], "active");
+        let ask = s.get("/api/ask?q=why", &viewer);
+        assert_eq!(ask.status, 403, "{}", ask.body);
+    }
+
+    #[test]
+    fn editor_gets_403_on_operations() {
+        let Some(s) = Served::gate() else {
+            eprintln!("skipping editor_gets_403_on_operations: no PostgreSQL reachable");
+            return;
+        };
+        let editor = s.browser_with(Role::Editor);
+        let mut refused = walk(&s, &editor, Role::Editor);
+        refused.sort();
+        assert_eq!(
+            refused,
+            [
+                "POST /api/agent-memory/ingest",
+                "POST /api/consolidate",
+                "POST /api/mimo-memory/ingest",
+                "POST /api/operate",
+                "POST /api/writeback",
+                "PUT /api/assistants/file",
+            ]
+        );
+        // Past the role, an editor's write still needs the request token.
+        let bare = s.send(
+            Method::POST,
+            "/api/memory/1/forget",
+            &[("cookie", editor.cookie.as_str())],
+            None,
+        );
+        assert_eq!(bare.status, 403, "{}", bare.body);
+        assert_eq!(bare.json()["error"], "forbidden_request");
+        let bare = s.send(
+            Method::POST,
+            "/api/operate",
+            &[("cookie", editor.cookie.as_str())],
+            None,
+        );
+        assert_eq!(bare.json(), forbidden(Role::Admin));
+    }
+
+    #[test]
+    fn admin_passes() {
+        let Some(s) = Served::gate() else {
+            eprintln!("skipping admin_passes: no PostgreSQL reachable");
+            return;
+        };
+        let admin = s.browser_with(Role::Admin);
+        assert!(walk(&s, &admin, Role::Admin).is_empty());
+        // Every route, the open ones too (sign-in is the real one).
+        for (method, path) in route_table() {
+            if path == "/api/login" {
+                continue;
+            }
+            let answer = s.call(method.clone(), &concrete(path), &admin);
+            assert_eq!(answer.body, "reached", "{method} {path}");
+        }
+        // The request token still applies to an admin.
+        let bare = s.send(
+            Method::POST,
+            "/api/operate",
+            &[("cookie", admin.cookie.as_str())],
+            None,
+        );
+        assert_eq!(bare.status, 403, "{}", bare.body);
+        assert_eq!(bare.json()["error"], "forbidden_request");
+        drop(s);
+
+        // The real handlers: the status job runs, a merge of nothing is refused
+        // by the handler itself.
+        let Some(s) = team_with_notes() else {
+            return;
+        };
+        let admin = s.browser_with(Role::Admin);
+        let answer = s.write("/api/operate?job=status", &admin, json!({}));
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        assert_eq!(answer.json()["job"], "status");
+        let answer = s.write("/api/consolidate", &admin, json!({ "ids": [] }));
+        assert_eq!(answer.status, 422, "{}", answer.body);
+        assert_eq!(answer.json()["error"], "validation_error");
+    }
+
+    /// Team mode, a broken notes table: the merge, the replacement and the
+    /// MCP tools answer `query_failed` without the database text. Local
+    /// mode, same table: the text is there, so the check could see it.
+    #[test]
+    fn team_mode_hides_db_error_detail() {
+        let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = Served::start_with_key(AuthMode::Team, None, key()) else {
+            eprintln!("skipping team_mode_hides_db_error_detail: no PostgreSQL reachable");
+            return;
+        };
+        // Session-local and without the columns every note query reads.
+        let broken = "CREATE TEMP TABLE memory_chunks (id bigint)";
+        s.db().batch_execute(broken).expect("broken notes table");
+        let leaks = |text: &str| {
+            [
+                "does not exist",
+                "column",
+                "memory_chunks",
+                "db error",
+                "ERROR",
+            ]
+            .iter()
+            .any(|word| text.contains(word))
+        };
+        let admin = s.browser_with(Role::Admin);
+        for (path, body) in [
+            (
+                "/api/consolidate",
+                json!({ "ids": [1, 2], "content": "merged" }),
+            ),
+            ("/api/memory/1/supersede", json!({ "content": "new" })),
+        ] {
+            let answer = s.write(path, &admin, body);
+            assert_eq!(answer.status, 500, "{path}: {}", answer.body);
+            assert_eq!(answer.json(), json!({ "error": "query_failed" }), "{path}");
+        }
+        let tool = |name: &str, args: Value| json!({ "name": name, "arguments": args });
+        for params in [
+            tool("get_note", json!({ "id": 1 })),
+            tool("conflicts", json!({})),
+            tool("project_context", json!({ "project": "p" })),
+        ] {
+            let body = mcp_call(&s, "tools/call", params.clone());
+            assert_eq!(body["error"]["code"], -32000, "{params}: {body}");
+            assert_eq!(body["error"]["message"], "query_failed", "{params}: {body}");
+            assert!(!leaks(&body.to_string()), "{params}: {body}");
+        }
+        let body = mcp_call(
+            &s,
+            "resources/read",
+            json!({ "uri": "throughline://note/1" }),
+        );
+        assert_eq!(body["error"]["message"], "query_failed", "{body}");
+        drop(s);
+
+        // Control: local mode shows the text, through HTTP and MCP.
+        let Some(s) = Served::start_with_key(AuthMode::Local, None, key()) else {
+            return;
+        };
+        s.db().batch_execute(broken).expect("broken notes table");
+        let body = mcp_call(&s, "tools/call", tool("get_note", json!({ "id": 1 })));
+        assert!(leaks(&body["error"]["message"].to_string()), "{body}");
+        drop(s);
+        let Some(s) = Served::start(AuthMode::Local, None) else {
+            return;
+        };
+        s.db().batch_execute(broken).expect("broken notes table");
+        let answer = s.send(
+            Method::POST,
+            "/api/consolidate",
+            &[("content-type", "application/json")],
+            Some(json!({ "ids": [1, 2], "content": "merged" }).to_string()),
+        );
+        assert_eq!(answer.status, 500, "{}", answer.body);
+        assert!(
+            leaks(&answer.json()["detail"].to_string()),
+            "{}",
+            answer.body
+        );
     }
 }
