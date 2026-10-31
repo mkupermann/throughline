@@ -55,6 +55,10 @@ pub enum Rank {
     Fulltext,
     /// The weighted sum of `WEIGHTS`.
     Weighted,
+    /// Cosine of the question's vector to the note's, nothing else; a note
+    /// without a vector scores 0. Without a question vector it ranks by full
+    /// text and the result says `degraded`.
+    Cosine,
 }
 
 impl Rank {
@@ -62,6 +66,7 @@ impl Rank {
         match self {
             Rank::Fulltext => "fulltext",
             Rank::Weighted => "weighted",
+            Rank::Cosine => "cosine",
         }
     }
 }
@@ -72,16 +77,19 @@ impl std::str::FromStr for Rank {
         match s {
             "fulltext" => Ok(Rank::Fulltext),
             "weighted" => Ok(Rank::Weighted),
+            "cosine" => Ok(Rank::Cosine),
             other => Err(format!("unknown rank: {other}")),
         }
     }
 }
 
-/// Whether a request uses the question's vector: the weighted ranking, the
-/// cosine gate of `as_of` and the evidence of `grounded`. Callers embed the
-/// question only then, so full text in `current` never waits for Ollama.
+/// Whether a request uses the question's vector: the cosine and weighted
+/// rankings, the cosine gate of `as_of` and the evidence of `grounded`.
+/// Callers embed the question only then, so full text in `current` never
+/// waits for Ollama.
 pub fn needs_embedding(mode: RecallMode, rank: Rank) -> bool {
-    rank == Rank::Weighted || matches!(mode, RecallMode::AsOf | RecallMode::Grounded)
+    matches!(rank, Rank::Weighted | Rank::Cosine)
+        || matches!(mode, RecallMode::AsOf | RecallMode::Grounded)
 }
 
 pub const DEFAULT_LIMIT: usize = 10;
@@ -166,6 +174,37 @@ pub fn query_embedding_with(
         vector,
         min_cosine: backend.profile.as_of_min_cosine,
     }))
+}
+
+#[cfg(test)]
+pub(crate) mod test_ollama {
+    use std::sync::Mutex;
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Runs `f` with `OLLAMA_HOST` on a local port nothing listens on, so
+    /// every embedding call fails as it does when Ollama is down. The old
+    /// value comes back afterwards, also when `f` panics.
+    pub(crate) fn unreachable<T>(f: impl FnOnce() -> T) -> T {
+        struct Restore(Option<String>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(v) => std::env::set_var("OLLAMA_HOST", v),
+                    None => std::env::remove_var("OLLAMA_HOST"),
+                }
+            }
+        }
+        let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Bound and dropped at once: the port is closed again.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .expect("free local port")
+            .port();
+        let _restore = Restore(std::env::var("OLLAMA_HOST").ok());
+        std::env::set_var("OLLAMA_HOST", format!("http://127.0.0.1:{port}"));
+        f()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -529,25 +568,53 @@ pub(crate) fn score(
     (total, why)
 }
 
-/// Score of one candidate by the chosen rank: its `ts_rank` (0 without a
-/// match) when `fulltext` holds the ranks, else the weighted score. The
-/// weighted parts stay in `Why` either way.
+/// What orders the candidates once the rank meets the question vector.
+enum Order {
+    /// `ts_rank` per note id.
+    Fulltext(HashMap<i64, f64>),
+    Weighted,
+    Cosine,
+}
+
+/// The order of `rank` for the notes `ids`. Cosine without a question vector
+/// orders by full text; the result reports that as degraded.
+fn order_for<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    rank: Rank,
+    has_embedding: bool,
+    words: &[String],
+    ids: &[i64],
+) -> Result<Order> {
+    Ok(match rank {
+        Rank::Weighted => Order::Weighted,
+        Rank::Cosine if has_embedding => Order::Cosine,
+        Rank::Fulltext | Rank::Cosine => {
+            Order::Fulltext(fulltext_ranks(client, actor, words, ids)?)
+        }
+    })
+}
+
+/// Score of one candidate by the order: its `ts_rank` (0 without a match),
+/// the weighted score or its cosine (0 without a vector). The weighted parts
+/// stay in `Why` either way.
 fn rank_score(
     c: &Candidate,
     words: &[String],
     has_embedding: bool,
     now: DateTime<Utc>,
     weights: &Weights,
-    fulltext: Option<&HashMap<i64, f64>>,
+    order: &Order,
 ) -> (f64, Why) {
     let (weighted, mut why) = score(c, words, has_embedding, now, weights);
-    match fulltext {
-        Some(ranks) => {
+    match order {
+        Order::Fulltext(ranks) => {
             let r = ranks.get(&c.id).copied().unwrap_or(0.0);
             why.fulltext = Some(r);
             (r, why)
         }
-        None => (weighted, why),
+        Order::Weighted => (weighted, why),
+        Order::Cosine => (why.cosine.unwrap_or(0.0), why),
     }
 }
 
@@ -655,14 +722,10 @@ fn associate<C: GenericClient>(
         let wanted: Vec<i64> = reached.keys().copied().collect();
         let mut next = HashMap::new();
         if !wanted.is_empty() {
-            let fulltext = match q.rank {
-                Rank::Fulltext => Some(fulltext_ranks(client, q.actor, words, &wanted)?),
-                Rank::Weighted => None,
-            };
+            let order = order_for(client, q.actor, q.rank, emb.is_some(), words, &wanted)?;
             for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
                 let (spread, rel) = reached[&c.id];
-                let (own, mut why) =
-                    rank_score(&c, words, emb.is_some(), now, weights, fulltext.as_ref());
+                let (own, mut why) = rank_score(&c, words, emb.is_some(), now, weights, &order);
                 why.spread = Some(spread);
                 let total = own.max(spread);
                 let replaced = c.superseded_by.is_some()
@@ -822,17 +885,12 @@ pub(crate) fn recall_with<C: GenericClient>(
     };
     let words = query_words(q.text);
     let cands = candidates(client, filter, q, emb)?;
-    let fulltext = match q.rank {
-        Rank::Fulltext => {
-            let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
-            Some(fulltext_ranks(client, q.actor, &words, &ids)?)
-        }
-        Rank::Weighted => None,
-    };
+    let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
+    let order = order_for(client, q.actor, q.rank, emb.is_some(), &words, &ids)?;
     let mut scored: Vec<(f64, Why, Candidate)> = cands
         .into_iter()
         .map(|c| {
-            let (s, why) = rank_score(&c, &words, emb.is_some(), now, weights, fulltext.as_ref());
+            let (s, why) = rank_score(&c, &words, emb.is_some(), now, weights, &order);
             (s, why, c)
         })
         .collect();
@@ -2451,9 +2509,64 @@ mod tests {
     }
 
     #[test]
+    fn cosine_rank_orders_by_vector_similarity() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping cosine_rank_orders_by_vector_similarity: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let model = model_name();
+        // `far` shares every question word, `near` only the tag but has the
+        // closer vector; `bare` has no vector at all.
+        let text = format!("kafka retention backlog {tag}");
+        let (cf, cn, cb) = (
+            format!("kafka retention backlog {tag} far"),
+            format!("{tag} near"),
+            format!("kafka {tag} bare"),
+        );
+        let mut sf = Seed::new(&cf, long_ago());
+        sf.project = Some(&project);
+        let mut sn = Seed::new(&cn, long_ago());
+        sn.project = Some(&project);
+        let mut sb = Seed::new(&cb, long_ago());
+        sb.project = Some(&project);
+        let (far, near, bare) = (seed(&mut tx, &sf), seed(&mut tx, &sn), seed(&mut tx, &sb));
+        embed(&mut tx, far, &model, &vec768(&[0.2, 0.98]));
+        embed(&mut tx, near, &model, &vec768(&[0.95, 0.31]));
+        let emb = query_embedding(&model);
+        let mut q = query(&text, Some(&project));
+        q.rank = Rank::Cosine;
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
+        assert_eq!(r.degraded, None);
+        let order: Vec<i64> = r
+            .hits
+            .iter()
+            .map(|h| h.id)
+            .filter(|id| [far, near, bare].contains(id))
+            .collect();
+        assert_eq!(order, vec![near, far, bare], "closest vector first");
+        for h in r.hits.iter().filter(|h| [far, near, bare].contains(&h.id)) {
+            // the score is the cosine itself, no word share, no full text
+            assert_eq!(Some(h.score), h.why.cosine, "{}", h.id);
+            assert_eq!(h.why.fulltext, None);
+        }
+        let score = |id: i64| r.hits[position(&r, id).unwrap()].score;
+        assert!((score(near) - 0.95 / (0.95f64.powi(2) + 0.31f64.powi(2)).sqrt()).abs() < 1e-3);
+        assert!((score(far) - 0.2 / (0.2f64.powi(2) + 0.98f64.powi(2)).sqrt()).abs() < 1e-3);
+        assert_eq!(score(bare), 0.0);
+        // control: full text puts the note with every word first
+        q.rank = Rank::Fulltext;
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
+        assert!(position(&r, far) < position(&r, near));
+    }
+
+    #[test]
     fn rank_parses_and_decides_the_embedding() {
         assert_eq!("fulltext".parse::<Rank>(), Ok(Rank::Fulltext));
         assert_eq!("weighted".parse::<Rank>(), Ok(Rank::Weighted));
+        assert_eq!("cosine".parse::<Rank>(), Ok(Rank::Cosine));
         assert!("Weighted".parse::<Rank>().is_err());
         assert!("".parse::<Rank>().is_err());
         assert_eq!(Rank::default(), Rank::Fulltext);
@@ -2463,6 +2576,8 @@ mod tests {
         assert!(!needs_embedding(Associative, Rank::Fulltext));
         assert!(needs_embedding(Current, Rank::Weighted));
         assert!(needs_embedding(Associative, Rank::Weighted));
+        assert!(needs_embedding(Current, Rank::Cosine));
+        assert_eq!(Rank::Cosine.as_str(), "cosine");
         assert!(needs_embedding(AsOf, Rank::Fulltext));
         assert!(needs_embedding(Grounded, Rank::Fulltext));
     }

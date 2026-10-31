@@ -73,7 +73,7 @@ enum Command {
         known_at: Option<String>,
         #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
         limit: usize,
-        /// fulltext (default) | weighted
+        /// fulltext (default) | weighted | cosine
         #[arg(long, default_value = "fulltext")]
         rank: String,
         /// Print the full result as JSON.

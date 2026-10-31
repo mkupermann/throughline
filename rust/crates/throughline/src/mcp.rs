@@ -232,7 +232,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: fulltext (default, word match) or weighted (meaning, recency, reliability; needs embeddings)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: fulltext (default, word match), cosine (meaning; ranks by full text when no embedding is reachable) or weighted (meaning, recency, reliability; needs embeddings)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -248,7 +248,7 @@ fn tools_list() -> Value {
                         "limit": { "type": "integer", "default": 10 },
                         "rank": {
                             "type": "string",
-                            "enum": ["fulltext", "weighted"],
+                            "enum": ["fulltext", "weighted", "cosine"],
                             "default": "fulltext"
                         }
                     },
@@ -1171,7 +1171,7 @@ mod tests {
         assert_eq!(modes.len(), 4);
         assert_eq!(
             schema["properties"]["rank"]["enum"],
-            json!(["fulltext", "weighted"])
+            json!(["fulltext", "weighted", "cosine"])
         );
         for k in ["project", "valid_at", "known_at", "limit"] {
             assert!(schema["properties"].get(k).is_some(), "{k}");

@@ -1318,7 +1318,7 @@ struct RecallParams {
     valid_at: Option<String>,
     known_at: Option<String>,
     limit: Option<i64>,
-    /// `fulltext` (default) | `weighted`
+    /// `fulltext` (default) | `weighted` | `cosine`
     rank: Option<String>,
 }
 
@@ -1494,7 +1494,8 @@ async fn recall_handler(
     }
     // Embed before taking the shared DB lock: a slow Ollama must not stall
     // other requests. The call blocks, so it gets its own blocking task.
-    // Full text in mode current needs no vector and never asks Ollama.
+    // Full text in mode current needs no vector and never asks Ollama. An
+    // unreachable Ollama gives no vector: cosine then ranks by full text.
     let emb = if crate::recall::needs_embedding(parsed.mode, parsed.rank) {
         let embed_text = text.clone();
         match tokio::task::spawn_blocking(move || crate::recall::query_embedding(&embed_text)).await
@@ -5288,6 +5289,69 @@ mod tests {
             .get(0);
         client.batch_execute("ROLLBACK").expect("rollback");
         assert_eq!(n, 0, "the UI recall must not count");
+    }
+
+    #[test]
+    fn cosine_rank_falls_back_to_fulltext_when_embedder_unreachable() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping cosine_rank_falls_back_to_fulltext_when_embedder_unreachable: no PostgreSQL reachable");
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        // both words against one word: full text puts `both` first
+        let one = seed_note(&mut client, &format!("{tag} only"), "insight");
+        let both = seed_note(&mut client, &format!("wombat burrow {tag}"), "insight");
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let ask = |rank: Option<&str>| {
+            let params = RecallParams {
+                q: Some(format!("wombat burrow {tag}")),
+                project: None,
+                mode: None,
+                valid_at: None,
+                known_at: None,
+                limit: None,
+                rank: rank.map(String::from),
+            };
+            let resp = crate::recall::test_ollama::unreachable(|| {
+                rt.block_on(recall_handler(
+                    State(state.clone()),
+                    Extension(Actor::local()),
+                    HeaderMap::new(),
+                    Query(params),
+                ))
+            });
+            assert_eq!(resp.status(), StatusCode::OK, "rank {rank:?}");
+            let body = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+                .expect("body");
+            serde_json::from_slice::<serde_json::Value>(&body).expect("json body")
+        };
+        let v = ask(Some("cosine"));
+        assert_eq!(v["degraded"], "no_embeddings", "{v}");
+        assert_eq!(v["mode"], "current", "{v}");
+        let hits = v["hits"].as_array().expect("hits");
+        let ids: Vec<i64> = hits.iter().filter_map(|h| h["id"].as_i64()).collect();
+        assert_eq!(ids[..2], [both, one], "full-text order: {v}");
+        for h in &hits[..2] {
+            // ranked by full text: `why.fulltext` holds the score, no cosine
+            assert_eq!(h["why"]["fulltext"], h["score"], "{h}");
+            assert!(h["why"]["cosine"].is_null(), "{h}");
+        }
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
     }
 
     const TEST_AGENT_KEY: &str = "test-agent-key-0123456789abcdef0123";
