@@ -6,7 +6,7 @@
 //! schema (memory_chunks, embeddings, pm_*) is intentionally not recreated
 //! here; this pass is ingest + search.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use postgres::Client;
 
 const CORE_SCHEMA: &str = r#"
@@ -445,6 +445,27 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("015_account_stars_untimed.sql", ACCOUNT_STARS_UNTIMED),
 ];
 
+/// The newest migration of [`MIGRATIONS`].
+pub const LATEST: &str = MIGRATIONS[MIGRATIONS.len() - 1].0;
+
+/// Refuse a database whose ledger lacks [`LATEST`]. Migrations run in
+/// order and stop at the first failure, so the newest one stands for all of
+/// them. Names the code does not know are fine: the Python package records
+/// its own files in the same ledger (`015_project_assignments.sql`, say).
+pub fn require_latest<C: postgres::GenericClient>(client: &mut C) -> Result<()> {
+    let applied: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM applied_migrations WHERE migration_name = $1)",
+            &[&LATEST],
+        )
+        .context("read applied_migrations (run `throughline migrate` first)")?
+        .get(0);
+    if !applied {
+        bail!("the database lacks migration {LATEST}: run `throughline migrate` first");
+    }
+    Ok(())
+}
+
 /// `migration_name` matches the Python package's `applied_migrations` table
 /// so a mixed-history database works without a rename migration.
 fn ensure_ledger(client: &mut Client) -> Result<()> {
@@ -820,7 +841,7 @@ END $$;
         )
         .expect("favorite before 014");
         // A same-named constraint on another table must not stop 014 from
-        // adding the CHECK to public.memory_chunks.
+        // adding the CHECK to the test's own copy of memory_chunks.
         tx.batch_execute(
             "CREATE TEMP TABLE team_mode_decoy (v text \
              CONSTRAINT memory_chunks_private_has_owner CHECK (v <> 'x'))",
