@@ -23,6 +23,9 @@ regex = "1.13.1"
 # enabled by default because state.db is Hermes's primary source.
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+# Password hashing for team-mode accounts; only the low-level `scrypt()`
+# function, without the `password-hash` (PHC string) layer.
+scrypt = { version = "0.11", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

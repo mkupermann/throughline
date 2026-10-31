@@ -20,3 +20,11 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 walkdir = "2"
 tempfile = "3"
+
+# Password hashing is far too slow unoptimised (seconds per hash), and tests
+# and debug builds hash passwords. Release builds are unaffected.
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
