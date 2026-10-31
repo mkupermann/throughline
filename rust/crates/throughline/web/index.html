@@ -4321,18 +4321,30 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   const ROLE_RANK = { viewer: 1, editor: 2, admin: 3 };
   let account = null;
   let requestToken = "";
-  // A page opened after a session ended (`?session=ended`): the sign-in
-  // page says so. The flag leaves the address at once.
-  const SESSION_ENDED = (function () {
-    if (!teamMode) return false;
+  // Why this page was opened: the one-shot `?session=` flag of `leavePage`.
+  // `ended`: the session ended (the sign-in page says so). `stop`: a page
+  // opened by `ended` found the session alive and then lost it; this page
+  // waits for the form and asks nothing by itself, so pages never chain
+  // without the user. `signin`, `signout`: a clean page for the next
+  // account. The flag leaves the address at once, so the address never
+  // holds it and the next `leavePage` is always a real load.
+  const ARRIVAL = (function () {
+    if (!teamMode) return "";
     try {
-      const ended = new URLSearchParams(location.search).get("session") === "ended";
-      if (ended) history.replaceState(null, "", location.pathname + location.hash);
-      return ended;
+      const params = new URLSearchParams(location.search);
+      const flag = params.get("session") || "";
+      if (flag) {
+        params.delete("session");
+        const rest = params.toString();
+        history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
+      }
+      return flag;
     } catch {
-      return false;
+      return "";
     }
   })();
+  // Whether the account came from GET /api/me at load (not from the form).
+  let accountFromProbe = false;
   let leaving = false;
   function roleAtLeast(min) {
     if (!account) return true;
@@ -4375,14 +4387,24 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       keys.forEach((k) => localStorage.removeItem(k));
     } catch {}
   }
-  /** Leaves the page for a fresh one: the DOM, every cache in memory and
-   * the form fields of this account go; `target` is the new address. */
-  function leavePage(target) {
+  /** Loads a fresh page with the one-shot flag `flag` (see ARRIVAL): the
+   * DOM, every cache in memory and the fields of this account go. The
+   * address never holds `session=`, so the new one always differs from it
+   * and the browser loads a new document (a `replace` to the same address
+   * with a fragment would only jump within this one). Sign-out lands on
+   * the overview. */
+  function leavePage(flag) {
     if (leaving) return;
     leaving = true;
     clearForms();
     clearOwnStorage();
-    location.replace(target);
+    if (flag === "signout") {
+      location.replace("/?session=signout");
+      return;
+    }
+    const params = new URLSearchParams(location.search);
+    params.set("session", flag);
+    location.replace(location.pathname + "?" + params.toString() + location.hash);
   }
   /** Every API call of the page goes through here: a write to `/api/`
    * carries the request token, a 401 in team mode ends the session (fresh
@@ -7980,20 +8002,19 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     $("signin-retry").hidden = true;
     document.querySelector(".app").hidden = false;
   }
-  /** A 401 in team mode: the session is gone. The page leaves for a fresh
-   * one at once, so nothing of this account stays in the DOM, in memory or
-   * in the fields. A page that was itself opened that way and meets a 401
-   * again stays put (no loop): it hides everything and clears the fields;
-   * its next sign-in leaves for a fresh page. */
+  /** A 401 in team mode: the session is gone. Every time, first or later,
+   * the page leaves for a fresh one at once, so nothing of this account
+   * stays in the DOM, in memory or in the fields. Only a page opened after
+   * a session end whose account came from its own GET /api/me leaves for a
+   * page that waits for the form (`stop`), so a server that answers
+   * /api/me but refuses the rest cannot make pages load each other. A page
+   * without an account never showed anything: the sign-in page is enough. */
   function sessionEnded() {
-    if (account && !SESSION_ENDED) {
-      leavePage(location.pathname + "?session=ended" + location.hash);
+    if (!account) {
+      showSignIn(t("auth.signedOut"));
       return;
     }
-    account = null;
-    requestToken = "";
-    clearForms();
-    showSignIn(t("auth.signedOut"));
+    leavePage(ARRIVAL === "ended" && accountFromProbe ? "stop" : "ended");
   }
   /** GET /api/me, team mode only: 200 is the signed-in account, 401 the
    * sign-in page, anything else the sign-in page with "retry". */
@@ -8007,11 +8028,12 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       try { me = await res.json(); } catch {}
       if (me) {
         setAccount(me);
+        accountFromProbe = true;
         hideSignIn();
         return true;
       }
     }
-    if (res && res.status === 401) showSignIn(SESSION_ENDED ? t("auth.signedOut") : "");
+    if (res && res.status === 401) showSignIn(ARRIVAL === "ended" ? t("auth.signedOut") : "");
     else showSignIn(t("auth.unavailable"), true);
     return false;
   }
@@ -8067,7 +8089,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         try { me = await res.json(); } catch {}
         // The app ran in this page before: start from a fresh page.
         if (!me || started) {
-          leavePage(location.pathname + location.hash);
+          leavePage("signin");
           return;
         }
         setAccount(me);
@@ -8093,7 +8115,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         toast(t("account.signOutFailed") + e.message);
         return;
       }
-      leavePage("/");
+      leavePage("signout");
     });
     const dlg = $("password-dialog");
     const msg = $("pw-msg");
@@ -8249,7 +8271,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   initLang();
   if (teamMode) {
     document.querySelector(".app").hidden = true;
-    resolveAccount().then((ready) => { if (ready) startApp(); });
+    if (ARRIVAL === "stop") showSignIn(t("auth.signedOut"));
+    else resolveAccount().then((ready) => { if (ready) startApp(); });
   } else {
     startApp();
   }
