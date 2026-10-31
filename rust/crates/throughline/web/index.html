@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="throughline-auth-mode" content="local" />
 <title>Throughline - Memory</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <style>
@@ -1825,7 +1826,7 @@ td .empty {
 body[data-account-role="viewer"] [data-min-role="editor"],
 body[data-account-role="viewer"] [data-min-role="admin"],
 body[data-account-role="editor"] [data-min-role="admin"] { display: none !important; }
-.app[hidden], .account-box[hidden], .role-notice[hidden], .pin-dialog .pin-check[hidden] { display: none; }
+.app[hidden], .account-box[hidden], .role-notice[hidden], .pin-dialog .pin-check[hidden], .pin-dialog .btn[hidden] { display: none; }
 .signin { background: var(--bg); z-index: 130; }
 .pin-dialog input[type="text"],
 .pin-dialog input[type="password"] {
@@ -1845,8 +1846,37 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
 .form-msg { margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--text-2); }
 .form-msg.is-error { color: var(--danger); }
 .form-msg[hidden] { display: none; }
-.account-box { display: flex; align-items: center; gap: var(--space-2); }
+.account-box { position: relative; display: flex; align-items: center; }
+.account-menu-btn { display: inline-flex; align-items: center; gap: var(--space-2); }
 .account-box .account-name { font-weight: 600; }
+.account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 200px;
+  padding: var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.account-menu[hidden] { display: none; }
+.account-menu .btn { width: 100%; text-align: left; }
+/* Room for the account button on one line (team mode only): the search
+   pill gives way and keeps its hint on one line. */
+.topbar.has-account .search-pill { flex-basis: 180px; min-width: 0; }
+.topbar.has-account .search-pill > span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
 .role-notice {
   margin: calc(-1 * var(--space-4)) 0 var(--space-4);
   padding: var(--space-2) var(--space-3);
@@ -1871,6 +1901,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     <input id="signin-password" name="password" type="password" autocomplete="current-password" required />
     <p class="form-msg is-error" id="signin-error" role="alert" hidden></p>
     <div class="pin-actions">
+      <button class="btn btn-ghost" id="signin-retry" type="button" data-i18n="auth.retry" hidden>Retry</button>
       <button class="btn btn-primary" id="signin-submit" type="submit" data-i18n="auth.submit">Sign in</button>
     </div>
   </form>
@@ -1941,10 +1972,14 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         <button class="btn btn-ghost" id="btn-hide-empty" type="button" data-i18n="topbar.hideEmpty">Hide empty</button>
         <button class="btn btn-primary" id="btn-browse" type="button" data-i18n="topbar.browseAll">Browse all</button>
         <div class="account-box" id="account-box" role="group" data-i18n-attr="aria-label:account.aria" aria-label="Account" hidden>
-          <span class="account-name" id="account-name"></span>
-          <span class="chip" id="account-role"></span>
-          <button class="btn btn-ghost" id="account-password" type="button" data-i18n="account.changePassword">Change password</button>
-          <button class="btn btn-ghost" id="account-signout" type="button" data-i18n="account.signOut">Sign out</button>
+          <button class="btn btn-ghost account-menu-btn" id="account-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+            <span class="account-name" id="account-name"></span>
+            <span class="chip" id="account-role"></span>
+          </button>
+          <div class="account-menu" id="account-menu" role="menu" hidden>
+            <button class="btn btn-ghost" id="account-password" type="button" role="menuitem" data-i18n="account.changePassword">Change password</button>
+            <button class="btn btn-ghost" id="account-signout" type="button" role="menuitem" data-i18n="account.signOut">Sign out</button>
+          </div>
         </div>
       </div>
       <div class="role-notice" id="role-notice" role="status" aria-live="polite" hidden></div>
@@ -2025,7 +2060,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
               <li data-i18n="home.quickstart.s3">Come back here. Sessions, memory and handoff fill in automatically.</li>
             </ol>
             <div class="empty-action">
-              <button class="btn btn-primary" type="button" data-drill="operate" data-i18n="home.quickstart.action">Run import</button>
+              <button class="btn btn-primary" type="button" data-drill="operate" data-min-role="admin" data-i18n="home.quickstart.action">Run import</button>
             </div>
           </div>
         </div>
@@ -3382,6 +3417,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "auth.tooMany": "too many attempts, try again later",
       "auth.server": "server error",
       "auth.signedOut": "Your session has ended. Sign in again.",
+      "auth.unavailable": "server unavailable, try again",
+      "auth.retry": "Retry",
       "account.aria": "Account",
       "account.changePassword": "Change password",
       "account.signOut": "Sign out",
@@ -3396,6 +3433,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "pw.wrongCurrent": "the current password is wrong",
       "pw.mismatch": "the new passwords do not match",
       "pw.length": "use a password with 15 to 128 characters",
+      "role.viewer": "viewer",
+      "role.editor": "editor",
+      "role.admin": "admin",
       "role.needs": "This needs the ",
       "role.needs2": " role.",
       "vis.private": "private",
@@ -4085,6 +4125,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "auth.tooMany": "zu viele Versuche, bitte später erneut versuchen",
       "auth.server": "Serverfehler",
       "auth.signedOut": "Ihre Sitzung ist beendet. Bitte melden Sie sich erneut an.",
+      "auth.unavailable": "Server nicht erreichbar, bitte erneut versuchen",
+      "auth.retry": "Erneut versuchen",
       "account.aria": "Konto",
       "account.changePassword": "Passwort ändern",
       "account.signOut": "Abmelden",
@@ -4099,6 +4141,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "pw.wrongCurrent": "das aktuelle Passwort ist falsch",
       "pw.mismatch": "die neuen Passwörter stimmen nicht überein",
       "pw.length": "das Passwort braucht 15 bis 128 Zeichen",
+      "role.viewer": "Betrachter",
+      "role.editor": "Bearbeiter",
+      "role.admin": "Administrator",
       "role.needs": "Dafür ist die Rolle ",
       "role.needs2": " nötig.",
       "vis.private": "privat",
@@ -4264,42 +4309,95 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     return a;
   }
   // --- team mode: account, request token, roles ---------------
-  // Local mode (GET /api/me answers 503) leaves `account` null: nothing is
-  // hidden, no token is sent. In team mode the request token lives only in
-  // this variable, never in storage.
+  // The server marks the page: `local` (the default) never asks for an
+  // account, sends no token and hides nothing; `team` asks GET /api/me
+  // before anything loads. The request token lives only in this variable.
+  const AUTH_MODE = (function () {
+    const meta = document.querySelector('meta[name="throughline-auth-mode"]');
+    return meta && meta.getAttribute("content") === "team" ? "team" : "local";
+  })();
+  const teamMode = AUTH_MODE === "team";
   const REQUEST_TOKEN_HEADER = "X-Throughline-Request-Token";
   const ROLE_RANK = { viewer: 1, editor: 2, admin: 3 };
-  let teamMode = false;
   let account = null;
   let requestToken = "";
-  // Set once a session ended in this page: the next sign-in reloads the
-  // page, so nothing of the previous account stays in the DOM.
-  let reloadAfterSignIn = false;
+  // A page opened after a session ended (`?session=ended`): the sign-in
+  // page says so. The flag leaves the address at once.
+  const SESSION_ENDED = (function () {
+    if (!teamMode) return false;
+    try {
+      const ended = new URLSearchParams(location.search).get("session") === "ended";
+      if (ended) history.replaceState(null, "", location.pathname + location.hash);
+      return ended;
+    } catch {
+      return false;
+    }
+  })();
+  let leaving = false;
   function roleAtLeast(min) {
     if (!account) return true;
     return (ROLE_RANK[account.role] || 0) >= (ROLE_RANK[min] || 0);
   }
+  /** Team mode without a signed-in account: the sign-in page is up and
+   * nothing else may load or react to keys. */
+  function appLocked() {
+    return teamMode && (!account || leaving);
+  }
+  function roleName(role) {
+    return ROLE_RANK[role] ? t("role." + role) : String(role || "");
+  }
   function showRoleNotice(required) {
     const el = $("role-notice");
     if (!el) return;
-    el.textContent = t("role.needs") + required + t("role.needs2");
+    el.textContent = t("role.needs") + roleName(required) + t("role.needs2");
     el.hidden = false;
     clearTimeout(el._t);
     el._t = setTimeout(() => { el.hidden = true; }, 6000);
   }
-  /** Every API call of the page goes through here: a write carries the
-   * request token, a 401 in team mode returns to the sign-in page, a 403
-   * `forbidden_role` shows a notice. `opts.keep401` leaves a 401 to the
-   * caller (a wrong current password). */
+  /** Empties every field of the page, so a browser that restores form
+   * state on the next load has nothing to restore. */
+  function clearForms() {
+    document.querySelectorAll("input, textarea").forEach((el) => {
+      if (el.type === "checkbox" || el.type === "radio") el.checked = false;
+      else if (["button", "submit", "reset", "hidden"].indexOf(el.type) < 0) el.value = "";
+    });
+  }
+  /** Team mode: the keys this page keeps in localStorage (saved filters,
+   * sort orders, favorites-only toggles, assistant source, theme, language)
+   * belong to whoever used the browser; they go with the account. */
+  function clearOwnStorage() {
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.indexOf("th-") === 0 || k.indexOf("tl-") === 0)) keys.push(k);
+      }
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch {}
+  }
+  /** Leaves the page for a fresh one: the DOM, every cache in memory and
+   * the form fields of this account go; `target` is the new address. */
+  function leavePage(target) {
+    if (leaving) return;
+    leaving = true;
+    clearForms();
+    clearOwnStorage();
+    location.replace(target);
+  }
+  /** Every API call of the page goes through here: a write to `/api/`
+   * carries the request token, a 401 in team mode ends the session (fresh
+   * page, sign-in), a 403 `forbidden_role` shows a notice. `opts.keep401`
+   * leaves a 401 to the caller (a wrong password). */
   async function apiFetch(path, init, opts) {
     const req = Object.assign({}, init || {});
     const method = (req.method || "GET").toUpperCase();
     const headers = new Headers(req.headers || {});
-    if (requestToken && method !== "GET" && method !== "HEAD") headers.set(REQUEST_TOKEN_HEADER, requestToken);
+    const ownApi = typeof path === "string" && path.indexOf("/api/") === 0;
+    if (requestToken && ownApi && method !== "GET" && method !== "HEAD") headers.set(REQUEST_TOKEN_HEADER, requestToken);
     req.headers = headers;
     const res = await fetch(path, req);
     if (teamMode && res.status === 401 && !(opts && opts.keep401)) {
-      showSignIn(t("auth.signedOut"));
+      sessionEnded();
     } else if (res.status === 403) {
       try {
         const b = await res.clone().json();
@@ -4702,7 +4800,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           t("home.noSessions"),
           t("home.nothingIngested"),
           "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("home.quickstart.action") + '</button>'
+          '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("home.quickstart.action") + '</button>'
         ));
       bindRows(el);
       announce(items.length ? items.length + " " + plural(items.length, t("p.recentSession"), t("p.recentSessions")) : t("home.noSessions"));
@@ -4807,7 +4905,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
             ? ""
             : hasFilters
             ? '<button type="button" class="btn btn-primary" id="hist-empty-reset">' + t("hist.resetFilters") + '</button>'
-            : '<button type="button" class="btn btn-primary" data-drill="operate">' + t("hist.runIngest") + '</button>';
+            : '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("hist.runIngest") + '</button>';
           tbody.innerHTML =
             '<tr><td colspan="8"><div class="empty"><strong>' +
             (favOnlyOn("history") ? t("fav.empty") : hasFilters ? t("hist.noMatches") : t("hist.empty")) + "</strong>" +
@@ -4863,7 +4961,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
             ? ""
             : hasFilters2
             ? '<button type="button" class="btn btn-primary" id="hist-empty-reset-cards">' + t("hist.resetFilters") + '</button>'
-            : '<button type="button" class="btn btn-primary" data-drill="operate">' + t("hist.runIngest") + '</button>';
+            : '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("hist.runIngest") + '</button>';
           el.innerHTML =
             '<div class="empty"><strong>' +
             (favOnlyOn("history") ? t("fav.empty") : hasFilters2 ? t("hist.noMatches") : t("hist.empty")) + "</strong>" +
@@ -4998,7 +5096,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
             ? emptyBox(t("browse.noMessages"), t("browse.loosen"), "",
                 '<button type="button" class="btn btn-primary" id="browse-empty-reset">' + t("browse.resetFilters") + '</button>')
             : emptyBox(t("browse.empty"), t("browse.notIngested"), "",
-                '<button type="button" class="btn btn-primary" data-drill="operate">' + t("browse.runIngest") + '</button>');
+                '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("browse.runIngest") + '</button>');
           const ber = $("browse-empty-reset");
           if (ber) ber.addEventListener("click", () => $("browse-reset") && $("browse-reset").click());
         }
@@ -5224,7 +5322,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           const emptyCorpus = (await fetchJson("/api/status").catch(() => ({}))).conversations === 0;
           el.innerHTML = emptyCorpus
             ? emptyBox(t("find.corpusEmpty"), t("find.notIngested"), "",
-                '<button type="button" class="btn btn-primary" data-drill="operate">' + t("find.runIngest") + '</button>')
+                '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("find.runIngest") + '</button>')
             : emptyBox(
                 t("find.noMatches"),
                 t("find.nothingMatched") + m + t("find.modeSuffix"),
@@ -5283,7 +5381,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
               '<div class="row-id">–</div>') +
           '<div><span class="chip">' + escapeHtml(h.source_tool || "tool") + "</span>" +
           ' <span class="chip">' + escapeHtml(h.project_name || "-") + "</span>" +
-          ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span></div>" +
+          ' <span class="chip">' + escapeHtml(kind) + " " + pct + "%</span>" +
+          (h.kind === "memory" && visChip(h) ? " " + visChip(h) : "") + "</div>" +
           '<div class="row-main"><div class="row-title">' + (hitFavKind(h) ? favStar(hitFavKind(h), h.message_id, hitIsFav(h)) : "") + escapeHtml(h.snippet || "") + "</div>" +
           '<div class="row-sub">' + escapeHtml(h.role) + " · " + fmtDateTime(h.created_at) + "</div></div>" +
           '<div class="row-meta"><button type="button" class="btn btn-ghost pin-hit" data-min-role="editor" data-pin="' + pinData + '" aria-label="' + t("find.pinAria") + '">' + t("msg.pin") + '</button></div>' +
@@ -5383,7 +5482,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       : q
       ? emptyBox(t("proj.noMatch"), "", "")
       : emptyBox(t("proj.none"), t("proj.appearAfter"), "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("proj.runIngest") + '</button>'));
+          '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("proj.runIngest") + '</button>'));
     el.querySelectorAll("[data-project]").forEach((b) => {
       const open = () => drillToHistory({ project: b.getAttribute("data-project") || "" });
       b.addEventListener("click", open);
@@ -5608,7 +5707,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         tlSortAsc ? (a.day < b.day ? -1 : 1) : (a.day < b.day ? 1 : -1));
       if (!rows.length) {
         el.innerHTML = emptyBox(t("tl.noActivity"), t("tl.fillsAfter"), "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("tl.runIngest") + '</button>');
+          '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("tl.runIngest") + '</button>');
       } else {
         el.innerHTML = rows.map((r) =>
           '<button type="button" class="row" data-day="' + escapeHtml(r.day) + '" style="cursor:pointer;text-align:left;width:100%">' +
@@ -5737,7 +5836,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         const d = await fetchJson("/api/stale-digest");
         let html = '<div class="result-block"><strong>' + escapeHtml(d.banner || "") + "</strong><ul>";
         (d.items || []).slice(0, 15).forEach((it) => {
-          html += "<li>[" + escapeHtml(it.reason) + "] " + escapeHtml((it.content || "").slice(0, 90)) + "</li>";
+          html += "<li>[" + escapeHtml(it.reason) + "] " + escapeHtml((it.content || "").slice(0, 90)) + (visChip(it) ? " " + visChip(it) : "") + "</li>";
         });
         html += "</ul></div>";
         el.innerHTML = html;
@@ -5908,7 +6007,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           t("handoff.noRecent"),
           t("handoff.ingestThen"),
           "",
-          '<button type="button" class="btn btn-primary" data-drill="operate">' + t("handoff.runIngest") + '</button>'
+          '<button type="button" class="btn btn-primary" data-drill="operate" data-min-role="admin">' + t("handoff.runIngest") + '</button>'
         );
       }
       sessions.forEach((s) => {
@@ -6200,6 +6299,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   });
 
   document.addEventListener("keydown", (e) => {
+    if (appLocked()) return;
     const open = $("palette").classList.contains("open");
     const inField = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable);
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -6249,7 +6349,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   // g chords
   let armed = false;
   document.addEventListener("keydown", (e) => {
-    if ($("palette").classList.contains("open")) return;
+    if (appLocked() || $("palette").classList.contains("open")) return;
     const el = e.target;
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -6867,7 +6967,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           escapeHtml(Number(h.score).toFixed(2)) + '">' +
           '<div class="card-top" style="margin:0 0 8px">' +
           '<span class="chip">' + escapeHtml(h.category || "insight") + "</span>" + proj +
-          '<span class="chip">#' + Number(h.id) + "</span>" +
+          '<span class="chip">#' + Number(h.id) + "</span>" + visChip(h) +
           '<span class="chip" data-mem-score-chip>' + escapeHtml(t("mem.score") + Number(h.score).toFixed(2)) + "</span>" +
           "</div>" +
           '<p class="mem-preview" style="margin:0;white-space:pre-wrap">' + escapeHtml(h.content || "") + "</p>" +
@@ -7036,9 +7136,10 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   }
 
   /** Team mode only: who owns a note and who sees it ("private · alice",
-   * "shared · alice"; "shared" for a note without an owner). */
+   * "shared · alice"; "shared" for a note without an owner). The server
+   * sends both fields in team mode on every answer drawn as note cards. */
   function visChip(note) {
-    if (!account) return "";
+    if (!account || !note || note.visibility == null) return "";
     const vis = note.visibility === "private" ? "private" : "shared";
     const text = t("vis." + vis) + (note.owner ? " · " + note.owner : "");
     return '<span class="chip mem-vis" data-mem-visibility="' + vis + '">' + escapeHtml(text) + "</span>";
@@ -7178,6 +7279,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     dlg.hidden = true;
     pinMode = "pin";
     pinOldId = null;
+    // The text of a (possibly private) note does not stay in the page.
+    $("pin-content").value = "";
+    if ($("pin-private")) $("pin-private").checked = false;
     if (pinReturnFocus && typeof pinReturnFocus.focus === "function") {
       try { pinReturnFocus.focus(); } catch {}
     }
@@ -7306,7 +7410,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         '<span class="chip">' + escapeHtml(it.reason || "stale") + "</span>" +
         '<span class="chip">' + escapeHtml(it.category || "insight") + "</span>" +
         (it.project_name ? '<span class="chip">' + escapeHtml(it.project_name) + "</span>" : "") +
-        '<span class="chip">#' + it.id + "</span>" +
+        '<span class="chip">#' + it.id + "</span>" + visChip(it) +
         "</div>" +
         "<p style=\"margin:0\">" + escapeHtml((it.content || "").slice(0, 280)) + "</p>" +
         '<div class="review-actions" data-min-role="editor">' +
@@ -7328,6 +7432,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       '<span class="chip">#' + n.id + "</span> " +
       '<span class="chip">' + escapeHtml(n.category || "insight") + "</span> " +
       (n.project_name ? '<span class="chip">' + escapeHtml(n.project_name) + "</span> " : "") +
+      (visChip(n) ? visChip(n) + " " : "") +
       '<span class="similar-note-text" style="white-space:pre-wrap">' + escapeHtml(n.content || "") + "</span></li>";
   }
   // Requests of the cards on screen. A re-render cancels them, so no answer
@@ -7490,6 +7595,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         '<span class="chip">#' + it.id + "</span>" +
         '<span class="chip">' + escapeHtml(it.category || "insight") + "</span>" +
         (it.project_name ? '<span class="chip">' + escapeHtml(it.project_name) + "</span>" : "") +
+        visChip(it) +
         "</div>" +
         '<p style="margin:0;white-space:pre-wrap">' + escapeHtml(it.content || "") + "</p>" +
         '<div class="review-actions" data-min-role="editor">' +
@@ -7828,7 +7934,6 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
 
   // --- team mode: sign-in page, account header, password --------
   function setAccount(me) {
-    teamMode = true;
     account = {
       username: String(me.username || ""),
       display_name: String(me.display_name || me.username || ""),
@@ -7837,8 +7942,11 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     requestToken = String(me.request_token || "");
     document.body.setAttribute("data-account-role", account.role);
     $("account-name").textContent = account.display_name;
-    $("account-role").textContent = account.role;
+    const roleEl = $("account-role");
+    roleEl.setAttribute("data-i18n", "role." + account.role);
+    roleEl.textContent = roleName(account.role);
     $("account-box").hidden = false;
+    document.querySelector(".topbar").classList.add("has-account");
     commands = buildCommands();
   }
   function closeDialog(id) {
@@ -7847,18 +7955,14 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     dlg.classList.remove("open");
     dlg.hidden = true;
   }
-  /** Team mode without a (valid) session: only the sign-in form shows. */
-  function showSignIn(message) {
-    teamMode = true;
+  /** The sign-in page; `message` under the form, `retry` for a server
+   * that did not answer. Nothing behind it loads or takes keys. */
+  function showSignIn(message, retry) {
     const box = $("signin");
     const err = $("signin-error");
-    if (account) reloadAfterSignIn = true;
-    account = null;
-    requestToken = "";
-    if (message) {
-      err.textContent = message;
-      err.hidden = false;
-    }
+    err.textContent = message || "";
+    err.hidden = !message;
+    $("signin-retry").hidden = !retry;
     if (!box.hidden) return;
     closeDialog("pin-dialog");
     closeDialog("password-dialog");
@@ -7873,30 +7977,73 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     box.classList.remove("open");
     box.hidden = true;
     $("signin-error").hidden = true;
+    $("signin-retry").hidden = true;
     document.querySelector(".app").hidden = false;
   }
-  /** GET /api/me: 401 shows the sign-in page, 200 is the signed-in
-   * account, anything else (503 in local mode) keeps the page as it is. */
+  /** A 401 in team mode: the session is gone. The page leaves for a fresh
+   * one at once, so nothing of this account stays in the DOM, in memory or
+   * in the fields. A page that was itself opened that way and meets a 401
+   * again stays put (no loop): it hides everything and clears the fields;
+   * its next sign-in leaves for a fresh page. */
+  function sessionEnded() {
+    if (account && !SESSION_ENDED) {
+      leavePage(location.pathname + "?session=ended" + location.hash);
+      return;
+    }
+    account = null;
+    requestToken = "";
+    clearForms();
+    showSignIn(t("auth.signedOut"));
+  }
+  /** GET /api/me, team mode only: 200 is the signed-in account, 401 the
+   * sign-in page, anything else the sign-in page with "retry". */
   async function resolveAccount() {
-    let res;
+    let res = null;
     try {
       res = await fetch("/api/me", { headers: { Accept: "application/json" } });
-    } catch {
-      return true;
-    }
-    if (res.status === 401) {
-      showSignIn("");
-      return false;
-    }
-    if (res.ok) {
-      let me = {};
+    } catch {}
+    if (res && res.ok) {
+      let me = null;
       try { me = await res.json(); } catch {}
-      setAccount(me);
+      if (me) {
+        setAccount(me);
+        hideSignIn();
+        return true;
+      }
     }
-    return true;
+    if (res && res.status === 401) showSignIn(SESSION_ENDED ? t("auth.signedOut") : "");
+    else showSignIn(t("auth.unavailable"), true);
+    return false;
   }
   (function wireAccount() {
+    const menuBtn = $("account-menu-btn");
+    const menu = $("account-menu");
+    const closeMenu = () => {
+      menu.hidden = true;
+      menuBtn.setAttribute("aria-expanded", "false");
+    };
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = menu.hidden;
+      menu.hidden = !open;
+      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) $("account-password").focus();
+    });
+    document.addEventListener("click", (e) => {
+      if (!menu.hidden && !(e.target && e.target.closest && e.target.closest("#account-box"))) closeMenu();
+    });
+    menu.addEventListener("click", closeMenu);
+    menu.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMenu();
+        menuBtn.focus();
+      }
+    });
     const form = $("signin-form");
+    $("signin-retry").addEventListener("click", () => {
+      resolveAccount().then((ready) => { if (ready) startApp(); });
+    });
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = $("signin-submit");
@@ -7918,10 +8065,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       if (res && res.ok) {
         let me = null;
         try { me = await res.json(); } catch {}
-        // After a session ended in this page, start from a fresh page so
-        // nothing of the earlier account stays in the DOM.
-        if (reloadAfterSignIn || !me) {
-          location.reload();
+        // The app ran in this page before: start from a fresh page.
+        if (!me || started) {
+          leavePage(location.pathname + location.hash);
           return;
         }
         setAccount(me);
@@ -7929,6 +8075,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         startApp();
         return;
       }
+      $("signin-retry").hidden = true;
       err.textContent = res && res.status === 401 ? t("auth.wrong")
         : res && res.status === 429 ? t("auth.tooMany")
         : t("auth.server");
@@ -7946,7 +8093,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         toast(t("account.signOutFailed") + e.message);
         return;
       }
-      location.reload();
+      leavePage("/");
     });
     const dlg = $("password-dialog");
     const msg = $("pw-msg");
@@ -7966,7 +8113,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       returnFocus = null;
     };
     $("account-password").addEventListener("click", () => {
-      returnFocus = document.activeElement;
+      returnFocus = $("account-menu-btn");
       clear();
       msg.hidden = true;
       dlg.hidden = false;
@@ -8100,7 +8247,12 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
   // boot
   initTheme();
   initLang();
-  resolveAccount().then((ready) => { if (ready) startApp(); });
+  if (teamMode) {
+    document.querySelector(".app").hidden = true;
+    resolveAccount().then((ready) => { if (ready) startApp(); });
+  } else {
+    startApp();
+  }
 })();
 </script>
 </body>
