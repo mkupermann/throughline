@@ -133,7 +133,15 @@ services:
       # requires 0.0.0.0 in the container; the port mapping below is loopback.
       THROUGHLINE_HOST: "0.0.0.0"
       THROUGHLINE_ALLOW_REMOTE: "1"
+      # local (default): one user, no sign-in; refuses to start on a database
+      # with accounts or private notes. team: sign-in, roles, private notes;
+      # needs an enabled admin (`throughline account add <name> --role admin`)
+      # and THROUGHLINE_PUBLIC_URL. Any other value refuses to start.
+      # See docs/TEAM_DEPLOYMENT.md.
       THROUGHLINE_AUTH_MODE: "${THROUGHLINE_AUTH_MODE:-local}"
+      # The exact address browsers use. Team mode needs https (http only on
+      # localhost, 127.x.x.x or ::1); TLS ends at a reverse proxy in front of
+      # the loopback port below. https also makes the session cookie Secure.
       THROUGHLINE_PUBLIC_URL: "${THROUGHLINE_PUBLIC_URL:-}"
       # Extra host names the server answers to besides loopback and the
       # THROUGHLINE_PUBLIC_URL host; anything else gets 403 (DNS rebinding).
@@ -142,6 +150,8 @@ services:
       THROUGHLINE_ALLOW_REMOTE_LLM: "${THROUGHLINE_ALLOW_REMOTE_LLM:-}"
       # Agent access over HTTP (POST /mcp). Off while the key is unset or
       # shorter than 32 characters. Make one with `throughline agent-key`.
+      # Ignored in team mode: there each account has its own keys
+      # (`throughline account agent-key <name>`).
       THROUGHLINE_AGENT_KEY: "${THROUGHLINE_AGENT_KEY:-}"
       # 1, true, yes or on hides write, forget, supersede and keep from /mcp.
       THROUGHLINE_MCP_READ_ONLY: "${THROUGHLINE_MCP_READ_ONLY:-}"

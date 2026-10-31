@@ -1122,6 +1122,9 @@ fn main() -> Result<()> {
         Command::AgentKey => {
             println!("{}", agent_key::generate());
             println!("Put it into .env as THROUGHLINE_AGENT_KEY and restart the server.");
+            println!(
+                "In team mode this key is ignored: use `throughline account agent-key <name>` instead."
+            );
         }
         Command::Doctor => {
             let mut client = config::DbConfig::from_env()
