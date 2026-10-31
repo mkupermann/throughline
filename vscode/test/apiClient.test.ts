@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { ApiClient } from "../src/apiClient";
 import { ThroughlineError } from "../src/errors";
-import { FakeServer, closedPort } from "./fakeServer";
+import { FakeServer, closedPort, type Recorded } from "./fakeServer";
 
 const srv = new FakeServer();
 const other = new FakeServer();
@@ -92,7 +92,7 @@ test("api_without_key_keeps_401", async () => {
   srv.respond(401, { error: "unauthorized" });
   await assert.rejects(
     () => new ApiClient(srv.baseUrl, () => Promise.resolve(undefined)).recall("x"),
-    (e: unknown) => e instanceof ThroughlineError && e.kind === "unauthorized" && e.message.includes("Throughline: Set Agent Key"),
+    (e: unknown) => e instanceof ThroughlineError && e.kind === "sign_in_required" && e.message.includes("Throughline: Set Agent Key"),
   );
   assert.equal(srv.requests.length, 1);
   srv.respond(200, {});
@@ -106,5 +106,40 @@ test("api_403_does_not_retry", async () => {
     (e: unknown) => e instanceof ThroughlineError && e.kind === "forbidden",
   );
   assert.equal(srv.requests.length, 1);
+  srv.respond(200, {});
+});
+
+test("api_blank_or_failing_key_means_no_retry", async () => {
+  for (const getter of [() => Promise.resolve("  "), () => Promise.reject(new Error("keychain locked"))]) {
+    srv.requests.length = 0;
+    srv.respond(401, { error: "unauthorized" });
+    await assert.rejects(
+      () => new ApiClient(srv.baseUrl, getter).recall("x"),
+      (e: unknown) => e instanceof ThroughlineError && e.kind === "sign_in_required" && !e.message.includes("keychain"),
+    );
+    assert.equal(srv.requests.length, 1);
+  }
+  srv.respond(200, {});
+});
+
+test("api_key_getter_is_not_called_without_a_401", async () => {
+  srv.requests.length = 0;
+  srv.respond(200, { mode: "current", hits: [], degraded: null });
+  let calls = 0;
+  await new ApiClient(srv.baseUrl, () => {
+    calls++;
+    return Promise.resolve("sekret-key-4");
+  }).recall("x");
+  assert.equal(calls, 0);
+  assert.equal(srv.requests.length, 1);
+});
+
+test("api_error_text_never_contains_an_echoed_header_key", async () => {
+  srv.requests.length = 0;
+  srv.respond(401, (r: Recorded) => ({ error: "unauthorized", detail: String(r.headers.authorization ?? "none") }));
+  await assert.rejects(
+    () => new ApiClient(srv.baseUrl, () => Promise.resolve("sekret-key-5")).recall("x"),
+    (e: unknown) => e instanceof ThroughlineError && !e.message.includes("sekret-key-5") && !e.detail.includes("sekret-key-5") && e.detail.includes("Bearer ***"),
+  );
   srv.respond(200, {});
 });

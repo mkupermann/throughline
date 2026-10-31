@@ -34,6 +34,8 @@ test("state_from_error_maps_kinds", () => {
   const u = "http://x:1";
   assert.deepEqual(stateFromError(new ThroughlineError("no_key", "m"), u), { kind: "no_key" });
   assert.deepEqual(stateFromError(new ThroughlineError("unauthorized", "m"), u), { kind: "unauthorized" });
+  assert.deepEqual(stateFromError(new ThroughlineError("sign_in_required", "m"), u), { kind: "sign_in_required" });
+  assert.equal(statusText({ kind: "sign_in_required" }), "Throughline: sign-in required (run Throughline: Set Agent Key)");
   assert.deepEqual(stateFromError(new ThroughlineError("access_off", "m"), u), { kind: "access_off" });
   assert.deepEqual(stateFromError(new ThroughlineError("unreachable", "m"), u), { kind: "unreachable", url: u });
   assert.deepEqual(stateFromError(new Error("boom"), u), { kind: "other", reason: "boom" });

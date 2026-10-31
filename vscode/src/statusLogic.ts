@@ -4,6 +4,7 @@ export type StatusState =
   | { kind: "connected"; project?: string }
   | { kind: "no_key" }
   | { kind: "unauthorized" }
+  | { kind: "sign_in_required" }
   | { kind: "access_off" }
   | { kind: "unreachable"; url: string }
   | { kind: "no_mcp" }
@@ -24,6 +25,8 @@ export function statusText(state: StatusState): string {
       return "Throughline: not connected (no key, run Throughline: Set Agent Key)";
     case "unauthorized":
       return "Throughline: not connected (key rejected)";
+    case "sign_in_required":
+      return "Throughline: sign-in required (run Throughline: Set Agent Key)";
     case "access_off":
       return "Throughline: not connected (agent access is off on the server)";
     case "unreachable":
@@ -40,6 +43,7 @@ export function stateFromError(e: unknown, url: string): StatusState {
     switch (e.kind) {
       case "no_key":
       case "unauthorized":
+      case "sign_in_required":
       case "access_off":
         return { kind: e.kind };
       case "unreachable":

@@ -1,6 +1,7 @@
 export type ErrorKind =
   | "no_key"
   | "unauthorized"
+  | "sign_in_required"
   | "access_off"
   | "forbidden"
   | "too_large"
