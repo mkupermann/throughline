@@ -46,12 +46,10 @@ impl std::str::FromStr for RecallMode {
     }
 }
 
-/// How the candidates are ordered. Full text is the default: in the first
-/// measurement the weighted ranking did not beat it by the bar set beforehand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// How the candidates are ordered; [`DEFAULT_RANK`] when nobody asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rank {
-    /// `ts_rank` of the question words, the method `recall-eval` measured.
-    #[default]
+    /// `ts_rank` of the question words; the default before 2026-10-31.
     Fulltext,
     /// The weighted sum of `WEIGHTS`.
     Weighted,
@@ -60,6 +58,13 @@ pub enum Rank {
     /// text and the result says `degraded`.
     Cosine,
 }
+
+/// The rank of a request that names none: HTTP, MCP `recall` and
+/// `project_context`, the CLI `recall` and the context pack. Cosine since
+/// 2026-10-31: on 74 questions it hit 94.6 % at k = 5, full text 50.0 %, and
+/// the rule set in block 2 makes the method with the most hits the default.
+/// Without a question vector it ranks by full text and says `degraded`.
+pub const DEFAULT_RANK: Rank = Rank::Cosine;
 
 impl Rank {
     pub fn as_str(self) -> &'static str {
@@ -270,13 +275,17 @@ pub struct Weights {
     pub provenance: f64,
 }
 
+/// Calibrated on 42 questions of one installation (block 8, 2026-10-31):
+/// the best of the 53,130 vectors with step 0.05. On the 32 held-out
+/// questions it hit 93.8 % at k = 5, the weights before 71.9 %, and it ties
+/// plain cosine there.
 pub const WEIGHTS: Weights = Weights {
-    cosine: 0.45,
-    lexical: 0.20,
-    recency: 0.10,
-    reliability: 0.10,
-    strength: 0.10,
-    provenance: 0.05,
+    cosine: 0.85,
+    lexical: 0.0,
+    recency: 0.0,
+    reliability: 0.15,
+    strength: 0.0,
+    provenance: 0.0,
 };
 
 const STOPWORDS: &[&str] = &[
@@ -1174,6 +1183,17 @@ mod tests {
         q
     }
 
+    /// The default weights before 2026-10-31. Tests of one weighted part use
+    /// them, since the calibrated default gives most parts no share.
+    const WEIGHTS_BEFORE_2026_10_31: Weights = Weights {
+        cosine: 0.45,
+        lexical: 0.20,
+        recency: 0.10,
+        reliability: 0.10,
+        strength: 0.10,
+        provenance: 0.05,
+    };
+
     fn model_name() -> String {
         format!("test-embed-{}", uuid::Uuid::new_v4())
     }
@@ -1228,12 +1248,12 @@ mod tests {
         let c = candidate(now);
         let words = query_words("kafka retention backlog");
         let same = Weights {
-            cosine: 0.45,
-            lexical: 0.20,
-            recency: 0.10,
-            reliability: 0.10,
-            strength: 0.10,
-            provenance: 0.05,
+            cosine: 0.85,
+            lexical: 0.0,
+            recency: 0.0,
+            reliability: 0.15,
+            strength: 0.0,
+            provenance: 0.0,
         };
         assert_eq!(same, WEIGHTS);
         for has_embedding in [true, false] {
@@ -1463,10 +1483,14 @@ mod tests {
         )
         .unwrap();
         let emb = query_embedding(&model);
-        let r = recall(
+        // The calibrated default gives strength no share; the weights before do.
+        let w = &WEIGHTS_BEFORE_2026_10_31;
+        let r = recall_with(
             &mut tx,
             &weighted("rotation plan", Some(&project)),
             Some(&emb),
+            w,
+            Utc::now(),
         )
         .unwrap();
         let (ha, hb) = (
@@ -1476,7 +1500,7 @@ mod tests {
         assert!(position(&r, b) < position(&r, a));
         assert!(hb.why.strength > ha.why.strength);
         let diff = hb.score - ha.score;
-        let expected = WEIGHTS.strength * (hb.why.strength - ha.why.strength);
+        let expected = w.strength * (hb.why.strength - ha.why.strength);
         assert!((diff - expected).abs() < 1e-9, "{diff} vs {expected}");
         assert!((hb.why.strength - lifecycle::strength(1.0, 1, false)).abs() < 1e-3);
         assert!((ha.why.strength - lifecycle::strength(30.0, 0, false)).abs() < 1e-3);
@@ -2462,10 +2486,10 @@ mod tests {
     }
 
     #[test]
-    fn recall_current_ranks_by_full_text_by_default() {
+    fn recall_current_ranks_by_full_text_on_request() {
         let Some(mut client) = test_db() else {
             eprintln!(
-                "skipping recall_current_ranks_by_full_text_by_default: no PostgreSQL reachable"
+                "skipping recall_current_ranks_by_full_text_on_request: no PostgreSQL reachable"
             );
             return;
         };
@@ -2563,13 +2587,45 @@ mod tests {
     }
 
     #[test]
+    fn default_rank_is_cosine() {
+        // Block 8, B2 (2026-10-31): on 74 questions full text hit 50.0 % at
+        // k = 5, cosine 94.6 %. By the rule set in block 2 the default left
+        // full text for the method with the most hits.
+        assert_eq!(DEFAULT_RANK, Rank::Cosine);
+        assert_eq!(DEFAULT_RANK.as_str().parse::<Rank>(), Ok(DEFAULT_RANK));
+        // so the default asks for a question vector and falls back without one
+        assert!(needs_embedding(RecallMode::Current, DEFAULT_RANK));
+    }
+
+    #[test]
+    fn weighted_default_weights_are_calibrated() {
+        // Calibrated in block 8, B3, on 42 questions of one installation.
+        // Before 2026-10-31 the default was cosine 0.45, lexical 0.20,
+        // recency 0.10, reliability 0.10, strength 0.10, provenance 0.05
+        // (`WEIGHTS_BEFORE_2026_10_31`).
+        assert_eq!(
+            WEIGHTS,
+            Weights {
+                cosine: 0.85,
+                lexical: 0.0,
+                recency: 0.0,
+                reliability: 0.15,
+                strength: 0.0,
+                provenance: 0.0,
+            }
+        );
+        let w = &WEIGHTS;
+        let sum = w.cosine + w.lexical + w.recency + w.reliability + w.strength + w.provenance;
+        assert!((sum - 1.0).abs() < 1e-12, "{sum}");
+    }
+
+    #[test]
     fn rank_parses_and_decides_the_embedding() {
         assert_eq!("fulltext".parse::<Rank>(), Ok(Rank::Fulltext));
         assert_eq!("weighted".parse::<Rank>(), Ok(Rank::Weighted));
         assert_eq!("cosine".parse::<Rank>(), Ok(Rank::Cosine));
         assert!("Weighted".parse::<Rank>().is_err());
         assert!("".parse::<Rank>().is_err());
-        assert_eq!(Rank::default(), Rank::Fulltext);
         assert_eq!(Rank::Weighted.as_str(), "weighted");
         use RecallMode::*;
         assert!(!needs_embedding(Current, Rank::Fulltext));
@@ -2651,7 +2707,9 @@ mod tests {
             q.known_at = Some(Utc::now());
             q.limit = 2;
             q.rank = rank;
-            let r = recall(&mut tx, &q, None).unwrap();
+            // Without a vector the calibrated weights keep only reliability,
+            // equal here; the weights before still count the shared words.
+            let r = recall_with(&mut tx, &q, None, &WEIGHTS_BEFORE_2026_10_31, Utc::now()).unwrap();
             let got: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
             assert_eq!(got, vec![ids[4], ids[3]], "{rank:?}");
         }

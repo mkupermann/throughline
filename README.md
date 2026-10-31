@@ -175,7 +175,7 @@ Search notes, filter categories and expand cards. **Ingest agent memory** reads 
 
 Each note shows when it became valid and, once replaced, when it stopped, apart from when it was recorded. **As of** takes a date and answers what was valid or what was known on that day. Replacing a note asks whether it is an update or a correction. **By meaning** ranks the current notes by meaning through `recall`, and without Ollama it says so and falls back to words.
 
-Recall by meaning can cross languages. With the multilingual model `granite-embedding:278m`, which you switch on yourself, a German question finds an English note and the other way round in **By meaning**, `--rank weighted`, `as_of`, `grounded`, semantic search and Ask. The default recall ranks by full text and finds a note in another language only through words both share. The measurement and how to switch models are in [docs/USAGE.md](docs/USAGE.md#embedding-model).
+Recall by meaning can cross languages. With the multilingual model `granite-embedding:278m`, which you switch on yourself, a German question finds an English note and the other way round in the default recall, **By meaning**, `--rank weighted`, `as_of`, `grounded`, semantic search and Ask. Full text (`--rank fulltext`, and the fallback without Ollama) finds a note in another language only through words both share. The measurement and how to switch models are in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 

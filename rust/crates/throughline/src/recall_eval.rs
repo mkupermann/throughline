@@ -2,8 +2,9 @@
 //!
 //! Every method ranks the same candidates as `recall` in mode `current`
 //! (except `phrase`, today's whole-phrase search, which is context only).
-//! `current` uses the default rank, full text, so it equals `fulltext` by
-//! construction; `weighted` is the weighted ranking.
+//! `current` is the full-text rank through `recall`, the default until
+//! 2026-10-31, so it equals `fulltext` by construction; `weighted` is the
+//! weighted ranking, `cosine` the default rank since then.
 
 use crate::access::Actor;
 use crate::recall::{self, Candidate, CandidateFilter, Rank, RecallMode, RecallQuery, Weights};

@@ -232,7 +232,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: fulltext (default, word match), cosine (meaning; ranks by full text when no embedding is reachable) or weighted (meaning, recency, reliability; needs embeddings)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (default, meaning; ranks by full text and says degraded when no embedding is reachable), fulltext (word match) or weighted (meaning and reliability; needs embeddings)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -249,7 +249,7 @@ fn tools_list() -> Value {
                         "rank": {
                             "type": "string",
                             "enum": ["fulltext", "weighted", "cosine"],
-                            "default": "fulltext"
+                            "default": crate::recall::DEFAULT_RANK.as_str()
                         }
                     },
                     "required": ["query"]
@@ -361,6 +361,7 @@ fn build_pack<C: GenericClient>(
     task: Option<&str>,
     budget: usize,
 ) -> Result<crate::context_pack::ContextPack, Value> {
+    let emb = crate::context_pack::task_embedding(task).map_err(|e| internal(actor, e))?;
     crate::context_pack::build_context(
         client,
         actor,
@@ -369,7 +370,7 @@ fn build_pack<C: GenericClient>(
             task,
             budget,
         },
-        None,
+        emb.as_ref(),
     )
     .map_err(|e| match crate::context_pack::input_error(&e) {
         Some(_) => json!({ "code": -32602, "message": e.to_string() }),
@@ -445,7 +446,7 @@ fn call_tool<C: GenericClient>(
                 Some(m) => m.parse().map_err(|e: String| invalid(&e))?,
             };
             let rank = match optional_str(&args, "rank", "rank must be a string")? {
-                None | Some("") => crate::recall::Rank::default(),
+                None | Some("") => crate::recall::DEFAULT_RANK,
                 Some(r) => r.parse().map_err(|e: String| invalid(&e))?,
             };
             let date = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, Value> {
@@ -1308,7 +1309,7 @@ mod tests {
         let out = call_text(
             &mut tx,
             "recall",
-            json!({ "query": format!("zebrafinch {tag}"), "project": project }),
+            json!({ "query": format!("zebrafinch {tag}"), "project": project, "rank": "fulltext" }),
         );
         let ids: Vec<i64> = out["hits"]
             .as_array()
@@ -1319,6 +1320,79 @@ mod tests {
         assert!(ids.contains(&id), "{out}");
         // current + full text needs no question vector, Ollama or not
         assert!(out["degraded"].is_null(), "{out}");
+    }
+
+    /// `recall` over MCP with Ollama unreachable, with `rank` or without.
+    fn recall_unreachable(
+        client: &mut impl GenericClient,
+        query: &str,
+        project: &str,
+        rank: Option<&str>,
+    ) -> Value {
+        let mut args = json!({ "query": query, "project": project });
+        if let Some(r) = rank {
+            args["rank"] = json!(r);
+        }
+        crate::recall::test_ollama::unreachable(|| call_text(client, "recall", args))
+    }
+
+    #[test]
+    fn mcp_recall_uses_default_rank() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_uses_default_rank: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let mut write = |content: String| {
+            call_text(
+                &mut tx,
+                "write",
+                json!({ "content": content, "project": project }),
+            )["id"]
+                .as_i64()
+                .unwrap()
+        };
+        let one = write(format!("{tag} only"));
+        let both = write(format!("wombat burrow {tag}"));
+        let query = format!("wombat burrow {tag}");
+        let ids = |v: &Value| -> Vec<i64> {
+            v["hits"]
+                .as_array()
+                .expect("hits")
+                .iter()
+                .map(|h| h["id"].as_i64().unwrap())
+                .collect()
+        };
+        let default = recall_unreachable(&mut tx, &query, &project, None);
+        let named = recall_unreachable(
+            &mut tx,
+            &query,
+            &project,
+            Some(crate::recall::DEFAULT_RANK.as_str()),
+        );
+        let words = recall_unreachable(&mut tx, &query, &project, Some("fulltext"));
+        // Without `rank` the tool answers as with the default named.
+        assert_eq!(ids(&default), ids(&named));
+        assert_eq!(default["degraded"], named["degraded"]);
+        // The default asks for a question vector; none is reachable, so the
+        // answer says so and ranks by full text meanwhile.
+        assert_eq!(default["degraded"], "no_embeddings", "{default}");
+        assert_eq!(ids(&default)[..2], [both, one], "{default}");
+        assert!(words["degraded"].is_null(), "{words}");
+        // The tool's schema names the same default.
+        let tools = tools_list();
+        let tool = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "recall")
+            .expect("recall tool");
+        assert_eq!(
+            tool["inputSchema"]["properties"]["rank"]["default"],
+            crate::recall::DEFAULT_RANK.as_str()
+        );
     }
 
     fn use_count(client: &mut impl GenericClient, id: i64) -> i32 {
