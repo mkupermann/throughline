@@ -6,8 +6,10 @@
 //! session from `POST /api/login` or an account's agent key (see
 //! `actor_layer`). `/mcp` needs the agent key: `THROUGHLINE_AGENT_KEY` in
 //! local mode, an account's key in team mode. `GET /api/recall` and
-//! `GET /api/context` count agent use when a valid Bearer key comes with the
-//! request.
+//! `GET /api/context` count agent use (see `agent_call`): in local mode when
+//! a valid Bearer key comes with the request, in team mode when the request
+//! is authenticated by an account's key. A key next to a valid session is
+//! not counted, because the session wins.
 
 use crate::access::{push_visibility, Actor};
 use crate::search;
@@ -3221,7 +3223,12 @@ async fn health_recovery_handler(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
 ) -> Response {
-    match with_db(&state, move |client| crate::doctor::run(client, &actor)).await {
+    let (mode, key) = (state.auth_mode, state.agent_key.clone());
+    match with_db(&state, move |client| {
+        crate::doctor::for_client(client, &actor, mode, &key)
+    })
+    .await
+    {
         Ok(r) => {
             let actions = recovery_actions(&r, &crate::embedding::configured_model());
             Json(serde_json::json!({
@@ -4438,6 +4445,18 @@ fn app_with(routes: Vec<Route>, state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(allowed, request_guard))
 }
 
+/// What `serve` logs once at startup about `THROUGHLINE_AGENT_KEY`: in team
+/// mode, that a set key is ignored. Never the key.
+fn startup_agent_key_note(
+    mode: crate::access::AuthMode,
+    key: &crate::agent_key::KeyState,
+) -> Option<&'static str> {
+    match mode {
+        crate::access::AuthMode::Team => crate::agent_key::team_mode_note(key),
+        crate::access::AuthMode::Local => None,
+    }
+}
+
 pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()> {
     // Before binding. Everything that can fail runs on the blocking pool:
     // the sync client blocks even when an early return drops it (see `with_db`).
@@ -4455,10 +4474,8 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
     .await
     .context("startup check")??;
     let agent_key = crate::agent_key::key_state();
-    if auth_mode == crate::access::AuthMode::Team {
-        if let Some(note) = crate::agent_key::team_mode_note(&agent_key) {
-            eprintln!("{note}");
-        }
+    if let Some(note) = startup_agent_key_note(auth_mode, &agent_key) {
+        eprintln!("{note}");
     }
     let state = AppState {
         db: Arc::new(Mutex::new(client)),
@@ -8327,14 +8344,27 @@ mod session_tests {
         json!({ "name": name, "arguments": args })
     }
 
+    /// An account and one of its agent keys.
+    struct AccountKey {
+        user: i64,
+        name: String,
+        key: String,
+        key_id: i64,
+    }
+
     /// A new account with `role` and an agent key made the way
-    /// `throughline account agent-key` makes one: (id, name, key).
-    fn account_with_key(s: &Served, role: Role) -> (i64, String, String) {
+    /// `throughline account agent-key` makes one.
+    fn account_with_key(s: &Served, role: Role) -> AccountKey {
         let name = format!("{}-{}", role.as_str(), uuid::Uuid::new_v4().simple());
-        let id = s.add_account(&name, role);
-        let (_, key) = crate::accounts_cli::new_agent_key(&mut *s.db(), &name, Some("test"))
+        let user = s.add_account(&name, role);
+        let (key_id, key) = crate::accounts_cli::new_agent_key(&mut *s.db(), &name, Some("test"))
             .expect("agent key");
-        (id, name, key)
+        AccountKey {
+            user,
+            name,
+            key,
+            key_id,
+        }
     }
 
     /// `method path` the way an agent sends it: `Authorization: Bearer
@@ -8382,7 +8412,7 @@ mod session_tests {
         let tag = uuid::Uuid::new_v4().simple().to_string();
         let (secret, probe) = (format!("secret{tag}"), format!("probe{tag}"));
         let a = s.add_account(&format!("a-{tag}"), Role::Editor);
-        let (_, _, key_b) = account_with_key(&s, Role::Editor);
+        let AccountKey { key: key_b, .. } = account_with_key(&s, Role::Editor);
         let private = insert_note(
             &s,
             Some(a),
@@ -8496,8 +8526,12 @@ mod session_tests {
         };
         let tag = uuid::Uuid::new_v4().simple().to_string();
         let probe = format!("probe{tag}");
-        let (a, _, key_a) = account_with_key(&s, Role::Editor);
-        let (b, _, _) = account_with_key(&s, Role::Editor);
+        let AccountKey {
+            user: a,
+            key: key_a,
+            ..
+        } = account_with_key(&s, Role::Editor);
+        let AccountKey { user: b, .. } = account_with_key(&s, Role::Editor);
         let (mine_text, theirs_text, shared_text) = (
             format!("mine{tag}"),
             format!("theirs{tag}"),
@@ -8564,7 +8598,7 @@ mod session_tests {
         assert_eq!(row.get::<_, Option<i64>>(0), Some(a));
         assert_eq!(row.get::<_, String>(1), "shared");
         // A viewer's key reads, but its write is refused and stores nothing.
-        let (_, _, key_v) = account_with_key(&s, Role::Viewer);
+        let AccountKey { key: key_v, .. } = account_with_key(&s, Role::Viewer);
         let body = mcp_call_with(
             &s,
             &key_v,
@@ -8600,7 +8634,7 @@ mod session_tests {
             );
             return;
         };
-        let (_, _, own) = account_with_key(&s, Role::Editor);
+        let AccountKey { key: own, .. } = account_with_key(&s, Role::Editor);
         let list = || mcp_tool("recall", json!({ "query": "anything" }));
         assert_eq!(
             mcp_send(&s, Some(&own), "tools/call", list()).status,
@@ -8645,6 +8679,21 @@ mod session_tests {
         }
     }
 
+    /// `key` gets the answer of no key at all, on `/mcp` and on `/api/recall`:
+    /// 401 with the same body.
+    fn assert_refused_like_no_key(s: &Served, key: &str) {
+        let recall = || mcp_tool("recall", json!({ "query": "anything" }));
+        let refused = mcp_send(s, Some(key), "tools/call", recall());
+        assert_eq!(refused.status, 401, "/mcp: {}", refused.body);
+        let without = mcp_send(s, None, "tools/call", recall());
+        assert_eq!(refused.json(), without.json(), "/mcp");
+        let path = "/api/recall?q=anything";
+        let refused = with_key(s, Method::GET, path, key, None);
+        assert_eq!(refused.status, 401, "{path}: {}", refused.body);
+        let without = s.send(Method::GET, path, &[], None);
+        assert_eq!(refused.json(), without.json(), "{path}");
+    }
+
     /// A revoked key gets nothing on either path; another key of the same
     /// account still works.
     #[test]
@@ -8653,7 +8702,9 @@ mod session_tests {
             eprintln!("skipping revoked_key_is_refused: no PostgreSQL reachable");
             return;
         };
-        let (_, name, key) = account_with_key(&s, Role::Editor);
+        let AccountKey {
+            name, key, key_id, ..
+        } = account_with_key(&s, Role::Editor);
         let (_, other) =
             crate::accounts_cli::new_agent_key(&mut *s.db(), &name, None).expect("second key");
         let recall = || mcp_tool("recall", json!({ "query": "anything" }));
@@ -8664,12 +8715,8 @@ mod session_tests {
             )
         };
         assert_eq!(statuses(&key), (200, 200), "before the revocation");
-        let id = s.count(
-            "SELECT id FROM access_agent_keys WHERE key_hash = $1",
-            &[&access::token_hash(&key)],
-        );
-        crate::accounts_cli::revoke_agent_key(&mut *s.db(), &name, id).expect("revoke");
-        assert_eq!(statuses(&key), (401, 401), "after the revocation");
+        crate::accounts_cli::revoke_agent_key(&mut *s.db(), &name, key_id).expect("revoke");
+        assert_refused_like_no_key(&s, &key);
         assert_eq!(statuses(&other), (200, 200), "the other key");
     }
 
@@ -8683,7 +8730,7 @@ mod session_tests {
             );
             return;
         };
-        let (_, name, key) = account_with_key(&s, Role::Editor);
+        let AccountKey { name, key, .. } = account_with_key(&s, Role::Editor);
         let recall = || mcp_tool("recall", json!({ "query": "anything" }));
         let statuses = || {
             (
@@ -8693,7 +8740,7 @@ mod session_tests {
         };
         assert_eq!(statuses(), (200, 200), "enabled");
         crate::accounts_cli::disable(&mut *s.db(), &name).expect("disable");
-        assert_eq!(statuses(), (401, 401), "disabled");
+        assert_refused_like_no_key(&s, &key);
         crate::accounts_cli::enable(&mut *s.db(), &name).expect("enable");
         assert_eq!(statuses(), (200, 200), "enabled again");
     }
@@ -8713,7 +8760,11 @@ mod session_tests {
         let name_a = format!("a-{tag}");
         let a = s.add_account(&name_a, Role::Editor);
         let browser = s.sign_in(&name_a, PASSWORD);
-        let (b, _, key_b) = account_with_key(&s, Role::Editor);
+        let AccountKey {
+            user: b,
+            key: key_b,
+            ..
+        } = account_with_key(&s, Role::Editor);
         let mine = insert_note(
             &s,
             Some(a),
@@ -8783,8 +8834,12 @@ mod session_tests {
         };
         let tag = uuid::Uuid::new_v4().simple().to_string();
         let probe = format!("probe{tag}");
-        let (a, _, key_a) = account_with_key(&s, Role::Viewer);
-        let (b, _, _) = account_with_key(&s, Role::Editor);
+        let AccountKey {
+            user: a,
+            key: key_a,
+            ..
+        } = account_with_key(&s, Role::Viewer);
+        let AccountKey { user: b, .. } = account_with_key(&s, Role::Editor);
         let mine = insert_note(
             &s,
             Some(a),
@@ -8858,8 +8913,12 @@ mod session_tests {
             );
             return;
         };
-        let (_, _, viewer) = account_with_key(&s, Role::Viewer);
-        let (editor_id, _, editor) = account_with_key(&s, Role::Editor);
+        let AccountKey { key: viewer, .. } = account_with_key(&s, Role::Viewer);
+        let AccountKey {
+            user: editor_id,
+            key: editor,
+            ..
+        } = account_with_key(&s, Role::Editor);
         let note = || json!({ "content": "pinned by a key", "category": "insight" });
         let answer = with_key(&s, Method::POST, "/api/memory", &viewer, Some(note()));
         assert_eq!(answer.status, 403, "{}", answer.body);
@@ -8887,6 +8946,151 @@ mod session_tests {
             assert_eq!(answer.status, 401, "{path}: {}", answer.body);
             assert_eq!(answer.json()["error"], "unauthorized", "{path}");
         }
+    }
+
+    /// The write guard is skipped for a key only without a valid session.
+    /// A stale or forged session cookie next to a valid key: the key is the
+    /// identity and writes without the request token (the cookie adds
+    /// nothing). A valid session next to the same key: the session's write,
+    /// which needs the token.
+    #[test]
+    fn stale_session_cookie_with_key_writes_without_token() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping stale_session_cookie_with_key_writes_without_token: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let editor = account_with_key(&s, Role::Editor);
+        let auth = format!("Bearer {}", editor.key);
+        let stale = s.sign_in(&editor.name, PASSWORD);
+        s.db()
+            .execute(
+                "UPDATE access_sessions SET expires_at = now() - interval '1 second' \
+                 WHERE token_hash = $1",
+                &[&stale.token_hash()],
+            )
+            .expect("expire the session");
+        let valid = s.sign_in(&editor.name, PASSWORD);
+        let forged = format!("throughline_session={}", "ab".repeat(32));
+        let post = |cookie: &str| {
+            s.send(
+                Method::POST,
+                "/api/memory",
+                &[
+                    ("cookie", cookie),
+                    ("authorization", auth.as_str()),
+                    ("content-type", "application/json"),
+                ],
+                Some(json!({ "content": "pinned with a key", "category": "insight" }).to_string()),
+            )
+        };
+        for (what, cookie) in [
+            ("forged", forged.as_str()),
+            ("expired", stale.cookie.as_str()),
+        ] {
+            let answer = post(cookie);
+            assert_eq!(answer.status, 200, "{what}: {}", answer.body);
+            let id = answer.json()["id"].as_i64().expect("id");
+            assert_eq!(
+                s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
+                editor.user,
+                "{what}"
+            );
+        }
+        let answer = post(&valid.cookie);
+        assert_eq!(answer.status, 403, "{}", answer.body);
+        assert_eq!(answer.json()["error"], "forbidden_request");
+    }
+
+    /// An admin's key passes the admin routes, a write among them without
+    /// request token; viewer and editor keys get 403.
+    #[test]
+    fn admin_key_passes_admin_routes() {
+        let Some(s) = Served::gate() else {
+            eprintln!("skipping admin_key_passes_admin_routes: no PostgreSQL reachable");
+            return;
+        };
+        for (role, expected) in [(Role::Viewer, 403), (Role::Editor, 403), (Role::Admin, 200)] {
+            let AccountKey { key, .. } = account_with_key(&s, role);
+            for (method, path, body) in [
+                (Method::GET, "/api/assistants", None),
+                (Method::POST, "/api/mimo-memory/ingest", Some(json!({}))),
+            ] {
+                let answer = with_key(&s, method.clone(), path, &key, body);
+                assert_eq!(
+                    answer.status, expected,
+                    "{role:?} {method} {path}: {}",
+                    answer.body
+                );
+                if expected == 200 {
+                    assert_eq!(answer.body, "reached");
+                } else {
+                    assert_eq!(answer.json(), forbidden(Role::Admin));
+                }
+            }
+        }
+    }
+
+    /// `GET /api/health-recovery` in team mode: the doctor's notes say
+    /// nothing about the host's `THROUGHLINE_AGENT_KEY`, and a failed count
+    /// is `agent access: unavailable` without the database text. The report
+    /// follows the server's mode and key, not the environment of the test.
+    #[test]
+    fn health_recovery_in_team_mode_has_no_error_text_and_no_key_note() {
+        let key = crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = Served::start_with_key(AuthMode::Team, None, key) else {
+            eprintln!(
+                "skipping health_recovery_in_team_mode_has_no_error_text_and_no_key_note: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let viewer = s.browser_with(Role::Viewer);
+        let notes = || -> Vec<String> {
+            let answer = s.get("/api/health-recovery", &viewer);
+            assert_eq!(answer.status, 200, "{}", answer.body);
+            serde_json::from_value(answer.json()["notes"].clone()).expect("notes")
+        };
+        let fine = notes();
+        assert!(
+            !fine
+                .iter()
+                .any(|n| n.contains("THROUGHLINE_AGENT_KEY") || n.starts_with("agent access")),
+            "{fine:?}"
+        );
+        s.db()
+            .batch_execute(
+                "DROP TABLE pg_temp.access_agent_keys; \
+                 CREATE TEMP TABLE access_agent_keys (id bigint)",
+            )
+            .expect("broken key table");
+        let broken = notes();
+        assert!(
+            broken.iter().any(|n| n == "agent access: unavailable"),
+            "{broken:?}"
+        );
+        assert!(
+            !broken.iter().any(|n| n.contains("does not exist")
+                || n.contains("column")
+                || n.contains("revoked_at")),
+            "{broken:?}"
+        );
+    }
+
+    /// `serve` logs the note once in team mode when `THROUGHLINE_AGENT_KEY`
+    /// is set at all; never in local mode.
+    #[test]
+    fn startup_note_only_in_team_mode_with_the_key_set() {
+        use crate::agent_key::{key_state_from, KeyState, IGNORED_IN_TEAM_MODE};
+        let ready = key_state_from(Some(AGENT_KEY));
+        for key in [&ready, &KeyState::TooShort] {
+            assert_eq!(
+                startup_agent_key_note(AuthMode::Team, key),
+                Some(IGNORED_IN_TEAM_MODE)
+            );
+            assert_eq!(startup_agent_key_note(AuthMode::Local, key), None);
+        }
+        assert_eq!(startup_agent_key_note(AuthMode::Team, &KeyState::Off), None);
     }
 
     /// Two signed-in accounts: (A's id, A, B).
@@ -9367,7 +9571,7 @@ mod session_tests {
             assert_eq!(answer.status, 500, "{path}: {}", answer.body);
             assert_eq!(answer.json(), json!({ "error": "query_failed" }), "{path}");
         }
-        let (_, _, viewer) = account_with_key(&s, Role::Viewer);
+        let AccountKey { key: viewer, .. } = account_with_key(&s, Role::Viewer);
         let tool = |name: &str, args: Value| json!({ "name": name, "arguments": args });
         for params in [
             tool("get_note", json!({ "id": 1 })),
