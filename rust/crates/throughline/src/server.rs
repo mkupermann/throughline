@@ -138,6 +138,12 @@ struct SearchHitJson {
     created_at: chrono::DateTime<chrono::Utc>,
     score: f32,
     kind: String,
+    /// Team mode, memory hits only: the owner's account name (null for a
+    /// note without owner) and the visibility. Left out otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    visibility: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -470,6 +476,7 @@ async fn search_handler(
     let limit = params.limit.clamp(1, 200);
     let q = query.clone();
     let m = mode.clone();
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
         let backend = crate::embedding::resolve().ok();
         let backend_label = backend
@@ -484,25 +491,39 @@ async fn search_handler(
             "lexical" => crate::search::search(client, &q, limit, None)?,
             _ => crate::search::hybrid(client, &actor, backend.as_ref(), &q, limit)?,
         };
-        Ok((hits, backend_label, m))
+        let notes: Vec<i64> = hits
+            .iter()
+            .filter(|h| h.kind == "memory")
+            .filter_map(|h| h.message_id)
+            .collect();
+        let owners = note_owners(client, team, &actor, &notes)?;
+        Ok((hits, backend_label, m, owners))
     })
     .await
     {
-        Ok((hits, backend_label, mode)) => {
+        Ok((hits, backend_label, mode, owners)) => {
             let total = hits.len();
             let hits = hits
                 .into_iter()
-                .map(|h| SearchHitJson {
-                    message_id: h.message_id,
-                    conversation_id: h.conversation_id,
-                    session_id: h.session_id,
-                    project_name: h.project_name,
-                    source_tool: h.source_tool,
-                    role: h.role,
-                    snippet: h.snippet,
-                    created_at: h.created_at,
-                    score: h.score,
-                    kind: h.kind.to_string(),
+                .map(|h| {
+                    let tagged = match (h.kind, h.message_id) {
+                        ("memory", Some(id)) => owners.get(&id),
+                        _ => None,
+                    };
+                    SearchHitJson {
+                        message_id: h.message_id,
+                        conversation_id: h.conversation_id,
+                        session_id: h.session_id,
+                        project_name: h.project_name,
+                        source_tool: h.source_tool,
+                        role: h.role,
+                        snippet: h.snippet,
+                        created_at: h.created_at,
+                        score: h.score,
+                        kind: h.kind.to_string(),
+                        owner: tagged.map(|(owner, _)| owner.clone()),
+                        visibility: tagged.map(|(_, visibility)| visibility.clone()),
+                    }
                 })
                 .collect();
             Json(SearchResponse {
@@ -1485,6 +1506,7 @@ async fn recall_handler(
     } else {
         None
     };
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
         let q = crate::recall::RecallQuery {
             actor: &actor,
@@ -1497,15 +1519,16 @@ async fn recall_handler(
             rank: parsed.rank,
         };
         let result = crate::recall::recall(client, &q, emb.as_ref())?;
+        let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
         if counted {
-            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
             crate::lifecycle::record_use_or_log(client, &ids);
         }
-        Ok(result)
+        let owners = note_owners(client, team, &actor, &ids)?;
+        Ok((result, owners))
     })
     .await
     {
-        Ok(result) => Json(result).into_response(),
+        Ok((result, owners)) => json_with_owners(&result, "hits", None, &owners),
         Err(resp) => resp,
     }
 }
@@ -2354,22 +2377,116 @@ async fn consolidation_candidates_handler(
         return Json(serde_json::json!({ "groups": [], "degraded": "no_embeddings" }))
             .into_response();
     };
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
-        crate::lifecycle::consolidation_candidates(
+        let groups = crate::lifecycle::consolidation_candidates(
             client,
             &actor,
             &backend.model,
             backend.column,
             min_similarity,
-        )
+        )?;
+        let ids: Vec<i64> = groups
+            .iter()
+            .flat_map(|g| g.notes.iter().map(|n| n.id))
+            .collect();
+        Ok((groups, note_owners(client, team, &actor, &ids)?))
     })
     .await
     {
-        Ok(groups) => {
-            Json(serde_json::json!({ "groups": groups, "degraded": null })).into_response()
-        }
+        Ok((groups, owners)) => json_with_owners(
+            &serde_json::json!({ "groups": groups, "degraded": null }),
+            "groups",
+            Some("notes"),
+            &owners,
+        ),
         Err(resp) => resp,
     }
+}
+
+/// Note id → (the owner's account name or `None`, visibility).
+type NoteOwners = std::collections::HashMap<i64, (Option<String>, String)>;
+
+/// Team mode: owner and visibility of the notes `ids` that `actor` sees,
+/// for the page's chips on recall, review, similar, damaged and search
+/// cards. Local mode: an empty map, so those answers keep their shape.
+fn note_owners<C: GenericClient>(
+    client: &mut C,
+    team: bool,
+    actor: &Actor,
+    ids: &[i64],
+) -> Result<NoteOwners> {
+    let mut owners = NoteOwners::new();
+    if !team || ids.is_empty() {
+        return Ok(owners);
+    }
+    let ids = ids.to_vec();
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&ids];
+    let seen = push_visibility(actor, "mc", &mut params);
+    for r in client.query(
+        &format!(
+            "SELECT mc.id, {}, mc.visibility::text FROM memory_chunks mc \
+             WHERE mc.id = ANY($1) AND {seen}",
+            crate::access::owner_name_sql("mc")
+        ),
+        &params,
+    )? {
+        owners.insert(r.get(0), (r.get(1), r.get(2)));
+    }
+    Ok(owners)
+}
+
+/// Puts `owner` and `visibility` of [`note_owners`] into each note object
+/// whose `id` is in `owners`.
+fn tag_owners<'a>(notes: impl IntoIterator<Item = &'a mut serde_json::Value>, owners: &NoteOwners) {
+    for note in notes {
+        let Some(id) = note.get("id").and_then(serde_json::Value::as_i64) else {
+            continue;
+        };
+        if let Some((owner, visibility)) = owners.get(&id) {
+            note["owner"] = serde_json::json!(owner);
+            note["visibility"] = serde_json::json!(visibility);
+        }
+    }
+}
+
+/// `body` as JSON with the note objects under `key` (an array of notes, or
+/// with `nested`, an array of objects each holding such an array) tagged by
+/// [`tag_owners`]. Without owners `body` goes out as it is.
+fn json_with_owners<T: Serialize>(
+    body: &T,
+    key: &str,
+    nested: Option<&str>,
+    owners: &NoteOwners,
+) -> Response {
+    if owners.is_empty() {
+        return Json(body).into_response();
+    }
+    let mut value = match serde_json::to_value(body) {
+        Ok(value) => value,
+        Err(_) => return Json(body).into_response(),
+    };
+    let list = if key.is_empty() {
+        value.as_array_mut()
+    } else {
+        value.get_mut(key).and_then(serde_json::Value::as_array_mut)
+    };
+    if let Some(list) = list {
+        match nested {
+            None => tag_owners(list.iter_mut(), owners),
+            Some(inner) => {
+                for item in list.iter_mut() {
+                    if let Some(notes) = item
+                        .get_mut(inner)
+                        .and_then(serde_json::Value::as_array_mut)
+                    {
+                        tag_owners(notes.iter_mut(), owners);
+                    }
+                }
+            }
+        }
+    }
+    Json(value).into_response()
 }
 
 /// Currently valid notes that the old `reflect` damaged: they hold several
@@ -2416,8 +2533,15 @@ async fn damaged_notes_handler(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
 ) -> Response {
-    match with_db(&state, move |client| damaged_notes(client, &actor)).await {
-        Ok(items) => Json(items).into_response(),
+    let team = state.auth_mode == crate::access::AuthMode::Team;
+    match with_db(&state, move |client| {
+        let items = damaged_notes(client, &actor)?;
+        let ids: Vec<i64> = items.iter().filter_map(|n| n["id"].as_i64()).collect();
+        Ok((items, note_owners(client, team, &actor, &ids)?))
+    })
+    .await
+    {
+        Ok((items, owners)) => json_with_owners(&items, "", None, &owners),
         Err(resp) => resp,
     }
 }
@@ -2718,8 +2842,34 @@ async fn agent_memory_ingest(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+/// The mode marker of `web/index.html` as written there (local mode); team
+/// mode serves the page with [`AUTH_MODE_TEAM`] in its place, so the page
+/// knows whether to ask for an account before it loads anything.
+const AUTH_MODE_LOCAL: &str = r#"<meta name="throughline-auth-mode" content="local" />"#;
+const AUTH_MODE_TEAM: &str = r#"<meta name="throughline-auth-mode" content="team" />"#;
+
+/// The page for `mode`: [`INDEX_HTML`] as is in local mode, with the team
+/// marker in team mode (made once).
+fn index_page(mode: crate::access::AuthMode) -> &'static str {
+    static TEAM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    match mode {
+        crate::access::AuthMode::Local => INDEX_HTML,
+        crate::access::AuthMode::Team => {
+            TEAM.get_or_init(|| INDEX_HTML.replacen(AUTH_MODE_LOCAL, AUTH_MODE_TEAM, 1))
+        }
+    }
+}
+
+/// `GET /` and `/index.html`. `no-cache`: a browser checks back before it
+/// reuses the page, so a server switched between modes never answers with
+/// the other mode's page from the cache.
+async fn index(State(state): State<AppState>) -> Response {
+    let mut resp = Html(index_page(state.auth_mode)).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache"),
+    );
+    resp
 }
 
 const FAVICON_SVG: &str = include_str!("../web/favicon.svg");
@@ -3159,12 +3309,15 @@ async fn stale_digest_handler(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
 ) -> Response {
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
-        crate::stale_digest::build_digest(client, &actor, 14)
+        let digest = crate::stale_digest::build_digest(client, &actor, 14)?;
+        let ids: Vec<i64> = digest.items.iter().map(|i| i.id).collect();
+        Ok((digest, note_owners(client, team, &actor, &ids)?))
     })
     .await
     {
-        Ok(d) => Json(d).into_response(),
+        Ok((digest, owners)) => json_with_owners(&digest, "items", None, &owners),
         Err(resp) => resp,
     }
 }
@@ -4534,7 +4687,6 @@ mod tests {
             r#"<input id="signin-password" name="password" type="password""#,
             r#"<button class="btn btn-primary" id="signin-submit" type="submit""#,
             r#"apiFetch("/api/login""#,
-            r#"fetch("/api/me""#,
         ] {
             assert!(INDEX_HTML.contains(needle), "index.html lacks {needle}");
         }
@@ -4547,7 +4699,44 @@ mod tests {
             set.map(str::to_ascii_lowercase).as_deref(),
             Some(REQUEST_TOKEN_HEADER)
         );
-        assert!(INDEX_HTML.contains("headers.set(REQUEST_TOKEN_HEADER, requestToken)"));
+        // One choke point: the page calls `fetch` itself only inside
+        // `apiFetch`, which sets the header on writes to its own `/api/`,
+        // and for the read-only account probe of team mode. Any other raw
+        // `fetch(` would be a request that bypasses the token.
+        let raw: Vec<&str> = INDEX_HTML
+            .lines()
+            .map(str::trim)
+            .filter(|line| {
+                line.match_indices("fetch(").any(|(i, _)| {
+                    !line[..i]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+            })
+            .collect();
+        assert_eq!(
+            raw,
+            [
+                "const res = await fetch(path, req);",
+                r#"res = await fetch("/api/me", { headers: { Accept: "application/json" } });"#,
+            ],
+            "raw fetch calls of the page"
+        );
+        let helper = INDEX_HTML
+            .split_once("async function apiFetch(path, init, opts) {")
+            .and_then(|(_, rest)| rest.split_once("const res = await fetch(path, req);"))
+            .map(|(body, _)| body)
+            .expect("apiFetch and its fetch");
+        for needle in [
+            r#"const ownApi = typeof path === "string" && path.indexOf("/api/") === 0;"#,
+            r#"if (requestToken && ownApi && method !== "GET" && method !== "HEAD") headers.set(REQUEST_TOKEN_HEADER, requestToken);"#,
+        ] {
+            assert!(helper.contains(needle), "apiFetch lacks {needle}");
+        }
+        // The mode marker the server swaps in team mode, once.
+        assert_eq!(INDEX_HTML.matches(AUTH_MODE_LOCAL).count(), 1);
+        assert!(!INDEX_HTML.contains(AUTH_MODE_TEAM));
     }
 
     /// The role table and the registered routes behind a session are the
@@ -9134,6 +9323,211 @@ mod session_tests {
             assert_eq!(startup_agent_key_note(AuthMode::Local, key), None);
         }
         assert_eq!(startup_agent_key_note(AuthMode::Team, &KeyState::Off), None);
+    }
+
+    /// The page tells local from team mode by the marker `index` serves:
+    /// local `GET /` keeps the page's own marker, team swaps it; both are
+    /// `no-cache`, so a mode switch never meets a cached page.
+    #[test]
+    fn index_serves_the_mode_marker() {
+        for mode in [AuthMode::Local, AuthMode::Team] {
+            let Some(s) = Served::start(mode, None) else {
+                eprintln!("skipping index_serves_the_mode_marker: no PostgreSQL reachable");
+                return;
+            };
+            let (mine, other) = match mode {
+                AuthMode::Local => (AUTH_MODE_LOCAL, AUTH_MODE_TEAM),
+                AuthMode::Team => (AUTH_MODE_TEAM, AUTH_MODE_LOCAL),
+            };
+            for path in ["/", "/index.html"] {
+                let page = s.send(Method::GET, path, &[], None);
+                assert_eq!(page.status, 200, "{mode:?} {path}");
+                assert_eq!(
+                    page.header("cache-control"),
+                    Some("no-cache"),
+                    "{mode:?} {path}"
+                );
+                assert_eq!(page.body.matches(mine).count(), 1, "{mode:?} {path}");
+                assert!(!page.body.contains(other), "{mode:?} {path}");
+                assert_eq!(
+                    page.body.len(),
+                    INDEX_HTML.len() + mine.len() - AUTH_MODE_LOCAL.len()
+                );
+            }
+        }
+    }
+
+    /// `json_with_owners` tags flat and nested note lists and leaves a body
+    /// without owners as it is.
+    #[test]
+    fn json_with_owners_tags_note_lists() {
+        let body = |resp: Response| -> Value {
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            let bytes = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), usize::MAX))
+                .expect("body");
+            serde_json::from_slice(&bytes).expect("json")
+        };
+        let mut owners = NoteOwners::new();
+        owners.insert(1, (Some("alice".into()), "private".into()));
+        owners.insert(2, (None, "shared".into()));
+        let groups = json!({ "groups": [{ "notes": [{ "id": 1 }, { "id": 2 }, { "id": 3 }] }] });
+        let tagged = body(json_with_owners(&groups, "groups", Some("notes"), &owners));
+        assert_eq!(
+            tagged["groups"][0]["notes"],
+            json!([
+                { "id": 1, "owner": "alice", "visibility": "private" },
+                { "id": 2, "owner": null, "visibility": "shared" },
+                { "id": 3 }
+            ])
+        );
+        let flat = json!([{ "id": 2 }]);
+        assert_eq!(
+            body(json_with_owners(&flat, "", None, &owners)),
+            json!([{ "id": 2, "owner": null, "visibility": "shared" }])
+        );
+        let items = json!({ "items": [{ "id": 1 }] });
+        assert_eq!(
+            body(json_with_owners(&items, "items", None, &owners))["items"][0]["owner"],
+            "alice"
+        );
+        assert_eq!(
+            body(json_with_owners(&items, "items", None, &NoteOwners::new())),
+            items
+        );
+    }
+
+    /// A note with `id` in the list at `pointer` of `body`, matched on `key`.
+    fn note_in<'a>(body: &'a Value, pointer: &str, key: &str, id: i64) -> Option<&'a Value> {
+        body.pointer(pointer)?
+            .as_array()?
+            .iter()
+            .find(|n| n[key].as_i64() == Some(id))
+    }
+
+    /// The answers the page draws as note cards: recall, review (stale
+    /// digest), damaged notes and memory search hits. Each path with the
+    /// pointer to its note list, the key of a note's id, and whether it
+    /// lists lapsed notes (the review list) or current ones.
+    const NOTE_CARD_READS: [(&str, &str, &str, bool); 4] = [
+        ("/api/recall?q=", "/hits", "id", false),
+        ("/api/stale-digest", "/items", "id", true),
+        ("/api/damaged-notes", "", "id", false),
+        ("/api/search?q=", "/hits", "message_id", false),
+    ];
+
+    /// Damages `current` and `lapsed` the way the old reflect did (the
+    /// damaged list shows current ones), and lets `lapsed` expire (the
+    /// review list shows those).
+    fn damage_and_lapse(s: &Served, current: &[i64], lapsed: &[i64]) {
+        let all: Vec<i64> = current.iter().chain(lapsed).copied().collect();
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET content = content || E'\\n---\\nmore', \
+                 merged_from = ARRAY[id] WHERE id = ANY($1)",
+                &[&all],
+            )
+            .expect("damage");
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET expires_at = now() - interval '1 hour' \
+                 WHERE id = ANY($1)",
+                &[&lapsed.to_vec()],
+            )
+            .expect("lapse");
+    }
+
+    /// Team mode: on every answer drawn as a note card the owner gets owner
+    /// and visibility of her private note, and a note without owner shows
+    /// `null` and `shared`; another account gets neither note's private
+    /// one. The search hit is a memory hit.
+    #[test]
+    fn note_cards_carry_owner_and_visibility_in_team_mode() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping note_cards_carry_owner_and_visibility_in_team_mode: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let (a_id, a, b) = two_browsers(&s);
+        let name_a: String = s
+            .db()
+            .query_one("SELECT username FROM access_users WHERE id = $1", &[&a_id])
+            .expect("name")
+            .get(0);
+        let probe = format!("probe{}", uuid::Uuid::new_v4().simple());
+        // Both pairs are damaged; the second one lapses.
+        let pairs: Vec<(i64, i64)> = (0..2)
+            .map(|_| {
+                let text = format!("sqlx {probe}");
+                (
+                    insert_note(&s, Some(a_id), "private", &text, "ui_pin"),
+                    insert_note(&s, None, "shared", &text, "manual"),
+                )
+            })
+            .collect();
+        damage_and_lapse(&s, &[pairs[0].0, pairs[0].1], &[pairs[1].0, pairs[1].1]);
+        for (path, pointer, key, lapsed) in NOTE_CARD_READS {
+            let (private, legacy) = pairs[usize::from(lapsed)];
+            let path = if path.ends_with('=') {
+                format!("{path}{probe}")
+            } else {
+                path.to_string()
+            };
+            let answer = s.get(&path, &a);
+            assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+            let body = answer.json();
+            let mine = note_in(&body, pointer, key, private)
+                .unwrap_or_else(|| panic!("{path} lacks the private note: {}", answer.body));
+            assert_eq!(mine["owner"], json!(name_a), "{path}");
+            assert_eq!(mine["visibility"], "private", "{path}");
+            let old = note_in(&body, pointer, key, legacy)
+                .unwrap_or_else(|| panic!("{path} lacks the shared note: {}", answer.body));
+            assert_eq!(old["owner"], Value::Null, "{path}");
+            assert_eq!(old["visibility"], "shared", "{path}");
+            let other = s.get(&path, &b).json();
+            assert!(note_in(&other, pointer, key, private).is_none(), "{path}");
+            assert_eq!(
+                note_in(&other, pointer, key, legacy).map(|n| n["visibility"].clone()),
+                Some(json!("shared")),
+                "{path}"
+            );
+        }
+    }
+
+    /// Local mode: the same answers have no `owner` or `visibility`; their
+    /// shape is the one from before team mode.
+    #[test]
+    fn note_cards_keep_their_shape_in_local_mode() {
+        let Some(s) = Served::start(AuthMode::Local, None) else {
+            eprintln!(
+                "skipping note_cards_keep_their_shape_in_local_mode: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let probe = format!("probe{}", uuid::Uuid::new_v4().simple());
+        let text = format!("diesel {probe}");
+        let current = insert_note(&s, None, "shared", &text, "manual");
+        let lapsed_id = insert_note(&s, None, "shared", &text, "manual");
+        damage_and_lapse(&s, &[current], &[lapsed_id]);
+        for (path, pointer, key, lapsed) in NOTE_CARD_READS {
+            let id = if lapsed { lapsed_id } else { current };
+            let path = if path.ends_with('=') {
+                format!("{path}{probe}")
+            } else {
+                path.to_string()
+            };
+            let answer = s.send(Method::GET, &path, &[], None);
+            assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+            let body = answer.json();
+            let note = note_in(&body, pointer, key, id)
+                .unwrap_or_else(|| panic!("{path} lacks the note: {}", answer.body));
+            let fields = note.as_object().expect("object");
+            assert!(
+                !fields.contains_key("owner") && !fields.contains_key("visibility"),
+                "{path}: {note}"
+            );
+        }
     }
 
     /// Two signed-in accounts: (A's id, A, B).
