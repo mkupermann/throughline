@@ -669,8 +669,10 @@ mod tests {
         let tag = uuid::Uuid::new_v4().simple().to_string();
         let model = format!("test-embed-auto-{tag}");
         // A plain client without BEGIN, as the server's: each statement
-        // commits on its own, so the test takes its rows out again.
-        let id = seed_note(&mut client, &format!("auto {tag}"), "active");
+        // commits on its own, so the test takes its rows out again. The note
+        // is superseded, so while it exists no other test sees an extra
+        // active note; the write-time embed takes it all the same.
+        let id = seed_note(&mut client, &format!("auto {tag}"), "superseded");
         write_fixture::with(&tag, &model, || embed_written_note(&mut client, id));
         let rows = embedded_rows(&mut client, &model, "memory_chunk");
         client
