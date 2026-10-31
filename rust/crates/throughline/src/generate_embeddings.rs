@@ -114,17 +114,21 @@ const NOTE_VECTOR_SAVEPOINT: &str = "throughline_note_vector";
 /// rolls back only them and never aborts the caller's transaction.
 /// `client.transaction()` would do the same for a `Transaction`, but on a
 /// plain client inside a `BEGIN` it would end the caller's block.
+///
+/// Callers call it right after writing the note on the same connection.
+/// Inside a block that write gave the transaction an id; in autocommit the
+/// write's own transaction has ended, and the check below runs in a fresh
+/// one without an id. (A timestamp comparison does not work: under the
+/// extended protocol `statement_timestamp()` moves on at Execute even in
+/// autocommit.) Passing the answer in from every caller would mean a flag
+/// on `supersede_memory`, `keep_memory`, `consolidate` and MCP `write`,
+/// which run both ways and cannot tell which.
 pub fn embed_written_note_with<C: GenericClient>(
     client: &mut C,
     id: i64,
     breaker: &embedding::EmbedBreaker,
 ) {
-    // In a transaction block that began before this statement, now() is
-    // older than the statement; outside one they are the same instant.
-    let in_block = match client.query_one(
-        "SELECT now() <> statement_timestamp() OR txid_current_if_assigned() IS NOT NULL",
-        &[],
-    ) {
+    let in_block = match client.query_one("SELECT txid_current_if_assigned() IS NOT NULL", &[]) {
         Ok(row) => row.get::<_, bool>(0),
         Err(e) => {
             eprintln!("embed at write: note {id}: {e}");
@@ -654,6 +658,28 @@ mod tests {
             .get(0);
         assert_eq!(kept, 1, "the note survives the failed vector");
         assert!(embedded_rows(&mut outer, &model, "memory_chunk").is_empty());
+    }
+
+    #[test]
+    fn embed_written_note_runs_in_autocommit() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping embed_written_note_runs_in_autocommit: no PostgreSQL reachable");
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let model = format!("test-embed-auto-{tag}");
+        // A plain client without BEGIN, as the server's: each statement
+        // commits on its own, so the test takes its rows out again.
+        let id = seed_note(&mut client, &format!("auto {tag}"), "active");
+        write_fixture::with(&tag, &model, || embed_written_note(&mut client, id));
+        let rows = embedded_rows(&mut client, &model, "memory_chunk");
+        client
+            .execute("DELETE FROM embeddings WHERE model = $1", &[&model])
+            .unwrap();
+        client
+            .execute("DELETE FROM memory_chunks WHERE id = $1", &[&id])
+            .unwrap();
+        assert_eq!(rows, vec![id], "the note got its vector in autocommit");
     }
 
     #[test]
