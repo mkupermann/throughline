@@ -80,9 +80,10 @@ pub enum AuthMode {
     Team,
 }
 
-/// `THROUGHLINE_AUTH_MODE`. Unset or empty means `local`.
+/// `THROUGHLINE_AUTH_MODE`: exactly `local` or `team`. Unset or empty
+/// (an unset variable passed through by Compose) means `local`.
 pub fn auth_mode_from(value: Option<&str>) -> Result<AuthMode> {
-    match value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+    match value {
         None | Some("") | Some("local") => Ok(AuthMode::Local),
         Some("team") => Ok(AuthMode::Team),
         Some(other) => bail!("THROUGHLINE_AUTH_MODE is `{other}`: use local or team"),
@@ -93,14 +94,15 @@ pub fn auth_mode_from(value: Option<&str>) -> Result<AuthMode> {
 /// `local` would show every account's private notes to anyone, so it needs
 /// a database without accounts and private notes. `team` needs an enabled
 /// admin and a public URL that keeps the session cookie off plain HTTP.
+/// Both modes refuse a database that migration 014 has not reached.
 pub fn check_startup<C: GenericClient>(
     client: &mut C,
     mode: AuthMode,
     public_url: Option<&str>,
 ) -> Result<()> {
+    let (accounts, private) = counts(client)?;
     match mode {
         AuthMode::Local => {
-            let (accounts, private) = counts(client)?;
             if accounts > 0 || private > 0 {
                 bail!(
                     "the database has {accounts} accounts and {private} private notes; \
@@ -162,7 +164,12 @@ fn team_url_ok(url: &str) -> bool {
     let Some((scheme, rest)) = url.trim().split_once("://") else {
         return false;
     };
-    let host = crate::server::host_of(rest.split(['/', '?', '#']).next().unwrap_or(""));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // `http://localhost@evil.example.com` goes to evil.example.com.
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = crate::server::host_of(authority);
     if host.is_empty() {
         return false;
     }
@@ -174,16 +181,38 @@ fn team_url_ok(url: &str) -> bool {
                     .is_ok_and(|ip| ip.is_loopback())))
 }
 
-/// [`visibility_predicate_at`] with the owner bound as `$1`.
+/// [`visibility_predicate_at`] with the owner bound as `$1`, for a query
+/// whose only parameter is the owner. Anything else uses [`push_visibility`].
 pub fn visibility_predicate(actor: &Actor, alias: &str) -> (String, Option<i64>) {
     visibility_predicate_at(actor, alias, 1)
+}
+
+/// The visibility condition on the notes table `alias` for a query whose
+/// parameters are collected in `params`: binds the owner as the next
+/// parameter when the actor has one and returns the SQL fragment. This is
+/// the form every note query uses.
+pub fn push_visibility<'a>(
+    actor: &'a Actor,
+    alias: &str,
+    params: &mut Vec<&'a (dyn postgres::types::ToSql + Sync)>,
+) -> String {
+    let (sql, owner) = visibility_predicate_at(actor, alias, params.len() + 1);
+    if let (Some(_), Some(id)) = (owner, actor.user_id.as_ref()) {
+        params.push(id);
+    }
+    sql
 }
 
 /// SQL condition on the notes table `alias` that keeps what `actor` may see,
 /// and the value the caller binds as `$n` when there is one. Local mode sees
 /// everything, an account sees shared notes and its own, and jobs or anything
-/// without an account see shared notes only.
-pub fn visibility_predicate_at(actor: &Actor, alias: &str, n: usize) -> (String, Option<i64>) {
+/// without an account see shared notes only. Callers must not number `$n`
+/// themselves: note queries (Task 4 on) go through [`push_visibility`].
+pub(crate) fn visibility_predicate_at(
+    actor: &Actor,
+    alias: &str,
+    n: usize,
+) -> (String, Option<i64>) {
     match (actor.via, actor.user_id) {
         (Via::Local, _) => ("TRUE".to_string(), None),
         (Via::Session | Via::AgentKey, Some(id)) => (
@@ -221,7 +250,8 @@ mod tests {
 
     /// A test transaction that sees no accounts and no private notes.
     /// Repeatable read keeps rows other tests commit meanwhile out of the
-    /// counts.
+    /// counts. `access_users` is locked first, as in the migration test, so
+    /// the two cannot deadlock.
     fn without_accounts(client: &mut postgres::Client) -> postgres::Transaction<'_> {
         let mut tx = client
             .build_transaction()
@@ -229,8 +259,10 @@ mod tests {
             .start()
             .expect("begin test tx");
         tx.batch_execute(
-            "UPDATE memory_chunks SET owner_id = NULL, visibility = 'shared' \
+            "LOCK TABLE access_users IN SHARE ROW EXCLUSIVE MODE; \
+             UPDATE memory_chunks SET owner_id = NULL, visibility = 'shared' \
                  WHERE owner_id IS NOT NULL OR visibility <> 'shared'; \
+             DELETE FROM favorites WHERE user_id IS NOT NULL; \
              DELETE FROM access_users;",
         )
         .expect("clear accounts");
@@ -273,11 +305,12 @@ mod tests {
             (Some(""), AuthMode::Local),
             (Some("local"), AuthMode::Local),
             (Some("team"), AuthMode::Team),
-            (Some(" Team "), AuthMode::Team),
         ] {
             assert_eq!(auth_mode_from(value).unwrap(), mode, "{value:?}");
         }
-        for value in ["teams", "off", "1", "admin"] {
+        for value in [
+            "teams", "off", "1", "admin", "Team", "TEAM", " team", "local ",
+        ] {
             let err = auth_mode_from(Some(value)).unwrap_err().to_string();
             assert!(err.contains("THROUGHLINE_AUTH_MODE"), "{err}");
             assert!(err.contains("use local or team"), "{err}");
@@ -341,11 +374,8 @@ mod tests {
             add_note(&mut tx, "private", Some(b)),
         ];
         let mut seen = |actor: &Actor| -> Vec<i64> {
-            let (predicate, owner) = visibility_predicate_at(actor, "m", 2);
             let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&notes];
-            if let Some(owner) = &owner {
-                params.push(owner);
-            }
+            let predicate = push_visibility(actor, "m", &mut params);
             tx.query(
                 &format!(
                     "SELECT m.id FROM memory_chunks m \
@@ -368,6 +398,34 @@ mod tests {
     }
 
     #[test]
+    fn push_visibility_binds_the_owner_at_the_next_position() {
+        let (a, b) = (1_i64, "x");
+        let user = Actor {
+            user_id: Some(42),
+            username: None,
+            role: Role::Viewer,
+            via: Via::Session,
+        };
+        for (actor, fragment, pushed) in [
+            (Actor::local(), "TRUE".to_string(), 0),
+            (
+                Actor::shared_only(),
+                "(n.visibility = 'shared')".to_string(),
+                0,
+            ),
+            (
+                user,
+                "(n.visibility = 'shared' OR n.owner_id = $3)".to_string(),
+                1,
+            ),
+        ] {
+            let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&a, &b];
+            assert_eq!(push_visibility(&actor, "n", &mut params), fragment);
+            assert_eq!(params.len(), 2 + pushed, "{fragment}");
+        }
+    }
+
+    #[test]
     fn startup_local_refuses_accounts_or_private_notes() {
         let Some(mut client) = test_db() else {
             eprintln!(
@@ -379,26 +437,23 @@ mod tests {
         check_startup(&mut tx, AuthMode::Local, None).expect("nothing private: local starts");
         assert_eq!(doctor_line(&mut tx, AuthMode::Local).unwrap(), "local");
 
-        let note = add_note(&mut tx, "private", None);
-        let err = check_startup(&mut tx, AuthMode::Local, None)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("1 private notes"), "{err}");
-        assert!(err.contains("THROUGHLINE_AUTH_MODE=team"), "{err}");
-        tx.execute(
-            "UPDATE memory_chunks SET visibility = 'shared' WHERE id = $1",
-            &[&note],
-        )
-        .expect("share note");
+        add_note(&mut tx, "shared", None);
         check_startup(&mut tx, AuthMode::Local, None).expect("shared notes are fine");
 
         // Even a disabled account stops local mode.
-        add_user(&mut tx, "viewer", false);
+        let user = add_user(&mut tx, "viewer", false);
         let err = check_startup(&mut tx, AuthMode::Local, None)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("1 accounts"), "{err}");
+        assert!(err.contains("1 accounts and 0 private notes"), "{err}");
         assert!(err.contains("THROUGHLINE_AUTH_MODE=team"), "{err}");
+
+        // A private note always has an owner, so it comes with an account.
+        add_note(&mut tx, "private", Some(user));
+        let err = check_startup(&mut tx, AuthMode::Local, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("1 accounts and 1 private notes"), "{err}");
     }
 
     #[test]
@@ -444,11 +499,27 @@ mod tests {
             Some("http://192.168.1.5:8787"),
             Some("https://"),
             Some("ftp://localhost"),
+            Some("http://localhost:8787@evil.example.com"),
+            Some("http://[::1]@evil.example.com"),
         ] {
             let err = check_startup(&mut tx, AuthMode::Team, url)
                 .expect_err("refused")
                 .to_string();
             assert!(err.contains("THROUGHLINE_PUBLIC_URL"), "{url:?}: {err}");
+        }
+
+        // Before migration 014 notes have no visibility: refused in both
+        // modes. A temporary table shadows memory_chunks for this session.
+        tx.batch_execute("CREATE TEMP TABLE memory_chunks (id bigint) ON COMMIT DROP")
+            .expect("shadow notes");
+        for mode in [AuthMode::Local, AuthMode::Team] {
+            // A savepoint each: the failed query of one mode must not abort
+            // the transaction the other mode is checked in.
+            let mut savepoint = tx.transaction().expect("savepoint");
+            let err = check_startup(&mut savepoint, mode, https)
+                .expect_err("refused before 014")
+                .to_string();
+            assert!(err.contains("throughline migrate"), "{mode:?}: {err}");
         }
     }
 }

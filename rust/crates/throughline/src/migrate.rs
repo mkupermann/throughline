@@ -330,12 +330,14 @@ CREATE INDEX IF NOT EXISTS idx_memory_superseded_by ON memory_chunks (superseded
 
 /// Team mode. Accounts, sessions and login attempts as in the Python-era
 /// schema, but sessions without `last_seen_at`, plus per-account agent keys.
-/// The Python audit trail goes: `access_audit`, its append-only trigger and
-/// the `access_changes` trigger on every table it was attached to (CASCADE on
-/// the trigger function reaches all of them). Notes get an owner (NULL for
-/// existing notes) and a visibility (existing notes are shared); favorites
-/// become per account (NULL in local mode). Idempotent, so the Python-era
-/// schema and a fresh Rust schema end up the same.
+/// The Python audit trail goes: `access_audit`, its append-only trigger, and
+/// every writer. CASCADE on a trigger function drops each trigger that runs
+/// it (`access_changes` sits on nine tables). Function bodies are not
+/// dependencies, so `record_conversation_project` is replaced by the same
+/// body without its audit insert. Notes get an owner (NULL for existing
+/// notes) and a visibility (existing notes are shared); favorites become per
+/// account (NULL in local mode). Idempotent, so the Python-era schema and a
+/// fresh Rust schema end up the same.
 const TEAM_MODE: &str = r#"
 CREATE TABLE IF NOT EXISTS access_users (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -371,15 +373,40 @@ CREATE TABLE IF NOT EXISTS access_agent_keys (
 CREATE INDEX IF NOT EXISTS access_agent_keys_user ON access_agent_keys (user_id);
 
 DROP FUNCTION IF EXISTS public.record_access_change() CASCADE;
+DROP FUNCTION IF EXISTS public.audit_processing_lifecycle() CASCADE;
+DO $$
+BEGIN
+    IF to_regprocedure('public.record_conversation_project()') IS NOT NULL THEN
+        CREATE OR REPLACE FUNCTION public.record_conversation_project() RETURNS trigger
+        LANGUAGE plpgsql AS $fn$
+        BEGIN
+            IF OLD.assigned_project IS DISTINCT FROM NEW.assigned_project THEN
+                INSERT INTO public.conversation_project_changes(conversation_id,previous_project,assigned_project,source_path,actor)
+                    VALUES(NEW.id,OLD.assigned_project,NEW.assigned_project,NEW.project_path,
+                        COALESCE(NULLIF(current_setting('throughline.actor',true),''),'operator'));
+            END IF;
+            IF OLD.project_name IS DISTINCT FROM NEW.project_name THEN
+                UPDATE public.memory_chunks SET project_name=NEW.project_name
+                    WHERE source_type='conversation' AND source_id=NEW.id;
+            END IF;
+            RETURN NEW;
+        END $fn$;
+    END IF;
+END $$;
 DROP TABLE IF EXISTS access_audit;
 DROP FUNCTION IF EXISTS public.protect_access_audit();
 
 ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS owner_id bigint REFERENCES access_users(id);
 ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFAULT 'shared'
     CONSTRAINT memory_chunks_visibility_check CHECK (visibility IN ('shared', 'private'));
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'memory_chunks_private_has_owner') THEN
+        ALTER TABLE memory_chunks ADD CONSTRAINT memory_chunks_private_has_owner
+            CHECK (visibility = 'shared' OR owner_id IS NOT NULL);
+    END IF;
+END $$;
 
-ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_id bigint
-    REFERENCES access_users(id) ON DELETE CASCADE;
+ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_id bigint REFERENCES access_users(id);
 CREATE UNIQUE INDEX IF NOT EXISTS favorites_kind_ref_user_key
     ON favorites (kind, ref, (COALESCE(user_id, 0)));
 ALTER TABLE favorites DROP CONSTRAINT IF EXISTS favorites_kind_ref_key;
@@ -633,9 +660,16 @@ mod tests {
 
     /// The state before 014 on any database: the Python-era access block of
     /// `sql/schema.sql` (sessions with `last_seen_at`, the audit table with
-    /// its append-only trigger, `access_changes` on two tables) and notes and
-    /// favorites without the 014 columns.
+    /// its append-only trigger, `access_changes` on two tables, the two other
+    /// functions that write the audit) and notes and favorites without the
+    /// 014 columns. `access_users` is locked first, as in the access tests,
+    /// so the two cannot deadlock.
     const BEFORE_TEAM_MODE: &str = r#"
+DO $$ BEGIN
+    IF to_regclass('public.access_users') IS NOT NULL THEN
+        LOCK TABLE access_users IN SHARE ROW EXCLUSIVE MODE;
+    END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS access_users (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username text UNIQUE NOT NULL,
@@ -675,6 +709,24 @@ BEGIN RAISE EXCEPTION 'Audit records are append-only'; END $$;
 DROP TRIGGER IF EXISTS access_audit_immutable ON access_audit;
 CREATE TRIGGER access_audit_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON access_audit
     FOR EACH STATEMENT EXECUTE FUNCTION public.protect_access_audit();
+CREATE OR REPLACE FUNCTION public.audit_processing_lifecycle() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO public.access_audit(actor, action, entity_type)
+        VALUES ('operator', 'PROCESSING_' || upper(NEW.state), 'processing_runs');
+    RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION public.record_conversation_project() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO public.access_audit(actor, action, entity_type) VALUES ('operator', 'ASSIGN', 'conversation');
+    RETURN NEW;
+END $$;
+DO $$ BEGIN
+    IF to_regclass('public.processing_runs') IS NOT NULL THEN
+        DROP TRIGGER IF EXISTS processing_lifecycle_audit ON public.processing_runs;
+        CREATE TRIGGER processing_lifecycle_audit AFTER INSERT OR UPDATE ON public.processing_runs
+            FOR EACH ROW EXECUTE FUNCTION public.audit_processing_lifecycle();
+    END IF;
+END $$;
 ALTER TABLE memory_chunks DROP COLUMN IF EXISTS owner_id, DROP COLUMN IF EXISTS visibility;
 ALTER TABLE favorites DROP COLUMN IF EXISTS user_id;
 DO $$ BEGIN
@@ -727,6 +779,16 @@ END $$;
             tx.query_one(q, &[]).expect(q).get(0)
         };
         assert!(one(&mut tx, "SELECT count(*) FROM access_audit") >= 2);
+        let legacy = one(
+            &mut tx,
+            "SELECT count(*) FROM pg_class WHERE relname = 'processing_runs'",
+        ) == 1;
+        let run = |tx: &mut postgres::Transaction| {
+            tx.execute(
+                "INSERT INTO processing_runs (id, name) VALUES ($1, $1)",
+                &[&format!("team-mode-{}", uuid::Uuid::new_v4())],
+            )
+        };
         let note_ref = note.to_string();
         tx.execute(
             "INSERT INTO favorites (kind, ref) VALUES ('memory', $1)",
@@ -737,6 +799,9 @@ END $$;
         // twice: a second run is a no-op
         tx.batch_execute(sql).expect("first run");
         tx.batch_execute(sql).expect("second run");
+        if legacy {
+            run(&mut tx).expect("processing run after 014");
+        }
 
         assert_eq!(
             one(
@@ -756,10 +821,28 @@ END $$;
             one(
                 &mut tx,
                 "SELECT count(*) FROM pg_proc \
-                 WHERE proname IN ('record_access_change', 'protect_access_audit')"
+                 WHERE proname IN ('record_access_change', 'protect_access_audit', \
+                                   'audit_processing_lifecycle')"
             ),
             0
         );
+        // No function body writes the audit any more.
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_proc WHERE prosrc ILIKE '%access_audit%'"
+            ),
+            0
+        );
+        let project_history: String = tx
+            .query_one(
+                "SELECT prosrc FROM pg_proc WHERE proname = 'record_conversation_project'",
+                &[],
+            )
+            .expect("record_conversation_project kept")
+            .get(0);
+        assert!(project_history.contains("INSERT INTO public.conversation_project_changes"));
+        assert!(project_history.contains("UPDATE public.memory_chunks SET project_name"));
         for table in [
             "access_users",
             "access_sessions",
@@ -804,6 +887,20 @@ END $$;
             )
             .is_err());
         drop(savepoint);
+        // A private note needs an owner.
+        let mut savepoint = tx.transaction().expect("savepoint");
+        assert!(savepoint
+            .execute(
+                "UPDATE memory_chunks SET visibility = 'private' WHERE id = $1",
+                &[&note],
+            )
+            .is_err());
+        drop(savepoint);
+        tx.execute(
+            "UPDATE memory_chunks SET visibility = 'private', owner_id = $2 WHERE id = $1",
+            &[&note, &user],
+        )
+        .expect("private note with owner");
 
         // One favorite per item and account; local mode is the NULL account.
         crate::favorites::add(&mut tx, crate::favorites::FavKind::Memory, &note_ref)
@@ -823,6 +920,16 @@ END $$;
             one(
                 &mut tx,
                 "SELECT count(*) FROM pg_constraint WHERE conname = 'favorites_kind_ref_key'"
+            ),
+            0
+        );
+        // Accounts are disabled, never deleted: no cascade from them.
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_constraint WHERE contype = 'f' \
+                 AND confrelid = 'access_users'::regclass AND confdeltype = 'c' \
+                 AND conrelid IN ('favorites'::regclass, 'memory_chunks'::regclass)"
             ),
             0
         );
