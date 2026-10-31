@@ -191,3 +191,48 @@ fn locomo_mode_refuses_other_databases() {
         assert!(stderr.contains("throughline_bench"), "{db:?}: {stderr}");
     }
 }
+
+/// `bench-answer` answers benchmark questions and must refuse every database
+/// but `throughline_bench`, in both paths, before it writes an answer file.
+#[test]
+fn bench_answer_refuses_other_databases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let qa = tmp.path().join("qa.json");
+    // Synthetic: one invented question.
+    std::fs::write(
+        &qa,
+        r#"{"items": [{"id": "demo-9#0", "sample_id": "demo-9", "category": 4,
+             "question": "Where did Odile travel?", "answer": "To the lake",
+             "evidence": ["D1:1"]}]}"#,
+    )
+    .unwrap();
+    let out_file = tmp.path().join("answers.jsonl");
+    let bin = env!("CARGO_BIN_EXE_throughline");
+    for raw in [false, true] {
+        for db in [Some("throughline"), Some("not_the_bench"), None] {
+            let mut cmd = Command::new(bin);
+            cmd.args(["bench-answer", "--qa"])
+                .arg(&qa)
+                .arg("--out")
+                .arg(&out_file);
+            if raw {
+                cmd.arg("--raw");
+            }
+            match db {
+                Some(db) => cmd.env("PGDATABASE", db),
+                None => cmd.env_remove("PGDATABASE"),
+            };
+            let out = cmd.output().expect("run bench-answer");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(!out.status.success(), "{db:?} raw={raw}: bench-answer ran");
+            assert!(
+                stderr.contains("throughline_bench"),
+                "{db:?} raw={raw}: {stderr}"
+            );
+            assert!(
+                !out_file.exists(),
+                "{db:?} raw={raw}: an answer file was written"
+            );
+        }
+    }
+}
