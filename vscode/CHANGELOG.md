@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Team mode: when `/api` answers 401 and an agent key is stored, the call is repeated once with `Authorization: Bearer <key>`. A second 401 asks for `Throughline: Set Agent Key`. Local mode is unchanged. Error messages never show the key.
+
 ## 0.1.0
 
 First local release, installed from a VSIX. Not on the marketplace.

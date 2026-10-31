@@ -60,3 +60,51 @@ test("clients_never_call_another_host (api)", async () => {
   raw.closeAllConnections();
   raw.close();
 });
+
+test("api_retries_once_with_bearer_on_401", async () => {
+  srv.requests.length = 0;
+  srv.queue({ status: 401, body: { error: "unauthorized" } }, { status: 200, body: { mode: "current", hits: [], degraded: null } });
+  const r = await new ApiClient(srv.baseUrl, () => Promise.resolve("sekret-key-1")).recall("x");
+  assert.equal(r.mode, "current");
+  assert.equal(srv.requests.length, 2);
+  assert.equal(srv.requests[0].headers.authorization, undefined);
+  assert.equal(srv.requests[1].headers.authorization, "Bearer sekret-key-1");
+});
+
+test("api_second_401_names_the_command_and_hides_the_key", async () => {
+  srv.requests.length = 0;
+  srv.respond(401, { error: "bad sekret-key-2 here" });
+  await assert.rejects(
+    () => new ApiClient(srv.baseUrl, () => Promise.resolve("sekret-key-2")).recall("x"),
+    (e: unknown) =>
+      e instanceof ThroughlineError &&
+      e.kind === "unauthorized" &&
+      e.message.includes("Throughline: Set Agent Key") &&
+      !e.message.includes("sekret-key-2") &&
+      !e.detail.includes("sekret-key-2"),
+  );
+  assert.equal(srv.requests.length, 2);
+  srv.respond(200, {});
+});
+
+test("api_without_key_keeps_401", async () => {
+  srv.requests.length = 0;
+  srv.respond(401, { error: "unauthorized" });
+  await assert.rejects(
+    () => new ApiClient(srv.baseUrl, () => Promise.resolve(undefined)).recall("x"),
+    (e: unknown) => e instanceof ThroughlineError && e.kind === "unauthorized" && e.message.includes("Throughline: Set Agent Key"),
+  );
+  assert.equal(srv.requests.length, 1);
+  srv.respond(200, {});
+});
+
+test("api_403_does_not_retry", async () => {
+  srv.requests.length = 0;
+  srv.respond(403, { error: "forbidden" });
+  await assert.rejects(
+    () => new ApiClient(srv.baseUrl, () => Promise.resolve("sekret-key-3")).recall("x"),
+    (e: unknown) => e instanceof ThroughlineError && e.kind === "forbidden",
+  );
+  assert.equal(srv.requests.length, 1);
+  srv.respond(200, {});
+});

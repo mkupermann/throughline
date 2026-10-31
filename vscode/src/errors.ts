@@ -31,3 +31,11 @@ export function describe(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
 }
+
+/** The same error with every occurrence of the key replaced by ***, so no message can leak it. */
+export function redact(e: unknown, key: string): unknown {
+  const clean = (s: string) => s.split(key).join("***");
+  if (e instanceof ThroughlineError) return new ThroughlineError(e.kind, clean(e.message), clean(e.detail));
+  if (e instanceof Error) return new Error(clean(e.message));
+  return new Error(clean(String(e)));
+}

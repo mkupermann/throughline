@@ -36,7 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let scratch: vscode.TextEditor | undefined;
   // Clients are built per call so a changed url setting applies at once.
   const deps = (): cmd.Deps => ({
-    api: new ApiClient(getUrl()),
+    api: new ApiClient(getUrl(), () => Promise.resolve(context.secrets.get(KEY_NAME))),
     mcp: new McpClient(getUrl(), () => Promise.resolve(context.secrets.get(KEY_NAME))),
     ui,
     settings: { url: getUrl, project: () => getProject(), budget: getBudget, rank: getRank },
