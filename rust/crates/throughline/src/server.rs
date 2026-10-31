@@ -1,7 +1,9 @@
 //! HTTP API + embedded web UI.
 //!
-//! Loopback-only by default. The UI and the REST API have no login and serve
-//! the whole corpus, the same posture as the Python server. `/mcp` needs the
+//! Loopback-only by default. In local mode (the default) the UI and the REST
+//! API have no login and serve the whole corpus, the same posture as the
+//! Python server. In team mode (`THROUGHLINE_AUTH_MODE=team`) `/api` needs a
+//! session from `POST /api/login` (see `actor_layer`). `/mcp` needs the
 //! agent key (`THROUGHLINE_AGENT_KEY`). `GET /api/recall` and
 //! `GET /api/context` count agent use when a valid Bearer key comes with the
 //! request.
@@ -10,7 +12,7 @@ use crate::search;
 use crate::temporal::as_of_predicate;
 use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -30,6 +32,60 @@ pub struct AppState {
     pub mcp_read_only: bool,
     /// `THROUGHLINE_AUTH_MODE`, read and checked once at start.
     pub auth_mode: crate::access::AuthMode,
+    /// `THROUGHLINE_PUBLIC_URL`, read once at start. In team mode writes
+    /// must come from its host, and an `https` URL makes the session
+    /// cookie `Secure`.
+    pub public_url: Option<String>,
+    /// Sign-in limits, shared by every request.
+    pub login: Arc<LoginGate>,
+}
+
+/// At most two password hashes at a time and at most 60 password checks a
+/// minute, server-wide. Nothing of it is stored.
+pub struct LoginGate {
+    hashing: Arc<tokio::sync::Semaphore>,
+    /// Start of the current minute and the checks counted in it.
+    window: Mutex<(std::time::Instant, u32)>,
+    #[cfg(test)]
+    probe: Mutex<HashProbe>,
+}
+
+/// When the last password check ran, and how many scrypt runs each made.
+#[cfg(test)]
+#[derive(Default)]
+struct HashProbe {
+    started: Option<std::time::Instant>,
+    finished: Option<std::time::Instant>,
+    derivations: Vec<usize>,
+}
+
+const CHECKS_PER_MINUTE: u32 = 60;
+
+impl Default for LoginGate {
+    fn default() -> Self {
+        LoginGate {
+            hashing: Arc::new(tokio::sync::Semaphore::new(2)),
+            window: Mutex::new((std::time::Instant::now(), 0)),
+            #[cfg(test)]
+            probe: Mutex::new(HashProbe::default()),
+        }
+    }
+}
+
+impl LoginGate {
+    /// Counts one password check; `false` once this minute has had 60.
+    fn admit(&self) -> bool {
+        let mut window = self.window.lock().unwrap_or_else(|p| p.into_inner());
+        let now = std::time::Instant::now();
+        if now.duration_since(window.0) >= std::time::Duration::from_secs(60) {
+            *window = (now, 0);
+        }
+        if window.1 >= CHECKS_PER_MINUTE {
+            return false;
+        }
+        window.1 += 1;
+        true
+    }
 }
 
 #[derive(Serialize)]
@@ -185,6 +241,7 @@ where
     F: FnOnce(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
 {
     let db = state.db.clone();
+    let team = state.auth_mode == crate::access::AuthMode::Team;
     let joined = tokio::task::spawn_blocking(move || {
         // A panic in an earlier request poisons the lock but leaves the client
         // usable. End the transaction it may have left open and go on, so one
@@ -210,6 +267,9 @@ where
                     "remote_llm_not_allowed",
                     msg,
                 ))
+            } else if team {
+                eprintln!("query failed: {}", error_for_log(&e));
+                Err(without_detail("query_failed"))
             } else {
                 Err(api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -218,11 +278,40 @@ where
                 ))
             }
         }
+        Err(_) if team => {
+            eprintln!("a database task failed");
+            Err(without_detail("blocking_task_failed"))
+        }
         Err(join) => Err(api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "blocking_task_failed",
             join.to_string(),
         )),
+    }
+}
+
+/// A 500 with the error code only. Team mode answers this way: database
+/// texts can repeat row values, and other accounts' data must not reach
+/// the client.
+fn without_detail(code: &str) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": code })),
+    )
+        .into_response()
+}
+
+/// The log line of a failed query in team mode: SQLSTATE and message of a
+/// database error, without its DETAIL (which can repeat a row, with an
+/// account name in it), else the outermost message.
+fn error_for_log(e: &anyhow::Error) -> String {
+    let db = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<postgres::Error>())
+        .and_then(postgres::Error::as_db_error);
+    match db {
+        Some(db) => format!("{}: {}", db.code().code(), db.message()),
+        None => e.to_string(),
     }
 }
 
@@ -3366,11 +3455,502 @@ async fn request_guard(
     next.run(req).await
 }
 
+/// Lowercased host of a URL or an `Origin` value
+/// (`scheme://[userinfo@]host[:port][/...]`); empty without `://`.
+pub(crate) fn url_host(url: &str) -> String {
+    let Some((_, rest)) = url.trim().split_once("://") else {
+        return String::new();
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // `http://localhost@evil.example.com` goes to evil.example.com.
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    host_of(authority)
+}
+
+const REQUEST_TOKEN_HEADER: &str = "x-throughline-request-token";
+
+/// The session token of the `throughline_session` cookie, if it has the
+/// shape of one.
+fn session_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == crate::access::SESSION_COOKIE)
+        .map(|(_, token)| token.trim().to_string())
+        .filter(|token| crate::access::is_session_token(token))
+}
+
+/// Why a team-mode write must be refused: it needs the session's request
+/// token and an `Origin` on the host of `THROUGHLINE_PUBLIC_URL`.
+fn write_refusal(
+    headers: &HeaderMap,
+    request_token: &str,
+    public_url: Option<&str>,
+) -> Option<&'static str> {
+    let sent = headers
+        .get(REQUEST_TOKEN_HEADER)
+        .map_or(&b""[..], |v| v.as_bytes());
+    if !crate::access::same_secret(sent, request_token.as_bytes()) {
+        return Some("missing or wrong request token");
+    }
+    let origin = headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(url_host);
+    let public = public_url.map(url_host).filter(|host| !host.is_empty());
+    match (origin, public) {
+        (Some(origin), Some(public)) if origin == public => None,
+        _ => Some("the request must come from THROUGHLINE_PUBLIC_URL"),
+    }
+}
+
+/// Puts the [`crate::access::Actor`] behind a request into its extensions.
+/// Local mode: [`crate::access::Actor::local`] for everything. Team mode:
+/// the session of the cookie; everything under `/api` except `/api/health`
+/// and `/api/login` needs one (401), and writes there also need the
+/// request token and the public URL's Origin (403). The page and its files
+/// pass, so the browser can show the sign-in form; `/mcp` checks its own
+/// key. Agent keys on `/api` come with Task 6.
+async fn actor_layer(
+    State(state): State<AppState>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if state.auth_mode == crate::access::AuthMode::Local {
+        req.extensions_mut().insert(crate::access::Actor::local());
+        return next.run(req).await;
+    }
+    let path = req.uri().path();
+    let api = path == "/api" || path.starts_with("/api/");
+    if !api || path == "/api/health" || path == "/api/login" {
+        return next.run(req).await;
+    }
+    let session = match session_token(req.headers()) {
+        Some(token) => {
+            match with_db(&state, move |client| crate::access::session(client, &token)).await {
+                Ok(session) => session,
+                Err(resp) => return resp,
+            }
+        }
+        None => None,
+    };
+    let Some(session) = session else {
+        return unauthorized("sign in first");
+    };
+    let read = matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
+    if !read {
+        if let Some(reason) = write_refusal(
+            req.headers(),
+            &session.request_token,
+            state.public_url.as_deref(),
+        ) {
+            return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
+        }
+    }
+    req.extensions_mut().insert(session.actor.clone());
+    req.extensions_mut().insert(session);
+    next.run(req).await
+}
+
+/// `Set-Cookie` for the session: the token for `max_age` seconds, or an
+/// empty value with 0 to end it. `Secure` when the public URL is https.
+fn session_cookie(public_url: Option<&str>, token: &str, max_age: i64) -> HeaderValue {
+    let secure = public_url.is_some_and(|url| {
+        url.trim_start()
+            .get(..6)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https:"))
+    });
+    let value = format!(
+        "{}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{}",
+        crate::access::SESSION_COOKIE,
+        if secure { "; Secure" } else { "" }
+    );
+    HeaderValue::from_str(&value).expect("a hex token and fixed attributes")
+}
+
+/// Marks a response that carries the request token as not cacheable.
+fn no_store(mut resp: Response) -> Response {
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    resp
+}
+
+fn local_mode() -> Response {
+    api_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "local_mode",
+        "there are no accounts in local mode (THROUGHLINE_AUTH_MODE=team turns them on)",
+    )
+}
+
+fn too_many_attempts() -> Response {
+    api_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "too_many_attempts",
+        "too many sign-in attempts: wait a few minutes and try again",
+    )
+}
+
+/// 400 for a body that is not the expected JSON. Fixed text: a parser
+/// message could quote the password.
+fn invalid_body(fields: &str) -> Response {
+    api_error(
+        StatusCode::BAD_REQUEST,
+        "invalid_body",
+        format!("send a JSON object with {fields}"),
+    )
+}
+
+/// Runs a password check on the blocking pool, at most two at a time and
+/// never under the database lock. The permit is held until the hashing
+/// ends, also when the client goes away meanwhile.
+#[allow(clippy::result_large_err)]
+async fn off_the_lock<T, F>(state: &AppState, check: F) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let gate = state.login.clone();
+    let failed = || {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "blocking_task_failed",
+            "the password check did not finish",
+        )
+    };
+    let permit = gate
+        .hashing
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| failed())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        #[cfg(test)]
+        gate.probe_started();
+        let out = check();
+        #[cfg(test)]
+        gate.probe_finished();
+        out
+    })
+    .await
+    .map_err(|_| failed())
+}
+
+#[cfg(test)]
+impl LoginGate {
+    fn probe_started(&self) {
+        crate::access::take_derivations();
+        let mut probe = self.probe.lock().unwrap_or_else(|p| p.into_inner());
+        probe.started = Some(std::time::Instant::now());
+    }
+
+    fn probe_finished(&self) {
+        let runs = crate::access::take_derivations();
+        let mut probe = self.probe.lock().unwrap_or_else(|p| p.into_inner());
+        probe.finished = Some(std::time::Instant::now());
+        probe.derivations.push(runs);
+    }
+}
+
+/// No `Debug`: it carries a password.
+#[derive(Deserialize)]
+struct LoginBody {
+    username: String,
+    password: String,
+}
+
+/// No `Debug`: it carries passwords.
+#[derive(Deserialize)]
+struct PasswordBody {
+    old: String,
+    new: String,
+}
+
+/// The account a sign-in checks against.
+struct StoredAccount {
+    id: i64,
+    display_name: String,
+    role: String,
+    enabled: bool,
+    password_hash: String,
+}
+
+/// `POST /api/login {username, password}`. One password check for every
+/// outcome: an unknown, disabled or locked account is checked against
+/// [`crate::access::DUMMY_HASH`], and all three answer like a wrong
+/// password (a locked one with 429).
+async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
+    if state.auth_mode == crate::access::AuthMode::Local {
+        return local_mode();
+    }
+    let Ok(LoginBody { username, password }) = serde_json::from_slice(&body) else {
+        return invalid_body("username and password");
+    };
+    if !state.login.admit() {
+        return too_many_attempts();
+    }
+    let name = username.clone();
+    let looked_up = with_db(&state, move |client| {
+        crate::access::sweep_expired(client)?;
+        let allowed = crate::access::login_allowed(client, &name)?;
+        let account = client
+            .query_opt(
+                "SELECT id, display_name, role, enabled, password_hash \
+                 FROM access_users WHERE username = $1",
+                &[&name],
+            )?
+            .map(|row| StoredAccount {
+                id: row.get(0),
+                display_name: row.get(1),
+                role: row.get(2),
+                enabled: row.get(3),
+                password_hash: row.get(4),
+            });
+        Ok((allowed, account))
+    })
+    .await;
+    let (allowed, account) = match looked_up {
+        Ok(found) => found,
+        Err(resp) => return resp,
+    };
+    let checked = account
+        .as_ref()
+        .filter(|a| a.enabled && allowed)
+        .map(|a| a.password_hash.clone());
+    let target = checked.clone();
+    let outcome = off_the_lock(&state, move || {
+        let hash = target.as_deref().unwrap_or(crate::access::DUMMY_HASH);
+        let ok = crate::access::verify_password(&password, hash);
+        // A Python-era hash is replaced once the password is known.
+        let rehash = (ok && crate::access::is_legacy_hash(hash))
+            .then(|| crate::access::hash_password(&password).ok())
+            .flatten();
+        (ok, rehash)
+    })
+    .await;
+    let (ok, rehash) = match outcome {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
+    if !allowed {
+        return too_many_attempts();
+    }
+    let (true, Some(account), Some(checked)) = (ok, account, checked) else {
+        let name = username.clone();
+        return match with_db(&state, move |client| {
+            crate::access::record_failure(client, &name)
+        })
+        .await
+        {
+            Ok(()) => unauthorized("invalid credentials"),
+            Err(resp) => resp,
+        };
+    };
+    let (id, name) = (account.id, username.clone());
+    let opened = with_db(&state, move |client| {
+        let mut tx = client.transaction()?;
+        // Disabled or given a new password since the check: no session.
+        let unchanged = tx
+            .query_opt(
+                "SELECT 1 FROM access_users \
+                 WHERE id = $1 AND enabled AND password_hash = $2 FOR UPDATE",
+                &[&id, &checked],
+            )?
+            .is_some();
+        if !unchanged {
+            return Ok(None);
+        }
+        if let Some(hash) = &rehash {
+            tx.execute(
+                "UPDATE access_users SET password_hash = $2 WHERE id = $1",
+                &[&id, hash],
+            )?;
+        }
+        crate::access::clear_failures(&mut tx, &name)?;
+        let session = crate::access::new_session(&mut tx, id)?;
+        tx.commit()?;
+        Ok(Some(session))
+    })
+    .await;
+    let (token, request_token, _expires) = match opened {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized("invalid credentials"),
+        Err(resp) => return resp,
+    };
+    let mut resp = Json(serde_json::json!({
+        "username": username,
+        "display_name": account.display_name,
+        "role": account.role,
+        "request_token": request_token,
+    }))
+    .into_response();
+    resp.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        session_cookie(
+            state.public_url.as_deref(),
+            &token,
+            crate::access::SESSION_SECONDS,
+        ),
+    );
+    no_store(resp)
+}
+
+/// `POST /api/logout`: ends this session and clears the cookie.
+async fn logout_handler(
+    State(state): State<AppState>,
+    session: Option<axum::Extension<crate::access::Session>>,
+) -> Response {
+    let Some(axum::Extension(session)) = session else {
+        return local_mode();
+    };
+    let hash = session.token_hash;
+    if let Err(resp) = with_db(&state, move |client| {
+        crate::access::end_session(client, &hash)
+    })
+    .await
+    {
+        return resp;
+    }
+    let mut resp = Json(serde_json::json!({ "status": "signed_out" })).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        session_cookie(state.public_url.as_deref(), "", 0),
+    );
+    resp
+}
+
+/// `GET /api/me`: who is signed in, and the request token for writes.
+async fn me_handler(session: Option<axum::Extension<crate::access::Session>>) -> Response {
+    let Some(axum::Extension(session)) = session else {
+        return local_mode();
+    };
+    no_store(
+        Json(serde_json::json!({
+            "username": session.actor.username,
+            "display_name": session.display_name,
+            "role": session.actor.role.as_str(),
+            "request_token": session.request_token,
+        }))
+        .into_response(),
+    )
+}
+
+/// `POST /api/password {old, new}`: one check of the old password under
+/// the sign-in limits, then the new hash; every other session of the
+/// account ends.
+async fn password_handler(
+    State(state): State<AppState>,
+    session: Option<axum::Extension<crate::access::Session>>,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(axum::Extension(session)) = session else {
+        return local_mode();
+    };
+    let Ok(PasswordBody { old, new }) = serde_json::from_slice(&body) else {
+        return invalid_body("old and new");
+    };
+    if !crate::access::password_length_ok(&new) {
+        return api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_password",
+            "use a password with 15 to 128 characters",
+        );
+    }
+    let (Some(id), Some(username)) = (session.actor.user_id, session.actor.username.clone()) else {
+        return unauthorized("sign in first");
+    };
+    if !state.login.admit() {
+        return too_many_attempts();
+    }
+    let name = username.clone();
+    let looked_up = with_db(&state, move |client| {
+        let allowed = crate::access::login_allowed(client, &name)?;
+        let hash: Option<String> = client
+            .query_opt(
+                "SELECT password_hash FROM access_users WHERE id = $1 AND enabled",
+                &[&id],
+            )?
+            .map(|row| row.get(0));
+        Ok((allowed, hash))
+    })
+    .await;
+    let (allowed, stored) = match looked_up {
+        Ok(found) => found,
+        Err(resp) => return resp,
+    };
+    let checked = stored.filter(|_| allowed);
+    let target = checked.clone();
+    let outcome = off_the_lock(&state, move || {
+        let hash = target.as_deref().unwrap_or(crate::access::DUMMY_HASH);
+        let ok = crate::access::verify_password(&old, hash);
+        let new_hash = ok
+            .then(|| crate::access::hash_password(&new).ok())
+            .flatten();
+        (ok, new_hash)
+    })
+    .await;
+    let (ok, new_hash) = match outcome {
+        Ok(result) => result,
+        Err(resp) => return resp,
+    };
+    if !allowed {
+        return too_many_attempts();
+    }
+    let (true, Some(checked), Some(new_hash)) = (ok, checked, new_hash) else {
+        let name = username.clone();
+        return match with_db(&state, move |client| {
+            crate::access::record_failure(client, &name)
+        })
+        .await
+        {
+            Ok(()) => unauthorized("invalid credentials"),
+            Err(resp) => resp,
+        };
+    };
+    let current = session.token_hash;
+    let changed = with_db(&state, move |client| {
+        let mut tx = client.transaction()?;
+        let updated = tx.execute(
+            "UPDATE access_users SET password_hash = $3 \
+             WHERE id = $1 AND enabled AND password_hash = $2",
+            &[&id, &checked, &new_hash],
+        )?;
+        if updated == 0 {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM access_sessions WHERE user_id = $1 AND token_hash <> $2",
+            &[&id, &current],
+        )?;
+        crate::access::clear_failures(&mut tx, &username)?;
+        tx.commit()?;
+        Ok(true)
+    })
+    .await;
+    match changed {
+        Ok(true) => Json(serde_json::json!({ "status": "changed" })).into_response(),
+        Ok(false) => unauthorized("invalid credentials"),
+        Err(resp) => resp,
+    }
+}
+
 pub fn app(state: AppState) -> Router {
     let allowed = Arc::new(allowed_hosts(
-        std::env::var("THROUGHLINE_PUBLIC_URL").ok().as_deref(),
+        state.public_url.as_deref(),
         std::env::var("THROUGHLINE_ALLOWED_HOSTS").ok().as_deref(),
     ));
+    let actors = axum::middleware::from_fn_with_state(state.clone(), actor_layer);
     Router::new()
         .route("/", get(index))
         .route("/favicon.svg", get(favicon))
@@ -3379,6 +3959,10 @@ pub fn app(state: AppState) -> Router {
         .route("/fonts/ibm-plex-mono-latin.woff2", get(font_plex_mono))
         .route("/index.html", get(index))
         .route("/api/health", get(health))
+        .route("/api/login", post(login_handler))
+        .route("/api/logout", post(logout_handler))
+        .route("/api/me", get(me_handler))
+        .route("/api/password", post(password_handler))
         .route("/api/status", get(status))
         .route("/api/search", get(search_handler))
         .route("/api/recall", get(recall_handler))
@@ -3444,6 +4028,8 @@ pub fn app(state: AppState) -> Router {
                 .delete(crate::mcp_http::mcp_other),
         )
         .with_state(state)
+        // The guard runs first (outermost), then the actor.
+        .layer(actors)
         .layer(axum::middleware::from_fn_with_state(allowed, request_guard))
 }
 
@@ -3470,6 +4056,8 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
             std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),
         ),
         auth_mode,
+        public_url: std::env::var("THROUGHLINE_PUBLIC_URL").ok(),
+        login: Default::default(),
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -3841,6 +4429,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = RecallParams {
@@ -3899,6 +4489,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::key_state_from(Some(TEST_AGENT_KEY))),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         }
     }
 
@@ -4067,6 +4659,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         // A panic inside a request leaves a poisoned lock and an open transaction.
@@ -4109,6 +4703,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let call = |headers: HeaderMap| {
@@ -4316,6 +4912,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         for params in [
@@ -4685,6 +5283,8 @@ mod tests {
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
             auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = ContextParams {
@@ -5688,5 +6288,823 @@ mod tests {
             "longest",
             "an empty answer counts as a failure"
         );
+    }
+}
+
+/// Team-mode sign-in over a real listener, as in `mcp_http`.
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use crate::access::{self, AuthMode, Role};
+    use reqwest::Method;
+    use serde_json::json;
+    use std::time::{Duration, Instant};
+
+    const PASSWORD: &str = "correct horse battery staple 1";
+    const WRONG: &str = "correct horse battery staple 2";
+    const NEW_PASSWORD: &str = "a new and longer passphrase 3";
+    /// The Python-era hash of `PASSWORD` from the vectors in `access`. Test
+    /// value, not a secret.
+    const LEGACY_HASH: &str = "scrypt$00112233445566778899aabbccddeeff$b7a11a1da4c37f8ce0fd857b975d4ea6658d9d7c907b441932f25c5551380b9563dfcf56f1636c169255c63d0be2e7367eb570e2aba9adb75d900072aecd00aa";
+
+    fn test_db() -> Option<postgres::Client> {
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(postgres::NoTls).ok()
+    }
+
+    /// A real listener around `app`. Team mode runs on session-local copies
+    /// of the three account tables: sign-in commits transactions of its
+    /// own, which would end a hand-opened test transaction, and temporary
+    /// tables go away with the connection. Local mode runs in a hand-opened
+    /// transaction, rolled back on drop. Field order matters: the runtime
+    /// drops before the state, so the last handle on the sync client goes
+    /// away outside the runtime.
+    struct Served {
+        rt: tokio::runtime::Runtime,
+        state: AppState,
+        base: String,
+    }
+
+    struct Answer {
+        status: u16,
+        headers: reqwest::header::HeaderMap,
+        body: String,
+    }
+
+    impl Answer {
+        fn json(&self) -> Value {
+            serde_json::from_str(&self.body)
+                .unwrap_or_else(|e| panic!("json body ({e}): {}", self.body))
+        }
+
+        fn header(&self, name: &str) -> Option<&str> {
+            self.headers.get(name).and_then(|v| v.to_str().ok())
+        }
+    }
+
+    /// A signed-in browser: its `Cookie` header and request token.
+    struct Browser {
+        cookie: String,
+        request_token: String,
+    }
+
+    impl Browser {
+        fn token_hash(&self) -> String {
+            access::token_hash(self.cookie.split_once('=').expect("cookie").1)
+        }
+    }
+
+    /// The session token of a sign-in's `Set-Cookie`.
+    fn cookie_token(answer: &Answer) -> String {
+        let set = answer.header("set-cookie").expect("set-cookie");
+        set.strip_prefix("throughline_session=")
+            .and_then(|rest| rest.split(';').next())
+            .unwrap_or_else(|| panic!("{set}"))
+            .to_string()
+    }
+
+    impl Served {
+        fn team() -> Option<Served> {
+            Self::start(AuthMode::Team, None)
+        }
+
+        /// `public_url` defaults to the listener's own address in team mode.
+        fn start(mode: AuthMode, public_url: Option<&str>) -> Option<Served> {
+            // Connect outside any runtime: the sync client blocks.
+            let mut client = test_db()?;
+            match mode {
+                AuthMode::Local => client.batch_execute("BEGIN").expect("begin"),
+                AuthMode::Team => client
+                    .batch_execute(
+                        "CREATE TEMP TABLE access_users (LIKE public.access_users INCLUDING ALL); \
+                         CREATE TEMP TABLE access_sessions (LIKE public.access_sessions INCLUDING ALL); \
+                         CREATE TEMP TABLE access_attempts (LIKE public.access_attempts INCLUDING ALL);",
+                    )
+                    .expect("session-local account tables"),
+            }
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+                .expect("bind");
+            let base = format!("http://{}", listener.local_addr().expect("addr"));
+            let public_url = match mode {
+                AuthMode::Local => None,
+                AuthMode::Team => Some(public_url.unwrap_or(&base).to_string()),
+            };
+            let state = AppState {
+                db: Arc::new(Mutex::new(client)),
+                agent_key: Arc::new(crate::agent_key::KeyState::Off),
+                mcp_read_only: false,
+                auth_mode: mode,
+                public_url,
+                login: Default::default(),
+            };
+            let router = app(state.clone());
+            rt.spawn(async move { axum::serve(listener, router).await.expect("serve") });
+            Some(Served { rt, state, base })
+        }
+
+        fn db(&self) -> std::sync::MutexGuard<'_, postgres::Client> {
+            self.state.db.lock().expect("db lock")
+        }
+
+        /// An account made the way `throughline account add` makes one.
+        fn add_account(&self, name: &str, role: Role) -> i64 {
+            crate::accounts_cli::add(&mut *self.db(), name, Some("Test Person"), role, PASSWORD)
+                .expect("add account")
+        }
+
+        fn send(
+            &self,
+            method: Method,
+            path: &str,
+            headers: &[(&str, &str)],
+            body: Option<String>,
+        ) -> Answer {
+            self.rt.block_on(async {
+                let client = reqwest::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .expect("client");
+                let mut req = client.request(method, format!("{}{path}", self.base));
+                for (name, value) in headers {
+                    req = req.header(*name, *value);
+                }
+                if let Some(body) = body {
+                    req = req.body(body);
+                }
+                let resp = req.send().await.expect("send");
+                let status = resp.status().as_u16();
+                let headers = resp.headers().clone();
+                let body = resp.text().await.expect("body");
+                Answer {
+                    status,
+                    headers,
+                    body,
+                }
+            })
+        }
+
+        fn login(&self, username: &str, password: &str) -> Answer {
+            let body = json!({ "username": username, "password": password }).to_string();
+            self.send(
+                Method::POST,
+                "/api/login",
+                &[("content-type", "application/json")],
+                Some(body),
+            )
+        }
+
+        fn sign_in(&self, username: &str, password: &str) -> Browser {
+            let answer = self.login(username, password);
+            assert_eq!(answer.status, 200, "sign-in: {}", answer.body);
+            Browser {
+                cookie: format!("throughline_session={}", cookie_token(&answer)),
+                request_token: answer.json()["request_token"]
+                    .as_str()
+                    .expect("request token")
+                    .to_string(),
+            }
+        }
+
+        /// `GET` with the browser's cookie.
+        fn get(&self, path: &str, browser: &Browser) -> Answer {
+            self.send(
+                Method::GET,
+                path,
+                &[("cookie", browser.cookie.as_str())],
+                None,
+            )
+        }
+
+        /// A write as the UI sends it: cookie, request token and Origin.
+        fn write(&self, path: &str, browser: &Browser, body: Value) -> Answer {
+            self.send(
+                Method::POST,
+                path,
+                &[
+                    ("cookie", browser.cookie.as_str()),
+                    (
+                        "x-throughline-request-token",
+                        browser.request_token.as_str(),
+                    ),
+                    ("origin", self.base.as_str()),
+                    ("content-type", "application/json"),
+                ],
+                Some(body.to_string()),
+            )
+        }
+
+        fn count(&self, sql: &str, params: &[&(dyn postgres::types::ToSql + Sync)]) -> i64 {
+            self.db().query_one(sql, params).expect("count").get(0)
+        }
+
+        fn sessions_with(&self, token_hash: &str) -> i64 {
+            self.count(
+                "SELECT count(*) FROM access_sessions WHERE token_hash = $1",
+                &[&token_hash],
+            )
+        }
+
+        /// scrypt runs of each password check so far, oldest first.
+        fn derivations(&self) -> Vec<usize> {
+            self.state
+                .login
+                .probe
+                .lock()
+                .expect("probe")
+                .derivations
+                .clone()
+        }
+    }
+
+    impl Drop for Served {
+        fn drop(&mut self) {
+            if self.state.auth_mode == AuthMode::Local {
+                if let Ok(mut client) = self.state.db.lock() {
+                    let _ = client.batch_execute("ROLLBACK");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn login_sets_httponly_strict_cookie_and_returns_request_token() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping login_sets_httponly_strict_cookie_and_returns_request_token: no PostgreSQL reachable");
+            return;
+        };
+        let id = s.add_account("alice", Role::Editor);
+        let answer = s.login("alice", PASSWORD);
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let token = cookie_token(&answer);
+        assert!(access::is_session_token(&token), "64 hex digits: {token}");
+        assert_eq!(
+            answer.header("set-cookie"),
+            Some(
+                format!(
+                    "throughline_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800"
+                )
+                .as_str()
+            ),
+            "no Secure on http://127.0.0.1"
+        );
+        assert_eq!(answer.header("cache-control"), Some("no-store"));
+        let v = answer.json();
+        let request_token = v["request_token"]
+            .as_str()
+            .expect("request token")
+            .to_string();
+        assert!(access::is_session_token(&request_token), "{request_token}");
+        assert_ne!(request_token, token);
+        assert_eq!(
+            v,
+            json!({
+                "username": "alice",
+                "display_name": "Test Person",
+                "role": "editor",
+                "request_token": request_token,
+            })
+        );
+        // The database keeps the token's hash, never the token.
+        assert_eq!(
+            s.count(
+                "SELECT count(*) FROM access_sessions \
+                 WHERE user_id = $1 AND token_hash = $2 AND csrf_token = $3 \
+                   AND expires_at BETWEEN now() + interval '7 days' - interval '1 minute' \
+                                      AND now() + interval '7 days' + interval '1 minute'",
+                &[&id, &access::token_hash(&token), &request_token],
+            ),
+            1
+        );
+        assert_eq!(s.sessions_with(&token), 0, "the raw token is never stored");
+        // The cookie signs the browser in, also among other cookies.
+        let cookies = format!("theme=dark; throughline_session={token}");
+        let me = s.send(
+            Method::GET,
+            "/api/me",
+            &[("cookie", cookies.as_str())],
+            None,
+        );
+        assert_eq!(me.status, 200, "{}", me.body);
+        assert_eq!(me.json(), v);
+
+        // An https public URL makes the cookie Secure.
+        let Some(https) = Served::start(AuthMode::Team, Some("https://memory.example.com")) else {
+            return;
+        };
+        https.add_account("alice", Role::Viewer);
+        let answer = https.login("alice", PASSWORD);
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let set = answer.header("set-cookie").unwrap_or("");
+        assert!(set.ends_with("; Max-Age=604800; Secure"), "{set}");
+    }
+
+    #[test]
+    fn wrong_password_and_unknown_user_look_the_same() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping wrong_password_and_unknown_user_look_the_same: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        s.add_account("bob", Role::Editor);
+        crate::accounts_cli::disable(&mut *s.db(), "bob").expect("disable bob");
+        // Wrong password, unknown account, disabled account (right password).
+        let answers: Vec<Answer> = [("alice", WRONG), ("nobody", PASSWORD), ("bob", PASSWORD)]
+            .iter()
+            .map(|(name, password)| s.login(name, password))
+            .collect();
+        let first = &answers[0];
+        assert_eq!(first.status, 401, "{}", first.body);
+        assert_eq!(
+            first.json(),
+            json!({ "error": "unauthorized", "detail": "invalid credentials" })
+        );
+        for answer in &answers {
+            assert_eq!(
+                (
+                    answer.status,
+                    answer.body.as_str(),
+                    answer.header("www-authenticate")
+                ),
+                (
+                    first.status,
+                    first.body.as_str(),
+                    first.header("www-authenticate")
+                )
+            );
+            assert!(answer.header("set-cookie").is_none());
+        }
+        // One scrypt run each: unknown and disabled accounts are checked
+        // against the dummy hash.
+        assert_eq!(s.derivations(), vec![1, 1, 1]);
+        // Control: the right password gets in, with one run as well.
+        assert_eq!(s.login("alice", PASSWORD).status, 200);
+        assert_eq!(s.derivations(), vec![1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn rate_limit_gives_429_and_leaves_no_row_for_unknown_names() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping rate_limit_gives_429_and_leaves_no_row_for_unknown_names: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let failures = |name: &str| {
+            s.count(
+                "SELECT COALESCE(sum(attempts), 0)::bigint FROM access_attempts WHERE key = $1",
+                &[&access::attempt_key(name)],
+            )
+        };
+        let rows = || s.count("SELECT count(*) FROM access_attempts", &[]);
+        // A failure, then a success: the count goes.
+        assert_eq!(s.login("alice", WRONG).status, 401);
+        assert_eq!(failures("alice"), 1);
+        assert_eq!(s.login("alice", PASSWORD).status, 200);
+        assert_eq!(rows(), 0, "deleted on success");
+
+        for i in 0..10 {
+            assert_eq!(s.login("alice", WRONG).status, 401, "failure {i}");
+        }
+        assert_eq!(failures("alice"), 10);
+        let locked = s.login("alice", PASSWORD);
+        assert_eq!(locked.status, 429, "{}", locked.body);
+        assert_eq!(locked.json()["error"], "too_many_attempts");
+        assert_eq!(
+            s.derivations().last(),
+            Some(&1),
+            "a locked account costs one check like any other"
+        );
+
+        // Names without an account are never counted.
+        for i in 0..12 {
+            assert_eq!(s.login("ghost", WRONG).status, 401, "unknown name {i}");
+        }
+        assert_eq!(failures("ghost"), 0);
+        assert_eq!(rows(), 1, "only alice's count");
+
+        // Once 15 minutes have passed the account gets in and the row goes.
+        s.db()
+            .execute(
+                "UPDATE access_attempts SET window_start = now() - interval '16 minutes'",
+                &[],
+            )
+            .expect("age the count");
+        assert_eq!(s.login("alice", PASSWORD).status, 200);
+        assert_eq!(rows(), 0);
+
+        // 60 checks a minute server-wide; the next one is refused before
+        // any hashing.
+        *s.state.login.window.lock().expect("window") = (Instant::now(), 60);
+        let checks = s.derivations().len();
+        let busy = s.login("alice", PASSWORD);
+        assert_eq!(busy.status, 429, "{}", busy.body);
+        assert_eq!(busy.json()["error"], "too_many_attempts");
+        assert_eq!(s.derivations().len(), checks, "no hashing past the limit");
+    }
+
+    #[test]
+    fn api_without_session_is_401_except_health_and_login() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping api_without_session_is_401_except_health_and_login: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let unknown = format!("throughline_session={}", "a".repeat(64));
+        let calls = [
+            (Method::GET, "/api/status"),
+            (Method::GET, "/api/memory"),
+            (Method::POST, "/api/memory"),
+            (Method::GET, "/api/me"),
+            (Method::POST, "/api/logout"),
+            (Method::POST, "/api/password"),
+            (Method::DELETE, "/api/favorites/message/1"),
+        ];
+        for (method, path) in calls {
+            for headers in [
+                vec![],
+                vec![("cookie", "throughline_session=not-a-token")],
+                vec![("cookie", unknown.as_str())],
+                // Agent keys on /api come with Task 6.
+                vec![("authorization", "Bearer 0123456789abcdef0123456789abcdef")],
+            ] {
+                let answer = s.send(method.clone(), path, &headers, None);
+                assert_eq!(
+                    answer.status, 401,
+                    "{method} {path} {headers:?}: {}",
+                    answer.body
+                );
+                assert_eq!(answer.json()["error"], "unauthorized");
+            }
+        }
+        // Open: health, the sign-in route itself, the page and its files.
+        assert_eq!(s.send(Method::GET, "/api/health", &[], None).status, 200);
+        let login = s.send(
+            Method::POST,
+            "/api/login",
+            &[("content-type", "application/json")],
+            Some("{}".into()),
+        );
+        assert_eq!(
+            login.status, 400,
+            "the sign-in handler answers: {}",
+            login.body
+        );
+        for path in ["/", "/index.html", "/favicon.svg"] {
+            assert_eq!(s.send(Method::GET, path, &[], None).status, 200, "{path}");
+        }
+        // Control: a session opens the API.
+        let browser = s.sign_in("alice", PASSWORD);
+        assert_eq!(s.get("/api/me", &browser).status, 200);
+        let status = s.get("/api/status", &browser);
+        assert_eq!(status.status, 200, "{}", status.body);
+    }
+
+    #[test]
+    fn write_without_request_token_or_origin_is_403() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping write_without_request_token_or_origin_is_403: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        s.add_account("bob", Role::Viewer);
+        let alice = s.sign_in("alice", PASSWORD);
+        let bob = s.sign_in("bob", PASSWORD);
+        // A password change the handler refuses (422) shows that a request
+        // got past the checks, without changing anything.
+        let body = json!({ "old": PASSWORD, "new": "too short" }).to_string();
+        let send = |headers: &[(&str, &str)]| {
+            let mut all = vec![
+                ("cookie", alice.cookie.as_str()),
+                ("content-type", "application/json"),
+            ];
+            all.extend_from_slice(headers);
+            s.send(Method::POST, "/api/password", &all, Some(body.clone()))
+        };
+        let token = alice.request_token.as_str();
+        let origin = s.base.as_str();
+        let passed = send(&[("x-throughline-request-token", token), ("origin", origin)]);
+        assert_eq!(passed.status, 422, "{}", passed.body);
+        let other = "f".repeat(64);
+        for headers in [
+            vec![("origin", origin)],
+            vec![
+                ("x-throughline-request-token", other.as_str()),
+                ("origin", origin),
+            ],
+            vec![
+                ("x-throughline-request-token", bob.request_token.as_str()),
+                ("origin", origin),
+            ],
+            vec![("x-throughline-request-token", token)],
+            vec![("x-throughline-request-token", token), ("origin", "null")],
+            vec![
+                ("x-throughline-request-token", token),
+                ("origin", "http://evil.example"),
+            ],
+        ] {
+            let answer = send(&headers);
+            let names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
+            assert_eq!(answer.status, 403, "{names:?}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "forbidden_request");
+            assert!(!answer.body.contains(token), "the token is not echoed");
+        }
+        // Reads need neither.
+        assert_eq!(s.get("/api/me", &alice).status, 200);
+    }
+
+    #[test]
+    fn logout_deletes_the_session_row() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping logout_deletes_the_session_row: no PostgreSQL reachable");
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let browser = s.sign_in("alice", PASSWORD);
+        assert_eq!(s.sessions_with(&browser.token_hash()), 1);
+        let out = s.write("/api/logout", &browser, json!({}));
+        assert_eq!(out.status, 200, "{}", out.body);
+        assert_eq!(
+            out.header("set-cookie"),
+            Some("throughline_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        );
+        assert_eq!(s.sessions_with(&browser.token_hash()), 0);
+        assert_eq!(
+            s.get("/api/me", &browser).status,
+            401,
+            "the old cookie no longer works"
+        );
+    }
+
+    #[test]
+    fn expired_session_is_deleted_on_use() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping expired_session_is_deleted_on_use: no PostgreSQL reachable");
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let (a, b) = (s.sign_in("alice", PASSWORD), s.sign_in("alice", PASSWORD));
+        s.db()
+            .execute(
+                "UPDATE access_sessions SET expires_at = now() - interval '1 second'",
+                &[],
+            )
+            .expect("expire");
+        // Using an expired session deletes it.
+        assert_eq!(s.get("/api/me", &a).status, 401);
+        assert_eq!(s.sessions_with(&a.token_hash()), 0);
+        // A sign-in sweeps the other expired ones.
+        assert_eq!(s.sessions_with(&b.token_hash()), 1);
+        s.sign_in("alice", PASSWORD);
+        assert_eq!(s.sessions_with(&b.token_hash()), 0);
+        assert_eq!(
+            s.count("SELECT count(*) FROM access_sessions", &[]),
+            1,
+            "only the new session"
+        );
+    }
+
+    #[test]
+    fn password_change_ends_other_sessions() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping password_change_ends_other_sessions: no PostgreSQL reachable");
+            return;
+        };
+        let id = s.add_account("alice", Role::Editor);
+        let (a, b) = (s.sign_in("alice", PASSWORD), s.sign_in("alice", PASSWORD));
+        let wrong = s.write(
+            "/api/password",
+            &a,
+            json!({ "old": WRONG, "new": NEW_PASSWORD }),
+        );
+        assert_eq!(wrong.status, 401, "{}", wrong.body);
+        let short = s.write(
+            "/api/password",
+            &a,
+            json!({ "old": PASSWORD, "new": "short" }),
+        );
+        assert_eq!(short.status, 422, "{}", short.body);
+        assert_eq!(s.get("/api/me", &b).status, 200, "nothing changed yet");
+
+        let changed = s.write(
+            "/api/password",
+            &a,
+            json!({ "old": PASSWORD, "new": NEW_PASSWORD }),
+        );
+        assert_eq!(changed.status, 200, "{}", changed.body);
+        assert_eq!(s.get("/api/me", &a).status, 200, "this session stays");
+        assert_eq!(s.get("/api/me", &b).status, 401, "the other one ended");
+        assert_eq!(
+            s.count(
+                "SELECT count(*) FROM access_sessions WHERE user_id = $1",
+                &[&id]
+            ),
+            1
+        );
+        assert_eq!(s.login("alice", PASSWORD).status, 401);
+        assert_eq!(s.login("alice", NEW_PASSWORD).status, 200);
+        for answer in [&wrong, &short, &changed] {
+            assert!(!answer.body.contains(NEW_PASSWORD) && !answer.body.contains(WRONG));
+        }
+    }
+
+    #[test]
+    fn local_mode_has_no_login_and_everything_still_works() {
+        let Some(s) = Served::start(AuthMode::Local, None) else {
+            eprintln!(
+                "skipping local_mode_has_no_login_and_everything_still_works: no PostgreSQL reachable"
+            );
+            return;
+        };
+        for path in ["/api/health", "/api/status", "/api/memory", "/"] {
+            let answer = s.send(Method::GET, path, &[], None);
+            assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+        }
+        // Writes need no request token: the handler itself answers.
+        let favorite = s.send(
+            Method::POST,
+            "/api/favorites",
+            &[("content-type", "application/json")],
+            Some(json!({ "kind": "bogus", "ref": "1" }).to_string()),
+        );
+        assert_eq!(favorite.status, 400, "{}", favorite.body);
+        assert_eq!(favorite.json()["error"], "invalid_kind");
+        let body = json!({ "username": "alice", "password": PASSWORD }).to_string();
+        for (method, path) in [
+            (Method::POST, "/api/login"),
+            (Method::POST, "/api/logout"),
+            (Method::GET, "/api/me"),
+            (Method::POST, "/api/password"),
+        ] {
+            let answer = s.send(
+                method.clone(),
+                path,
+                &[("content-type", "application/json")],
+                Some(body.clone()),
+            );
+            assert_eq!(answer.status, 503, "{method} {path}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "local_mode");
+        }
+        assert!(s.derivations().is_empty(), "no password is checked");
+    }
+
+    #[test]
+    fn team_mode_hides_db_error_details() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping team_mode_hides_db_error_details: no PostgreSQL reachable");
+            return;
+        };
+        let mut state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: AuthMode::Team,
+            public_url: None,
+            login: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let marker = format!("tl_marker_{}", uuid::Uuid::new_v4().simple());
+        // A database error (unknown table) and an error whose text carries
+        // the marker, as a row value in a DETAIL line would.
+        let fail = |state: &AppState, database: bool| {
+            let marker = marker.clone();
+            let resp = rt
+                .block_on(with_db(state, move |client| -> anyhow::Result<()> {
+                    if database {
+                        client.batch_execute(&format!("SELECT * FROM {marker}"))?;
+                    }
+                    anyhow::bail!("row ({marker}) already exists")
+                }))
+                .expect_err("the query fails");
+            let status = resp.status();
+            let body = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
+                .expect("body");
+            (status, String::from_utf8_lossy(&body).into_owned())
+        };
+        for database in [true, false] {
+            let (status, body) = fail(&state, database);
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                serde_json::from_str::<Value>(&body).expect("json"),
+                json!({ "error": "query_failed" }),
+                "database error: {database}"
+            );
+        }
+        // Control: local mode still shows the detail, so the check above
+        // could have seen one.
+        state.auth_mode = AuthMode::Local;
+        let (status, body) = fail(&state, false);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body.contains(&marker), "{body}");
+        let (_, body) = fail(&state, true);
+        assert!(body.contains("detail"), "{body}");
+    }
+
+    #[test]
+    fn hashing_does_not_hold_the_db_lock() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping hashing_does_not_hold_the_db_lock: no PostgreSQL reachable");
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        // Another request takes the database lock as soon as the password
+        // check starts and keeps it for a second.
+        let (gate, db) = (s.state.login.clone(), s.state.db.clone());
+        let holder = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while gate.probe.lock().expect("probe").started.is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "the password check never started"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let guard = db.lock().expect("db lock");
+            let held = Instant::now();
+            std::thread::sleep(Duration::from_secs(1));
+            let released = Instant::now();
+            drop(guard);
+            (held, released)
+        });
+        let answer = s.login("alice", PASSWORD);
+        let answered = Instant::now();
+        let (held, released) = holder.join().expect("lock holder");
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let finished = s
+            .state
+            .login
+            .probe
+            .lock()
+            .expect("probe")
+            .finished
+            .expect("the check finished");
+        assert!(held < finished, "the check went on while the lock was held");
+        assert!(
+            finished < released,
+            "the check finished within the second the lock was held, not after it"
+        );
+        assert!(
+            answered >= released,
+            "the session itself waits for the lock"
+        );
+    }
+
+    #[test]
+    fn legacy_hash_is_rehashed_after_login() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping legacy_hash_is_rehashed_after_login: no PostgreSQL reachable");
+            return;
+        };
+        let id = s.add_account("alice", Role::Editor);
+        s.db()
+            .execute(
+                "UPDATE access_users SET password_hash = $2 WHERE id = $1",
+                &[&id, &LEGACY_HASH],
+            )
+            .expect("legacy hash");
+        let stored = || -> String {
+            s.db()
+                .query_one(
+                    "SELECT password_hash FROM access_users WHERE id = $1",
+                    &[&id],
+                )
+                .expect("hash")
+                .get(0)
+        };
+        assert_eq!(s.login("alice", WRONG).status, 401);
+        assert_eq!(stored(), LEGACY_HASH, "a failed sign-in changes nothing");
+        assert_eq!(s.login("alice", PASSWORD).status, 200);
+        let upgraded = stored();
+        assert!(upgraded.starts_with("scrypt2$15,8,3$"), "{upgraded}");
+        assert!(access::verify_password(PASSWORD, &upgraded));
+        assert_eq!(s.derivations(), vec![1, 2], "the check, then the new hash");
+        assert_eq!(s.login("alice", PASSWORD).status, 200);
+        assert_eq!(stored(), upgraded, "a current hash stays");
+        assert_eq!(s.derivations(), vec![1, 2, 1]);
     }
 }
