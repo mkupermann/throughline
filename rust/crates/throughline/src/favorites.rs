@@ -5,7 +5,13 @@
 //! `ref` is the item identifier as text: the database id for conversations,
 //! messages and memory, the project name for projects, the inventory hash
 //! for imported configs.
+//!
+//! Stars belong to the account that set them (`user_id`); local mode has no
+//! accounts and keeps every star with `user_id` NULL. A star on a memory
+//! note is only listed while the note is visible to its owner.
 
+use crate::access::{push_visibility, Actor, Via};
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use std::str::FromStr;
 
@@ -90,35 +96,89 @@ pub struct Favorite {
     pub created_at: String,
 }
 
-/// Insert a favorite. A duplicate `(kind, ref)` is a no-op (idempotent).
-/// The conflict target is the per-account key of migration 014; local mode
-/// stars without an account (`user_id` NULL).
-pub fn add<C: GenericClient>(c: &mut C, kind: FavKind, r: &str) -> anyhow::Result<()> {
-    c.execute(
-        "INSERT INTO favorites (kind, ref) VALUES ($1, $2) \
-         ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING",
-        &[&kind.as_str(), &r],
-    )?;
-    Ok(())
+/// The condition on the favorites alias `alias` that keeps the stars of
+/// `actor`: the account's own rows, or the rows without an account (local
+/// mode, jobs). Binds the account as the next parameter of `params`.
+pub fn push_mine<'a>(
+    actor: &'a Actor,
+    alias: &str,
+    params: &mut Vec<&'a (dyn ToSql + Sync)>,
+) -> String {
+    params.push(&actor.user_id);
+    format!(
+        "{alias}.user_id IS NOT DISTINCT FROM ${}::bigint",
+        params.len()
+    )
 }
 
-/// Delete a favorite. Returns true when a row was removed.
-pub fn remove<C: GenericClient>(c: &mut C, kind: FavKind, r: &str) -> anyhow::Result<bool> {
+/// Insert a favorite of `actor`. A duplicate is a no-op (idempotent); the
+/// conflict target is the per-account key of migration 014. With an
+/// account, a memory note it does not see (missing or another account's
+/// private note) is not starred: `Ok(false)`, the caller's "not found".
+/// Local mode stores the star as before.
+pub fn add<C: GenericClient>(
+    c: &mut C,
+    actor: &Actor,
+    kind: FavKind,
+    r: &str,
+) -> anyhow::Result<bool> {
+    if kind == FavKind::Memory && actor.via != Via::Local {
+        let id: i64 = r.parse()?;
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+        let seen = push_visibility(actor, "mc", &mut params);
+        let sql = format!("SELECT 1 FROM memory_chunks mc WHERE mc.id = $1 AND {seen}");
+        if c.query_opt(&sql, &params)?.is_none() {
+            return Ok(false);
+        }
+    }
+    c.execute(
+        "INSERT INTO favorites (kind, ref, user_id) VALUES ($1, $2, $3) \
+         ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING",
+        &[&kind.as_str(), &r, &actor.user_id],
+    )?;
+    Ok(true)
+}
+
+/// Delete a favorite of `actor`; other accounts' stars stay. Returns true
+/// when a row was removed.
+pub fn remove<C: GenericClient>(
+    c: &mut C,
+    actor: &Actor,
+    kind: FavKind,
+    r: &str,
+) -> anyhow::Result<bool> {
+    let kind = kind.as_str();
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&kind, &r];
+    let mine = push_mine(actor, "f", &mut params);
     let n = c.execute(
-        "DELETE FROM favorites WHERE kind = $1 AND ref = $2",
-        &[&kind.as_str(), &r],
+        &format!("DELETE FROM favorites f WHERE f.kind = $1 AND f.ref = $2 AND {mine}"),
+        &params,
     )?;
     Ok(n > 0)
 }
 
-/// All favorites, newest first. `kind` filters on the item kind when given.
-pub fn list<C: GenericClient>(c: &mut C, kind: Option<FavKind>) -> anyhow::Result<Vec<Favorite>> {
+/// The favorites of `actor`, newest first. `kind` filters on the item kind
+/// when given. A memory star is listed only while `actor` sees the note.
+pub fn list<C: GenericClient>(
+    c: &mut C,
+    actor: &Actor,
+    kind: Option<FavKind>,
+) -> anyhow::Result<Vec<Favorite>> {
     let kind = kind.map(|k| k.as_str().to_string());
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&kind];
+    let mine = push_mine(actor, "f", &mut params);
+    let seen = push_visibility(actor, "mc", &mut params);
+    // The CASE keeps project names and config hashes away from the cast.
     let rows = c.query(
-        "SELECT kind, ref, created_at FROM favorites \
-         WHERE ($1::text IS NULL OR kind = $1) \
-         ORDER BY created_at DESC",
-        &[&kind],
+        &format!(
+            "SELECT f.kind, f.ref, f.created_at FROM favorites f \
+             LEFT JOIN memory_chunks mc ON mc.id = CASE \
+                 WHEN f.kind = 'memory' AND f.ref ~ '^[0-9]{{1,18}}$' THEN f.ref::bigint END \
+             WHERE ($1::text IS NULL OR f.kind = $1) AND {mine} \
+               AND (f.kind <> 'memory' OR {seen}) \
+             ORDER BY f.created_at DESC"
+        ),
+        &params,
     )?;
     Ok(rows
         .into_iter()
@@ -217,8 +277,9 @@ mod tests {
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
-        add(&mut tx, FavKind::Conversation, "987654321098").expect("first add");
-        add(&mut tx, FavKind::Conversation, "987654321098").expect("second add");
+        let local = Actor::local();
+        add(&mut tx, &local, FavKind::Conversation, "987654321098").expect("first add");
+        add(&mut tx, &local, FavKind::Conversation, "987654321098").expect("second add");
         let n: i64 = tx
             .query_one(
                 "SELECT COUNT(*) FROM favorites \
@@ -238,9 +299,10 @@ mod tests {
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
-        add(&mut tx, FavKind::Message, "987654321099").expect("seed favorite");
-        assert!(remove(&mut tx, FavKind::Message, "987654321099").expect("first remove"));
-        assert!(!remove(&mut tx, FavKind::Message, "987654321099").expect("second remove"));
+        let local = Actor::local();
+        add(&mut tx, &local, FavKind::Message, "987654321099").expect("seed favorite");
+        assert!(remove(&mut tx, &local, FavKind::Message, "987654321099").expect("first remove"));
+        assert!(!remove(&mut tx, &local, FavKind::Message, "987654321099").expect("second remove"));
         // Drop tx → rollback, nothing left behind.
     }
 
@@ -251,9 +313,10 @@ mod tests {
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
-        add(&mut tx, FavKind::Memory, "987654321100").expect("memory favorite");
-        add(&mut tx, FavKind::Project, "tl-fav-list-proj").expect("project favorite");
-        let mems = list(&mut tx, Some(FavKind::Memory)).expect("memory list");
+        let local = Actor::local();
+        add(&mut tx, &local, FavKind::Memory, "987654321100").expect("memory favorite");
+        add(&mut tx, &local, FavKind::Project, "tl-fav-list-proj").expect("project favorite");
+        let mems = list(&mut tx, &local, Some(FavKind::Memory)).expect("memory list");
         assert!(
             mems.iter().any(|f| f.ref_ == "987654321100"),
             "memory entry listed"
@@ -262,7 +325,7 @@ mod tests {
             !mems.iter().any(|f| f.ref_ == "tl-fav-list-proj"),
             "project hidden"
         );
-        let all = list(&mut tx, None).expect("full list");
+        let all = list(&mut tx, &local, None).expect("full list");
         assert!(
             all.iter().any(|f| f.ref_ == "987654321100"),
             "memory in full list"
@@ -272,5 +335,64 @@ mod tests {
             "project in full list"
         );
         // Drop tx → rollback, nothing left behind.
+    }
+
+    #[test]
+    fn favorites_are_per_account_and_hide_private() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping favorites_are_per_account_and_hide_private: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "A's private note",
+            "insight",
+            None,
+        );
+        let shared = note(&mut tx, None, "shared", "a shared note", "insight", None);
+        let (private, shared) = (private.to_string(), shared.to_string());
+        // Sorted: the stars of one transaction share their created_at.
+        let memory = |tx: &mut postgres::Transaction<'_>, actor: &Actor| -> Vec<String> {
+            let mut refs: Vec<String> = list(tx, actor, Some(FavKind::Memory))
+                .expect("list")
+                .into_iter()
+                .map(|f| f.ref_)
+                .collect();
+            refs.sort_by_key(|r| r.parse::<i64>().unwrap_or(0));
+            refs
+        };
+        // A stars her private note and a shared one.
+        assert!(add(&mut tx, &a, FavKind::Memory, &private).expect("star"));
+        assert!(add(&mut tx, &a, FavKind::Memory, &shared).expect("star"));
+        assert_eq!(memory(&mut tx, &a), vec![private.clone(), shared.clone()]);
+        // B sees neither star, and cannot star A's private note.
+        assert!(memory(&mut tx, &b).is_empty());
+        assert!(!add(&mut tx, &b, FavKind::Memory, &private).expect("refused"));
+        // A missing note looks the same as a private one.
+        assert!(!add(&mut tx, &b, FavKind::Memory, "987654321177").expect("refused"));
+        // B's own star on the shared note is B's; it changes nothing for A.
+        assert!(add(&mut tx, &b, FavKind::Memory, &shared).expect("star"));
+        assert_eq!(memory(&mut tx, &b), vec![shared.clone()]);
+        assert_eq!(memory(&mut tx, &a).len(), 2);
+        // B's unstar removes B's row only.
+        assert!(remove(&mut tx, &b, FavKind::Memory, &shared).expect("unstar"));
+        assert!(!remove(&mut tx, &b, FavKind::Memory, &private).expect("not B's"));
+        assert_eq!(memory(&mut tx, &a), vec![private.clone(), shared.clone()]);
+        assert!(memory(&mut tx, &b).is_empty());
+        let rows: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM favorites WHERE user_id = $1",
+                &[&a.user_id],
+            )
+            .expect("count")
+            .get(0);
+        assert_eq!(rows, 2);
     }
 }

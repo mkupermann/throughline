@@ -156,7 +156,8 @@ pub fn run_eval<C: GenericClient>(
 
         let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
         let fulltext = {
-            let ranks = recall::fulltext_ranks(client, &recall::query_words(&case.q), &ids)?;
+            let ranks =
+                recall::fulltext_ranks(client, &LOCAL, &recall::query_words(&case.q), &ids)?;
             let mut scored: Vec<(i64, f64)> = ids
                 .iter()
                 .map(|id| (*id, ranks.get(id).copied().unwrap_or(0.0)))

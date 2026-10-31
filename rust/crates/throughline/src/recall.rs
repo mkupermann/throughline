@@ -281,19 +281,25 @@ pub fn fulltext_tsquery(words: &[String]) -> Option<String> {
 }
 
 /// `ts_rank` of the notes `ids` against the OR-joined `words`. A note without
-/// a match, or every note when no word is left, is missing and counts as 0.
+/// a match, or every note when no word is left, is missing and counts as 0;
+/// so is a note `actor` does not see.
 pub(crate) fn fulltext_ranks<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     words: &[String],
     ids: &[i64],
 ) -> Result<HashMap<i64, f64>> {
     let Some(tsq) = fulltext_tsquery(words) else {
         return Ok(HashMap::new());
     };
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&tsq, &ids];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        "SELECT id, ts_rank(to_tsvector('simple', content), to_tsquery('simple', $1))::float8 \
-         FROM memory_chunks WHERE id = ANY($2)",
-        &[&tsq, &ids],
+        &format!(
+            "SELECT id, ts_rank(to_tsvector('simple', content), to_tsquery('simple', $1))::float8 \
+             FROM memory_chunks mc WHERE id = ANY($2) AND {seen}"
+        ),
+        &params,
     )?;
     Ok(rows
         .iter()
@@ -644,7 +650,7 @@ fn associate<C: GenericClient>(
         let mut next = HashMap::new();
         if !wanted.is_empty() {
             let fulltext = match q.rank {
-                Rank::Fulltext => Some(fulltext_ranks(client, words, &wanted)?),
+                Rank::Fulltext => Some(fulltext_ranks(client, q.actor, words, &wanted)?),
                 Rank::Weighted => None,
             };
             for c in load_candidates(client, CandidateFilter::Ids, q, emb, &wanted)? {
@@ -800,7 +806,7 @@ pub fn recall<C: GenericClient>(
     let fulltext = match q.rank {
         Rank::Fulltext => {
             let ids: Vec<i64> = cands.iter().map(|c| c.id).collect();
-            Some(fulltext_ranks(client, &words, &ids)?)
+            Some(fulltext_ranks(client, q.actor, &words, &ids)?)
         }
         Rank::Weighted => None,
     };
@@ -2599,5 +2605,52 @@ mod tests {
         assert!(cands
             .iter()
             .all(|c| c.id != private && !c.merged_from.contains(&private)));
+
+        // The other direction: a shared note that replaced a private note of
+        // A's, which came from a session. B sees the shared successor, but
+        // neither its predecessor nor the session at the root of the chain.
+        let session = conversation(&mut tx, &tag);
+        let first = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("draft{tag} {secret}"),
+            "insight",
+            p,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET source_type = 'conversation', source_id = $2 WHERE id = $1",
+            &[&first, &session],
+        )
+        .unwrap();
+        let after = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("final{tag}"),
+            "insight",
+            p,
+        );
+        replace(&mut tx, first, after);
+        let final_q = || query(leak(format!("final{tag}")), None);
+        let r = run(&mut tx, &a, final_q());
+        let h = &r.hits[position(&r, after).expect("A's hit")];
+        assert_eq!(
+            (h.supersedes, h.conversation_id),
+            (Some(first), Some(session))
+        );
+        let r = run(&mut tx, &b, final_q());
+        let h = &r.hits[position(&r, after).expect("B's hit")];
+        assert_eq!(h.supersedes, None, "no predecessor B does not see");
+        assert_eq!(
+            (h.conversation_id, h.session_title.as_deref()),
+            (None, None),
+            "the root walk stops before the private note"
+        );
+        assert_hidden(
+            &serde_json::to_string(&r).unwrap(),
+            &secret,
+            "the successor's hit",
+        );
     }
 }

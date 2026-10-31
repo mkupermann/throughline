@@ -165,10 +165,14 @@ pub fn list_decisions<C: GenericClient>(
                         c.chars().take(120).collect()
                     },
                 });
+                let mut step: Vec<&(dyn ToSql + Sync)> = vec![&nid];
+                let seen = push_visibility(actor, "ch", &mut step);
                 next = client
                     .query_one(
-                        "SELECT superseded_by FROM memory_chunks WHERE id = $1",
-                        &[&nid],
+                        &format!(
+                            "SELECT superseded_by FROM memory_chunks ch WHERE id = $1 AND {seen}"
+                        ),
+                        &step,
                     )
                     .ok()
                     .and_then(|row| row.get(0));

@@ -1127,7 +1127,7 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let report = doctor::run(&mut client)?;
+            let report = doctor::run(&mut client, &Actor::local())?;
             println!("database:   {}", report.database);
             println!("generation: {}", report.generation);
             println!("embeddings: {}", report.embeddings);

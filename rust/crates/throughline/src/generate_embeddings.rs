@@ -48,9 +48,11 @@ impl EmbedProgress {
 }
 
 /// Notes (not forgotten) and messages with text, and how many of them have a vector
-/// for `backend.model` in its column.
+/// for `backend.model` in its column. Notes count only when `actor` sees them;
+/// the embedding job itself embeds every note.
 pub fn embed_progress<C: GenericClient>(
     client: &mut C,
+    actor: &crate::access::Actor,
     backend: &EmbeddingBackend,
 ) -> Result<EmbedProgress> {
     let column = backend.column;
@@ -61,29 +63,38 @@ pub fn embed_progress<C: GenericClient>(
         };
         Ok(row.get(0))
     };
-    let notes_total = count(
-        client,
-        "SELECT count(*) FROM memory_chunks \
-         WHERE COALESCE(status, 'active') <> 'forgotten' AND COALESCE(content, '') <> ''"
-            .into(),
-        None,
-    )?;
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = Vec::new();
+    let seen = crate::access::push_visibility(actor, "c", &mut params);
+    let notes_total: i64 = client
+        .query_one(
+            &format!(
+                "SELECT count(*) FROM memory_chunks c \
+                 WHERE COALESCE(c.status, 'active') <> 'forgotten' \
+                   AND COALESCE(c.content, '') <> '' AND {seen}"
+            ),
+            &params,
+        )?
+        .get(0);
     let messages_total = count(
         client,
         "SELECT count(*) FROM messages WHERE COALESCE(content, '') <> ''".into(),
         None,
     )?;
-    let notes_done = count(
-        client,
-        format!(
-            "SELECT count(*) FROM embeddings e \
-             JOIN memory_chunks c ON c.id = e.source_id \
-             WHERE e.source_type = 'memory_chunk' AND e.model = $1 \
-               AND e.{column} IS NOT NULL \
-               AND COALESCE(c.status, 'active') <> 'forgotten' AND COALESCE(c.content, '') <> ''"
-        ),
-        Some(&backend.model),
-    )?;
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&backend.model];
+    let seen = crate::access::push_visibility(actor, "c", &mut params);
+    let notes_done: i64 = client
+        .query_one(
+            &format!(
+                "SELECT count(*) FROM embeddings e \
+                 JOIN memory_chunks c ON c.id = e.source_id \
+                 WHERE e.source_type = 'memory_chunk' AND e.model = $1 \
+                   AND e.{column} IS NOT NULL \
+                   AND COALESCE(c.status, 'active') <> 'forgotten' \
+                   AND COALESCE(c.content, '') <> '' AND {seen}"
+            ),
+            &params,
+        )?
+        .get(0);
     let messages_done = count(
         client,
         format!(
@@ -504,20 +515,20 @@ mod tests {
         };
         let mut tx = client.transaction().expect("begin test tx");
         let backend = test_backend();
-        let before = embed_progress(&mut tx, &backend).unwrap();
+        let before = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!((before.notes_done, before.messages_done), (0, 0));
         seed_note(&mut tx, "active one", "active");
         seed_note(&mut tx, "active two", "active");
         seed_note(&mut tx, "gone", "forgotten");
         seed_message(&mut tx, "a message");
         seed_message(&mut tx, "");
-        let mid = embed_progress(&mut tx, &backend).unwrap();
+        let mid = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!(mid.notes_total, before.notes_total + 2);
         assert_eq!(mid.messages_total, before.messages_total + 1);
         assert_eq!((mid.notes_done, mid.messages_done), (0, 0));
         // Fill exactly the new notes and the new message, newest first.
         embed_pending_with(&mut tx, &backend, 3, |_| Ok(vec![0.1f32; 768])).unwrap();
-        let after = embed_progress(&mut tx, &backend).unwrap();
+        let after = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!(after.model, backend.model);
         assert_eq!(after.notes_done, 2);
         assert_eq!(after.messages_done, 1);
@@ -531,16 +542,22 @@ mod tests {
         };
         let mut tx = client.transaction().expect("begin test tx");
         let backend = test_backend();
-        let before = embed_progress(&mut tx, &backend).unwrap();
+        let before = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         let id = seed_note(&mut tx, "old note", "superseded");
-        let mid = embed_progress(&mut tx, &backend).unwrap();
+        let mid = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!(mid.notes_total, before.notes_total + 1);
         assert_eq!(mid.notes_done, 0);
-        let (_, missing) = crate::doctor::embedding_lines(&mut tx, &backend, Ok(None)).unwrap();
+        let (_, missing) = crate::doctor::embedding_lines(
+            &mut tx,
+            &crate::access::Actor::local(),
+            &backend,
+            Ok(None),
+        )
+        .unwrap();
         assert_ne!(missing, "complete");
         embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
         assert!(embedded_rows(&mut tx, &backend.model, "memory_chunk").contains(&id));
-        let after = embed_progress(&mut tx, &backend).unwrap();
+        let after = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!(after.notes_done, 1);
         assert_eq!(after.notes_missing(), before.notes_total);
     }
@@ -564,11 +581,16 @@ mod tests {
             eprintln!("skipping null_status_note_is_embedded: status is NOT NULL here");
             return;
         }
-        let before = embed_progress(&mut tx, &backend).unwrap();
+        let before = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!(before.notes_done, 0);
         embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
         assert!(embedded_rows(&mut tx, &backend.model, "memory_chunk").contains(&id));
-        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 1);
+        assert_eq!(
+            embed_progress(&mut tx, &crate::access::Actor::local(), &backend)
+                .unwrap()
+                .notes_done,
+            1
+        );
     }
 
     #[test]
@@ -591,9 +613,70 @@ mod tests {
             eprintln!("skipping null_vector_row_is_filled: row without vector not allowed");
             return;
         }
-        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 0);
+        assert_eq!(
+            embed_progress(&mut tx, &crate::access::Actor::local(), &backend)
+                .unwrap()
+                .notes_done,
+            0
+        );
         let summary = embed_pending_with(&mut tx, &backend, 1, |_| Ok(vec![0.1f32; 768])).unwrap();
         assert_eq!(summary.embedded, 1);
-        assert_eq!(embed_progress(&mut tx, &backend).unwrap().notes_done, 1);
+        assert_eq!(
+            embed_progress(&mut tx, &crate::access::Actor::local(), &backend)
+                .unwrap()
+                .notes_done,
+            1
+        );
+    }
+
+    #[test]
+    fn health_counts_only_visible_notes() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping health_counts_only_visible_notes: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let backend = test_backend();
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "A's private note",
+            "insight",
+            None,
+        );
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "A's note without a vector",
+            "insight",
+            None,
+        );
+        tx.execute(
+            "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+             VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+            &[&private, &backend.model, &vector_literal(&[0.1; 768])],
+        )
+        .expect("embed");
+        let (mine, theirs) = (
+            embed_progress(&mut tx, &a, &backend).unwrap(),
+            embed_progress(&mut tx, &b, &backend).unwrap(),
+        );
+        // A's two private notes, one with a vector, count for A alone.
+        assert_eq!(mine.notes_total, theirs.notes_total + 2);
+        assert_eq!(mine.notes_done, theirs.notes_done + 1);
+        assert_eq!(mine.notes_missing(), theirs.notes_missing() + 1);
+        let line = |tx: &mut postgres::Transaction<'_>, actor: &crate::access::Actor| {
+            crate::doctor::embedding_lines(tx, actor, &backend, Ok(Some(backend.clone()))).unwrap()
+        };
+        let (target_a, _) = line(&mut tx, &a);
+        let (target_b, _) = line(&mut tx, &b);
+        assert_ne!(
+            target_a, target_b,
+            "the target line counts A's notes for A only"
+        );
     }
 }

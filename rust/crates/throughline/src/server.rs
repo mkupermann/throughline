@@ -502,21 +502,27 @@ struct ConversationParams {
 
 async fn conversation(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Path(id): Path<i64>,
     Query(params): Query<ConversationParams>,
 ) -> Response {
     let dir = order_dir(params.order.as_deref(), true);
     let result = with_db(&state, move |client| {
+        // Stars are the actor's own: $2 binds the account.
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+        let mine = crate::favorites::push_mine(&actor, "f", &mut params);
         let conv_rows = client.query(
-            r#"
+            &format!(
+                r#"
             SELECT id, session_id, project_name, project_path, source_tool, model,
                    started_at, ended_at, message_count,
                    EXISTS (SELECT 1 FROM favorites f
                            WHERE f.kind = 'conversation'
-                             AND f.ref = conversations.id::text) AS favorite
+                             AND f.ref = conversations.id::text AND {mine}) AS favorite
             FROM conversations WHERE id = $1
-            "#,
-            &[&id],
+            "#
+            ),
+            &params,
         )?;
         let Some(conv_row) = conv_rows.into_iter().next() else {
             return Ok(None);
@@ -527,13 +533,13 @@ async fn conversation(
             SELECT id, role::text, COALESCE(content, ''), model, created_at,
                    EXISTS (SELECT 1 FROM favorites f
                            WHERE f.kind = 'message'
-                             AND f.ref = messages.id::text) AS favorite
+                             AND f.ref = messages.id::text AND {mine}) AS favorite
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at {dir}, id {dir}
             "#
             ),
-            &[&id],
+            &params,
         )?;
         let messages: Vec<MessageJson> = msgs
             .into_iter()
@@ -643,7 +649,11 @@ struct ConversationsPage {
     offset: i32,
 }
 
-async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams>) -> Response {
+async fn recent(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(params): Query<RecentParams>,
+) -> Response {
     let limit = if params.csv {
         params.limit.clamp(1, 50_000)
     } else {
@@ -667,6 +677,7 @@ async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams
         // $1 include_generated  $2 tool  $3 project  $4 q_pat
         // $5 hide_empty         $6 from  $7 to
         // $8 favorites          $9 limit  $10 offset
+        // then the star owner: $9 in the count, $11 in the page.
         let empty_pred = r#"
                   ($5::bool = false OR (
                     EXISTS (
@@ -680,12 +691,41 @@ async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams
                   AND ($6::text IS NULL OR c.started_at::date >= $6::text::date)
                   AND ($7::text IS NULL OR c.started_at::date <= $7::text::date)
             "#;
-        let fav_pred = r#"
-                  AND ($8::bool = false OR EXISTS (
+        let fav_pred = |mine: &str| {
+            format!(
+                "AND ($8::bool = false OR EXISTS (
                     SELECT 1 FROM favorites f
-                    WHERE f.kind = 'conversation' AND f.ref = c.id::text
-                  ))
-            "#;
+                    WHERE f.kind = 'conversation' AND f.ref = c.id::text AND {mine}
+                  ))"
+            )
+        };
+        let (limit64, offset64) = (limit as i64, offset as i64);
+        let mut count_params: Vec<&(dyn ToSql + Sync)> = vec![
+            &include_generated,
+            &tool,
+            &project,
+            &q_pat,
+            &hide_empty,
+            &from,
+            &to,
+            &favorites,
+        ];
+        let count_mine = crate::favorites::push_mine(&actor, "f", &mut count_params);
+        let count_fav = fav_pred(&count_mine);
+        let mut list_params: Vec<&(dyn ToSql + Sync)> = vec![
+            &include_generated,
+            &tool,
+            &project,
+            &q_pat,
+            &hide_empty,
+            &from,
+            &to,
+            &favorites,
+            &limit64,
+            &offset64,
+        ];
+        let list_mine = crate::favorites::push_mine(&actor, "f", &mut list_params);
+        let list_fav = fav_pred(&list_mine);
         let order_sql = {
             let raw = sort.as_str();
             let (col, dir) = match raw.rsplit_once(':') {
@@ -747,24 +787,10 @@ async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams
                   ))
                   AND {empty_pred}
                   {date_pred}
-                  {fav_pred}
+                  {count_fav}
                 "#
         );
-        let total: i64 = client
-            .query_one(
-                &count_sql,
-                &[
-                    &include_generated,
-                    &tool,
-                    &project,
-                    &q_pat,
-                    &hide_empty,
-                    &from,
-                    &to,
-                    &favorites,
-                ],
-            )?
-            .get(0);
+        let total: i64 = client.query_one(&count_sql, &count_params)?.get(0);
 
         let list_sql = format!(
             r#"
@@ -782,7 +808,7 @@ async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams
                            c.summary, ''), 240),
                        EXISTS (SELECT 1 FROM favorites f
                                WHERE f.kind = 'conversation'
-                                 AND f.ref = c.id::text) AS favorite
+                                 AND f.ref = c.id::text AND {list_mine}) AS favorite
                 FROM conversations c
                 WHERE ($1::bool OR c.generated_by IS NULL)
                   AND ($2::text IS NULL OR c.source_tool = $2)
@@ -799,26 +825,12 @@ async fn recent(State(state): State<AppState>, Query(params): Query<RecentParams
                   ))
                   AND {empty_pred}
                   {date_pred}
-                  {fav_pred}
+                  {list_fav}
                 ORDER BY {order_sql}
                 LIMIT $9 OFFSET $10
                 "#
         );
-        let rows = client.query(
-            &list_sql,
-            &[
-                &include_generated,
-                &tool,
-                &project,
-                &q_pat,
-                &hide_empty,
-                &from,
-                &to,
-                &favorites,
-                &(limit as i64),
-                &(offset as i64),
-            ],
-        )?;
+        let rows = client.query(&list_sql, &list_params)?;
         let conversations: Vec<ConversationSummary> = rows
             .into_iter()
             .map(|r| ConversationSummary {
@@ -962,6 +974,7 @@ struct MessageListParams {
 
 async fn messages_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<MessageListParams>,
 ) -> Response {
     let limit = params.limit.clamp(1, 200);
@@ -999,20 +1012,26 @@ async fn messages_handler(
                   )
                   AND ($6::bool = false OR EXISTS (
                     SELECT 1 FROM favorites f
-                    WHERE f.kind = 'message' AND f.ref = m.id::text
+                    WHERE f.kind = 'message' AND f.ref = m.id::text AND __MINE__
                   ))
             "#;
+        // The star owner comes after the fixed slots: $7 in the count, $9 in the page.
+        let (limit64, offset64) = (limit as i64, offset as i64);
+        let mut count_params: Vec<&(dyn ToSql + Sync)> =
+            vec![&q_pat, &role, &tool, &conv, &tool_only, &favorites];
+        let count_mine = crate::favorites::push_mine(&actor, "f", &mut count_params);
+        let count_where = where_sql.replace("__MINE__", &count_mine);
+        let mut list_params: Vec<&(dyn ToSql + Sync)> = vec![
+            &q_pat, &role, &tool, &conv, &tool_only, &favorites, &limit64, &offset64,
+        ];
+        let list_mine = crate::favorites::push_mine(&actor, "f", &mut list_params);
+        let list_where = where_sql.replace("__MINE__", &list_mine);
         let count_sql = format!(
             "SELECT COUNT(*)::bigint FROM messages m
                  JOIN conversations c ON c.id = m.conversation_id
-                 {where_sql}"
+                 {count_where}"
         );
-        let total: i64 = client
-            .query_one(
-                &count_sql,
-                &[&q_pat, &role, &tool, &conv, &tool_only, &favorites],
-            )?
-            .get(0);
+        let total: i64 = client.query_one(&count_sql, &count_params)?.get(0);
 
         let list_sql = format!(
             r#"
@@ -1037,27 +1056,15 @@ async fn messages_handler(
                        m.created_at,
                        EXISTS (SELECT 1 FROM favorites f
                                WHERE f.kind = 'message'
-                                 AND f.ref = m.id::text) AS favorite
+                                 AND f.ref = m.id::text AND {list_mine}) AS favorite
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
-                {where_sql}
+                {list_where}
                 ORDER BY m.created_at {dir}, m.id {dir}
                 LIMIT $7 OFFSET $8
                 "#
         );
-        let rows = client.query(
-            &list_sql,
-            &[
-                &q_pat,
-                &role,
-                &tool,
-                &conv,
-                &tool_only,
-                &favorites,
-                &(limit as i64),
-                &(offset as i64),
-            ],
-        )?;
+        let rows = client.query(&list_sql, &list_params)?;
         let messages: Vec<MessageRowJson> = rows
             .into_iter()
             .map(|r| MessageRowJson {
@@ -1113,10 +1120,17 @@ struct MessageDetailJson {
     favorite: bool,
 }
 
-async fn message_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn message_detail(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<i64>,
+) -> Response {
     let result = with_db(&state, move |client| {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+        let mine = crate::favorites::push_mine(&actor, "f", &mut params);
         let rows = client.query(
-            r#"
+            &format!(
+                r#"
             SELECT m.id, m.conversation_id, c.session_id, c.project_name,
                    m.role::text, m.tool_name,
                    COALESCE(m.content, ''),
@@ -1124,12 +1138,13 @@ async fn message_detail(State(state): State<AppState>, Path(id): Path<i64>) -> R
                    m.token_count, m.model, m.duration_ms, m.created_at,
                    EXISTS (SELECT 1 FROM favorites f
                            WHERE f.kind = 'message'
-                             AND f.ref = m.id::text) AS favorite
+                             AND f.ref = m.id::text AND {mine}) AS favorite
             FROM messages m
             JOIN conversations c ON c.id = m.conversation_id
             WHERE m.id = $1
-            "#,
-            &[&id],
+            "#
+            ),
+            &params,
         )?;
         let Some(r) = rows.into_iter().next() else {
             return Ok(None);
@@ -1588,7 +1603,7 @@ fn list_memory_rows<C: GenericClient>(
     let (pred, _label) = memory_status_predicate(status.as_deref());
     // Every placeholder must appear in the statement, so without a reference
     // date the as-of parameters are pinned to NULL instead of left out.
-    let base_filter = |v: &str, k: &str| {
+    let base_filter = |v: &str, k: &str, mine: &str| {
         let head = if as_of {
             as_of_predicate(v, k)
         } else {
@@ -1600,16 +1615,16 @@ fn list_memory_rows<C: GenericClient>(
          AND ($2::text IS NULL OR category::text = $2)
          AND ($3::bool = false OR EXISTS (
              SELECT 1 FROM favorites f
-             WHERE f.kind = 'memory' AND f.ref = mc.id::text
+             WHERE f.kind = 'memory' AND f.ref = mc.id::text AND {mine}
          ))"
         )
     };
     // The count binds $1..$5 (limit and offset are not in it), the page $1..$7;
-    // the actor's filter comes after them.
-    let count_filter = base_filter("$4", "$5");
-    let sql_filter = base_filter("$6", "$7");
+    // the star owner and the actor's filter come after them.
     let mut count_params: Vec<&(dyn ToSql + Sync)> =
         vec![&q_pat, &category, &favorites, &valid_at, &known_at];
+    let count_mine = crate::favorites::push_mine(actor, "f", &mut count_params);
+    let count_filter = base_filter("$4", "$5", &count_mine);
     let count_seen = push_visibility(actor, "mc", &mut count_params);
     let total: i64 = client
         .query_one(
@@ -1623,6 +1638,8 @@ fn list_memory_rows<C: GenericClient>(
     let mut params: Vec<&(dyn ToSql + Sync)> = vec![
         &q_pat, &category, &favorites, &limit, &offset, &valid_at, &known_at,
     ];
+    let mine = crate::favorites::push_mine(actor, "f", &mut params);
+    let sql_filter = base_filter("$6", "$7", &mine);
     let seen = push_visibility(actor, "mc", &mut params);
     let seen_next = push_visibility(actor, "s", &mut params);
     let seen_prev = push_visibility(actor, "o", &mut params);
@@ -1640,7 +1657,7 @@ fn list_memory_rows<C: GenericClient>(
                     mc.source_at,
                     EXISTS (SELECT 1 FROM favorites f
                             WHERE f.kind = 'memory'
-                              AND f.ref = mc.id::text) AS favorite,
+                              AND f.ref = mc.id::text AND {mine}) AS favorite,
                     mc.valid_from, mc.valid_to, {owner}, mc.visibility
              FROM memory_chunks mc
              WHERE {sql_filter} AND {seen}
@@ -1750,9 +1767,11 @@ pub(crate) fn get_note_json<C: GenericClient>(
     if note["status"] == "forgotten" {
         return Ok(None);
     }
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+    let seen = push_visibility(actor, "mc", &mut params);
     let source = client.query_one(
-        "SELECT source_type, source_id FROM memory_chunks WHERE id = $1",
-        &[&id],
+        &format!("SELECT source_type, source_id FROM memory_chunks mc WHERE id = $1 AND {seen}"),
+        &params,
     )?;
     let source_type: Option<String> = source.get(0);
     let source_id: Option<i64> = source.get(1);
@@ -2075,9 +2094,17 @@ pub fn supersede_memory<C: GenericClient>(
             &(new.kind == SupersedeKind::Correction),
         ],
     )?;
+    // Only the actor's own star moves (local mode and jobs: the stars
+    // without an account); other accounts' stars stay where they are.
+    let (old_ref, new_ref) = (id.to_string(), new_id.to_string());
+    let mut star: Vec<&(dyn ToSql + Sync)> = vec![&old_ref, &new_ref];
+    let mine = crate::favorites::push_mine(actor, "f", &mut star);
     tx.execute(
-        "UPDATE favorites SET ref = $2::text WHERE kind = 'memory' AND ref = $1::text",
-        &[&id.to_string(), &new_id.to_string()],
+        &format!(
+            "UPDATE favorites f SET ref = $2::text \
+             WHERE f.kind = 'memory' AND f.ref = $1::text AND {mine}"
+        ),
+        &star,
     )?;
     tx.commit()?;
     Ok((id, new_id))
@@ -2721,25 +2748,30 @@ async fn conflicts_handler(
 /// carries `favorite`; `favorites` keeps only favorited projects.
 fn project_rows<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     favorites: bool,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&favorites];
+    let mine = crate::favorites::push_mine(actor, "f", &mut params);
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT p.name,
                COALESCE(p.description, ''),
                (SELECT COUNT(*) FROM conversations c WHERE c.project_name = p.name),
                p.status::text,
                (SELECT MAX(c.started_at) FROM conversations c WHERE c.project_name = p.name),
                EXISTS (SELECT 1 FROM favorites f
-                       WHERE f.kind = 'project' AND f.ref = p.name) AS favorite
+                       WHERE f.kind = 'project' AND f.ref = p.name AND {mine}) AS favorite
         FROM projects p
         WHERE ($1::bool = false OR EXISTS (
             SELECT 1 FROM favorites f
-            WHERE f.kind = 'project' AND f.ref = p.name
+            WHERE f.kind = 'project' AND f.ref = p.name AND {mine}
         ))
         ORDER BY p.name
-        "#,
-        &[&favorites],
+        "#
+        ),
+        &params,
     )?;
     Ok(rows
         .into_iter()
@@ -2765,10 +2797,15 @@ struct ProjectsParams {
 
 async fn projects_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<ProjectsParams>,
 ) -> Response {
     let favorites = params.favorites;
-    match with_db(&state, move |client| project_rows(client, favorites)).await {
+    match with_db(&state, move |client| {
+        project_rows(client, &actor, favorites)
+    })
+    .await
+    {
         Ok(items) => Json(serde_json::json!({ "projects": items })).into_response(),
         Err(resp) => resp,
     }
@@ -2816,13 +2853,18 @@ fn parse_timeline_range(
 /// days are inclusive.
 fn timeline_day_rows<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     since: Option<chrono::NaiveDate>,
     until: Option<chrono::NaiveDate>,
     favorites_only: bool,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let rows = match (since, until) {
-        (None, None) => client.query(
-            r#"
+        (None, None) => {
+            let mut params: Vec<&(dyn ToSql + Sync)> = vec![&favorites_only];
+            let mine = crate::favorites::push_mine(actor, "f", &mut params);
+            client.query(
+                &format!(
+                    r#"
             SELECT date_trunc('day', started_at)::date AS day,
                    source_tool,
                    COUNT(*)
@@ -2831,22 +2873,27 @@ fn timeline_day_rows<C: GenericClient>(
               AND started_at > now() - interval '90 days'
               AND ($1::bool = false OR EXISTS (
                 SELECT 1 FROM favorites f
-                WHERE f.kind = 'conversation' AND f.ref = c.id::text
+                WHERE f.kind = 'conversation' AND f.ref = c.id::text AND {mine}
               ))
             GROUP BY 1, 2
             ORDER BY 1 DESC
             LIMIT 5000
-            "#,
-            &[&favorites_only],
-        )?,
+            "#
+                ),
+                &params,
+            )?
+        }
         (since, until) => {
             let since = since
                 .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("min date"));
             let until = until.unwrap_or_else(|| {
                 chrono::NaiveDate::from_ymd_opt(9999, 12, 31).expect("max date")
             });
+            let mut params: Vec<&(dyn ToSql + Sync)> = vec![&since, &until, &favorites_only];
+            let mine = crate::favorites::push_mine(actor, "f", &mut params);
             client.query(
-                r#"
+                &format!(
+                    r#"
                 SELECT date_trunc('day', started_at)::date AS day,
                        source_tool,
                        COUNT(*)
@@ -2856,13 +2903,14 @@ fn timeline_day_rows<C: GenericClient>(
                   AND started_at < ($2::date + 1)
                   AND ($3::bool = false OR EXISTS (
                     SELECT 1 FROM favorites f
-                    WHERE f.kind = 'conversation' AND f.ref = c.id::text
+                    WHERE f.kind = 'conversation' AND f.ref = c.id::text AND {mine}
                   ))
                 GROUP BY 1, 2
                 ORDER BY 1 DESC
                 LIMIT 5000
-                "#,
-                &[&since, &until, &favorites_only],
+                "#
+                ),
+                &params,
             )?
         }
     };
@@ -2880,6 +2928,7 @@ fn timeline_day_rows<C: GenericClient>(
 
 async fn timeline_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<TimelineParams>,
 ) -> Response {
     let (since, until) =
@@ -2895,7 +2944,7 @@ async fn timeline_handler(
         };
     let favorites = params.favorites;
     match with_db(&state, move |client| {
-        timeline_day_rows(client, since, until, favorites)
+        timeline_day_rows(client, &actor, since, until, favorites)
     })
     .await
     {
@@ -3132,8 +3181,13 @@ fn recovery_actions(r: &crate::doctor::DoctorReport, embed_model: &str) -> Vec<s
     actions
 }
 
-async fn health_recovery_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, crate::doctor::run).await {
+/// The doctor's report for the actor: its note counts cover only the notes
+/// the actor sees, like `/api/status`.
+async fn health_recovery_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| crate::doctor::run(client, &actor)).await {
         Ok(r) => {
             let actions = recovery_actions(&r, &crate::embedding::configured_model());
             Json(serde_json::json!({
@@ -3390,11 +3444,13 @@ struct ImportedParams {
 
 async fn assistants_imported_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<ImportedParams>,
 ) -> Response {
     match with_db(&state, move |client| {
         let entries = crate::config_import::list(
             client,
+            &actor,
             params.tool.as_deref(),
             params.kind.as_deref(),
             params.favorites,
@@ -3440,6 +3496,7 @@ struct FavoritesAddBody {
 
 async fn favorites_list_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<FavoritesListParams>,
 ) -> Response {
     let kind = match params.kind {
@@ -3455,7 +3512,11 @@ async fn favorites_list_handler(
         },
         _ => None,
     };
-    match with_db(&state, move |client| crate::favorites::list(client, kind)).await {
+    match with_db(&state, move |client| {
+        crate::favorites::list(client, &actor, kind)
+    })
+    .await
+    {
         Ok(favorites) => {
             let count = favorites.len();
             Json(serde_json::json!({ "favorites": favorites, "count": count })).into_response()
@@ -3466,6 +3527,7 @@ async fn favorites_list_handler(
 
 async fn favorites_add_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Json(body): Json<FavoritesAddBody>,
 ) -> Response {
     let kind = match body.kind.parse::<crate::favorites::FavKind>() {
@@ -3484,11 +3546,13 @@ async fn favorites_add_handler(
     let ref_ = body.ref_;
     let ref_for_resp = ref_.clone();
     match with_db(&state, move |client| {
-        crate::favorites::add(client, kind, &ref_)
+        crate::favorites::add(client, &actor, kind, &ref_)
     })
     .await
     {
-        Ok(()) => (
+        // A note the account does not see: the answer of `GET /api/memory/{id}`.
+        Ok(false) => api_error(StatusCode::NOT_FOUND, "not_found", "memory chunk not found"),
+        Ok(true) => (
             StatusCode::CREATED,
             Json(serde_json::json!({
                 "kind": kind.as_str(),
@@ -3503,6 +3567,7 @@ async fn favorites_add_handler(
 
 async fn favorites_delete_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Path((kind_raw, ref_raw)): Path<(String, String)>,
 ) -> Response {
     let kind = match kind_raw.parse::<crate::favorites::FavKind>() {
@@ -3519,7 +3584,7 @@ async fn favorites_delete_handler(
         return api_error(StatusCode::BAD_REQUEST, "invalid_ref", e);
     }
     match with_db(&state, move |client| {
-        crate::favorites::remove(client, kind, &ref_raw)
+        crate::favorites::remove(client, &actor, kind, &ref_raw)
     })
     .await
     {
@@ -5114,7 +5179,11 @@ mod tests {
                 favorites: false,
             },
         ] {
-            let resp = rt.block_on(timeline_handler(State(state.clone()), Query(params)));
+            let resp = rt.block_on(timeline_handler(
+                State(state.clone()),
+                Extension(Actor::local()),
+                Query(params),
+            ));
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
             let body = rt
                 .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
@@ -5178,8 +5247,10 @@ mod tests {
                 .map(|r| r["count"].as_i64().unwrap())
                 .sum()
         };
-        let all = timeline_day_rows(&mut tx, Some(day), Some(day), false).expect("all");
-        let favs = timeline_day_rows(&mut tx, Some(day), Some(day), true).expect("favorites");
+        let all =
+            timeline_day_rows(&mut tx, &Actor::local(), Some(day), Some(day), false).expect("all");
+        let favs = timeline_day_rows(&mut tx, &Actor::local(), Some(day), Some(day), true)
+            .expect("favorites");
         assert_eq!(count(&all), 2);
         assert_eq!(count(&favs), 1, "only the starred conversation counts");
     }
@@ -5226,6 +5297,7 @@ mod tests {
         // since/until keep only January 2026 — and every returned day is in it.
         let jan = timeline_day_rows(
             &mut tx,
+            &Actor::local(),
             Some(chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
             Some(chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap()),
             false,
@@ -5248,7 +5320,8 @@ mod tests {
         );
 
         // No bounds: the classic rolling 90-day window.
-        let default_rows = timeline_day_rows(&mut tx, None, None, false).expect("default window");
+        let default_rows =
+            timeline_day_rows(&mut tx, &Actor::local(), None, None, false).expect("default window");
         assert!(
             default_rows.iter().any(|r| r["day"] == recent_day.as_str()),
             "10-day-old conversation belongs to the 90-day window"
@@ -5282,6 +5355,7 @@ mod tests {
         .expect("seed 240 rows");
         let rows = timeline_day_rows(
             &mut tx,
+            &Actor::local(),
             Some(chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
             Some(chrono::NaiveDate::from_ymd_opt(2021, 12, 31).unwrap()),
             false,
@@ -5341,7 +5415,7 @@ mod tests {
             "tl_proj",
         );
 
-        let rows = project_rows(&mut tx, false).expect("project rows");
+        let rows = project_rows(&mut tx, &Actor::local(), false).expect("project rows");
         for row in &rows {
             for field in ["name", "description", "conversations", "status"] {
                 assert!(
@@ -5398,10 +5472,15 @@ mod tests {
             &[],
         )
         .expect("seed projects");
-        crate::favorites::add(&mut tx, crate::favorites::FavKind::Project, "tl-fav-proj-a")
-            .expect("seed favorite");
+        crate::favorites::add(
+            &mut tx,
+            &crate::access::Actor::local(),
+            crate::favorites::FavKind::Project,
+            "tl-fav-proj-a",
+        )
+        .expect("seed favorite");
 
-        let all = project_rows(&mut tx, false).expect("project rows");
+        let all = project_rows(&mut tx, &Actor::local(), false).expect("project rows");
         let a = all
             .iter()
             .find(|r| r["name"] == "tl-fav-proj-a")
@@ -5417,7 +5496,7 @@ mod tests {
         );
         assert_eq!(b["favorite"].as_bool(), Some(false), "plain project: {b}");
 
-        let only = project_rows(&mut tx, true).expect("favorite project rows");
+        let only = project_rows(&mut tx, &Actor::local(), true).expect("favorite project rows");
         assert!(
             only.iter().any(|r| r["name"] == "tl-fav-proj-a"),
             "favorited project kept: {only:?}"
@@ -6824,6 +6903,51 @@ mod tests {
             Some(1),
             "{detail}"
         );
+
+        // The other direction: a shared note that replaced a private one.
+        // B gets the successor without its predecessor, in list, detail
+        // and chain.
+        let first = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("draft {secret}"),
+            "insight",
+            None,
+        );
+        let after = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("final {tag}"),
+            "insight",
+            None,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2 WHERE id = $1",
+            &[&first, &after],
+        )
+        .expect("chain");
+        for (actor, supersedes, chain) in [(&a, Some(first), 2), (&b, None, 1)] {
+            let (_, rows) = list(&mut tx, actor);
+            let row = rows.iter().find(|r| r.id == after).expect("successor row");
+            assert_eq!(row.supersedes, supersedes);
+            let detail = load_note(&mut tx, actor, after)
+                .expect("load")
+                .expect("visible");
+            assert_eq!(detail["supersedes"], serde_json::json!(supersedes));
+            let detail = get_note_json(&mut tx, actor, after)
+                .expect("load")
+                .expect("visible");
+            assert_eq!(
+                detail["chain"].as_array().map(Vec::len),
+                Some(chain),
+                "{detail}"
+            );
+            if actor.user_id == b.user_id {
+                assert_hidden(&detail.to_string(), &secret, "the successor's detail");
+            }
+        }
     }
 
     #[test]
@@ -6837,7 +6961,8 @@ mod tests {
         let (a, _) = two_accounts(&mut tx);
         // The timeline counts conversations per day and tool; notes, private
         // or not, never enter it. A private note leaves it unchanged.
-        let before = timeline_day_rows(&mut tx, None, None, false).expect("timeline");
+        let before =
+            timeline_day_rows(&mut tx, &Actor::local(), None, None, false).expect("timeline");
         note(
             &mut tx,
             a.user_id,
@@ -6846,7 +6971,8 @@ mod tests {
             "insight",
             None,
         );
-        let after = timeline_day_rows(&mut tx, None, None, false).expect("timeline");
+        let after =
+            timeline_day_rows(&mut tx, &Actor::local(), None, None, false).expect("timeline");
         assert_eq!(before, after);
     }
 
@@ -6982,6 +7108,15 @@ mod session_tests {
 
         /// `public_url` defaults to the listener's own address in team mode.
         fn start(mode: AuthMode, public_url: Option<&str>) -> Option<Served> {
+            Self::start_with_key(mode, public_url, crate::agent_key::KeyState::Off)
+        }
+
+        /// [`Served::start`] with the shared agent key for `/mcp`.
+        fn start_with_key(
+            mode: AuthMode,
+            public_url: Option<&str>,
+            agent_key: crate::agent_key::KeyState,
+        ) -> Option<Served> {
             // Connect outside any runtime: the sync client blocks.
             let mut client = test_db()?;
             match mode {
@@ -7010,7 +7145,7 @@ mod session_tests {
             };
             let state = AppState {
                 db: Arc::new(Mutex::new(client)),
-                agent_key: Arc::new(crate::agent_key::KeyState::Off),
+                agent_key: Arc::new(agent_key),
                 mcp_read_only: false,
                 auth_mode: mode,
                 public_url,
@@ -7792,21 +7927,158 @@ mod session_tests {
         assert_eq!(s.derivations(), vec![1, 1, 1, 1]);
     }
 
-    /// Team mode on a session-local notes table as well: the routes see
-    /// only the notes of the test, so counts are exact, and its owners can
-    /// be the session-local accounts. Gone with the connection. Without
-    /// named constraints: migration 014 looks its CHECK up by name, and the
-    /// migration test must not find this table's copy.
+    /// Team mode on session-local notes and favorites tables as well: the
+    /// routes see only the rows of the test, so counts are exact, and their
+    /// owners can be the session-local accounts. Gone with the connection.
+    /// Without named constraints: older migrations look constraints up by
+    /// name, and the migration test must not find these copies.
     fn team_with_notes() -> Option<Served> {
-        let served = Served::team()?;
+        team_with_notes_and_key(crate::agent_key::KeyState::Off)
+    }
+
+    fn team_with_notes_and_key(key: crate::agent_key::KeyState) -> Option<Served> {
+        let served = Served::start_with_key(AuthMode::Team, None, key)?;
         served
             .db()
             .batch_execute(
                 "CREATE TEMP TABLE memory_chunks (LIKE public.memory_chunks \
-                 INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)",
+                 INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY); \
+                 CREATE TEMP TABLE favorites (LIKE public.favorites \
+                 INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY); \
+                 CREATE UNIQUE INDEX ON favorites (kind, ref, (COALESCE(user_id, 0)));",
             )
-            .expect("session-local notes");
+            .expect("session-local notes and favorites");
         Some(served)
+    }
+
+    /// Test value, not a secret: the shared agent key of `/mcp`.
+    const AGENT_KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// One JSON-RPC call to `/mcp` with the shared agent key.
+    fn mcp_call(s: &Served, method: &str, params: Value) -> Value {
+        let auth = format!("Bearer {AGENT_KEY}");
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        let answer = s.send(
+            Method::POST,
+            "/mcp",
+            &[
+                ("authorization", auth.as_str()),
+                ("mcp-protocol-version", "2025-11-25"),
+                ("accept", "application/json, text/event-stream"),
+                ("content-type", "application/json"),
+            ],
+            Some(body.to_string()),
+        );
+        assert_eq!(answer.status, 200, "{method}: {}", answer.body);
+        answer.json()
+    }
+
+    /// In team mode the shared agent key is no account: `/mcp` runs as
+    /// `Actor::shared_only()`. A private note of A's never comes back,
+    /// and a write is shared without an owner. Local mode, same key and
+    /// same note: it comes back. Pins the actor of `mcp_http::mcp_post`.
+    #[test]
+    fn mcp_agent_key_in_team_mode_sees_shared_notes_only() {
+        let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = team_with_notes_and_key(key()) else {
+            eprintln!(
+                "skipping mcp_agent_key_in_team_mode_sees_shared_notes_only: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (secret, probe) = (format!("secret{tag}"), format!("probe{tag}"));
+        let a = s.add_account(&format!("a-{tag}"), Role::Editor);
+        let private = insert_note(
+            &s,
+            Some(a),
+            "private",
+            &format!("{probe} {secret}?"),
+            "manual",
+        );
+        let shared = insert_note(&s, None, "shared", &format!("{probe} shared"), "manual");
+        let tool = |name: &str, args: Value| json!({ "name": name, "arguments": args });
+        for (method, params) in [
+            ("tools/call", tool("recall", json!({ "query": probe }))),
+            (
+                "tools/call",
+                tool(
+                    "project_context",
+                    json!({ "project": "team-project", "task": "x" }),
+                ),
+            ),
+            ("tools/call", tool("get_note", json!({ "id": shared }))),
+            (
+                "resources/read",
+                json!({ "uri": "throughline://project/team-project/context" }),
+            ),
+            (
+                "prompts/get",
+                json!({ "name": "handoff", "arguments": { "project": "team-project" } }),
+            ),
+        ] {
+            let body = mcp_call(&s, method, params.clone());
+            assert!(body["error"].is_null(), "{method} {params}: {body}");
+            assert!(
+                !body.to_string().contains(&secret),
+                "{method} {params}: {body}"
+            );
+        }
+        let body = mcp_call(&s, "tools/call", tool("get_note", json!({ "id": private })));
+        assert_eq!(body["error"]["message"], "memory chunk not found", "{body}");
+        let body = mcp_call(
+            &s,
+            "resources/read",
+            json!({ "uri": format!("throughline://note/{private}") }),
+        );
+        assert!(
+            body["error"].is_object() && !body.to_string().contains(&secret),
+            "{body}"
+        );
+        // A write through the shared key belongs to nobody and is shared.
+        let body = mcp_call(
+            &s,
+            "tools/call",
+            tool("write", json!({ "content": "by the key" })),
+        );
+        let text = body["result"]["content"][0]["text"].as_str().expect("text");
+        let id = serde_json::from_str::<Value>(text).unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        let row = s
+            .db()
+            .query_one(
+                "SELECT owner_id, visibility FROM memory_chunks WHERE id = $1",
+                &[&id],
+            )
+            .expect("row");
+        assert_eq!(row.get::<_, Option<i64>>(0), None);
+        assert_eq!(row.get::<_, String>(1), "shared");
+        drop(s);
+
+        // Local mode with the same key: the same kind of note is returned.
+        let Some(s) = Served::start_with_key(AuthMode::Local, None, key()) else {
+            return;
+        };
+        let owner: i64 = s
+            .db()
+            .query_one(
+                "INSERT INTO access_users (username, display_name, password_hash, role) \
+                 VALUES ($1, 'Test', 'not-a-hash', 'editor') RETURNING id",
+                &[&format!("a-{tag}")],
+            )
+            .expect("account")
+            .get(0);
+        let private = insert_note(
+            &s,
+            Some(owner),
+            "private",
+            &format!("{probe} {secret}?"),
+            "manual",
+        );
+        let body = mcp_call(&s, "tools/call", tool("get_note", json!({ "id": private })));
+        assert!(body["error"].is_null(), "{body}");
+        assert!(body.to_string().contains(&secret), "{body}");
     }
 
     /// Two signed-in accounts: (A's id, A, B).
@@ -7985,5 +8257,42 @@ mod session_tests {
         assert_eq!(s.get(&format!("/api/memory/{pin}"), &a).status, 404);
         let mine = s.get(&format!("/api/memory/{pin}"), &b).json();
         assert_eq!(mine["visibility"], "private");
+
+        // Stars are per account: A stars her private note and the shared one.
+        for id in [private, shared] {
+            let star = json!({ "kind": "memory", "ref": id.to_string() });
+            let answer = s.write("/api/favorites", &a, star);
+            assert_eq!(answer.status, 201, "{}", answer.body);
+        }
+        let stars = |browser: &Browser| s.get("/api/favorites?kind=memory", browser);
+        let theirs = stars(&b);
+        assert_eq!(theirs.status, 200, "{}", theirs.body);
+        assert_eq!(theirs.json()["count"], 0, "{}", theirs.body);
+        // B cannot star A's private note: the answer of reading it.
+        let star = json!({ "kind": "memory", "ref": private.to_string() });
+        let answer = s.write("/api/favorites", &b, star);
+        assert_eq!(answer.status, 404, "{}", answer.body);
+        assert_eq!(answer.json()["error"], "not_found");
+        // B's unstar leaves A's star; B's list and flags show no star of A's.
+        let answer = s.send(
+            Method::DELETE,
+            &format!("/api/favorites/memory/{private}"),
+            &[
+                ("cookie", b.cookie.as_str()),
+                ("x-throughline-request-token", b.request_token.as_str()),
+                ("origin", s.base.as_str()),
+            ],
+            None,
+        );
+        assert_eq!(answer.status, 204, "{}", answer.body);
+        assert_eq!(stars(&a).json()["count"], 2);
+        let only = s.get("/api/memory?status=all&favorites=1", &b);
+        assert_eq!(only.json()["total"], 0, "{}", only.body);
+        let listed = s.get("/api/memory?status=all", &b).json();
+        assert!(listed["chunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["favorite"] == false));
     }
 }

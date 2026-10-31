@@ -23,7 +23,9 @@ pub struct DoctorReport {
     pub notes: Vec<String>,
 }
 
-pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
+/// The report as `actor` may see it: the embedding progress counts only the
+/// notes `actor` sees (the CLI passes [`crate::access::Actor::local`]).
+pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Result<DoctorReport> {
     let mut notes = Vec::new();
 
     let database = match client.batch_execute("SELECT 1") {
@@ -62,7 +64,7 @@ pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
                     .as_deref(),
                 &b,
             );
-            match embedding_lines(client, &b, target) {
+            match embedding_lines(client, actor, &b, target) {
                 Ok((t, m)) => (embedding::label(&b), t, m),
                 Err(e) => {
                     notes.push(format!("embedding progress: {e}"));
@@ -104,13 +106,14 @@ pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
 /// activates the code default, so the second line must make a gap visible.
 pub fn embedding_lines<C: GenericClient>(
     client: &mut C,
+    actor: &crate::access::Actor,
     active: &embedding::EmbeddingBackend,
     target: Result<Option<embedding::EmbeddingBackend>>,
 ) -> Result<(Option<String>, String)> {
     let target_line = match target {
         Ok(None) => None,
         Ok(Some(t)) => {
-            let p = generate_embeddings::embed_progress(client, &t)?;
+            let p = generate_embeddings::embed_progress(client, actor, &t)?;
             Some(if p.is_complete() {
                 format!(
                     "{}: complete, set OLLAMA_EMBED_MODEL to it, remove the target and run docker compose up -d web",
@@ -125,7 +128,7 @@ pub fn embedding_lines<C: GenericClient>(
         }
         Err(e) => Some(format!("{e:#}")),
     };
-    let p = generate_embeddings::embed_progress(client, active)?;
+    let p = generate_embeddings::embed_progress(client, actor, active)?;
     let missing = if p.is_complete() {
         "complete".to_string()
     } else {
@@ -221,8 +224,11 @@ mod tests {
         let mut tx = client.transaction().expect("begin test tx");
         let active = backend();
         seed_note(&mut tx, "doctor note");
-        let p = generate_embeddings::embed_progress(&mut tx, &active).unwrap();
-        let (target, missing) = embedding_lines(&mut tx, &active, Ok(None)).unwrap();
+        let p =
+            generate_embeddings::embed_progress(&mut tx, &crate::access::Actor::local(), &active)
+                .unwrap();
+        let (target, missing) =
+            embedding_lines(&mut tx, &crate::access::Actor::local(), &active, Ok(None)).unwrap();
         assert_eq!(target, None);
         assert_eq!(
             missing,
@@ -233,8 +239,13 @@ mod tests {
         );
         assert!(p.notes_total >= 1);
         // A target that could not be resolved shows its error as the line.
-        let (target, _) =
-            embedding_lines(&mut tx, &active, Err(anyhow::anyhow!("nope: unreachable"))).unwrap();
+        let (target, _) = embedding_lines(
+            &mut tx,
+            &crate::access::Actor::local(),
+            &active,
+            Err(anyhow::anyhow!("nope: unreachable")),
+        )
+        .unwrap();
         assert_eq!(target.as_deref(), Some("nope: unreachable"));
     }
 
@@ -248,7 +259,13 @@ mod tests {
         let active = backend();
         let target = backend();
         seed_note(&mut tx, "doctor note");
-        let (line, _) = embedding_lines(&mut tx, &active, Ok(Some(target.clone()))).unwrap();
+        let (line, _) = embedding_lines(
+            &mut tx,
+            &crate::access::Actor::local(),
+            &active,
+            Ok(Some(target.clone())),
+        )
+        .unwrap();
         let line = line.expect("target line");
         assert!(
             line.starts_with(&format!("{}: notes 0/", target.model)),
@@ -257,7 +274,13 @@ mod tests {
         assert!(line.contains(", messages 0/"), "{line}");
         // Fill the target completely.
         fill(&mut tx, &target.model);
-        let (line, missing) = embedding_lines(&mut tx, &active, Ok(Some(target.clone()))).unwrap();
+        let (line, missing) = embedding_lines(
+            &mut tx,
+            &crate::access::Actor::local(),
+            &active,
+            Ok(Some(target.clone())),
+        )
+        .unwrap();
         assert_eq!(
             line.as_deref(),
             Some(
@@ -272,7 +295,8 @@ mod tests {
         assert!(missing.contains(&active.model), "{missing}");
         // Fill the active model too: nothing is missing.
         fill(&mut tx, &active.model);
-        let (_, missing) = embedding_lines(&mut tx, &active, Ok(None)).unwrap();
+        let (_, missing) =
+            embedding_lines(&mut tx, &crate::access::Actor::local(), &active, Ok(None)).unwrap();
         assert_eq!(missing, "complete");
     }
 }
