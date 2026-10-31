@@ -8,7 +8,7 @@ The extension talks to one address only, the Throughline server in `throughline.
 
 | Path | Used for | Key | Counts as use |
 | --- | --- | --- | --- |
-| `GET /api/...` | Recall, project context, open note, conflicts, embedding status | none | no |
+| `GET /api/...` | Recall, project context, open note, conflicts, embedding status | none in local mode, account key after a 401 in team mode | no in local mode, yes in team mode |
 | `POST /mcp` | Quick note, remember selection, copy context, send context to an agent, connection check | agent key | only the context pack |
 
 Looking at notes is browsing, and browsing does not count. Handing the context pack to an agent does: it calls the MCP tool `project_context`, which raises `access_count` of every note in the pack. Writing a note goes through the MCP tool `write`, which creates a note and counts nothing. The connection check calls `list_projects`, which counts nothing either. The full counting rule is in the [usage guide](../docs/USAGE.md#how-often-a-note-is-used-and-how-strong-it-is).
@@ -64,7 +64,7 @@ The status bar item sits at the bottom right. It shows `Throughline: <project> Â
 
 ## Team mode
 
-When the server runs in team mode, every `/api` route needs a signed-in account. Run `Throughline: Set Agent Key` and enter the key of your account. The extension first calls without a key; if the server answers 401, it repeats the call once with `Authorization: Bearer <key>`. A second 401 shows a message that names the command. Without a stored key, the 401 is shown as it is.
+When the server runs in team mode, every `/api` route needs a signed-in account. Run `Throughline: Set Agent Key` and enter the key of your account. The extension first calls without a key; if the server answers 401, it repeats the call once with `Authorization: Bearer <key>`. A second 401 shows "The agent key was rejected" and names the command. Without a stored key there is no retry, and the message "Sign-in required" names the command too.
 
 In team mode, recall and context calls from the extension count as agent use. Local mode is unchanged.
 

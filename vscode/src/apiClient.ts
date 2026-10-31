@@ -171,20 +171,24 @@ export class ApiClient {
     let res = await send(url, { method: "GET", headers });
     let key: string | undefined;
     if (res.status === 401 && this.key) {
-      key = (await this.key())?.trim() || undefined;
+      try {
+        key = (await this.key())?.trim() || undefined;
+      } catch {
+        key = undefined; // a secret storage error counts as no key
+      }
+    }
+    try {
       if (key) {
         await res.text();
         res = await send(url, { method: "GET", headers: { ...headers, Authorization: `Bearer ${key}` } });
       }
-    }
-    try {
-      return await this.read<T>(res);
+      return await this.read<T>(res, key !== undefined);
     } catch (e) {
       throw key ? redact(e, key) : e;
     }
   }
 
-  private async read<T>(res: Response): Promise<T> {
+  private async read<T>(res: Response, keySent: boolean): Promise<T> {
     const text = await res.text();
     if (!res.ok) {
       let detail = text.slice(0, 300);
@@ -195,7 +199,9 @@ export class ApiClient {
         /* keep the raw text */
       }
       if (res.status === 401) {
-        throw new ThroughlineError("unauthorized", 'Sign-in required. Run "Throughline: Set Agent Key" with the key of your account.', detail);
+        throw keySent
+          ? new ThroughlineError("unauthorized", 'The agent key was rejected. Run "Throughline: Set Agent Key" with the key of your account.', detail)
+          : new ThroughlineError("sign_in_required", 'Sign-in required. Run "Throughline: Set Agent Key" with the key of your account.', detail);
       }
       const kind = res.status === 403 ? "forbidden" : res.status === 400 || res.status === 422 ? "invalid" : "server";
       throw new ThroughlineError(kind, `Throughline answered ${res.status}`, detail);
