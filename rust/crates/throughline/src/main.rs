@@ -266,6 +266,13 @@ enum Command {
         seed: u64,
         #[arg(long)]
         json: bool,
+        /// Weights of `weighted`: cosine,lexical,recency,reliability,strength,provenance,
+        /// summing to 1. Default: the built-in weights.
+        #[arg(long, value_parser = recall_eval::parse_weights)]
+        weights: Option<recall::Weights>,
+        /// Write the six score parts of every candidate per question to this JSON file.
+        #[arg(long = "dump-parts")]
+        dump_parts: Option<String>,
     },
     /// Digest of stale / superseded / never-opened memory.
     StaleDigest {
@@ -1087,12 +1094,28 @@ fn main() -> Result<()> {
                 println!("{} group(s)", groups.len());
             }
         }
-        Command::RecallEval { set, k, seed, json } => {
+        Command::RecallEval {
+            set,
+            k,
+            seed,
+            json,
+            weights,
+            dump_parts,
+        } => {
             let cases = recall_eval::load_cases(std::path::Path::new(&set))?;
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let report = recall_eval::run_eval(&mut client, &cases, k, seed)?;
+            let weights = weights.unwrap_or(recall::WEIGHTS);
+            let mut parts = dump_parts.as_ref().map(|_| Vec::new());
+            let report =
+                recall_eval::run_eval(&mut client, &cases, k, seed, &weights, parts.as_mut())?;
+            if let (Some(path), Some(parts)) = (dump_parts, parts) {
+                let file =
+                    std::fs::File::create(&path).with_context(|| format!("create {path}"))?;
+                serde_json::to_writer(std::io::BufWriter::new(file), &parts)
+                    .with_context(|| format!("write {path}"))?;
+            }
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1343,5 +1366,71 @@ fn print_summary(s: &IngestSummary) {
             s.errors,
             s.messages_written
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recall_eval_weights(args: &[&str]) -> Result<Option<recall::Weights>, clap::Error> {
+        let mut argv = vec!["throughline", "recall-eval", "--set", "set.json"];
+        argv.extend_from_slice(args);
+        match Cli::try_parse_from(argv)?.command {
+            Command::RecallEval { weights, .. } => Ok(weights),
+            _ => unreachable!("recall-eval parses to RecallEval"),
+        }
+    }
+
+    #[test]
+    fn recall_eval_weights_flag_parses_six_values_summing_to_one() {
+        assert_eq!(recall_eval_weights(&[]).unwrap(), None);
+        let w = recall_eval_weights(&["--weights", "0.45,0.20,0.10,0.10,0.10,0.05"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(w, recall::WEIGHTS);
+        let w = recall_eval_weights(&["--weights", "0.3, 0.15, 0.05, 0.25, 0.2, 0.05"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (
+                w.cosine,
+                w.lexical,
+                w.recency,
+                w.reliability,
+                w.strength,
+                w.provenance
+            ),
+            (0.3, 0.15, 0.05, 0.25, 0.2, 0.05)
+        );
+        // Grid corners are valid: one weight 1, the rest 0.
+        let w = recall_eval_weights(&["--weights", "1,0,0,0,0,0"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(w.cosine, 1.0);
+        for bad in [
+            "0.45,0.20,0.10,0.10,0.15",
+            "0.45,0.20,0.10,0.10,0.10,0.05,0",
+            "0.5,0.20,0.10,0.10,0.10,0.05",
+            "0.55,-0.10,0.25,0.10,0.15,0.05",
+            "0.45,0.20,0.10,0.10,0.10,x",
+            "NaN,0.20,0.10,0.10,0.10,0.05",
+            "",
+        ] {
+            assert!(recall_eval_weights(&["--weights", bad]).is_err(), "{bad:?}");
+        }
+        let dump = Cli::try_parse_from([
+            "throughline",
+            "recall-eval",
+            "--set",
+            "set.json",
+            "--dump-parts",
+            "parts.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            dump.command,
+            Command::RecallEval { dump_parts: Some(ref p), .. } if p == "parts.json"
+        ));
     }
 }

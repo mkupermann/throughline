@@ -6,9 +6,10 @@
 //! construction; `weighted` is the weighted ranking.
 
 use crate::access::Actor;
-use crate::recall::{self, CandidateFilter, Rank, RecallMode, RecallQuery};
+use crate::recall::{self, Candidate, CandidateFilter, Rank, RecallMode, RecallQuery, Weights};
 use crate::search;
 use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Utc};
 use postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -47,8 +48,94 @@ pub struct CaseRanks {
 pub struct EvalReport {
     pub k: usize,
     pub seed: u64,
+    /// The weights `weighted` ranked with.
+    pub weights: Weights,
     pub scores: Vec<MethodScore>,
     pub cases: Vec<CaseRanks>,
+}
+
+/// The six parts of one candidate's weighted score, so the ranking can be
+/// redone offline with other weights.
+#[derive(Debug, Clone, Serialize)]
+pub struct CandidateParts {
+    pub id: i64,
+    /// Missing only when the question has no vector; `score` then scales the
+    /// other five by 1 / (1 - w.cosine). A note without a vector has 0.
+    pub cosine: Option<f64>,
+    pub lexical: f64,
+    pub recency: f64,
+    pub reliability: f64,
+    pub strength: f64,
+    pub provenance: f64,
+    /// Whether the note has a vector of the question's model.
+    pub has_vector: bool,
+}
+
+/// Every candidate of one question (0-based, in the order of the test set).
+#[derive(Debug, Serialize)]
+pub struct QuestionParts {
+    pub question_index: usize,
+    pub candidates: Vec<CandidateParts>,
+}
+
+/// The parts of `cands` as `recall::score` computes them at `now`.
+pub(crate) fn candidate_parts(
+    cands: &[Candidate],
+    words: &[String],
+    has_embedding: bool,
+    now: DateTime<Utc>,
+) -> Vec<CandidateParts> {
+    cands
+        .iter()
+        .map(|c| {
+            // The parts do not depend on the weights.
+            let (_, why) = recall::score(c, words, has_embedding, now, &recall::WEIGHTS);
+            CandidateParts {
+                id: c.id,
+                cosine: why.cosine,
+                lexical: why.lexical,
+                recency: why.recency,
+                reliability: why.reliability,
+                strength: why.strength,
+                provenance: why.provenance,
+                has_vector: c.cosine.is_some(),
+            }
+        })
+        .collect()
+}
+
+/// `--weights c,l,r,rel,s,p`: six numbers in the order of `Weights`, none
+/// negative, summing to 1.
+pub fn parse_weights(s: &str) -> Result<Weights, String> {
+    let v = s
+        .split(',')
+        .map(|x| {
+            x.trim()
+                .parse::<f64>()
+                .map_err(|e| format!("weight {:?}: {e}", x.trim()))
+        })
+        .collect::<Result<Vec<f64>, String>>()?;
+    let &[cosine, lexical, recency, reliability, strength, provenance] = v.as_slice() else {
+        return Err(format!(
+            "6 weights needed (cosine,lexical,recency,reliability,strength,provenance), got {}",
+            v.len()
+        ));
+    };
+    if v.iter().any(|x| !x.is_finite() || *x < 0.0) {
+        return Err("weights must be finite and not negative".to_string());
+    }
+    let sum: f64 = v.iter().sum();
+    if (sum - 1.0).abs() > 1e-6 {
+        return Err(format!("weights sum to {sum}, not 1"));
+    }
+    Ok(Weights {
+        cosine,
+        lexical,
+        recency,
+        reliability,
+        strength,
+        provenance,
+    })
 }
 
 pub fn load_cases(path: &Path) -> Result<Vec<EvalCase>> {
@@ -102,16 +189,22 @@ pub const METHODS: [&str; 6] = [
     "current", "weighted", "cosine", "fulltext", "phrase", "random",
 ];
 
+/// Ranks every case by each method. `weighted` uses `weights`; every
+/// question is scored at one `now`. With `parts`, the score parts of all
+/// candidates are collected per question at that same `now`.
 pub fn run_eval<C: GenericClient>(
     client: &mut C,
     cases: &[EvalCase],
     k: usize,
     seed: u64,
+    weights: &Weights,
+    mut parts: Option<&mut Vec<QuestionParts>>,
 ) -> Result<EvalReport> {
+    let now = Utc::now();
     let mut rng = Rng::new(seed);
     let mut per_method: Vec<Vec<Option<usize>>> = vec![Vec::new(); METHODS.len()];
     let mut out_cases = Vec::new();
-    for case in cases {
+    for (question_index, case) in cases.iter().enumerate() {
         if case.expected.is_empty() {
             bail!("test set case without expected ids: {}", case.q);
         }
@@ -131,7 +224,7 @@ pub fn run_eval<C: GenericClient>(
             rank: Rank::Fulltext,
         };
         let mut ranked = |q: &RecallQuery| -> Result<Vec<i64>> {
-            Ok(recall::recall(client, q, emb.as_ref())?
+            Ok(recall::recall_with(client, q, emb.as_ref(), weights, now)?
                 .hits
                 .iter()
                 .map(|h| h.id)
@@ -142,6 +235,13 @@ pub fn run_eval<C: GenericClient>(
         let weighted = ranked(&q)?;
         q.rank = Rank::Fulltext;
         let cands = recall::candidates(client, CandidateFilter::Current, &q, emb.as_ref())?;
+        if let Some(parts) = parts.as_mut() {
+            let words = recall::query_words(&case.q);
+            parts.push(QuestionParts {
+                question_index,
+                candidates: candidate_parts(&cands, &words, emb.is_some(), now),
+            });
+        }
 
         // Notes without an embedding rank after all that have one.
         let mut by_cosine: Vec<(i64, Option<f64>)> =
@@ -205,6 +305,7 @@ pub fn run_eval<C: GenericClient>(
     Ok(EvalReport {
         k,
         seed,
+        weights: *weights,
         scores,
         cases: out_cases,
     })
