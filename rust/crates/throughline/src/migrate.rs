@@ -400,7 +400,8 @@ ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS owner_id bigint REFERENCES ac
 ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFAULT 'shared'
     CONSTRAINT memory_chunks_visibility_check CHECK (visibility IN ('shared', 'private'));
 DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'memory_chunks_private_has_owner') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'memory_chunks_private_has_owner'
+                   AND conrelid = 'public.memory_chunks'::regclass) THEN
         ALTER TABLE memory_chunks ADD CONSTRAINT memory_chunks_private_has_owner
             CHECK (visibility = 'shared' OR owner_id IS NOT NULL);
     END IF;
@@ -795,6 +796,13 @@ END $$;
             &[&note_ref],
         )
         .expect("favorite before 014");
+        // A same-named constraint on another table must not stop 014 from
+        // adding the CHECK to public.memory_chunks.
+        tx.batch_execute(
+            "CREATE TEMP TABLE team_mode_decoy (v text \
+             CONSTRAINT memory_chunks_private_has_owner CHECK (v <> 'x'))",
+        )
+        .expect("decoy constraint");
 
         // twice: a second run is a no-op
         tx.batch_execute(sql).expect("first run");
@@ -903,8 +911,13 @@ END $$;
         .expect("private note with owner");
 
         // One favorite per item and account; local mode is the NULL account.
-        crate::favorites::add(&mut tx, crate::favorites::FavKind::Memory, &note_ref)
-            .expect("favorite again");
+        crate::favorites::add(
+            &mut tx,
+            &crate::access::Actor::local(),
+            crate::favorites::FavKind::Memory,
+            &note_ref,
+        )
+        .expect("favorite again");
         let per_user = "INSERT INTO favorites (kind, ref, user_id) VALUES ('memory', $1, $2) \
                         ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING";
         assert_eq!(tx.execute(per_user, &[&note_ref, &user]).unwrap(), 1);

@@ -159,11 +159,15 @@ pub fn consolidation_candidates<C: GenericClient>(
     }
     let ids: Vec<i64> = parent.keys().copied().collect();
     let mut notes: HashMap<i64, GroupNote> = HashMap::new();
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&ids];
+    let seen = push_visibility(actor, "mc", &mut params);
     for r in client.query(
-        "SELECT id, content, category::text, project_name,
-                COALESCE(valid_from, source_at, created_at)
-         FROM memory_chunks WHERE id = ANY($1)",
-        &[&ids],
+        &format!(
+            "SELECT id, content, category::text, project_name,
+                    COALESCE(valid_from, source_at, created_at)
+             FROM memory_chunks mc WHERE id = ANY($1) AND {seen}"
+        ),
+        &params,
     )? {
         let id: i64 = r.get(0);
         notes.insert(
@@ -344,18 +348,27 @@ pub fn consolidate<C: GenericClient>(
          WHERE id = ANY($1)",
         &[&ids, &new_id],
     )?;
-    // Stars are UI marks, not memory: all of them become one star on the new note.
+    // Stars are UI marks, not memory: the actor's stars on the sources become
+    // one star on the new note. Other accounts' stars stay; a job (no
+    // account) moves only the stars without an account, i.e. local mode's.
     let refs: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    let new_ref = new_id.to_string();
+    let mut star: Vec<&(dyn ToSql + Sync)> = vec![&refs, &new_ref];
+    let mine = crate::favorites::push_mine(actor, "f", &mut star);
     tx.execute(
-        "INSERT INTO favorites (kind, ref)
-         SELECT 'memory', $2 WHERE EXISTS
-             (SELECT 1 FROM favorites WHERE kind = 'memory' AND ref = ANY($1))
-         ON CONFLICT DO NOTHING",
-        &[&refs, &new_id.to_string()],
+        &format!(
+            "INSERT INTO favorites (kind, ref, user_id)
+             SELECT 'memory', $2, $3 WHERE EXISTS
+                 (SELECT 1 FROM favorites f WHERE f.kind = 'memory' AND f.ref = ANY($1) AND {mine})
+             ON CONFLICT DO NOTHING"
+        ),
+        &star,
     )?;
+    let mut star: Vec<&(dyn ToSql + Sync)> = vec![&refs];
+    let mine = crate::favorites::push_mine(actor, "f", &mut star);
     tx.execute(
-        "DELETE FROM favorites WHERE kind = 'memory' AND ref = ANY($1)",
-        &[&refs],
+        &format!("DELETE FROM favorites f WHERE f.kind = 'memory' AND f.ref = ANY($1) AND {mine}"),
+        &star,
     )?;
     tx.commit()?;
     Ok(new_id)

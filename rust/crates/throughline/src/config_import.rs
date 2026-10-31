@@ -242,10 +242,11 @@ pub fn run(client: &mut postgres::Client) -> Result<ImportSummary> {
 
 /// List imported entries, newest first. Optional `tool` / `kind` filters.
 /// Each row carries `fav_ref` (inventory id) and `favorite`; `favorites_only`
-/// keeps only favorited rows. Config refs are path hashes, not SQL ids, so
+/// keeps only favorited rows. Stars are those of `actor`. Config refs are path hashes, not SQL ids, so
 /// the config favorites are resolved here in Rust.
 pub fn list(
     client: &mut postgres::Client,
+    actor: &crate::access::Actor,
     tool: Option<&str>,
     kind: Option<&str>,
     favorites_only: bool,
@@ -259,7 +260,8 @@ pub fn list(
          ORDER BY imported_at DESC",
         &[&tool, &kind],
     )?;
-    let favs = crate::favorites::list(client, Some(crate::favorites::FavKind::Config))?;
+    // The actor's own stars.
+    let favs = crate::favorites::list(client, actor, Some(crate::favorites::FavKind::Config))?;
     let fav_refs: std::collections::HashSet<String> = favs.into_iter().map(|f| f.ref_).collect();
     let mut entries: Vec<ImportedEntry> = rows
         .into_iter()

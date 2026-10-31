@@ -357,7 +357,7 @@ pub fn build_context<C: GenericClient>(
         // rest newest first. The stable sort keeps the newest-first order inside each group.
         let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
         let ids: Vec<i64> = decisions.iter().map(|c| c.id).collect();
-        let ranks = fulltext_ranks(client, &query_words(&text), &ids)?;
+        let ranks = fulltext_ranks(client, actor, &query_words(&text), &ids)?;
         let rank = |c: &Candidate| ranks.get(&c.id).copied().unwrap_or(0.0).max(0.0);
         decisions.sort_by(|a, b| rank(b).total_cmp(&rank(a)));
     }

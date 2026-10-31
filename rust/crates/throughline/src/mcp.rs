@@ -102,7 +102,7 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
             "capabilities": capabilities(),
             "serverInfo": { "name": "throughline", "version": env!("CARGO_PKG_VERSION") }
         })),
-        "tools/list" => Ok(tools_list_for(ctx.read_only)),
+        "tools/list" => Ok(tools_list_for(ctx.read_only, &ctx.actor)),
         "tools/call" => match params.get("name").and_then(|n| n.as_str()) {
             Some(name) if ctx.read_only && WRITE_TOOLS.contains(&name) => Err(json!({
                 "code": -32602,
@@ -152,11 +152,24 @@ fn capabilities() -> Value {
 /// The tools that change notes; read-only mode hides and refuses them.
 const WRITE_TOOLS: &[&str] = &["write", "forget", "supersede", "keep"];
 
-fn tools_list_for(read_only: bool) -> Value {
+/// The tool list for this caller. `write` offers `visibility` only to an
+/// account: without one (local mode, the shared agent key) a note is always
+/// shared, and the list stays as it was before team mode.
+fn tools_list_for(read_only: bool, actor: &Actor) -> Value {
     let mut list = tools_list();
-    if read_only {
-        if let Some(tools) = list["tools"].as_array_mut() {
+    if let Some(tools) = list["tools"].as_array_mut() {
+        if read_only {
             tools.retain(|t| !t["name"].as_str().is_some_and(|n| WRITE_TOOLS.contains(&n)));
+        }
+        if actor.user_id.is_some() {
+            for t in tools.iter_mut().filter(|t| t["name"] == "write") {
+                t["inputSchema"]["properties"]["visibility"] = json!({
+                    "type": "string",
+                    "enum": ["shared", "private"],
+                    "default": "shared",
+                    "description": "private: only your account sees the note"
+                });
+            }
         }
     }
     list
@@ -265,13 +278,7 @@ fn tools_list() -> Value {
                             "default": "insight",
                             "description": "Use decision to record a decision"
                         },
-                        "project": { "type": "string" },
-                        "visibility": {
-                            "type": "string",
-                            "enum": ["shared", "private"],
-                            "default": "shared",
-                            "description": "private: only your account sees the note"
-                        }
+                        "project": { "type": "string" }
                     },
                     "required": ["content"]
                 }
@@ -2429,9 +2436,17 @@ mod tests {
             assert!(body.to_string().contains(&secret), "{}: {body}", reads[i].0);
         }
         let theirs = as_actor(&b);
-        for (method, params) in &reads {
+        for (i, (method, params)) in reads.iter().enumerate() {
             let body = call(&mut tx, &theirs, method, params.clone());
             assert_hidden(&body.to_string(), &secret, &format!("{method} {params}"));
+            // Only the two lookups of the private id fail, like a missing id;
+            // every other read answers, so an error cannot pass as "hidden".
+            if [3, 7].contains(&i) {
+                assert!(body["error"].is_object(), "{method} {params}: {body}");
+            } else {
+                assert!(body["error"].is_null(), "{method} {params}: {body}");
+                assert!(!body["result"].is_null(), "{method} {params}: {body}");
+            }
         }
         // B cannot change the note either; every refusal looks like a missing id.
         for (name, args) in [
@@ -2501,5 +2516,37 @@ mod tests {
             assert_eq!(row.get::<_, Option<i64>>(0), owner);
             assert_eq!(row.get::<_, String>(1), visibility.unwrap_or("shared"));
         }
+    }
+
+    #[test]
+    fn tools_list_offers_private_only_to_accounts() {
+        use crate::access::Role;
+        let write_props = |actor: &Actor| {
+            let list = tools_list_for(false, actor);
+            list["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["name"] == "write")
+                .expect("write tool")["inputSchema"]["properties"]
+                .clone()
+        };
+        // Without an account the list is the one from before team mode.
+        for actor in [Actor::local(), Actor::shared_only()] {
+            assert_eq!(tools_list_for(false, &actor), tools_list());
+            assert!(write_props(&actor).get("visibility").is_none());
+        }
+        let user = Actor::for_user(3, "a", Role::Editor);
+        assert_eq!(
+            write_props(&user)["visibility"]["enum"],
+            json!(["shared", "private"])
+        );
+        // Read-only still hides the write tools for accounts.
+        let ro = tools_list_for(true, &user);
+        assert!(ro["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"] != "write"));
     }
 }
