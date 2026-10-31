@@ -219,13 +219,15 @@ pub fn auth_mode_from(value: Option<&str>) -> Result<AuthMode> {
 /// Refuse to start when the mode does not fit the database or the URL.
 /// `local` would show every account's private notes to anyone, so it needs
 /// a database without accounts and private notes. `team` needs an enabled
-/// admin and a public URL that keeps the session cookie off plain HTTP.
-/// Both modes refuse a database that migration 014 has not reached.
+/// admin and a public URL that keeps the session cookie off plain HTTP,
+/// with a port the write check can read. Both modes refuse a database that
+/// lacks the newest migration of the code list ([`crate::migrate::LATEST`]).
 pub fn check_startup<C: GenericClient>(
     client: &mut C,
     mode: AuthMode,
     public_url: Option<&str>,
 ) -> Result<()> {
+    crate::migrate::require_latest(client)?;
     let (accounts, private) = counts(client)?;
     match mode {
         AuthMode::Local => {
@@ -241,6 +243,14 @@ pub fn check_startup<C: GenericClient>(
                 bail!(
                     "team mode needs THROUGHLINE_PUBLIC_URL with https \
                      (http only on localhost, 127.x.x.x or ::1)"
+                );
+            }
+            // The write check compares every Origin with this URL's scheme,
+            // host and port. A port it cannot read would refuse every write.
+            if public_url.and_then(crate::server::url_origin).is_none() {
+                bail!(
+                    "THROUGHLINE_PUBLIC_URL has an empty or invalid port: \
+                     leave it out or give a number up to 65535"
                 );
             }
             let admins: i64 = client
@@ -1359,5 +1369,91 @@ mod tests {
                 .to_string();
             assert!(err.contains("throughline migrate"), "{mode:?}: {err}");
         }
+    }
+
+    /// Startup reads the port of `THROUGHLINE_PUBLIC_URL` with the parser of
+    /// the write check. A URL whose port that check cannot read would start
+    /// a server that refuses every write from a browser.
+    #[test]
+    fn startup_team_refuses_a_public_url_without_a_readable_port() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping startup_team_refuses_a_public_url_without_a_readable_port: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = without_accounts(&mut client);
+        add_user(&mut tx, "admin", true);
+        for url in [
+            "https://memory.example.com:8443",
+            "https://memory.example.com:443/",
+            "http://localhost:8787",
+            "http://[::1]:8787",
+        ] {
+            check_startup(&mut tx, AuthMode::Team, Some(url))
+                .unwrap_or_else(|e| panic!("{url}: {e}"));
+            assert!(crate::server::url_origin(url).is_some(), "{url}");
+        }
+        for url in [
+            "https://memory.example.com:",
+            "https://memory.example.com:/base",
+            "https://memory.example.com:https",
+            "https://memory.example.com:65536",
+            "http://localhost:",
+            "http://127.0.0.1:x/",
+            "http://[::1]:",
+        ] {
+            assert!(crate::server::url_origin(url).is_none(), "{url}");
+            let err = check_startup(&mut tx, AuthMode::Team, Some(url))
+                .expect_err(url)
+                .to_string();
+            assert!(err.contains("THROUGHLINE_PUBLIC_URL"), "{url}: {err}");
+            assert!(err.contains("port"), "{url}: {err}");
+        }
+    }
+
+    /// A server needs the newest migration of the code list. Names in the
+    /// ledger that the code does not know, such as the Python package's
+    /// `015_project_assignments.sql`, do not stop it.
+    #[test]
+    fn startup_needs_the_latest_migration_and_ignores_unknown_names() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping startup_needs_the_latest_migration_and_ignores_unknown_names: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let latest = crate::migrate::LATEST;
+        assert_eq!(latest, "015_account_stars_untimed.sql");
+        let mut tx = without_accounts(&mut client);
+        // A temporary ledger shadows applied_migrations for this session.
+        tx.batch_execute(
+            "CREATE TEMP TABLE applied_migrations (migration_name text PRIMARY KEY) ON COMMIT DROP; \
+             INSERT INTO applied_migrations VALUES \
+                 ('014_team_mode.sql'), ('015_project_assignments.sql')",
+        )
+        .expect("ledger without the latest migration");
+        let err = check_startup(&mut tx, AuthMode::Local, None)
+            .expect_err("refused without the latest migration")
+            .to_string();
+        assert!(err.contains(latest), "{err}");
+        assert!(err.contains("throughline migrate"), "{err}");
+
+        tx.execute("INSERT INTO applied_migrations VALUES ($1)", &[&latest])
+            .expect("latest migration");
+        check_startup(&mut tx, AuthMode::Local, None).expect("latest applied, unknown name kept");
+
+        let https = Some("https://memory.example.com");
+        add_user(&mut tx, "admin", true);
+        check_startup(&mut tx, AuthMode::Team, https).expect("team starts");
+        tx.execute(
+            "DELETE FROM applied_migrations WHERE migration_name = $1",
+            &[&latest],
+        )
+        .expect("drop the latest migration");
+        let err = check_startup(&mut tx, AuthMode::Team, https)
+            .expect_err("team refused without the latest migration")
+            .to_string();
+        assert!(err.contains(latest), "{err}");
     }
 }

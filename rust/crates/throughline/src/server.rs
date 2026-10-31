@@ -3978,7 +3978,7 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
 /// Scheme, lowercased host and port of a URL or an `Origin` value, with
 /// the port of http (80) and https (443) filled in when it is left out.
 /// `None` without `://`, without a host, or with a port that is no number.
-fn url_origin(url: &str) -> Option<(String, String, u16)> {
+pub(crate) fn url_origin(url: &str) -> Option<(String, String, u16)> {
     let (scheme, rest) = url.trim().split_once("://")?;
     let scheme = scheme.to_ascii_lowercase();
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -4433,14 +4433,20 @@ async fn logout_handler(
         return no_session(&state);
     };
     let hash = session.token_hash;
-    // Expired sessions and counts go too, so they wait for no sign-in.
-    if let Err(resp) = with_db(&state, move |client| {
+    // Expired sessions and counts go too, so they wait for no sign-in. That
+    // sweep is housekeeping: when it fails, the sign-out still stands and
+    // the cookie still goes.
+    let swept = match with_db(&state, move |client| {
         crate::access::end_session(client, &hash)?;
-        crate::access::sweep_expired(client)
+        Ok(crate::access::sweep_expired(client))
     })
     .await
     {
-        return resp;
+        Ok(swept) => swept,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = swept {
+        eprintln!("sign-out: sweep failed: {}", error_for_log(&e));
     }
     let mut resp = Json(serde_json::json!({ "status": "signed_out" })).into_response();
     resp.headers_mut().insert(
@@ -8824,6 +8830,40 @@ mod session_tests {
         // The sign-out also swept what had expired meanwhile.
         assert_eq!(s.sessions_with(&expired), 0);
         assert_eq!(attempts_with(&s, &lapsed), 0);
+    }
+
+    /// The sweep after a sign-out is housekeeping: when it fails, the
+    /// session is still gone and the browser still loses its cookie.
+    #[test]
+    fn sign_out_clears_the_cookie_when_the_sweep_fails() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping sign_out_clears_the_cookie_when_the_sweep_fails: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        let browser = s.sign_in("alice", PASSWORD);
+        // A failure-count table without its window column: the sweep's
+        // second statement fails after the session row is gone.
+        s.db()
+            .batch_execute(
+                "DROP TABLE pg_temp.access_attempts; \
+                 CREATE TEMP TABLE access_attempts (key text PRIMARY KEY)",
+            )
+            .expect("break the sweep");
+        assert!(
+            access::sweep_expired(&mut *s.db()).is_err(),
+            "the sweep must fail for this test"
+        );
+        let out = s.write("/api/logout", &browser, json!({}));
+        assert_eq!(out.status, 200, "{}", out.body);
+        assert_eq!(
+            out.header("set-cookie"),
+            Some("throughline_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        );
+        assert_eq!(s.sessions_with(&browser.token_hash()), 0);
+        assert_eq!(s.get("/api/me", &browser).status, 401);
     }
 
     /// An expired session of account `id` and a failure count whose window
