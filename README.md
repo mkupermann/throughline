@@ -179,6 +179,20 @@ Recall by meaning can cross languages. With the multilingual model `granite-embe
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 
+### Team mode. One Throughline for a team
+
+With `THROUGHLINE_AUTH_MODE=team` the server asks for an account. Accounts are created on the server's command line, each with one of three roles: a viewer reads, an editor pins and replaces notes and asks the model, an admin runs imports and maintenance. The header shows the account and its role, with password change and sign-out behind it.
+
+![Sign-in page of a team installation](docs/media/rust/team-signin.png)
+
+![Account menu with the role and sign-out](docs/media/rust/team-account-menu.png)
+
+Notes are shared by default. When you pin one, you can keep it private: only your account sees it, in every view, in recall and through your own agent key. Every note card shows its owner and whether it is shared or private. Agents sign in with a key per account instead of the global key. Nothing records who signed in when; the design is written up in [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md).
+
+![Pin dialog with the private option](docs/media/rust/team-pin-private.png)
+
+![A private note with owner and visibility](docs/media/rust/team-private-note.png)
+
 ### Search. Across every assistant
 
 Choose **Lexical**, **Semantic** or **Hybrid**. Lexical search needs no model. Semantic search requires stored embeddings and a compatible embedding service. Results link to sessions and name the search backend. Scores are retrieval values, not truth probabilities.

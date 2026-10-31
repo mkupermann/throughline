@@ -179,6 +179,20 @@ Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachig
 
 ![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 
+### Team-Modus. Ein Throughline für ein Team
+
+Mit `THROUGHLINE_AUTH_MODE=team` verlangt der Server ein Konto. Konten entstehen auf der Befehlszeile des Servers, jedes mit einer von drei Rollen: Ein Betrachter liest, ein Bearbeiter pinnt und ersetzt Notizen und fragt das Modell, ein Verwalter führt Importe und Wartung aus. Die Kopfzeile zeigt Konto und Rolle, dahinter Passwort ändern und Abmelden.
+
+![Anmeldeseite einer Team-Installation](docs/media/rust/de/team-signin.png)
+
+![Kontomenü mit Rolle und Abmelden](docs/media/rust/de/team-account-menu.png)
+
+Notizen sind gemeinsam, wenn nichts anderes gesagt wird. Beim Pinnen kann eine Notiz privat bleiben: Nur das eigene Konto sieht sie, in jeder Ansicht, im Abruf und über den eigenen Agentenschlüssel. Jede Notizkarte zeigt Eigentümer und Sichtbarkeit. Agenten melden sich mit einem Schlüssel je Konto an statt mit dem globalen Schlüssel. Niemand zeichnet auf, wer sich wann angemeldet hat. Der Entwurf steht in [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md) (englisch).
+
+![Pinnen-Dialog mit der Option privat](docs/media/rust/de/team-pin-private.png)
+
+![Eine private Notiz mit Eigentümer und Sichtbarkeit](docs/media/rust/de/team-private-note.png)
+
 ### Suche. Über alle Assistenten hinweg
 
 Wähle **Lexical**, **Semantic** oder **Hybrid**. Die lexikalische Suche braucht kein Modell. Die semantische Suche braucht gespeicherte Embeddings und einen passenden Embedding-Dienst. Treffer verlinken auf Sitzungen und nennen das Such-Backend. Scores sind Retrieval-Werte, keine Wahrheits-Wahrscheinlichkeiten.

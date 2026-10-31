@@ -67,7 +67,20 @@
     "ask",
     "operate",
     "operate-status",
-    "palette"
+    "palette",
+    "team-signin",
+    "team-account-menu",
+    "team-pin-private",
+    "team-private-note"
   ],
-  "pageErrors": []
+  "pageErrors": [],
+  "teamModeScreenshots": {
+    "capturedAt": "2026-10-31",
+    "fixture": "throughline_readme_demo plus three demo accounts, fictional data",
+    "accounts": [
+      "admin",
+      "editor",
+      "viewer"
+    ]
+  }
 }
