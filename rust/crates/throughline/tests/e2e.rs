@@ -114,3 +114,50 @@ fn migrate_ingest_and_search_roundtrip() {
         )
         .ok();
 }
+
+/// `ingest --source locomo` writes benchmark data (CC BY-NC) and must refuse
+/// every database but `throughline_bench`, before it connects anywhere.
+#[test]
+fn locomo_ingest_refuses_other_databases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("dialogues.json");
+    // Synthetic: one invented session.
+    std::fs::write(
+        &path,
+        r#"[{"sample_id": "demo-9", "conversation": {"speaker_a": "Odile", "speaker_b": "Fenn",
+             "session_1_date_time": "3:15 pm on 4 March, 2031",
+             "session_1": [{"speaker": "Odile", "dia_id": "D1:1", "text": "Hello there."}]},
+           "qa": []}]"#,
+    )
+    .unwrap();
+    let count = |client: &mut postgres::Client| -> i64 {
+        client
+            .query_one(
+                "SELECT count(*) FROM conversations WHERE source_tool = 'locomo'",
+                &[],
+            )
+            .map(|r| r.get(0))
+            .unwrap_or(0)
+    };
+    let mut client = connect();
+    let before = client.as_mut().map(count);
+
+    let bin = env!("CARGO_BIN_EXE_throughline");
+    for db in [Some("throughline"), Some("not_the_bench"), None] {
+        let mut cmd = Command::new(bin);
+        cmd.args(["ingest", "--source", "locomo"])
+            .env("THROUGHLINE_LOCOMO_PATH", &path);
+        match db {
+            Some(db) => cmd.env("PGDATABASE", db),
+            None => cmd.env_remove("PGDATABASE"),
+        };
+        let out = cmd.output().expect("run ingest");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{db:?}: ingest ran");
+        assert!(stderr.contains("throughline_bench"), "{db:?}: {stderr}");
+    }
+
+    if let (Some(client), Some(before)) = (client.as_mut(), before) {
+        assert_eq!(count(client), before, "nothing was written");
+    }
+}

@@ -513,24 +513,38 @@ fn main() -> Result<()> {
             verbose,
             ignore,
         } => {
-            let mut client = config::DbConfig::from_env()
-                .connect()
-                .context("connect to PostgreSQL")?;
+            let db = config::DbConfig::from_env();
+            let adapter = match source.as_str() {
+                "all" => None,
+                name => Some(
+                    adapters::registry::by_name(name)
+                        .ok_or_else(|| anyhow::anyhow!("unknown source {source:?}"))?,
+                ),
+            };
+            // Benchmark data never reaches a real store: refuse before connecting.
+            if adapter
+                .as_ref()
+                .is_some_and(|a| a.name() == adapters::locomo::NAME)
+            {
+                adapters::locomo::check_database(&db.dbname)?;
+            }
+            let mut client = db.connect().context("connect to PostgreSQL")?;
             let rules = throughline::ignore::IgnoreRules::load(&ignore);
-            if source == "all" {
-                for summary in ingest_run::run_all_with_rules(&mut client, verbose, &rules)? {
+            match adapter {
+                None => {
+                    for summary in ingest_run::run_all_with_rules(&mut client, verbose, &rules)? {
+                        print_summary(&summary);
+                    }
+                }
+                Some(adapter) => {
+                    let summary = ingest_run::run_adapter_with_rules(
+                        &mut client,
+                        adapter.as_ref(),
+                        verbose,
+                        &rules,
+                    )?;
                     print_summary(&summary);
                 }
-            } else {
-                let adapter = adapters::registry::by_name(&source)
-                    .ok_or_else(|| anyhow::anyhow!("unknown source {source:?}"))?;
-                let summary = ingest_run::run_adapter_with_rules(
-                    &mut client,
-                    adapter.as_ref(),
-                    verbose,
-                    &rules,
-                )?;
-                print_summary(&summary);
             }
         }
         Command::Recall {
@@ -733,6 +747,11 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend()?;
             llm::ensure_local_or_allowed(&backend)?;
+            let profile = std::env::var(extract_memory::PROFILE_ENV).ok();
+            let prompt = extract_memory::extraction_prompt(profile.as_deref())?;
+            if prompt == extract_memory::PERSONAL_EXTRACTION_PROMPT {
+                eprintln!("extraction profile: personal");
+            }
             let mut total = extract_memory::ExtractSummary::default();
             for conv_id in extract_memory::pending_conversations(&mut client, limit)? {
                 let s = extract_memory::extract_conversation(
@@ -740,6 +759,7 @@ fn main() -> Result<()> {
                     &backend,
                     conv_id,
                     window_chars,
+                    prompt,
                 )?;
                 total.windows += s.windows;
                 total.chunks += s.chunks;

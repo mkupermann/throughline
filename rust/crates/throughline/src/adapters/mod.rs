@@ -7,6 +7,7 @@ pub mod codex;
 pub mod continue_dev;
 pub mod cursor;
 pub mod hermes;
+pub mod locomo;
 pub mod opencode;
 pub mod registry;
 pub mod vibe;

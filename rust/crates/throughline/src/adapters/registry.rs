@@ -27,7 +27,12 @@ fn registry_hook() -> Vec<Box<dyn Adapter>> {
     Vec::new()
 }
 
+/// A built-in by name, or the LoCoMo benchmark adapter, which is reachable
+/// only this way (never through `built_ins`, so never through `--source all`).
 pub fn by_name(name: &str) -> Option<Box<dyn Adapter>> {
     let normalized = name.replace('-', "_");
+    if normalized == super::locomo::NAME {
+        return Some(Box::new(super::locomo::LocomoAdapter::from_env()));
+    }
     built_ins().into_iter().find(|a| a.name() == normalized)
 }

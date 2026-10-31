@@ -77,6 +77,45 @@ Rules:
 
 Return the JSON array only. No markdown fences, no prose."#;
 
+/// Selects the extraction prompt: unset (or `default`) keeps
+/// [`EXTRACTION_PROMPT`], `personal` picks [`PERSONAL_EXTRACTION_PROMPT`].
+pub const PROFILE_ENV: &str = "THROUGHLINE_EXTRACT_PROFILE";
+
+/// The prompt for conversations between people rather than coding sessions:
+/// facts about people, events, preferences and dates. Same reply shape and
+/// categories as the default, so parsing and storage are shared.
+pub const PERSONAL_EXTRACTION_PROMPT: &str = r#"You extract durable memory from a conversation between people.
+Return ONLY a JSON array. Each item must have this exact shape:
+{"content": "...", "category": "...", "tags": ["..."], "confidence": 0.0-1.0}
+
+Categories (use exactly one):
+- "contact" — who a person is: family, friends, pets, job, home, background (e.g. "Ana's sister lives in Lisbon")
+- "insight" — something that happened to a person or that they did, with its time if known (e.g. "Ben ran his first marathon last weekend")
+- "preference" — what a person likes, dislikes, believes or values (e.g. "Ana prefers hiking to beach holidays")
+- "decision" — a plan, goal or choice a person made (e.g. "Ben plans to apply for a teaching job")
+
+Rules:
+1. Each line starts with the speaker's name after the role label. Name the person in every item; never write "he", "she", "the user" or "the assistant".
+2. Content must be self-contained — understandable without the transcript.
+3. One fact per item. Keep small details: names of people and pets, places, objects, hobbies, numbers.
+4. Keep times as they are said, relative ones too ("last Saturday", "two years ago"); the note is stored with the date of the conversation.
+5. "[shares a photo: ...]" describes a picture the speaker shared; use it when it tells something about the person.
+6. Skip greetings and small talk that carry no fact.
+7. Tags: 1–5 short lowercase keywords. No empty tags.
+8. If nothing is durable, return [] — never invent memories.
+
+Return the JSON array only. No markdown fences, no prose."#;
+
+/// The prompt for a profile value (see [`PROFILE_ENV`]). An unknown value is
+/// an error, so a typo never runs the wrong prompt unnoticed.
+pub fn extraction_prompt(profile: Option<&str>) -> Result<&'static str> {
+    match profile.map(|p| p.trim().to_lowercase()).as_deref() {
+        None | Some("") | Some("default") => Ok(EXTRACTION_PROMPT),
+        Some("personal") => Ok(PERSONAL_EXTRACTION_PROMPT),
+        Some(other) => bail!("{PROFILE_ENV}={other:?} is unknown; use personal or leave it unset"),
+    }
+}
+
 /// First user text from a message list.
 pub fn first_user_text(messages: &[NormalisedMessage]) -> String {
     messages
@@ -100,9 +139,11 @@ pub fn render_transcript(messages: &[NormalisedMessage], max_chars: usize) -> St
     out
 }
 
-/// Extract memories via the resolved generation backend.
+/// Extract memories via the resolved generation backend, with `prompt` (see
+/// [`extraction_prompt`]) in front of the transcript.
 pub fn extract(
     backend: &GenerationBackend,
+    prompt: &str,
     transcript: &str,
     redact: bool,
 ) -> Result<Vec<ExtractedMemory>> {
@@ -111,7 +152,7 @@ pub fn extract(
     } else {
         (transcript.to_string(), 0)
     };
-    let user = format!("{EXTRACTION_PROMPT}\n\n---\n{payload}");
+    let user = format!("{prompt}\n\n---\n{payload}");
     let raw = llm::complete(backend, None, &user).context("extraction completion")?;
     parse_array(&raw)
 }
@@ -229,12 +270,14 @@ pub fn pending_conversations<C: GenericClient>(client: &mut C, limit: usize) -> 
 /// Extract memories from one conversation's messages after its watermark,
 /// window by window. Each window's notes and the advanced watermark commit
 /// together. A failed window is reported and ends this conversation's pass,
-/// so it stays pending for the next run.
+/// so it stays pending for the next run. `prompt` comes from
+/// [`extraction_prompt`].
 pub fn extract_conversation<C: GenericClient>(
     client: &mut C,
     backend: &GenerationBackend,
     conv_id: i64,
     window_chars: usize,
+    prompt: &str,
 ) -> Result<ExtractSummary> {
     llm::ensure_local_or_allowed(backend)?;
     let lines: Vec<(DateTime<Utc>, String)> = client
@@ -255,7 +298,7 @@ pub fn extract_conversation<C: GenericClient>(
 
     let mut summary = ExtractSummary::default();
     for (text, end) in windows(&lines, window_chars) {
-        let items = match extract(backend, &text, true) {
+        let items = match extract(backend, prompt, &text, true) {
             Ok(items) => items,
             Err(e) => {
                 eprintln!("extract #{conv_id}: {e:#}");
@@ -674,7 +717,8 @@ mod tests {
         let backend = ollama_at(base);
 
         // "user: first\nuser: second" is 24 bytes, so 25 makes two windows.
-        let first = extract_conversation(&mut tx, &backend, conv, 25).expect("first pass");
+        let first = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT)
+            .expect("first pass");
         assert_eq!(
             first,
             ExtractSummary {
@@ -712,7 +756,8 @@ mod tests {
         assert!(!pending_conversations(&mut tx, 1000)
             .unwrap()
             .contains(&conv));
-        let again = extract_conversation(&mut tx, &backend, conv, 25).expect("second pass");
+        let again = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT)
+            .expect("second pass");
         assert_eq!(again, ExtractSummary::default());
 
         // A new message is pending, and it is the only thing sent.
@@ -725,7 +770,8 @@ mod tests {
             .unwrap()
             .contains(&conv));
         let (base, requests) = fake_ollama(vec!["[]"]);
-        let later = extract_conversation(&mut tx, &ollama_at(base), conv, 25).expect("third pass");
+        let later = extract_conversation(&mut tx, &ollama_at(base), conv, 25, EXTRACTION_PROMPT)
+            .expect("third pass");
         assert_eq!(
             later,
             ExtractSummary {
@@ -748,7 +794,8 @@ mod tests {
         let conv = seed_conversation(&mut tx, &[(1, "first"), (2, "second"), (3, "third")]);
         // One reply only: the second window's request finds no server.
         let (base, _requests) = fake_ollama(vec![DECISION]);
-        let s = extract_conversation(&mut tx, &ollama_at(base), conv, 25).expect("pass");
+        let s = extract_conversation(&mut tx, &ollama_at(base), conv, 25, EXTRACTION_PROMPT)
+            .expect("pass");
         assert_eq!(
             s,
             ExtractSummary {
@@ -765,6 +812,88 @@ mod tests {
             .unwrap()
             .get(0);
         assert_eq!(until, ts(T0 + 2), "the failed window stays pending");
+    }
+
+    #[test]
+    fn extract_profile_personal_changes_prompt_and_default_is_unchanged() {
+        use sha2::{Digest, Sha256};
+        // Byte for byte the prompt from before profiles existed (sha256 at 8c20aa3).
+        assert_eq!(
+            format!("{:x}", Sha256::digest(EXTRACTION_PROMPT.as_bytes())),
+            "45764bbe79164e10d09f28a4be5860472f0353e1b22cc57ecc9cbff979da513c"
+        );
+        for unset in [None, Some(""), Some("  "), Some("default")] {
+            assert_eq!(
+                extraction_prompt(unset).unwrap(),
+                EXTRACTION_PROMPT,
+                "{unset:?}"
+            );
+        }
+        for personal in ["personal", " Personal "] {
+            assert_eq!(
+                extraction_prompt(Some(personal)).unwrap(),
+                PERSONAL_EXTRACTION_PROMPT
+            );
+        }
+        assert_ne!(PERSONAL_EXTRACTION_PROMPT, EXTRACTION_PROMPT);
+        // A typo must not silently fall back to the default prompt.
+        let err = extraction_prompt(Some("persnal")).unwrap_err().to_string();
+        assert!(err.contains(PROFILE_ENV), "{err}");
+
+        // Same reply contract and categories, so parser and insert stay as they are.
+        assert!(PERSONAL_EXTRACTION_PROMPT.contains(
+            r#"{"content": "...", "category": "...", "tags": ["..."], "confidence": 0.0-1.0}"#
+        ));
+        let categories: Vec<&str> = PERSONAL_EXTRACTION_PROMPT
+            .lines()
+            .filter(|l| l.starts_with("- \""))
+            .filter_map(|l| l.split('"').nth(1))
+            .collect();
+        assert!(!categories.is_empty());
+        for category in categories {
+            assert!(CATEGORIES.contains(&category), "{category}");
+        }
+    }
+
+    /// The text of the last chat message in a fake-Ollama request body.
+    fn sent_prompt(body: &str) -> String {
+        let v: Value = serde_json::from_str(body).expect("request json");
+        v["messages"]
+            .as_array()
+            .and_then(|m| m.last())
+            .and_then(|m| m["content"].as_str())
+            .expect("user message")
+            .to_string()
+    }
+
+    #[test]
+    fn extract_conversation_sends_the_prompt_it_is_given() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping extract_conversation_sends_the_prompt_it_is_given: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = seed_conversation(&mut tx, &[(1, "first")]);
+        let (base, requests) = fake_ollama(vec!["[]", "[]"]);
+        let backend = ollama_at(base);
+
+        extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT).expect("default");
+        tx.execute(
+            "UPDATE conversations SET memory_extracted_until = NULL WHERE id = $1",
+            &[&conv],
+        )
+        .unwrap();
+        extract_conversation(&mut tx, &backend, conv, 25, PERSONAL_EXTRACTION_PROMPT)
+            .expect("personal");
+
+        let sent: Vec<String> = requests.try_iter().map(|b| sent_prompt(&b)).collect();
+        assert_eq!(
+            sent,
+            [
+                format!("{EXTRACTION_PROMPT}\n\n---\nuser: first"),
+                format!("{PERSONAL_EXTRACTION_PROMPT}\n\n---\nuser: first"),
+            ]
+        );
     }
 
     #[test]
@@ -791,7 +920,7 @@ mod tests {
         // record any request that reached it.
         let mut backend = ollama_at(base);
         backend.model = "glm-5.2:cloud".into();
-        let err = extract_conversation(&mut tx, &backend, conv, 25).unwrap_err();
+        let err = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT).unwrap_err();
         assert!(
             err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
             "{err}"
