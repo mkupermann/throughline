@@ -21,7 +21,7 @@ Measured on 74 questions from one installation with `granite-embedding-multiling
 - **`recall-eval`.** `--weights` runs `weighted` with weights of your own, and `--dump-parts` writes the six score parts of every candidate. The full-text method is labelled `fulltext` (it was `current`). `--mode locomo` measures retrieval on the LoCoMo benchmark.
 - **Extraction profile.** `THROUGHLINE_EXTRACT_PROFILE=personal` uses a prompt for conversations between people. Unset keeps the coding prompt, unchanged; an unknown value stops `extract-memory` before it starts.
 - **LoCoMo adapter.** `ingest --source locomo` reads the file named by `THROUGHLINE_LOCOMO_PATH` into `throughline_bench` and refuses any other database. `ingest --source all` leaves it out. The data is licensed CC BY-NC 4.0 and stays out of the repository.
-- **Embed job.** `launchd/com.claude-memory-embed.plist` and `systemd/throughline-embed.service` with its timer run `throughline embed --limit 10000` every hour at minute 15.
+- **Embed job.** `launchd/com.claude-memory-embed.plist` and `systemd/throughline-embed.service` with its timer run the Rust runtime's `throughline embed --limit 10000` every hour at minute 15. They need the Rust binary built in the checkout and the server's `OLLAMA_EMBED_MODEL` and `OLLAMA_HOST` (in the plist, or in `systemd/throughline.env`, which gains both); the Python CLI's `embed` ignores `OLLAMA_EMBED_MODEL` and uses `nomic-embed-text` on Ollama.
 - **No migration.** The schema is unchanged.
 
 ### Stricter start checks, sign-out

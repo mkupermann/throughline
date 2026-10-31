@@ -1,13 +1,8 @@
 # Throughline Benchmarks
 
 The first section, [Recall and public benchmarks](#recall-and-public-benchmarks),
-measures how well the Rust runtime finds notes (2026-10-31). Everything after it
-is historical.
-
-Historical, reproducible numbers from a real developer laptop. Nothing here is
-a synthetic stress test — every measurement was made against the author's
-Claude Code corpus in `~/.claude/projects/` before the multi-adapter runtime.
-They are not claims about the current nine-adapter ingest command.
+measures how well the Rust runtime finds notes (2026-10-31). Everything from
+[Historical numbers](#historical-numbers) on is older.
 
 ## Recall and public benchmarks
 
@@ -24,8 +19,11 @@ moved afterwards. A result that missed its bar is reported as such.
 - A copy of one real corpus, not the live database: about 1,600 current notes
   (1,595 at the start of part B), every one with a vector.
 - Embedding model `granite-embedding-multilingual:278m` for notes and questions.
-- Every number comes from `throughline recall-eval`. It runs the real recall
-  path and counts no use, so measuring changed no note's strength.
+- Every recall number comes from `throughline recall-eval` or from re-ranking
+  its `--dump-parts` output offline (the grid and the random weights of part
+  B). `recall-eval` runs the real recall path and counts no use, so measuring
+  changed no note's strength. The extraction numbers of part C come from
+  `extract-memory`.
   k = 5, seed 7. MRR counts down to rank 50.
 
 ### The test set
@@ -129,12 +127,14 @@ and no result that quotes it, is in this repository.
   notes per session at 42.8 s per session (measured over the 19 sessions before
   the machine went to sleep).
 - **Retrieval.** `recall-eval --mode locomo` asks every question in its
-  dialogue's project, with the default rank and with full text, weighted and
-  cosine for comparison. A hit means a returned note comes from a session that
-  holds one of the question's evidence turns. That is session level: notes do
-  not record which turn they came from. Recall@5 and recall@10 per category,
-  with n. The adversarial category is reported apart and stays out of the
-  headline.
+  dialogue's project, with the default rank (cosine) and with full text and
+  weighted for comparison. A hit means a returned note comes from a session
+  that holds one of the question's evidence turns. That is session level:
+  notes do not record which turn they came from. Per category, with n, at
+  k = 5 and k = 10: `hit`, the share of questions with a note from an evidence
+  session in the top k, and `coverage`, the mean share of a question's evidence
+  sessions that have a note in the top k. The adversarial category is reported
+  apart and stays out of the headline.
 - **Answers.** A context pack for the question's project, then the production
   answer prompt on `qwen3.6:27b`. The same model judges each answer three times
   with the yes/no template of the Mem0 paper, and the majority counts. The same
@@ -178,8 +178,9 @@ note, on the same Ollama that runs the extraction model. The time per note was
 not measured on its own, and the extraction timings in part C were taken
 before this existed. A note the write could not embed is ranked by its words
 until `throughline embed` gives it a vector, and the answer says how many such
-notes it saw. The shipped `launchd/` and `systemd/` templates run `embed`
-hourly at minute 15.
+notes it saw. The shipped `launchd/` and `systemd/` templates run the Rust
+`embed` hourly at minute 15; they help only when they are given the server's
+`OLLAMA_EMBED_MODEL`, because vectors of another model are not read.
 
 ### Reproducing the recall numbers
 
@@ -199,6 +200,13 @@ throughline recall-eval --set calibration.json --k 5 --seed 7 --json \
 throughline recall-eval --set test.json --k 5 --seed 7 --json \
   --weights 0.85,0,0,0.15,0,0
 ```
+
+## Historical numbers
+
+Historical, reproducible numbers from a real developer laptop. Nothing in this
+part is a synthetic stress test — every measurement was made against the
+author's Claude Code corpus in `~/.claude/projects/` before the multi-adapter
+runtime. They are not claims about the current nine-adapter ingest command.
 
 ## Test Rig
 
