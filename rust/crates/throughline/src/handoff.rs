@@ -3,7 +3,9 @@
 //! Offline — no LLM. The brief is what an agent should see at session start.
 //! Ranking: decisions and clear first-user text are surfaced first.
 
+use crate::access::{push_visibility, Actor};
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
 
@@ -110,6 +112,7 @@ pub fn decision_relevance_score(d: &DecisionNote) -> i32 {
 /// Build a compact resume brief for `project` (or the whole corpus).
 pub fn build_handoff<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     project: Option<&str>,
     limit: usize,
 ) -> Result<HandoffBrief> {
@@ -130,40 +133,55 @@ pub fn build_handoff<C: GenericClient>(
         &[&project, &(limit as i64)],
     )?;
 
+    // Every note query binds the project as $1 and the actor's filter after it.
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&project];
+    let seen = push_visibility(actor, "mc", &mut params);
     let decisions = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT id, content, category::text, project_name
-        FROM memory_chunks
+        FROM memory_chunks mc
         WHERE status = 'active'
           AND category IN ('decision','preference','project_context')
           AND ($1::text IS NULL OR project_name = $1)
+          AND {seen}
         ORDER BY created_at DESC
         LIMIT 12
-        "#,
-        &[&project],
+        "#
+        ),
+        &params,
     )?;
 
+    // Lapsed notes of every project: only the actor's filter is bound.
+    let mut stale_params: Vec<&(dyn ToSql + Sync)> = Vec::new();
+    let stale_seen = push_visibility(actor, "mc", &mut stale_params);
     let stale = client.query(
-        r#"
-        SELECT content FROM memory_chunks
+        &format!(
+            r#"
+        SELECT content FROM memory_chunks mc
         WHERE status = 'active'
           AND (expires_at IS NOT NULL AND expires_at < now())
+          AND {stale_seen}
         ORDER BY created_at DESC
         LIMIT 5
-        "#,
-        &[],
+        "#
+        ),
+        &stale_params,
     )?;
 
     let questions = client.query(
-        r#"
-        SELECT content FROM memory_chunks
+        &format!(
+            r#"
+        SELECT content FROM memory_chunks mc
         WHERE status = 'active'
           AND (content ILIKE '%?%' OR content ILIKE '%todo%' OR content ILIKE '%open%')
           AND ($1::text IS NULL OR project_name = $1)
+          AND {seen}
         ORDER BY created_at DESC
         LIMIT 5
-        "#,
-        &[&project],
+        "#
+        ),
+        &params,
     )?;
 
     let conversations: i64 = client
@@ -180,8 +198,11 @@ pub fn build_handoff<C: GenericClient>(
         .get(0);
     let memory_chunks: i64 = client
         .query_one(
-            "SELECT COUNT(*) FROM memory_chunks WHERE status = 'active' AND ($1::text IS NULL OR project_name = $1)",
-            &[&project],
+            &format!(
+                "SELECT COUNT(*) FROM memory_chunks mc WHERE status = 'active' \
+                 AND ($1::text IS NULL OR project_name = $1) AND {seen}"
+            ),
+            &params,
         )?
         .get(0);
     let tools: Vec<String> = client
@@ -553,5 +574,74 @@ mod tests {
             ]
         );
         assert!(clipboard_candidates("plan9").is_empty());
+    }
+
+    #[test]
+    fn handoff_hides() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping handoff_hides: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let project = format!("ho-{}", uuid::Uuid::new_v4().simple());
+        let secret = format!("secret {project}");
+        let p = Some(project.as_str());
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("decided {secret}"),
+            "decision",
+            p,
+        );
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("todo {secret}?"),
+            "insight",
+            p,
+        );
+        let lapsed = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("lapsed {secret}"),
+            "insight",
+            p,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET expires_at = now() - interval '1 day' WHERE id = $1",
+            &[&lapsed],
+        )
+        .expect("lapse");
+        note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("shared decision {project}"),
+            "decision",
+            p,
+        );
+        let mine = build_handoff(&mut tx, &a, p, 8).expect("handoff");
+        assert!(serde_json::to_string(&mine).unwrap().contains(&secret));
+        assert_eq!(mine.stats.memory_chunks, 4);
+        let theirs = build_handoff(&mut tx, &b, p, 8).expect("handoff");
+        assert_hidden(
+            &serde_json::to_string(&theirs).unwrap(),
+            &secret,
+            "the handoff",
+        );
+        assert_hidden(&render_text(&theirs), &secret, "the handoff text");
+        assert_eq!(theirs.stats.memory_chunks, 1, "only the shared note counts");
+        // Without a project the lapsed list covers every project.
+        let all = build_handoff(&mut tx, &b, None, 8).expect("handoff");
+        assert_hidden(
+            &serde_json::to_string(&all).unwrap(),
+            &secret,
+            "the handoff of all projects",
+        );
     }
 }

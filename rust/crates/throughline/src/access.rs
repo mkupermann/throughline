@@ -56,7 +56,7 @@ pub struct Actor {
 
 impl Actor {
     /// Local mode: the one person at this machine, who sees every note.
-    pub fn local() -> Actor {
+    pub const fn local() -> Actor {
         Actor {
             user_id: None,
             username: None,
@@ -66,7 +66,7 @@ impl Actor {
     }
 
     /// Server-wide jobs in team mode: no account, shared notes only.
-    pub fn shared_only() -> Actor {
+    pub const fn shared_only() -> Actor {
         Actor {
             user_id: None,
             username: None,
@@ -74,6 +74,42 @@ impl Actor {
             via: Via::Job,
         }
     }
+
+    /// A signed-in account, for tests of the filtered paths.
+    #[cfg(test)]
+    pub fn for_user(id: i64, username: &str, role: Role) -> Actor {
+        Actor {
+            user_id: Some(id),
+            username: Some(username.to_string()),
+            role,
+            via: Via::Session,
+        }
+    }
+}
+
+/// Owner and visibility of a note `actor` creates. `shared` is the default;
+/// `private` needs an account, because a note without an owner (local mode,
+/// jobs, the shared agent key) can never be private. `Err` is the message
+/// for a 422 or a JSON-RPC -32602.
+pub fn new_note_owner(
+    actor: &Actor,
+    visibility: Option<&str>,
+) -> std::result::Result<(Option<i64>, &'static str), String> {
+    match visibility.map(str::trim) {
+        None | Some("") | Some("shared") => Ok((actor.user_id, "shared")),
+        Some("private") if actor.user_id.is_some() => Ok((actor.user_id, "private")),
+        Some("private") => Err(
+            "a private note needs an account: without one (local mode, jobs) notes are shared"
+                .to_string(),
+        ),
+        Some(_) => Err("visibility must be shared or private".to_string()),
+    }
+}
+
+/// SQL for the `owner` field of a note row on alias `alias`: the owner's
+/// account name, or NULL for notes without an owner.
+pub fn owner_name_sql(alias: &str) -> String {
+    format!("(SELECT u.username FROM access_users u WHERE u.id = {alias}.owner_id)")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -614,6 +650,63 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn take_derivations() -> usize {
     DERIVATIONS.with(|d| std::mem::take(&mut *d.borrow_mut()).len())
+}
+
+/// Two accounts and their notes, for the visibility tests of every module.
+#[cfg(test)]
+pub(crate) mod team_test {
+    use super::*;
+
+    /// Test value, not a secret.
+    pub const PASSWORD: &str = "correct horse battery staple 1";
+
+    /// Accounts A and B, made the way `throughline account add` makes them,
+    /// as signed-in actors. `access_users` is locked first, as in every test
+    /// that writes accounts, so this cannot deadlock with the migration test.
+    pub fn two_accounts<C: GenericClient>(client: &mut C) -> (Actor, Actor) {
+        client
+            .batch_execute("LOCK TABLE access_users IN ROW EXCLUSIVE MODE")
+            .expect("lock accounts");
+        let mut add = |prefix: &str| {
+            let name = format!("{prefix}-{}", uuid::Uuid::new_v4().simple());
+            let id = crate::accounts_cli::add(client, &name, None, Role::Editor, PASSWORD)
+                .expect("add account");
+            Actor::for_user(id, &name, Role::Editor)
+        };
+        (add("a"), add("b"))
+    }
+
+    /// An active note owned by `owner` (NULL: a legacy note) with `visibility`.
+    pub fn note<C: GenericClient>(
+        client: &mut C,
+        owner: Option<i64>,
+        visibility: &str,
+        content: &str,
+        category: &str,
+        project: Option<&str>,
+    ) -> i64 {
+        let category_type = crate::extract_memory::category_column_type(client).expect("type");
+        client
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category, project_name, \
+                     confidence, status, source_at, valid_from, owner_id, visibility) \
+                     VALUES ('manual', $1, $2::text::{category_type}, $3, 0.9, 'active', now(), \
+                     now(), $4, $5) RETURNING id"
+                ),
+                &[&content, &category, &project, &owner, &visibility],
+            )
+            .expect("insert note")
+            .get(0)
+    }
+
+    /// A's private note must not show up in what B gets.
+    pub fn assert_hidden(text: &str, secret: &str, what: &str) {
+        assert!(
+            !text.contains(secret),
+            "{what} shows another account's private note: {text}"
+        );
+    }
 }
 
 #[cfg(test)]

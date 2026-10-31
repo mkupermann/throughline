@@ -5,6 +5,7 @@
 //! `current` uses the default rank, full text, so it equals `fulltext` by
 //! construction; `weighted` is the weighted ranking.
 
+use crate::access::Actor;
 use crate::recall::{self, CandidateFilter, Rank, RecallMode, RecallQuery};
 use crate::search;
 use anyhow::{bail, Context, Result};
@@ -15,6 +16,9 @@ use std::path::Path;
 
 /// Ranks beyond this are reported as "not found" for every method alike.
 const RANK_DEPTH: usize = 50;
+
+/// `recall-eval` is a CLI command: it sees every note, like local mode.
+static LOCAL: Actor = Actor::local();
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EvalCase {
@@ -116,6 +120,8 @@ pub fn run_eval<C: GenericClient>(
             bail!("no query embedding (is Ollama reachable?): {}", case.q);
         }
         let mut q = RecallQuery {
+            // An operator's evaluation over the whole corpus, like every CLI command.
+            actor: &LOCAL,
             text: &case.q,
             project: case.project.as_deref(),
             mode: RecallMode::Current,
@@ -160,7 +166,7 @@ pub fn run_eval<C: GenericClient>(
             scored.into_iter().map(|s| s.0).collect::<Vec<i64>>()
         };
 
-        let phrase: Vec<i64> = search::memory_hits(client, &case.q, RANK_DEPTH as i32)?
+        let phrase: Vec<i64> = search::memory_hits(client, &LOCAL, &case.q, RANK_DEPTH as i32)?
             .iter()
             .filter_map(|h| h.message_id)
             .collect();

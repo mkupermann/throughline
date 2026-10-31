@@ -3,6 +3,7 @@
 //! Candidates and scores are separate steps so that other modes and an
 //! evaluation can rank the same candidates in a different way.
 
+use crate::access::{push_visibility, Actor};
 use crate::generate_embeddings::vector_literal;
 use crate::lifecycle;
 use crate::temporal;
@@ -106,6 +107,9 @@ fn as_of_min_cosine(emb: Option<&QueryEmbedding>) -> f64 {
 }
 
 pub struct RecallQuery<'a> {
+    /// Whose notes may appear: every query, chain step and neighbour is
+    /// filtered to what this actor sees.
+    pub actor: &'a Actor,
     pub text: &'a str,
     pub project: Option<&'a str>,
     pub mode: RecallMode,
@@ -391,16 +395,27 @@ fn load_candidates<C: GenericClient>(
     if filter == CandidateFilter::Ids {
         params.push(&ids);
     }
+    // The chain is cut at a note the actor does not see: no successor, no
+    // predecessor, no merge member and no root behind it.
+    let seen = push_visibility(q.actor, "mc", &mut params);
+    let seen_next = push_visibility(q.actor, "s", &mut params);
+    let seen_prev = push_visibility(q.actor, "p", &mut params);
+    let seen_member = push_visibility(q.actor, "mm", &mut params);
+    let seen_root = push_visibility(q.actor, "p", &mut params);
     let sql = format!(
         r#"
         SELECT mc.id, mc.content, mc.category::text, mc.project_name,
                COALESCE(mc.status, 'active'),
                COALESCE(mc.valid_from, mc.source_at, mc.created_at), mc.valid_to,
-               mc.source_type, c.id, c.summary, mc.superseded_by,
-               (SELECT min(p.id) FROM memory_chunks p WHERE p.superseded_by = mc.id),
+               mc.source_type, c.id, c.summary,
+               (SELECT s.id FROM memory_chunks s WHERE s.id = mc.superseded_by AND {seen_next}),
+               (SELECT min(p.id) FROM memory_chunks p WHERE p.superseded_by = mc.id AND {seen_prev}),
                COALESCE(mc.confidence::float8, 0.5),
                {cosine},
-               COALESCE(mc.tags, '{{}}'), mc.source_id, COALESCE(mc.merged_from, '{{}}'),
+               COALESCE(mc.tags, '{{}}'), mc.source_id,
+               ARRAY(SELECT u.x FROM unnest(COALESCE(mc.merged_from, '{{}}')) WITH ORDINALITY u(x, n)
+                     WHERE EXISTS (SELECT 1 FROM memory_chunks mm WHERE mm.id = u.x AND {seen_member})
+                     ORDER BY u.n),
                mc.expires_at, COALESCE(root.source_at, c.started_at),
                COALESCE(mc.access_count, 0)::bigint, mc.last_accessed
         FROM memory_chunks mc
@@ -410,12 +425,12 @@ fn load_candidates<C: GenericClient>(
                 UNION ALL
                 SELECT p.id, p.source_type, p.source_id, p.source_at, up.depth + 1
                 FROM memory_chunks p JOIN up ON p.superseded_by = up.id
-                WHERE up.depth < 50)
+                WHERE up.depth < 50 AND {seen_root})
             SELECT source_type, source_id, source_at FROM up ORDER BY depth DESC LIMIT 1
         ) root ON true
         LEFT JOIN conversations c ON root.source_type = 'conversation' AND c.id = root.source_id
         {join}
-        WHERE {state} {predicate}
+        WHERE {state} {predicate} AND {seen}
           AND ($3::text IS NULL OR mc.project_name = $3 OR mc.project_name IS NULL)
         "#
     );
@@ -539,9 +554,13 @@ const MAX_HOPS: usize = 2;
 /// from), in the order of the edge table, so the first row per id wins a tie.
 fn neighbour_edges<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     frontier: &[i64],
 ) -> Result<Vec<(i64, &'static str, i64)>> {
-    let rows = client.query(
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&frontier];
+    // A neighbour the actor does not see is no step: the walk stops there.
+    let seen = push_visibility(actor, "v", &mut params);
+    let sql = format!(
         "SELECT id, prio, via FROM (
             SELECT mc.id, 1 AS prio, mc.superseded_by AS via
               FROM memory_chunks mc WHERE mc.superseded_by = ANY($1)
@@ -556,18 +575,20 @@ fn neighbour_edges<C: GenericClient>(
             UNION ALL
             SELECT mc.id, 3, f.id FROM memory_chunks f
               JOIN memory_chunks mc ON mc.id <> f.id
-               AND EXISTS (SELECT 1 FROM unnest(COALESCE(f.tags, '{}')) t
-                           WHERE left(t, 5) = 'file:' AND t = ANY(COALESCE(mc.tags, '{}')))
+               AND EXISTS (SELECT 1 FROM unnest(COALESCE(f.tags, '{{}}')) t
+                           WHERE left(t, 5) = 'file:' AND t = ANY(COALESCE(mc.tags, '{{}}')))
              WHERE f.id = ANY($1)
             UNION ALL
             SELECT mc.id, 4, f.id FROM memory_chunks f
               JOIN memory_chunks mc ON mc.id <> f.id
-               AND (f.id = ANY(COALESCE(mc.merged_from, '{}'))
-                    OR mc.id = ANY(COALESCE(f.merged_from, '{}')))
+               AND (f.id = ANY(COALESCE(mc.merged_from, '{{}}'))
+                    OR mc.id = ANY(COALESCE(f.merged_from, '{{}}')))
              WHERE f.id = ANY($1)
-         ) x WHERE id <> ALL($1) ORDER BY prio, id, via",
-        &[&frontier],
-    )?;
+         ) x WHERE id <> ALL($1)
+             AND EXISTS (SELECT 1 FROM memory_chunks v WHERE v.id = x.id AND {seen})
+         ORDER BY prio, id, via"
+    );
+    let rows = client.query(&sql, &params)?;
     Ok(rows
         .iter()
         .map(|r| {
@@ -610,7 +631,7 @@ fn associate<C: GenericClient>(
         let ids: Vec<i64> = frontier.keys().copied().collect();
         // id -> (spread, relation)
         let mut reached: HashMap<i64, (f64, &'static str)> = HashMap::new();
-        for (id, rel, via) in neighbour_edges(client, &ids)? {
+        for (id, rel, via) in neighbour_edges(client, q.actor, &ids)? {
             if seeds.contains(&id) {
                 continue;
             }
@@ -1039,8 +1060,12 @@ mod tests {
             .unwrap();
     }
 
+    /// Local mode: every note visible, as before team mode.
+    static LOCAL: Actor = Actor::local();
+
     fn query<'a>(text: &'a str, project: Option<&'a str>) -> RecallQuery<'a> {
         RecallQuery {
+            actor: &LOCAL,
             text,
             project,
             mode: RecallMode::Current,
@@ -1388,6 +1413,7 @@ mod tests {
         let a = seed(&mut tx, &sa);
         let (_, b) = crate::server::supersede_memory(
             &mut tx,
+            &crate::access::Actor::local(),
             a,
             &crate::server::Successor {
                 content: &content_b,
@@ -2415,5 +2441,163 @@ mod tests {
             line.ends_with(&format!("new {tag} (Quelle: Session {tag}, 2026-02-28)")),
             "{line}"
         );
+    }
+
+    #[test]
+    fn recall_hides_private_notes_of_others() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping recall_hides_private_notes_of_others: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let secret = format!("secret{tag}");
+        let p = Some(project.as_str());
+        // A shared note that A's private note replaced, the private note,
+        // a shared neighbour of it (same file) and a note one step behind it
+        // (same conversation). B sees the shared notes, never the private one,
+        // and no walk passes through it.
+        let old = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("plan{tag} old"),
+            "insight",
+            p,
+        );
+        let private = note(
+            &mut tx,
+            Some(a.user_id.unwrap()),
+            "private",
+            &format!("plan{tag} {secret}"),
+            "insight",
+            p,
+        );
+        replace(&mut tx, old, private);
+        let near = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("zebra{tag} near"),
+            "insight",
+            p,
+        );
+        let behind = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("behind{tag}"),
+            "insight",
+            p,
+        );
+        let merged = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("merged{tag}"),
+            "insight",
+            p,
+        );
+        let conv = 986_000_000 + i64::from(uuid::Uuid::new_v4().as_u128() as u32 % 1_000_000);
+        tx.execute(
+            "UPDATE memory_chunks SET tags = ARRAY[$2]::text[] WHERE id = ANY($1)",
+            &[&vec![near, private], &format!("file:{tag}.rs")],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET source_type = 'conversation', source_id = $2 WHERE id = ANY($1)",
+            &[&vec![private, behind], &conv],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = ARRAY[$2]::bigint[] WHERE id = $1",
+            &[&merged, &private],
+        )
+        .unwrap();
+
+        fn run(
+            tx: &mut postgres::Transaction<'_>,
+            actor: &Actor,
+            q: RecallQuery<'_>,
+        ) -> RecallResult {
+            recall(tx, &RecallQuery { actor, ..q }, None).unwrap()
+        }
+        let ids = |r: &RecallResult| -> Vec<i64> {
+            r.hits
+                .iter()
+                .flat_map(|h| [Some(h.id), h.superseded_by, h.supersedes])
+                .flatten()
+                .collect()
+        };
+        let as_of = |text: &'static str| {
+            let mut q = query(text, None);
+            q.mode = RecallMode::AsOf;
+            q.valid_at = Some(Utc::now());
+            q
+        };
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        let current_q = || query(leak(format!("plan{tag} {secret}")), None);
+        let as_of_q = || as_of(leak(format!("plan{tag}")));
+        let near_q = || associative(&format!("zebra{tag}"), &project, 1);
+        let behind_q = || associative(&format!("behind{tag}"), &project, 1);
+
+        // A, the owner, sees the note, the chain and the neighbours.
+        let r = run(&mut tx, &a, current_q());
+        assert!(position(&r, private).is_some(), "A must see her note");
+        let r = run(&mut tx, &a, as_of_q());
+        assert_eq!(
+            r.hits[position(&r, old).unwrap()].superseded_by,
+            Some(private)
+        );
+        for q in [near_q(), behind_q()] {
+            let r = run(&mut tx, &a, q);
+            assert!(position(&r, private).is_some(), "a neighbour of A's");
+        }
+
+        // B sees none of it.
+        for (what, r) in [
+            ("current", run(&mut tx, &b, current_q())),
+            ("as_of", run(&mut tx, &b, as_of_q())),
+            ("associative by file", run(&mut tx, &b, near_q())),
+            ("associative by conversation", run(&mut tx, &b, behind_q())),
+        ] {
+            assert!(!ids(&r).contains(&private), "{what}: {:?}", ids(&r));
+            assert_hidden(&serde_json::to_string(&r).unwrap(), &secret, what);
+            if what == "as_of" {
+                let h = &r.hits[position(&r, old).expect("the shared old note stays")];
+                assert_eq!(h.superseded_by, None, "the chain ends at the private note");
+            }
+        }
+        // No edge leads B to the private note, so no walk passes through it:
+        // from its shared neighbours B reaches nothing behind it.
+        for frontier in [vec![near], vec![behind], vec![merged], vec![old]] {
+            let edges = neighbour_edges(&mut tx, &b, &frontier).unwrap();
+            assert!(
+                edges.iter().all(|e| e.0 != private),
+                "{frontier:?}: {edges:?}"
+            );
+            let mine = neighbour_edges(&mut tx, &a, &frontier).unwrap();
+            assert!(
+                mine.iter().any(|e| e.0 == private),
+                "{frontier:?}: {mine:?}"
+            );
+        }
+        // Weighted candidates of B: the merge member list is cut too.
+        let cands = candidates(
+            &mut tx,
+            CandidateFilter::Current,
+            &RecallQuery {
+                actor: &b,
+                ..query("", Some(&project))
+            },
+            None,
+        )
+        .unwrap();
+        assert!(cands
+            .iter()
+            .all(|c| c.id != private && !c.merged_from.contains(&private)));
     }
 }

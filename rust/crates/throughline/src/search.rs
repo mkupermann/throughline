@@ -3,10 +3,12 @@
 //! Ranking prefers memory hits and project instructions over raw messages,
 //! and applies a mild recency boost so recent evidence surfaces first.
 
+use crate::access::{push_visibility, Actor};
 use crate::embedding::EmbeddingBackend;
 use crate::generate_embeddings;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use postgres::types::ToSql;
 use postgres::GenericClient;
 
 #[derive(Debug, Clone)]
@@ -187,6 +189,7 @@ pub fn semantic<C: GenericClient>(
 /// Falls back to lexical when the embedding backend is down.
 pub fn hybrid<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     backend: Option<&EmbeddingBackend>,
     query: &str,
     limit: i32,
@@ -204,7 +207,7 @@ pub fn hybrid<C: GenericClient>(
     hits.append(&mut lex);
     // Durable notes (agent memory, project instructions) are first-class hits —
     // otherwise Find never surfaces MiMo/agent memory in the GUI.
-    hits.append(&mut memory_hits(client, query, limit)?);
+    hits.append(&mut memory_hits(client, actor, query, limit)?);
 
     let mut seen = std::collections::HashSet::new();
     hits.retain(|h| {
@@ -224,21 +227,27 @@ pub fn hybrid<C: GenericClient>(
 /// Lexical hits from `memory_chunks` and indexed instruction files.
 pub(crate) fn memory_hits<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     query: &str,
     limit: i32,
 ) -> Result<Vec<SearchHit>> {
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let mut hits = Vec::new();
+    let limit64 = limit as i64;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&like, &limit64];
+    let seen = push_visibility(actor, "ch", &mut params);
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT ch.id, COALESCE(ch.source_id, 0), COALESCE(ch.project_name, ''),
                ch.source_type, 'memory', left(ch.content, 240), ch.created_at
         FROM memory_chunks ch
-        WHERE ch.content ILIKE $1 AND ch.status = 'active'
+        WHERE ch.content ILIKE $1 AND ch.status = 'active' AND {seen}
         ORDER BY ch.created_at DESC
         LIMIT $2::bigint
-        "#,
-        &[&like, &(limit as i64)],
+        "#
+        ),
+        &params,
     )?;
     hits.extend(rows.into_iter().map(|r| SearchHit {
         message_id: Some(r.get(0)),
@@ -344,6 +353,7 @@ impl SearchSource {
 /// Memory and instruction hits are scored higher; recency boost is applied.
 pub fn search_from<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     query: &str,
     limit: i32,
     source: SearchSource,
@@ -354,8 +364,12 @@ pub fn search_from<C: GenericClient>(
     let like = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
     let mut hits = Vec::new();
     if matches!(source, SearchSource::Memory | SearchSource::All) {
+        let limit64 = limit as i64;
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&like, &limit64];
+        let seen = push_visibility(actor, "ch", &mut params);
         let rows = client.query(
-            r#"
+            &format!(
+                r#"
             SELECT ch.id,
                    COALESCE(ch.source_id, 0),
                    COALESCE(ch.project_name, ''),
@@ -366,10 +380,12 @@ pub fn search_from<C: GenericClient>(
             FROM memory_chunks ch
             WHERE ch.content ILIKE $1
               AND ch.status = 'active'
+              AND {seen}
             ORDER BY ch.created_at DESC
             LIMIT $2::bigint
-            "#,
-            &[&like, &(limit as i64)],
+            "#
+            ),
+            &params,
         )?;
         hits.extend(rows.into_iter().map(|r| {
             let created_at: DateTime<Utc> = r.get(6);
@@ -499,5 +515,66 @@ mod tests {
         assert_eq!(SearchSource::parse("messages"), SearchSource::Messages);
         assert_eq!(SearchSource::parse("all"), SearchSource::All);
         assert_eq!(SearchSource::parse("anything"), SearchSource::All);
+    }
+
+    #[test]
+    fn search_hides() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping search_hides: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let secret = format!("secret-{tag}");
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("plan {secret}"),
+            "insight",
+            None,
+        );
+        let shared = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("plan shared-{tag}"),
+            "insight",
+            None,
+        );
+        let texts = |hits: &[SearchHit]| -> String {
+            hits.iter()
+                .map(|h| format!("{} {:?} {}", h.kind, h.message_id, h.snippet))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let ids = |hits: &[SearchHit]| -> Vec<i64> {
+            hits.iter()
+                .filter(|h| h.kind == "memory")
+                .filter_map(|h| h.message_id)
+                .collect()
+        };
+        let mine = memory_hits(&mut tx, &a, &tag, 50).expect("memory hits");
+        assert!(ids(&mine).contains(&private), "A finds her note");
+        for (what, hits) in [
+            (
+                "memory_hits",
+                memory_hits(&mut tx, &b, &tag, 50).expect("memory hits"),
+            ),
+            (
+                "hybrid",
+                hybrid(&mut tx, &b, None, &tag, 50).expect("hybrid"),
+            ),
+            (
+                "search_from",
+                search_from(&mut tx, &b, &tag, 50, SearchSource::All).expect("search_from"),
+            ),
+        ] {
+            assert!(!ids(&hits).contains(&private), "{what}: {}", texts(&hits));
+            assert_hidden(&texts(&hits), &secret, what);
+            assert!(ids(&hits).contains(&shared), "{what} finds the shared note");
+        }
     }
 }

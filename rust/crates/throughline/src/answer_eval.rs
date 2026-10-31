@@ -3,9 +3,11 @@
 //! Retrieval evals measure what comes back. This measures whether the answer
 //! stays inside those excerpts, cites them correctly, and does not invent.
 
+use crate::access::{push_visibility, Actor};
 use crate::ask::{self, AskAnswer};
 use crate::llm::GenerationBackend;
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -131,12 +133,13 @@ pub fn evaluate_answer(case: &EvalCase, answer: &AskAnswer) -> EvalCaseResult {
 /// Run the answer-quality suite against the corpus + a generation backend.
 pub fn run_eval<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     backend: &GenerationBackend,
     cases: &[EvalCase],
 ) -> Result<EvalReport> {
     let mut results = Vec::new();
     for case in cases {
-        let answer = ask::ask(client, &case.question, backend, 12)?;
+        let answer = ask::ask(client, actor, &case.question, backend, 12)?;
         results.push(evaluate_answer(case, &answer));
     }
     let passed = results.iter().filter(|r| r.pass).count();
@@ -154,6 +157,42 @@ pub fn run_eval<C: GenericClient>(
         hallucination_rate: with_flags as f32 / n,
         citation_rate: with_cites as f32 / n,
     })
+}
+
+/// The default suite: one question per active decision `actor` sees, the
+/// newest `limit` first.
+pub fn decision_cases<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    limit: i64,
+    forbidden: &[&str],
+) -> Result<Vec<EvalCase>> {
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&limit];
+    let seen = push_visibility(actor, "mc", &mut params);
+    let rows = client.query(
+        &format!(
+            "SELECT content FROM memory_chunks mc WHERE status = 'active' \
+             AND category = 'decision' AND {seen} ORDER BY created_at DESC LIMIT $1::bigint"
+        ),
+        &params,
+    )?;
+    Ok(rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let c: String = r.get(0);
+            EvalCase {
+                id: format!("mem-{i}"),
+                question: format!(
+                    "What did we decide about: {}",
+                    c.chars().take(60).collect::<String>()
+                ),
+                must_cite_conversation_ids: vec![],
+                expected_phrases: vec![],
+                forbidden_phrases: forbidden.iter().map(|f| f.to_string()).collect(),
+            }
+        })
+        .collect())
 }
 
 pub fn render_text(report: &EvalReport) -> String {
@@ -230,5 +269,67 @@ mod tests {
     fn counts_numeric_citations() {
         assert_eq!(count_citations("a [1] b [23] c [x]"), 2);
         assert_eq!(count_citations("none"), 0);
+    }
+
+    #[test]
+    fn answer_eval_hides() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping answer_eval_hides: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let secret = format!("secret {}", uuid::Uuid::new_v4().simple());
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("we chose {secret}"),
+            "decision",
+            None,
+        );
+        let questions = |cases: &[EvalCase]| {
+            cases
+                .iter()
+                .map(|c| c.question.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mine = decision_cases(&mut tx, &a, 10, &["probably"]).expect("cases");
+        assert!(
+            questions(&mine).contains(&secret),
+            "A's decision is a question for A"
+        );
+        let theirs = decision_cases(&mut tx, &b, 10, &["probably"]).expect("cases");
+        assert_hidden(&questions(&theirs), &secret, "the answer-eval questions");
+        // The run itself asks with B's filter: a model that cannot be reached
+        // turns every answer into the listing of its sources.
+        let backend = GenerationBackend {
+            kind: crate::llm::BackendKind::Ollama,
+            label: "unreachable".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            model: "none".into(),
+            api_key: None,
+        };
+        let probe = EvalCase {
+            id: "probe".into(),
+            question: secret.clone(),
+            must_cite_conversation_ids: vec![],
+            expected_phrases: vec![],
+            forbidden_phrases: vec![],
+        };
+        let sources = |tx: &mut postgres::Transaction<'_>, actor: &Actor| {
+            run_eval(tx, actor, &backend, std::slice::from_ref(&probe))
+                .expect("run")
+                .cases[0]
+                .source_count
+        };
+        let (mine, theirs) = (sources(&mut tx, &a), sources(&mut tx, &b));
+        assert_eq!(
+            mine,
+            theirs + 1,
+            "only A's own note is a source of A's alone"
+        );
     }
 }

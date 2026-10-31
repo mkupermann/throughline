@@ -2,6 +2,7 @@
 //! request, answered with plain JSON. Only agents holding
 //! `THROUGHLINE_AGENT_KEY` get in.
 
+use crate::access::Actor;
 use crate::agent_key::{check_bearer, KeyCheck};
 use crate::mcp::{dispatch, McpContext, Reply};
 use crate::mcp_protocol::{classify_http, Transport, INVALID_REQUEST, PARSE_ERROR};
@@ -10,7 +11,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use serde_json::{json, Value};
 
 /// Largest request body read, in bytes.
@@ -34,8 +35,15 @@ fn invalid(code: i64, message: &str) -> Response {
 }
 
 /// One JSON-RPC message. The key is checked before the body is read, so a
-/// client without it learns nothing from body handling.
-pub async fn mcp_post(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
+/// client without it learns nothing from body handling. Local mode passes
+/// [`Actor::local`]; in team mode the shared agent key is no account and
+/// sees shared notes only.
+pub async fn mcp_post(
+    State(state): State<AppState>,
+    actor: Option<Extension<Actor>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     // A header that is not text is checked as an empty value and fails.
     let authorization = headers
         .get(header::AUTHORIZATION)
@@ -82,6 +90,7 @@ pub async fn mcp_post(State(state): State<AppState>, headers: HeaderMap, body: B
     let ctx = McpContext {
         transport: Transport::Http,
         read_only: state.mcp_read_only,
+        actor: actor.map_or_else(Actor::shared_only, |Extension(actor)| actor),
     };
     // vereinfacht: Einbetten der Frage läuft unter der DB-Sperre, ausbauen wenn K7 reißt
     match with_db(&state, move |client| Ok(dispatch(client, &msg, &ctx))).await {

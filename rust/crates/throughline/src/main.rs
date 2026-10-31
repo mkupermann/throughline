@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use throughline::access::Actor;
 use throughline::types::IngestSummary;
 use throughline::{
     access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, config, conflicts,
@@ -566,7 +567,9 @@ fn main() -> Result<()> {
             } else {
                 None
             };
+            let local = Actor::local();
             let q = recall::RecallQuery {
+                actor: &local,
                 text: &text,
                 project: project.as_deref(),
                 mode,
@@ -618,6 +621,7 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let pack = context_pack::build_context(
                 &mut client,
+                &Actor::local(),
                 &context_pack::ContextRequest {
                     project,
                     task,
@@ -668,7 +672,7 @@ fn main() -> Result<()> {
                 }
             }
             let source = search::SearchSource::parse(&from);
-            let hits = search::search_from(&mut client, &query, limit, source)?;
+            let hits = search::search_from(&mut client, &Actor::local(), &query, limit, source)?;
             if hits.is_empty() {
                 println!("no matches");
                 return Ok(());
@@ -703,7 +707,7 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend().context("resolve generation backend")?;
             llm::ensure_local_or_allowed(&backend)?;
-            let answer = ask::ask(&mut client, &question, &backend, limit)?;
+            let answer = ask::ask(&mut client, &Actor::local(), &question, &backend, limit)?;
             println!("{}", answer.answer);
             println!();
             println!(
@@ -874,7 +878,8 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let brief = handoff::build_handoff(&mut client, project.as_deref(), limit)?;
+            let brief =
+                handoff::build_handoff(&mut client, &Actor::local(), project.as_deref(), limit)?;
             let text = handoff::render_text(&brief);
             print!("{text}");
             if let Some(path) = out {
@@ -921,6 +926,7 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let report = decisions::list_decisions(
                 &mut client,
+                &Actor::local(),
                 project.as_deref(),
                 include_superseded,
                 limit,
@@ -967,7 +973,7 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let report = audit::audit(&mut client, since)?;
+            let report = audit::audit(&mut client, &Actor::local(), since)?;
             print!("{}", audit::render_text(&report));
         }
         Command::AnswerEval { cases, limit } => {
@@ -978,31 +984,15 @@ fn main() -> Result<()> {
             llm::ensure_local_or_allowed(&backend)?;
             let case_list = match cases {
                 Some(path) => answer_eval::load_cases(std::path::Path::new(&path))?,
-                None => {
-                    // Default suite: pull open questions from memory as probes.
-                    let rows = client.query(
-                        "SELECT content FROM memory_chunks WHERE status='active' AND category='decision' ORDER BY created_at DESC LIMIT $1::bigint",
-                        &[&(limit as i64)],
-                    )?;
-                    rows.into_iter()
-                        .enumerate()
-                        .map(|(i, r)| {
-                            let c: String = r.get(0);
-                            answer_eval::EvalCase {
-                                id: format!("mem-{i}"),
-                                question: format!(
-                                    "What did we decide about: {}",
-                                    c.chars().take(60).collect::<String>()
-                                ),
-                                must_cite_conversation_ids: vec![],
-                                expected_phrases: vec![],
-                                forbidden_phrases: vec!["I think".into(), "probably".into()],
-                            }
-                        })
-                        .collect()
-                }
+                // Default suite: pull open questions from memory as probes.
+                None => answer_eval::decision_cases(
+                    &mut client,
+                    &Actor::local(),
+                    limit as i64,
+                    &["I think", "probably"],
+                )?,
             };
-            let report = answer_eval::run_eval(&mut client, &backend, &case_list)?;
+            let report = answer_eval::run_eval(&mut client, &Actor::local(), &backend, &case_list)?;
             print!("{}", answer_eval::render_text(&report));
         }
         Command::Consolidate {
@@ -1027,8 +1017,11 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
+            // Merging is a job over the whole database: shared notes only.
+            let job = Actor::shared_only();
             let groups = lifecycle::consolidation_candidates(
                 &mut client,
+                &job,
                 &backend.model,
                 backend.column,
                 min_similarity,
@@ -1037,7 +1030,7 @@ fn main() -> Result<()> {
                 let mut failed = 0usize;
                 for g in &groups {
                     let ids: Vec<i64> = g.notes.iter().map(|n| n.id).collect();
-                    match lifecycle::consolidate(&mut client, &ids, &g.proposal, None) {
+                    match lifecycle::consolidate(&mut client, &job, &ids, &g.proposal, None) {
                         Ok(new_id) => println!("{ids:?} -> {new_id}"),
                         Err(e) => {
                             failed += 1;
@@ -1090,7 +1083,7 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let digest = stale_digest::build_digest(&mut client, since)?;
+            let digest = stale_digest::build_digest(&mut client, &Actor::local(), since)?;
             print!("{}", stale_digest::render_text(&digest));
         }
         Command::Writeback {
@@ -1104,8 +1097,14 @@ fn main() -> Result<()> {
             let root = root
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            let summary =
-                memory_writeback::writeback(&mut client, &root, project.as_deref(), limit)?;
+            // The instruction file is shared: private notes never go there.
+            let summary = memory_writeback::writeback(
+                &mut client,
+                &Actor::shared_only(),
+                &root,
+                project.as_deref(),
+                limit,
+            )?;
             println!(
                 "writeback: {} items → {} ({})",
                 summary.items_written,
@@ -1146,7 +1145,8 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let report = conflicts::find_conflicts(&mut client, project.as_deref(), 0.85)?;
+            let report =
+                conflicts::find_conflicts(&mut client, &Actor::local(), project.as_deref(), 0.85)?;
             println!(
                 "conflicts: {} (checked {})",
                 report.conflicts.len(),
@@ -1171,9 +1171,11 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let backend = llm::resolve_backend().ok();
+            // Reflect is a job: it sees shared notes only.
+            let job = Actor::shared_only();
             let summaries = match mode.as_str() {
-                "dedup" => vec![reflect_memory::dedup(&mut client, dry_run)?],
-                "stale" => vec![reflect_memory::expire_stale(&mut client, dry_run)?],
+                "dedup" => vec![reflect_memory::dedup(&mut client, &job, dry_run)?],
+                "stale" => vec![reflect_memory::expire_stale(&mut client, &job, dry_run)?],
                 "contradictions" => {
                     let b = backend.as_ref().ok_or_else(|| {
                         anyhow::anyhow!("contradictions need a generation backend")
@@ -1181,6 +1183,7 @@ fn main() -> Result<()> {
                     llm::ensure_local_or_allowed(b)?;
                     vec![reflect_memory::contradictions(
                         &mut client,
+                        &job,
                         b,
                         dry_run,
                         limit,
@@ -1198,7 +1201,7 @@ fn main() -> Result<()> {
                                     false
                                 }
                             });
-                    reflect_memory::run_all(&mut client, usable, dry_run, limit)?
+                    reflect_memory::run_all(&mut client, &job, usable, dry_run, limit)?
                 }
             };
             let mut failed = 0usize;
@@ -1238,7 +1241,8 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let n = ops_jobs::extract_entities_from_chunks(&mut client, limit)?;
+            let n =
+                ops_jobs::extract_entities_from_chunks(&mut client, &Actor::shared_only(), limit)?;
             println!("entity mentions upserted: {n}");
         }
         Command::Mcp => {
@@ -1246,6 +1250,7 @@ fn main() -> Result<()> {
                 .connect()
                 .context("connect to PostgreSQL")?;
             let ctx = mcp::McpContext {
+                actor: Actor::local(),
                 transport: throughline::mcp_protocol::Transport::Stdio,
                 read_only: mcp::read_only_from(
                     std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),

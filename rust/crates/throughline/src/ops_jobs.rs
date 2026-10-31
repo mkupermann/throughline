@@ -1,7 +1,9 @@
 //! Backup via `pg_dump` and entity extraction helpers.
 
+use crate::access::{push_visibility, Actor};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -107,20 +109,39 @@ fn prune(dir: &Path, keep: usize, dbname: &str) -> Result<()> {
     Ok(())
 }
 
+/// The notes entity extraction reads: (id, project or "", content) of the
+/// newest `limit` active notes `actor` sees.
+fn entity_sources<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    limit: usize,
+) -> Result<Vec<(i64, String, String)>> {
+    let limit = limit as i64;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&limit];
+    let seen = push_visibility(actor, "mc", &mut params);
+    let rows = client.query(
+        &format!(
+            "SELECT id, COALESCE(project_name,''), content FROM memory_chunks mc \
+             WHERE status = 'active' AND {seen} ORDER BY created_at DESC LIMIT $1::bigint"
+        ),
+        &params,
+    )?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect())
+}
+
 /// Naive entity harvest: technology/proper-noun-like tokens from memory content.
+/// A server-wide job: callers pass [`Actor::shared_only`], so no private
+/// note feeds the shared entity tables.
 pub fn extract_entities_from_chunks<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     limit: usize,
 ) -> Result<usize> {
-    let rows = client.query(
-        "SELECT id, COALESCE(project_name,''), content FROM memory_chunks WHERE status = 'active' ORDER BY created_at DESC LIMIT $1::bigint",
-        &[&(limit as i64)],
-    )?;
     let mut inserted = 0usize;
-    for row in rows {
-        let chunk_id: i64 = row.get(0);
-        let project: String = row.get(1);
-        let content: String = row.get(2);
+    for (chunk_id, project, content) in entity_sources(client, actor, limit)? {
         for word in content.split_whitespace() {
             let w = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '.');
             if w.len() < 3 || !w.chars().any(|c| c.is_uppercase()) {
@@ -235,5 +256,47 @@ mod tests {
             eprintln!("skip backup: no pg_dump and no docker");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entity_extraction_skips_private() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping entity_extraction_skips_private: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, _) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string().to_uppercase();
+        let (private, shared) = (format!("PRIV{tag}"), format!("PUB{tag}"));
+        let p = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("we use {private}"),
+            "insight",
+            None,
+        );
+        let s = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("we use {shared}"),
+            "insight",
+            None,
+        );
+        // The job reads its notes here; the entity tables differ between the
+        // schemas, so the selection is what the test pins.
+        let ids = |actor: &Actor, tx: &mut postgres::Transaction<'_>| -> Vec<i64> {
+            entity_sources(tx, actor, 50)
+                .expect("sources")
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect()
+        };
+        assert!(ids(&a, &mut tx).contains(&p), "A herself would see it");
+        let job = ids(&Actor::shared_only(), &mut tx);
+        assert!(job.contains(&s), "the shared note feeds the entities");
+        assert!(!job.contains(&p), "a private note never does");
     }
 }

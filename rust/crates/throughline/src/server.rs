@@ -8,6 +8,7 @@
 //! `GET /api/context` count agent use when a valid Bearer key comes with the
 //! request.
 
+use crate::access::{push_visibility, Actor};
 use crate::search;
 use crate::temporal::as_of_predicate;
 use anyhow::{Context, Result};
@@ -15,7 +16,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -335,60 +337,77 @@ async fn health(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn status(State(state): State<AppState>) -> Response {
-    match with_db(&state, |client| {
-        let conversations = search::count_conversations(client)?;
-        let messages = search::count_messages(client)?;
-        let memory_chunks: i64 = client
-            .query_one("SELECT COUNT(*) FROM memory_chunks", &[])?
-            .get(0);
-        let embeddings: i64 = client
-            .query_one("SELECT COUNT(*) FROM embeddings", &[])?
-            .get(0);
-        let projects: i64 = client
-            .query_one("SELECT COUNT(*) FROM projects", &[])?
-            .get(0);
-        let range = client.query_one(
-            "SELECT MIN(started_at), MAX(started_at) FROM conversations",
-            &[],
-        )?;
-        let first_started_at: Option<chrono::DateTime<chrono::Utc>> = range.get(0);
-        let last_started_at: Option<chrono::DateTime<chrono::Utc>> = range.get(1);
-        let tool_rows = client.query(
-            r#"
-            SELECT c.source_tool,
-                   COUNT(*)::bigint AS conversations,
-                   COALESCE(SUM(c.message_count), 0)::bigint AS messages
-            FROM conversations c
-            GROUP BY 1
-            ORDER BY 2 DESC
-            "#,
-            &[],
-        )?;
-        let tools = tool_rows
-            .into_iter()
-            .map(|r| ToolCount {
-                source_tool: r.get(0),
-                conversations: r.get(1),
-                messages: r.get(2),
-            })
-            .collect();
-        Ok(StatusBody {
-            conversations,
-            messages,
-            memory_chunks,
-            embeddings,
-            projects,
-            first_started_at,
-            last_started_at,
-            tools,
-        })
-    })
-    .await
-    {
+async fn status(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> Response {
+    match with_db(&state, move |client| status_body(client, &actor)).await {
         Ok(body) => Json(body).into_response(),
         Err(resp) => resp,
     }
+}
+
+/// The counts of `GET /api/status`. Notes and their vectors count only
+/// when `actor` sees the note.
+fn status_body<C: GenericClient>(client: &mut C, actor: &Actor) -> Result<StatusBody> {
+    let conversations = search::count_conversations(client)?;
+    let messages = search::count_messages(client)?;
+    let mut params: Vec<&(dyn ToSql + Sync)> = Vec::new();
+    let seen = push_visibility(actor, "mc", &mut params);
+    let memory_chunks: i64 = client
+        .query_one(
+            &format!("SELECT COUNT(*) FROM memory_chunks mc WHERE {seen}"),
+            &params,
+        )?
+        .get(0);
+    // Every vector but those of notes the actor does not see; in local mode
+    // nothing is taken off, so the count stays the whole table.
+    let embeddings: i64 = client
+        .query_one(
+            &format!(
+                "SELECT (SELECT COUNT(*) FROM embeddings) \
+                      - (SELECT COUNT(*) FROM embeddings e JOIN memory_chunks mc \
+                           ON e.source_type = 'memory_chunk' AND mc.id = e.source_id \
+                         WHERE NOT {seen})"
+            ),
+            &params,
+        )?
+        .get(0);
+    let projects: i64 = client
+        .query_one("SELECT COUNT(*) FROM projects", &[])?
+        .get(0);
+    let range = client.query_one(
+        "SELECT MIN(started_at), MAX(started_at) FROM conversations",
+        &[],
+    )?;
+    let first_started_at: Option<chrono::DateTime<chrono::Utc>> = range.get(0);
+    let last_started_at: Option<chrono::DateTime<chrono::Utc>> = range.get(1);
+    let tool_rows = client.query(
+        r#"
+        SELECT c.source_tool,
+               COUNT(*)::bigint AS conversations,
+               COALESCE(SUM(c.message_count), 0)::bigint AS messages
+        FROM conversations c
+        GROUP BY 1
+        ORDER BY 2 DESC
+        "#,
+        &[],
+    )?;
+    let tools = tool_rows
+        .into_iter()
+        .map(|r| ToolCount {
+            source_tool: r.get(0),
+            conversations: r.get(1),
+            messages: r.get(2),
+        })
+        .collect();
+    Ok(StatusBody {
+        conversations,
+        messages,
+        memory_chunks,
+        embeddings,
+        projects,
+        first_started_at,
+        last_started_at,
+        tools,
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -406,6 +425,7 @@ fn default_limit() -> i32 {
 
 async fn search_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<SearchParams>,
 ) -> Response {
     let query = params.q.unwrap_or_default();
@@ -438,7 +458,7 @@ async fn search_handler(
                 None => crate::search::search(client, &q, limit, None)?,
             },
             "lexical" => crate::search::search(client, &q, limit, None)?,
-            _ => crate::search::hybrid(client, backend.as_ref(), &q, limit)?,
+            _ => crate::search::hybrid(client, &actor, backend.as_ref(), &q, limit)?,
         };
         Ok((hits, backend_label, m))
     })
@@ -1336,6 +1356,7 @@ fn parse_context_params(
 
 async fn context_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     headers: HeaderMap,
     Query(params): Query<ContextParams>,
 ) -> Response {
@@ -1354,6 +1375,7 @@ async fn context_handler(
         &state,
         move |client| match crate::context_pack::build_context(
             client,
+            &actor,
             &crate::context_pack::ContextRequest {
                 project: &parsed.project,
                 task: parsed.task.as_deref(),
@@ -1382,6 +1404,7 @@ async fn context_handler(
 
 async fn recall_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     headers: HeaderMap,
     Query(params): Query<RecallParams>,
 ) -> Response {
@@ -1425,6 +1448,7 @@ async fn recall_handler(
     };
     match with_db(&state, move |client| {
         let q = crate::recall::RecallQuery {
+            actor: &actor,
             text: &text,
             project: project.as_deref(),
             mode: parsed.mode,
@@ -1461,6 +1485,7 @@ fn memory_status_predicate(status: Option<&str>) -> (&'static str, Option<String
 
 async fn memory_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<MemoryParams>,
 ) -> Response {
     let limit = params.limit.clamp(1, 200);
@@ -1477,7 +1502,7 @@ async fn memory_handler(
         };
     match with_db(&state, move |client| {
         list_memory_rows(
-            client, q, cat, status, favorites, limit, offset, dir, valid_at, known_at,
+            client, &actor, q, cat, status, favorites, limit, offset, dir, valid_at, known_at,
         )
     })
     .await
@@ -1500,6 +1525,8 @@ async fn memory_handler(
                         "superseded_at": row.superseded_at,
                         "supersedes": row.supersedes,
                         "favorite": row.favorite,
+                        "owner": row.owner,
+                        "visibility": row.visibility,
                     })
                 })
                 .collect();
@@ -1531,15 +1558,21 @@ struct MemoryRow {
     supersedes: Option<i64>,
     /// Whether this memory note is favorited.
     favorite: bool,
+    /// The owner's account name; `None` for notes without an owner.
+    owner: Option<String>,
+    visibility: String,
 }
 
 /// List memory chunks with an optional status filter and chain links.
 /// Superseded notes stay out of the default (active) list; the History filter
 /// reaches them. `supersedes` points at the predecessor this note replaced.
 /// With `valid_at` or `known_at` the as-of predicate replaces the status filter.
+/// Only notes `actor` sees are counted and listed, and a chain link to a
+/// note the actor does not see is left out.
 #[allow(clippy::too_many_arguments)]
 fn list_memory_rows<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     q: Option<String>,
     category: Option<String>,
     status: Option<String>,
@@ -1571,41 +1604,50 @@ fn list_memory_rows<C: GenericClient>(
          ))"
         )
     };
-    // The count binds $1..$5 (limit and offset are not in it), the page $1..$7.
+    // The count binds $1..$5 (limit and offset are not in it), the page $1..$7;
+    // the actor's filter comes after them.
     let count_filter = base_filter("$4", "$5");
     let sql_filter = base_filter("$6", "$7");
+    let mut count_params: Vec<&(dyn ToSql + Sync)> =
+        vec![&q_pat, &category, &favorites, &valid_at, &known_at];
+    let count_seen = push_visibility(actor, "mc", &mut count_params);
     let total: i64 = client
         .query_one(
-            &format!("SELECT COUNT(*)::bigint FROM memory_chunks mc WHERE {count_filter}"),
-            &[&q_pat, &category, &favorites, &valid_at, &known_at],
+            &format!(
+                "SELECT COUNT(*)::bigint FROM memory_chunks mc WHERE {count_filter} AND {count_seen}"
+            ),
+            &count_params,
         )?
         .get(0);
+    let (limit, offset) = (limit as i64, offset as i64);
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![
+        &q_pat, &category, &favorites, &limit, &offset, &valid_at, &known_at,
+    ];
+    let seen = push_visibility(actor, "mc", &mut params);
+    let seen_next = push_visibility(actor, "s", &mut params);
+    let seen_prev = push_visibility(actor, "o", &mut params);
+    let owner = crate::access::owner_name_sql("mc");
     let rows = client.query(
         &format!(
             "SELECT mc.id, mc.content, mc.category::text, mc.project_name, mc.created_at,
-                    mc.status, mc.superseded_by, mc.superseded_at,
+                    mc.status,
+                    (SELECT s.id FROM memory_chunks s
+                      WHERE s.id = mc.superseded_by AND {seen_next}),
+                    mc.superseded_at,
                     (SELECT o.id FROM memory_chunks o
-                      WHERE o.superseded_by = mc.id
+                      WHERE o.superseded_by = mc.id AND {seen_prev}
                       ORDER BY o.id DESC LIMIT 1) AS supersedes,
                     mc.source_at,
                     EXISTS (SELECT 1 FROM favorites f
                             WHERE f.kind = 'memory'
                               AND f.ref = mc.id::text) AS favorite,
-                    mc.valid_from, mc.valid_to
+                    mc.valid_from, mc.valid_to, {owner}, mc.visibility
              FROM memory_chunks mc
-             WHERE {sql_filter}
+             WHERE {sql_filter} AND {seen}
              ORDER BY COALESCE(mc.source_at, mc.created_at) {dir}
              LIMIT $4 OFFSET $5"
         ),
-        &[
-            &q_pat,
-            &category,
-            &favorites,
-            &(limit as i64),
-            &(offset as i64),
-            &valid_at,
-            &known_at,
-        ],
+        &params,
     )?;
     let items = rows
         .into_iter()
@@ -1623,23 +1665,39 @@ fn list_memory_rows<C: GenericClient>(
             favorite: r.get(10),
             valid_from: r.get(11),
             valid_to: r.get(12),
+            owner: r.get(13),
+            visibility: r.get(14),
         })
         .collect();
     Ok((total, items))
 }
 
-/// The detail fields of `GET /api/memory/{id}`, or `None` for an unknown id.
-pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
+/// The detail fields of `GET /api/memory/{id}`, or `None` for an unknown id
+/// or a note `actor` does not see. A chain link to such a note is left out.
+pub(crate) fn load_note<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    id: i64,
+) -> Result<Option<Value>> {
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+    let seen = push_visibility(actor, "mc", &mut params);
+    let seen_next = push_visibility(actor, "s", &mut params);
+    let seen_prev = push_visibility(actor, "o", &mut params);
+    let owner = crate::access::owner_name_sql("mc");
     let row = client.query_opt(
-        "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at,
-                COALESCE(mc.status, 'active'),
-                mc.superseded_by, mc.superseded_at,
-                (SELECT o.id FROM memory_chunks o
-                  WHERE o.superseded_by = mc.id
-                  ORDER BY o.id DESC LIMIT 1) AS supersedes,
-                mc.source_at, mc.valid_from, mc.valid_to
-         FROM memory_chunks mc WHERE mc.id = $1",
-        &[&id],
+        &format!(
+            "SELECT mc.content, mc.category::text, mc.project_name, mc.created_at,
+                    COALESCE(mc.status, 'active'),
+                    (SELECT s.id FROM memory_chunks s
+                      WHERE s.id = mc.superseded_by AND {seen_next}),
+                    mc.superseded_at,
+                    (SELECT o.id FROM memory_chunks o
+                      WHERE o.superseded_by = mc.id AND {seen_prev}
+                      ORDER BY o.id DESC LIMIT 1) AS supersedes,
+                    mc.source_at, mc.valid_from, mc.valid_to, {owner}, mc.visibility
+             FROM memory_chunks mc WHERE mc.id = $1 AND {seen}"
+        ),
+        &params,
     )?;
     Ok(row.map(|r| {
         let content: String = r.get(0);
@@ -1654,6 +1712,8 @@ pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Opt
         let source_at: Option<chrono::DateTime<chrono::Utc>> = r.get(8);
         let valid_from: Option<chrono::DateTime<chrono::Utc>> = r.get(9);
         let valid_to: Option<chrono::DateTime<chrono::Utc>> = r.get(10);
+        let owner: Option<String> = r.get(11);
+        let visibility: String = r.get(12);
         serde_json::json!({
             "id": id,
             "content": content,
@@ -1667,6 +1727,8 @@ pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Opt
             "superseded_by": superseded_by,
             "superseded_at": superseded_at,
             "supersedes": supersedes,
+            "owner": owner,
+            "visibility": visibility,
         })
     }))
 }
@@ -1674,10 +1736,15 @@ pub(crate) fn load_note<C: GenericClient>(client: &mut C, id: i64) -> Result<Opt
 /// `load_note` plus `source_type`, `source_id` and the whole supersede chain
 /// (predecessors and successors, oldest first, the note itself included).
 /// For agents: a forgotten note is `None` and forgotten members leave the
-/// chain (the walk still passes through them). Does not count a use; the
-/// caller decides.
-pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result<Option<Value>> {
-    let Some(mut note) = load_note(client, id)? else {
+/// chain (the walk still passes through them). A note `actor` does not see
+/// is `None`, and the walk stops at one. Does not count a use; the caller
+/// decides.
+pub(crate) fn get_note_json<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    id: i64,
+) -> Result<Option<Value>> {
+    let Some(mut note) = load_note(client, actor, id)? else {
         return Ok(None);
     };
     if note["status"] == "forgotten" {
@@ -1689,22 +1756,29 @@ pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result
     )?;
     let source_type: Option<String> = source.get(0);
     let source_id: Option<i64> = source.get(1);
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+    let seen_prev = push_visibility(actor, "p", &mut params);
+    let seen_next = push_visibility(actor, "s", &mut params);
     let rows = client.query(
-        "WITH RECURSIVE chain(id) AS (
-             SELECT $1::bigint
-             UNION
-             SELECT n.id FROM chain c CROSS JOIN LATERAL (
-                 SELECT id FROM memory_chunks WHERE superseded_by = c.id
-                 UNION ALL
-                 SELECT superseded_by FROM memory_chunks
-                  WHERE id = c.id AND superseded_by IS NOT NULL
-             ) n
-         )
-         SELECT m.id, COALESCE(m.status, 'active'), m.valid_from, m.valid_to, m.content
-         FROM memory_chunks m JOIN chain USING (id)
-         WHERE COALESCE(m.status, 'active') <> 'forgotten'
-         ORDER BY m.valid_from NULLS FIRST, m.id",
-        &[&id],
+        &format!(
+            "WITH RECURSIVE chain(id) AS (
+                 SELECT $1::bigint
+                 UNION
+                 SELECT n.id FROM chain c CROSS JOIN LATERAL (
+                     SELECT p.id FROM memory_chunks p
+                      WHERE p.superseded_by = c.id AND {seen_prev}
+                     UNION ALL
+                     SELECT s.id FROM memory_chunks cur
+                       JOIN memory_chunks s ON s.id = cur.superseded_by
+                      WHERE cur.id = c.id AND {seen_next}
+                 ) n
+             )
+             SELECT m.id, COALESCE(m.status, 'active'), m.valid_from, m.valid_to, m.content
+             FROM memory_chunks m JOIN chain USING (id)
+             WHERE COALESCE(m.status, 'active') <> 'forgotten'
+             ORDER BY m.valid_from NULLS FIRST, m.id"
+        ),
+        &params,
     )?;
     let chain: Vec<Value> = rows
         .iter()
@@ -1729,8 +1803,12 @@ pub(crate) fn get_note_json<C: GenericClient>(client: &mut C, id: i64) -> Result
     Ok(Some(note))
 }
 
-async fn memory_detail(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match with_db(&state, move |client| load_note(client, id)).await {
+async fn memory_detail(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<i64>,
+) -> Response {
+    match with_db(&state, move |client| load_note(client, &actor, id)).await {
         Ok(Some(note)) => Json(note).into_response(),
         Ok(None) => api_error(StatusCode::NOT_FOUND, "not_found", "memory chunk not found"),
         Err(resp) => resp,
@@ -1886,19 +1964,29 @@ pub struct Successor<'a> {
 /// validity interval and move a star from the old note to the new one.
 /// An update ends the old interval where the new one starts; a correction
 /// empties it, because the old note was never true.
+///
+/// A note `actor` does not see is `NotFound`. The successor belongs to
+/// `actor` (no owner in local mode and for jobs). It is shared, unless the
+/// old note is the actor's own private note: then it stays private. The old
+/// note keeps its owner and visibility.
 pub fn supersede_memory<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     id: i64,
     new: &Successor,
 ) -> std::result::Result<(i64, i64), SupersedeError> {
     validate_supersede(new.content, new.category)?;
     let content = new.content.trim().to_string();
     let mut tx = client.transaction()?;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+    let seen = push_visibility(actor, "mc", &mut params);
     let old = tx.query_opt(
-        "SELECT category::text, project_name, status, superseded_by,
-                COALESCE(valid_from, source_at, created_at)
-         FROM memory_chunks WHERE id = $1 FOR UPDATE",
-        &[&id],
+        &format!(
+            "SELECT category::text, project_name, status, superseded_by,
+                    COALESCE(valid_from, source_at, created_at), visibility, owner_id
+             FROM memory_chunks mc WHERE id = $1 AND {seen} FOR UPDATE"
+        ),
+        &params,
     )?;
     let Some(old) = old else {
         return Err(SupersedeError::NotFound);
@@ -1908,6 +1996,15 @@ pub fn supersede_memory<C: GenericClient>(
     let old_status: String = old.get(2);
     let old_superseded_by: Option<i64> = old.get(3);
     let old_vf: chrono::DateTime<chrono::Utc> = old.get(4);
+    let old_owner: Option<i64> = old.get(6);
+    let visibility = if old.get::<_, String>(5) == "private"
+        && actor.user_id.is_some()
+        && old_owner == actor.user_id
+    {
+        "private"
+    } else {
+        "shared"
+    };
     if old_superseded_by.is_some() || old_status == "superseded" || old_status == "merged" {
         return Err(SupersedeError::AlreadySuperseded);
     }
@@ -1940,8 +2037,8 @@ pub fn supersede_memory<C: GenericClient>(
         .query_one(
             &format!(
                 r#"
-            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at, valid_from, tags)
-            VALUES ($1, $2, $3::text::{category_type}, $4, $5::float8, 'active', COALESCE($6, now()), $7, $8::text[])
+            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at, valid_from, tags, owner_id, visibility)
+            VALUES ($1, $2, $3::text::{category_type}, $4, $5::float8, 'active', COALESCE($6, now()), $7, $8::text[], $9, $10)
             RETURNING id
             "#
             ),
@@ -1954,6 +2051,8 @@ pub fn supersede_memory<C: GenericClient>(
                 &new.source_at,
                 &vf,
                 &new.tags,
+                &actor.user_id,
+                &visibility,
             ],
         )?
         .get(0);
@@ -2040,6 +2139,7 @@ struct MemorySupersede {
 /// unparsable or out-of-range valid_from, 404 unknown id, 409 already superseded.
 async fn memory_supersede(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Path(id): Path<i64>,
     Json(body): Json<MemorySupersede>,
 ) -> Response {
@@ -2093,6 +2193,7 @@ async fn memory_supersede(
     let outcome = with_db(&state, move |client| {
         Ok(supersede_memory(
             client,
+            &actor,
             id,
             &Successor {
                 content: &content,
@@ -2125,7 +2226,11 @@ fn consolidate_error_response(e: crate::lifecycle::ConsolidateError) -> Response
     use crate::lifecycle::ConsolidateError as E;
     let detail = e.to_string();
     match e {
-        E::TooFew | E::EmptyContent | E::InvalidCategory(_) | E::MixedProjects => {
+        E::TooFew
+        | E::EmptyContent
+        | E::InvalidCategory(_)
+        | E::MixedProjects
+        | E::MixedVisibility => {
             api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", detail)
         }
         E::NotFound(_) => api_error(StatusCode::NOT_FOUND, "not_found", detail),
@@ -2145,6 +2250,7 @@ struct ConsolidateBody {
 
 async fn consolidate_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Json(body): Json<ConsolidateBody>,
 ) -> Response {
     // Carry ConsolidateError as Ok(payload) so with_db keeps 500 for real
@@ -2152,6 +2258,7 @@ async fn consolidate_handler(
     let outcome = with_db(&state, move |client| {
         Ok(crate::lifecycle::consolidate(
             client,
+            &actor,
             &body.ids,
             &body.content,
             body.category.as_deref(),
@@ -2174,6 +2281,7 @@ struct CandidateParams {
 /// empty and `degraded` says why; no embedding is ever computed here.
 async fn consolidation_candidates_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<CandidateParams>,
 ) -> Response {
     let backend = tokio::task::spawn_blocking(crate::embedding::resolve)
@@ -2193,6 +2301,7 @@ async fn consolidation_candidates_handler(
     match with_db(&state, move |client| {
         crate::lifecycle::consolidation_candidates(
             client,
+            &actor,
             &backend.model,
             backend.column,
             min_similarity,
@@ -2209,10 +2318,15 @@ async fn consolidation_candidates_handler(
 
 /// Currently valid notes that the old `reflect` damaged: they hold several
 /// notes joined by a rule line and name themselves among their sources.
-fn damaged_notes<C: GenericClient>(client: &mut C) -> Result<Vec<serde_json::Value>> {
+fn damaged_notes<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+) -> Result<Vec<serde_json::Value>> {
     let predicate = crate::temporal::as_of_predicate("$1", "$2");
     let now = Some(chrono::Utc::now());
     let known_at: Option<chrono::DateTime<chrono::Utc>> = None;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now, &known_at];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
         &format!(
             "SELECT mc.id, left(mc.content, 280), mc.category::text, mc.project_name,
@@ -2223,9 +2337,10 @@ fn damaged_notes<C: GenericClient>(client: &mut C) -> Result<Vec<serde_json::Val
                AND position(E'\\n---\\n' IN mc.content) > 0
                AND mc.id = ANY(mc.merged_from)
                AND {predicate}
+               AND {seen}
              ORDER BY mc.id"
         ),
-        &[&now, &known_at],
+        &params,
     )?;
     Ok(rows
         .iter()
@@ -2241,8 +2356,11 @@ fn damaged_notes<C: GenericClient>(client: &mut C) -> Result<Vec<serde_json::Val
         .collect())
 }
 
-async fn damaged_notes_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, damaged_notes).await {
+async fn damaged_notes_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| damaged_notes(client, &actor)).await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -2305,10 +2423,38 @@ struct ProposalParams {
     ids: String,
 }
 
+/// The current notes among `ids` that `actor` sees, by id: (id, text).
+fn proposal_texts<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    ids: &[i64],
+) -> Result<Vec<(i64, String)>> {
+    let predicate = crate::temporal::as_of_predicate("$2", "$3");
+    let now = Some(chrono::Utc::now());
+    let known_at: Option<chrono::DateTime<chrono::Utc>> = None;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&ids, &now, &known_at];
+    let seen = push_visibility(actor, "mc", &mut params);
+    let rows = client.query(
+        &format!(
+            "SELECT mc.id, mc.content FROM memory_chunks mc
+             WHERE mc.id = ANY($1)
+               AND COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
+               AND mc.superseded_by IS NULL AND {predicate} AND {seen}
+             ORDER BY mc.id"
+        ),
+        &params,
+    )?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get::<_, i64>(0), r.get::<_, String>(1)))
+        .collect())
+}
+
 /// Read-only. The model runs outside the database lock, like the query
 /// embedding in `/api/recall`; any failure falls back to the longest note.
 async fn consolidation_proposal_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<ProposalParams>,
 ) -> Response {
     let ids = match parse_proposal_ids(&params.ids) {
@@ -2319,23 +2465,7 @@ async fn consolidation_proposal_handler(
     };
     let wanted = ids.clone();
     let texts = match with_db(&state, move |client| {
-        let predicate = crate::temporal::as_of_predicate("$2", "$3");
-        let now = Some(chrono::Utc::now());
-        let known_at: Option<chrono::DateTime<chrono::Utc>> = None;
-        let rows = client.query(
-            &format!(
-                "SELECT mc.id, mc.content FROM memory_chunks mc
-                 WHERE mc.id = ANY($1)
-                   AND COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
-                   AND mc.superseded_by IS NULL AND {predicate}
-                 ORDER BY mc.id"
-            ),
-            &[&wanted, &now, &known_at],
-        )?;
-        Ok(rows
-            .iter()
-            .map(|r| (r.get::<_, i64>(0), r.get::<_, String>(1)))
-            .collect::<Vec<_>>())
+        proposal_texts(client, &actor, &wanted)
     })
     .await
     {
@@ -2377,12 +2507,25 @@ struct MemoryCreate {
     #[serde(default)]
     category: String,
     project_name: Option<String>,
+    /// `shared` (default) or `private`; private needs a signed-in account.
+    visibility: Option<String>,
 }
 
-async fn memory_create(State(state): State<AppState>, Json(body): Json<MemoryCreate>) -> Response {
+async fn memory_create(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(body): Json<MemoryCreate>,
+) -> Response {
     if let Err((status, code, detail)) = validate_memory_create(&body.content, &body.category) {
         return api_error(status, code, detail);
     }
+    let (owner, visibility) =
+        match crate::access::new_note_owner(&actor, body.visibility.as_deref()) {
+            Ok(v) => v,
+            Err(detail) => {
+                return api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", detail)
+            }
+        };
     let content = body.content.trim().to_string();
     let category = body.category.trim().to_string();
     let project = body
@@ -2394,12 +2537,12 @@ async fn memory_create(State(state): State<AppState>, Json(body): Json<MemoryCre
         let row = client.query_one(
             &format!(
                 r#"
-            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at)
-            VALUES ('ui_pin', $1, $2::text::{category_type}, $3, 1.0, 'active', now())
+            INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at, owner_id, visibility)
+            VALUES ('ui_pin', $1, $2::text::{category_type}, $3, 1.0, 'active', now(), $4, $5)
             RETURNING id
             "#
             ),
-            &[&content, &category, &project],
+            &[&content, &category, &project, &owner, &visibility],
         )?;
         Ok::<i64, anyhow::Error>(row.get(0))
     })
@@ -2410,11 +2553,20 @@ async fn memory_create(State(state): State<AppState>, Json(body): Json<MemoryCre
     }
 }
 
-async fn memory_forget(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn memory_forget(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<i64>,
+) -> Response {
     match with_db(&state, move |client| {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+        let seen = push_visibility(&actor, "mc", &mut params);
         Ok(client.execute(
-            "UPDATE memory_chunks SET status = 'forgotten', updated_at = now() WHERE id = $1",
-            &[&id],
+            &format!(
+                "UPDATE memory_chunks mc SET status = 'forgotten', updated_at = now() \
+                 WHERE id = $1 AND {seen}"
+            ),
+            &params,
         )?)
     })
     .await
@@ -2433,12 +2585,19 @@ pub(crate) enum KeepOutcome {
 
 /// Confirm a note: back to active (undo of forget), expiry cleared, `reviewed`
 /// tag and `updated_at` stamped. A note that a successor replaced stays
-/// superseded, so keeping it cannot revive it next to the successor.
-pub(crate) fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<KeepOutcome> {
+/// superseded, so keeping it cannot revive it next to the successor. A note
+/// `actor` does not see is `NotFound`; owner and visibility stay as they are.
+pub(crate) fn keep_memory<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    id: i64,
+) -> Result<KeepOutcome> {
     let mut tx = client.transaction()?;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&id];
+    let seen = push_visibility(actor, "mc", &mut params);
     let Some(row) = tx.query_opt(
-        "SELECT superseded_by FROM memory_chunks WHERE id = $1 FOR UPDATE",
-        &[&id],
+        &format!("SELECT superseded_by FROM memory_chunks mc WHERE id = $1 AND {seen} FOR UPDATE"),
+        &params,
     )?
     else {
         return Ok(KeepOutcome::NotFound);
@@ -2467,8 +2626,12 @@ pub(crate) fn keep_memory<C: GenericClient>(client: &mut C, id: i64) -> Result<K
     Ok(KeepOutcome::Kept)
 }
 
-async fn memory_keep(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match with_db(&state, move |client| keep_memory(client, id)).await {
+async fn memory_keep(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<i64>,
+) -> Response {
+    match with_db(&state, move |client| keep_memory(client, &actor, id)).await {
         Ok(KeepOutcome::Kept) => {
             Json(serde_json::json!({ "id": id, "status": "active" })).into_response()
         }
@@ -2538,9 +2701,12 @@ async fn font_plex_mono() -> Response {
     font_response(PLEX_MONO_WOFF2)
 }
 
-async fn conflicts_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, |client| {
-        crate::conflicts::find_conflicts(client, None, 0.85)
+async fn conflicts_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| {
+        crate::conflicts::find_conflicts(client, &actor, None, 0.85)
     })
     .await
     {
@@ -2743,7 +2909,11 @@ struct AskParams {
     q: Option<String>,
 }
 
-async fn ask_handler(State(state): State<AppState>, Query(params): Query<AskParams>) -> Response {
+async fn ask_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(params): Query<AskParams>,
+) -> Response {
     let question = params.q.unwrap_or_default();
     if question.trim().is_empty() {
         return api_error(StatusCode::BAD_REQUEST, "bad_request", "q is required");
@@ -2752,7 +2922,7 @@ async fn ask_handler(State(state): State<AppState>, Query(params): Query<AskPara
     match with_db(&state, move |client| {
         let backend = crate::llm::resolve_backend()?;
         crate::llm::ensure_local_or_allowed(&backend)?;
-        crate::ask::ask(client, &q, &backend, 12)
+        crate::ask::ask(client, &actor, &q, &backend, 12)
     })
     .await
     {
@@ -2836,7 +3006,7 @@ async fn operate_handler(
                 format!("extract-memory: scanned {} conversation(s)", rows.len())
             }
             "reflect" => {
-                let s = crate::reflect_memory::dedup(client, false)?;
+                let s = crate::reflect_memory::dedup(client, &Actor::shared_only(), false)?;
                 format!("reflect/dedup: {}", s.counts())
             }
             "agent-memory" | "mimo-memory" => {
@@ -2873,11 +3043,12 @@ struct HandoffParams {
 
 async fn handoff_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Query(params): Query<HandoffParams>,
 ) -> Response {
     let project = params.project.or(params.q).filter(|s| !s.trim().is_empty());
     match with_db(&state, move |client| {
-        crate::handoff::build_handoff(client, project.as_deref(), 8)
+        crate::handoff::build_handoff(client, &actor, project.as_deref(), 8)
     })
     .await
     {
@@ -2899,9 +3070,12 @@ async fn costs_handler(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn stale_digest_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, |client| {
-        crate::stale_digest::build_digest(client, 14)
+async fn stale_digest_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| {
+        crate::stale_digest::build_digest(client, &actor, 14)
     })
     .await
     {
@@ -2910,29 +3084,15 @@ async fn stale_digest_handler(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn answer_eval_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, |client| {
+async fn answer_eval_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| {
         let backend = crate::llm::resolve_backend()?;
         crate::llm::ensure_local_or_allowed(&backend)?;
-        let rows = client.query(
-            "SELECT content FROM memory_chunks WHERE status='active' AND category='decision' ORDER BY created_at DESC LIMIT 10",
-            &[],
-        )?;
-        let cases: Vec<crate::answer_eval::EvalCase> = rows
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let c: String = r.get(0);
-                crate::answer_eval::EvalCase {
-                    id: format!("mem-{i}"),
-                    question: format!("What did we decide about: {}", c.chars().take(60).collect::<String>()),
-                    must_cite_conversation_ids: vec![],
-                    expected_phrases: vec![],
-                    forbidden_phrases: vec!["probably".into()],
-                }
-            })
-            .collect();
-        crate::answer_eval::run_eval(client, &backend, &cases)
+        let cases = crate::answer_eval::decision_cases(client, &actor, 10, &["probably"])?;
+        crate::answer_eval::run_eval(client, &actor, &backend, &cases)
     })
     .await
     {
@@ -2944,7 +3104,8 @@ async fn answer_eval_handler(State(state): State<AppState>) -> Response {
 async fn writeback_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, |client| {
         let root = std::env::current_dir().unwrap_or_default();
-        crate::memory_writeback::writeback(client, &root, None, 15)
+        // A job: only shared notes reach the instruction file.
+        crate::memory_writeback::writeback(client, &Actor::shared_only(), &root, None, 15)
     })
     .await
     {
@@ -2992,8 +3153,15 @@ async fn health_recovery_handler(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn audit_handler(State(state): State<AppState>) -> Response {
-    match with_db(&state, |client| crate::audit::audit(client, 30)).await {
+async fn audit_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| {
+        crate::audit::audit(client, &actor, 30)
+    })
+    .await
+    {
         Ok(report) => Json(report).into_response(),
         Err(resp) => resp,
     }
@@ -4352,10 +4520,15 @@ mod tests {
         };
         let mut tx = client.transaction().expect("begin test tx");
         let a = seed_note(&mut tx, "keep-successor note A", "decision");
-        let (_, b) = supersede_memory(&mut tx, a, &test_successor("keep-successor note B"))
-            .expect("supersede");
+        let (_, b) = supersede_memory(
+            &mut tx,
+            &Actor::local(),
+            a,
+            &test_successor("keep-successor note B"),
+        )
+        .expect("supersede");
         assert_eq!(
-            keep_memory(&mut tx, a).expect("keep"),
+            keep_memory(&mut tx, &Actor::local(), a).expect("keep"),
             KeepOutcome::HasSuccessor
         );
         assert_eq!(validity(&mut tx, a).0, "superseded");
@@ -4375,7 +4548,10 @@ mod tests {
             &[&a],
         )
         .expect("forget");
-        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        assert_eq!(
+            keep_memory(&mut tx, &Actor::local(), a).expect("keep"),
+            KeepOutcome::Kept
+        );
         assert_eq!(validity(&mut tx, a).0, "active");
     }
 
@@ -4388,7 +4564,13 @@ mod tests {
         let mut tx = client.transaction().expect("begin test tx");
         let a = seed_note(&mut tx, "keep-count note", "decision");
         let b = seed_note(&mut tx, "keep-count note replaced", "decision");
-        supersede_memory(&mut tx, b, &test_successor("keep-count successor")).expect("supersede");
+        supersede_memory(
+            &mut tx,
+            &Actor::local(),
+            b,
+            &test_successor("keep-count successor"),
+        )
+        .expect("supersede");
         let uses = |tx: &mut postgres::Transaction<'_>, id: i64| -> i32 {
             tx.query_one(
                 "SELECT COALESCE(access_count, 0) FROM memory_chunks WHERE id = $1",
@@ -4397,11 +4579,14 @@ mod tests {
             .expect("row")
             .get(0)
         };
-        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        assert_eq!(
+            keep_memory(&mut tx, &Actor::local(), a).expect("keep"),
+            KeepOutcome::Kept
+        );
         assert_eq!(uses(&mut tx, a), 1);
         // a refused keep counts nothing
         assert_eq!(
-            keep_memory(&mut tx, b).expect("keep"),
+            keep_memory(&mut tx, &Actor::local(), b).expect("keep"),
             KeepOutcome::HasSuccessor
         );
         assert_eq!(uses(&mut tx, b), 0);
@@ -4438,6 +4623,7 @@ mod tests {
         };
         let resp = rt.block_on(recall_handler(
             State(state.clone()),
+            Extension(Actor::local()),
             HeaderMap::new(),
             Query(params),
         ));
@@ -4538,6 +4724,7 @@ mod tests {
         let call = |headers: HeaderMap| {
             rt.block_on(recall_handler(
                 State(state.clone()),
+                Extension(Actor::local()),
                 headers,
                 Query(params()),
             ))
@@ -4606,6 +4793,7 @@ mod tests {
         let call = |headers: HeaderMap| {
             rt.block_on(context_handler(
                 State(state.clone()),
+                Extension(Actor::local()),
                 headers,
                 Query(params()),
             ))
@@ -4704,6 +4892,7 @@ mod tests {
         let call = |headers: HeaderMap| {
             rt.block_on(recall_handler(
                 State(state.clone()),
+                Extension(Actor::local()),
                 headers,
                 Query(RecallParams {
                     q: Some(format!("ibis {tag}")),
@@ -4743,7 +4932,10 @@ mod tests {
             &[&a, &at("2026-02-01T00:00:00Z")],
         )
         .expect("mark stale");
-        assert_eq!(keep_memory(&mut tx, a).expect("keep"), KeepOutcome::Kept);
+        assert_eq!(
+            keep_memory(&mut tx, &Actor::local(), a).expect("keep"),
+            KeepOutcome::Kept
+        );
         let (status, expires_at): (String, Option<chrono::DateTime<chrono::Utc>>) = tx
             .query_one(
                 "SELECT status, expires_at FROM memory_chunks WHERE id = $1",
@@ -5288,6 +5480,7 @@ mod tests {
         };
         let resp = rt.block_on(context_handler(
             State(state.clone()),
+            Extension(Actor::local()),
             HeaderMap::new(),
             Query(params),
         ));
@@ -5437,7 +5630,9 @@ mod tests {
         };
         let mut tx = client.transaction().expect("begin test tx");
         let id = seed_note(&mut tx, "detail seed", "decision");
-        let v = load_note(&mut tx, id).expect("load").expect("row");
+        let v = load_note(&mut tx, &Actor::local(), id)
+            .expect("load")
+            .expect("row");
         let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
         keys.sort_unstable();
         assert_eq!(
@@ -5447,6 +5642,7 @@ mod tests {
                 "content",
                 "created_at",
                 "id",
+                "owner",
                 "project_name",
                 "source_at",
                 "status",
@@ -5454,7 +5650,8 @@ mod tests {
                 "superseded_by",
                 "supersedes",
                 "valid_from",
-                "valid_to"
+                "valid_to",
+                "visibility"
             ]
         );
         assert_eq!(v["id"], serde_json::json!(id));
@@ -5464,7 +5661,9 @@ mod tests {
         assert!(v["project_name"].is_null() && v["superseded_by"].is_null());
         assert!(v["supersedes"].is_null() && v["superseded_at"].is_null());
         assert!(v["created_at"].is_string());
-        assert!(load_note(&mut tx, -5).expect("load").is_none());
+        assert!(load_note(&mut tx, &Actor::local(), -5)
+            .expect("load")
+            .is_none());
     }
 
     #[test]
@@ -5477,7 +5676,7 @@ mod tests {
         let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
         let mut s = test_successor("update successor");
         s.valid_from = Some(at("2026-03-01T00:00:00Z"));
-        let (_, b) = supersede_memory(&mut tx, a, &s).expect("update");
+        let (_, b) = supersede_memory(&mut tx, &Actor::local(), a, &s).expect("update");
         let (st, _, to) = validity(&mut tx, a);
         assert_eq!(st, "superseded");
         assert_eq!(to, Some(at("2026-03-01T00:00:00Z")));
@@ -5496,7 +5695,7 @@ mod tests {
         let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
         let mut s = test_successor("correction successor");
         s.kind = SupersedeKind::Correction;
-        let (_, b) = supersede_memory(&mut tx, a, &s).expect("correction");
+        let (_, b) = supersede_memory(&mut tx, &Actor::local(), a, &s).expect("correction");
         let (_, from, _) = validity(&mut tx, b);
         assert_eq!(from, Some(at("2026-01-01T00:00:00Z")));
         let (_, a_from, a_to) = validity(&mut tx, a);
@@ -5513,14 +5712,14 @@ mod tests {
         let a = seed_valid_from(&mut tx, Some("2026-01-01T00:00:00Z"));
         let mut s = test_successor("rejected successor");
         s.valid_from = Some(chrono::Utc::now() + chrono::Duration::days(1));
-        let err = supersede_memory(&mut tx, a, &s).expect_err("future");
+        let err = supersede_memory(&mut tx, &Actor::local(), a, &s).expect_err("future");
         assert!(matches!(err, SupersedeError::ValidFromInFuture), "{err:?}");
         assert_eq!(
             supersede_error_response(err).status(),
             StatusCode::UNPROCESSABLE_ENTITY
         );
         s.valid_from = Some(at("2025-12-31T00:00:00Z"));
-        let err = supersede_memory(&mut tx, a, &s).expect_err("too early");
+        let err = supersede_memory(&mut tx, &Actor::local(), a, &s).expect_err("too early");
         assert!(
             matches!(err, SupersedeError::ValidFromBeforePredecessor),
             "{err:?}"
@@ -5556,13 +5755,15 @@ mod tests {
         let mut s = test_successor("same-day successor");
         s.valid_from = crate::temporal::parse_instant(&day);
         // Control: the bare midnight lies before the old start and is refused.
-        let err = supersede_memory(&mut tx, a, &s).expect_err("midnight before the start");
+        let err = supersede_memory(&mut tx, &Actor::local(), a, &s)
+            .expect_err("midnight before the start");
         assert!(
             matches!(err, SupersedeError::ValidFromBeforePredecessor),
             "{err:?}"
         );
         s.valid_from_is_date = crate::temporal::is_plain_date(&day);
-        let (_, b) = supersede_memory(&mut tx, a, &s).expect("a plain date on the first day");
+        let (_, b) = supersede_memory(&mut tx, &Actor::local(), a, &s)
+            .expect("a plain date on the first day");
         assert_eq!(
             validity(&mut tx, b).1,
             Some(start),
@@ -5579,8 +5780,13 @@ mod tests {
         };
         let mut tx = client.transaction().expect("begin test tx");
         let a = seed_valid_from(&mut tx, None);
-        let (_, b) = supersede_memory(&mut tx, a, &test_successor("successor of undated"))
-            .expect("update of a note without valid_from");
+        let (_, b) = supersede_memory(
+            &mut tx,
+            &Actor::local(),
+            a,
+            &test_successor("successor of undated"),
+        )
+        .expect("update of a note without valid_from");
         let (_, _, to) = validity(&mut tx, a);
         assert!(to.is_some(), "old note must be closed");
         assert!(validity(&mut tx, b).1.is_some());
@@ -5599,8 +5805,13 @@ mod tests {
             &[&a.to_string()],
         )
         .expect("star");
-        let (_, b) =
-            supersede_memory(&mut tx, a, &test_successor("starred successor")).expect("supersede");
+        let (_, b) = supersede_memory(
+            &mut tx,
+            &Actor::local(),
+            a,
+            &test_successor("starred successor"),
+        )
+        .expect("supersede");
         let n = |tx: &mut postgres::Transaction<'_>, id: i64| -> i64 {
             tx.query_one(
                 "SELECT COUNT(*)::bigint FROM favorites WHERE kind = 'memory' AND ref = $1",
@@ -5626,7 +5837,8 @@ mod tests {
             &[&a],
         )
         .expect("merge");
-        let err = supersede_memory(&mut tx, a, &test_successor("after merge")).expect_err("merged");
+        let err = supersede_memory(&mut tx, &Actor::local(), a, &test_successor("after merge"))
+            .expect_err("merged");
         assert!(matches!(err, SupersedeError::AlreadySuperseded), "{err:?}");
     }
 
@@ -5644,6 +5856,7 @@ mod tests {
         );
         let (got_old, new_id) = supersede_memory(
             &mut tx,
+            &Actor::local(),
             old_id,
             &test_successor("m10 supersede new: hybrid retrieval is the baseline now."),
         )
@@ -5712,6 +5925,7 @@ mod tests {
         };
         let err = supersede_memory(
             &mut client,
+            &Actor::local(),
             999_999_999,
             &test_successor("orphan replacement"),
         )
@@ -5737,6 +5951,7 @@ mod tests {
         );
         let (got_old, _new_id) = supersede_memory(
             &mut tx,
+            &Actor::local(),
             old_id,
             &test_successor("m10 double-supersede: second version of the fact."),
         )
@@ -5745,6 +5960,7 @@ mod tests {
 
         let err = supersede_memory(
             &mut tx,
+            &Actor::local(),
             old_id,
             &test_successor("m10 double-supersede: third version of the fact."),
         )
@@ -5809,6 +6025,7 @@ mod tests {
         .expect("seed note");
         let (_, rows) = list_memory_rows(
             &mut tx,
+            &Actor::local(),
             Some(tag),
             None,
             None,
@@ -5853,6 +6070,7 @@ mod tests {
     ) -> Vec<i64> {
         let (_, rows) = list_memory_rows(
             client,
+            &Actor::local(),
             Some(tag.to_string()),
             None,
             None,
@@ -5873,7 +6091,9 @@ mod tests {
         let tag_content = label.to_string();
         let mut s = test_successor(&tag_content);
         s.valid_from = Some(at(from));
-        supersede_memory(client, old, &s).expect("update").1
+        supersede_memory(client, &Actor::local(), old, &s)
+            .expect("update")
+            .1
     }
 
     #[test]
@@ -5909,7 +6129,9 @@ mod tests {
         let content = format!("{tag} B");
         let mut s = test_successor(&content);
         s.kind = SupersedeKind::Correction;
-        let b = supersede_memory(&mut tx, a, &s).expect("correct").1;
+        let b = supersede_memory(&mut tx, &Actor::local(), a, &s)
+            .expect("correct")
+            .1;
         // inside one transaction now() is constant: set the order of events by hand
         tx.execute(
             "UPDATE memory_chunks SET created_at = '2026-01-01T00:00:00Z' WHERE id = $1",
@@ -6055,6 +6277,7 @@ mod tests {
         assert_eq!(listed_ids(&mut tx, &tag, None, now), vec![b]);
         let (_, history) = list_memory_rows(
             &mut tx,
+            &Actor::local(),
             Some(tag),
             None,
             Some("history".into()),
@@ -6102,6 +6325,7 @@ mod tests {
         let _ = not_fav;
         let (_, rows) = list_memory_rows(
             &mut tx,
+            &Actor::local(),
             Some(tag),
             Some("decision".into()),
             None,
@@ -6145,19 +6369,31 @@ mod tests {
             consolidate_error_response(r.expect_err("must be refused")).status()
         };
         assert_eq!(
-            status(consolidate(&mut tx, &[a], "x", None)),
+            status(consolidate(&mut tx, &Actor::local(), &[a], "x", None)),
             StatusCode::UNPROCESSABLE_ENTITY
         );
         assert_eq!(
-            status(consolidate(&mut tx, &[a, b], "  ", None)),
+            status(consolidate(&mut tx, &Actor::local(), &[a, b], "  ", None)),
             StatusCode::UNPROCESSABLE_ENTITY
         );
         assert_eq!(
-            status(consolidate(&mut tx, &[a, b], "x", Some("nonsense"))),
+            status(consolidate(
+                &mut tx,
+                &Actor::local(),
+                &[a, b],
+                "x",
+                Some("nonsense")
+            )),
             StatusCode::UNPROCESSABLE_ENTITY
         );
         assert_eq!(
-            status(consolidate(&mut tx, &[a, i64::MAX], "x", None)),
+            status(consolidate(
+                &mut tx,
+                &Actor::local(),
+                &[a, i64::MAX],
+                "x",
+                None
+            )),
             StatusCode::NOT_FOUND
         );
         let p1 = seed_note(&mut tx, &format!("merge p1 {tag}"), "decision");
@@ -6168,13 +6404,19 @@ mod tests {
         )
         .expect("project");
         assert_eq!(
-            status(consolidate(&mut tx, &[p1, p2], "x", None)),
+            status(consolidate(&mut tx, &Actor::local(), &[p1, p2], "x", None)),
             StatusCode::UNPROCESSABLE_ENTITY
         );
-        let new_id = consolidate(&mut tx, &[a, b], "merged", None).expect("merge");
+        let new_id = consolidate(&mut tx, &Actor::local(), &[a, b], "merged", None).expect("merge");
         assert!(new_id > 0);
         assert_eq!(
-            status(consolidate(&mut tx, &[a, b], "again", None)),
+            status(consolidate(
+                &mut tx,
+                &Actor::local(),
+                &[a, b],
+                "again",
+                None
+            )),
             StatusCode::CONFLICT
         );
     }
@@ -6202,7 +6444,7 @@ mod tests {
         .expect("merged");
         let closed = seed_note(&mut tx, &format!("old {tag}\n---\ndamage"), "decision");
         tx.execute("UPDATE memory_chunks SET merged_from = ARRAY[$1::bigint], status = 'superseded' WHERE id = $1", &[&closed]).expect("closed");
-        let listed = damaged_notes(&mut tx).expect("list");
+        let listed = damaged_notes(&mut tx, &Actor::local()).expect("list");
         let ids: Vec<i64> = listed.iter().filter_map(|v| v["id"].as_i64()).collect();
         assert!(ids.contains(&damaged), "damaged note missing: {ids:?}");
         for id in [plain, other, closed] {
@@ -6282,6 +6524,366 @@ mod tests {
             "longest",
             "an empty answer counts as a failure"
         );
+    }
+
+    #[test]
+    fn damaged_notes_hide() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping damaged_notes_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let secret = format!("secret {}", uuid::Uuid::new_v4().simple());
+        let damaged = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("first {secret}\n---\nsecond"),
+            "insight",
+            None,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET merged_from = ARRAY[id] WHERE id = $1",
+            &[&damaged],
+        )
+        .expect("damage");
+        let ids = |items: &[Value]| {
+            items
+                .iter()
+                .map(|v| v["id"].as_i64().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert!(ids(&damaged_notes(&mut tx, &a).expect("list")).contains(&damaged));
+        let theirs = damaged_notes(&mut tx, &b).expect("list");
+        assert!(!ids(&theirs).contains(&damaged));
+        assert_hidden(
+            &Value::Array(theirs).to_string(),
+            &secret,
+            "the damaged notes",
+        );
+    }
+
+    #[test]
+    fn supersede_keeps_the_old_owner_and_visibility() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping supersede_keeps_the_old_owner_and_visibility: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let owned = |tx: &mut postgres::Transaction<'_>, id: i64| -> (Option<i64>, String) {
+            let row = tx
+                .query_one(
+                    "SELECT owner_id, visibility FROM memory_chunks WHERE id = $1",
+                    &[&id],
+                )
+                .expect("row");
+            (row.get(0), row.get(1))
+        };
+        let shared_of_a = note(
+            &mut tx,
+            a.user_id,
+            "shared",
+            "a shared note of A",
+            "insight",
+            None,
+        );
+        let legacy = note(
+            &mut tx,
+            None,
+            "shared",
+            "a note from before accounts",
+            "insight",
+            None,
+        );
+        let private_of_a = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "a private note of A",
+            "insight",
+            None,
+        );
+        let shared = || "shared".to_string();
+        let private = || "private".to_string();
+        // B replaces A's shared note and a legacy note: the successors are B's
+        // and shared, the old notes keep owner and visibility.
+        for old in [shared_of_a, legacy] {
+            let before = owned(&mut tx, old);
+            let (_, new) = supersede_memory(&mut tx, &b, old, &test_successor("B's version"))
+                .expect("supersede");
+            assert_eq!(owned(&mut tx, new), (b.user_id, shared()));
+            assert_eq!(owned(&mut tx, old), before);
+        }
+        // A replaces her private note: the successor stays private and hers.
+        let (_, new) = supersede_memory(&mut tx, &a, private_of_a, &test_successor("A's version"))
+            .expect("supersede");
+        assert_eq!(owned(&mut tx, new), (a.user_id, private()));
+        assert_eq!(owned(&mut tx, private_of_a), (a.user_id, private()));
+        // B cannot replace a private note of A's: to B it does not exist.
+        let other = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "another private note",
+            "insight",
+            None,
+        );
+        let err = supersede_memory(&mut tx, &b, other, &test_successor("taken over"))
+            .expect_err("invisible");
+        assert!(matches!(err, SupersedeError::NotFound), "{err:?}");
+        // Local mode (no account) writes a successor without an owner.
+        let legacy = note(
+            &mut tx,
+            None,
+            "shared",
+            "another legacy note",
+            "insight",
+            None,
+        );
+        let (_, new) = supersede_memory(&mut tx, &Actor::local(), legacy, &test_successor("local"))
+            .expect("supersede");
+        assert_eq!(owned(&mut tx, new), (None, shared()));
+    }
+
+    #[test]
+    fn legacy_notes_cannot_become_private() {
+        use crate::access::team_test::note;
+        use crate::access::{new_note_owner, Role};
+        // Without an account (local mode, jobs, the shared agent key) no
+        // note can be private; with one, a new note can.
+        for actor in [Actor::local(), Actor::shared_only()] {
+            assert!(new_note_owner(&actor, Some("private")).is_err());
+            assert_eq!(new_note_owner(&actor, None), Ok((None, "shared")));
+        }
+        let user = Actor::for_user(7, "x", Role::Editor);
+        assert_eq!(
+            new_note_owner(&user, Some("private")),
+            Ok((Some(7), "private"))
+        );
+        assert!(new_note_owner(&user, Some("secret")).is_err());
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping legacy_notes_cannot_become_private: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let legacy = note(&mut tx, None, "shared", "legacy note", "insight", None);
+        // The database refuses it as well.
+        let mut sp = tx.transaction().expect("savepoint");
+        let err = sp
+            .execute(
+                "UPDATE memory_chunks SET visibility = 'private' WHERE id = $1",
+                &[&legacy],
+            )
+            .expect_err("check constraint");
+        assert_eq!(
+            err.as_db_error().map(|e| e.constraint()),
+            Some(Some("memory_chunks_private_has_owner")),
+            "{err}"
+        );
+        drop(sp);
+        // MCP write: -32602, nothing stored.
+        let before: i64 = tx
+            .query_one("SELECT count(*) FROM memory_chunks", &[])
+            .unwrap()
+            .get(0);
+        for actor in [Actor::local(), Actor::shared_only()] {
+            let ctx = crate::mcp::McpContext {
+                actor,
+                transport: crate::mcp_protocol::Transport::Http,
+                read_only: false,
+            };
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "write",
+                            "arguments": { "content": "private?", "visibility": "private" } } });
+            let body = crate::mcp::dispatch(&mut tx, &msg, &ctx)
+                .body
+                .expect("body");
+            assert_eq!(body["error"]["code"], -32602, "{body}");
+        }
+        let after: i64 = tx
+            .query_one("SELECT count(*) FROM memory_chunks", &[])
+            .unwrap()
+            .get(0);
+        assert_eq!(before, after);
+        // HTTP pin: 422 before the database is asked.
+        drop(tx);
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let resp = rt.block_on(memory_create(
+            State(state.clone()),
+            Extension(Actor::local()),
+            Json(MemoryCreate {
+                content: "a private pin".into(),
+                category: "insight".into(),
+                project_name: None,
+                visibility: Some("private".into()),
+            }),
+        ));
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn memory_list_and_detail_hide() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping memory_list_and_detail_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let secret = format!("secret {tag}");
+        let old = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("old {tag}"),
+            "insight",
+            None,
+        );
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("new {secret}"),
+            "insight",
+            None,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2 WHERE id = $1",
+            &[&old, &private],
+        )
+        .expect("chain");
+        let list = |tx: &mut postgres::Transaction<'_>, actor: &Actor| {
+            list_memory_rows(
+                tx,
+                actor,
+                Some(tag.clone()),
+                None,
+                Some("all".into()),
+                false,
+                50,
+                0,
+                "DESC",
+                None,
+                None,
+            )
+            .expect("list")
+        };
+        // A sees both, with owner and visibility (ruling R2).
+        let (total, rows) = list(&mut tx, &a);
+        assert_eq!(total, 2);
+        let row = rows.iter().find(|r| r.id == private).expect("private row");
+        assert_eq!(
+            (row.owner.as_deref(), row.visibility.as_str()),
+            (a.username.as_deref(), "private")
+        );
+        let row = rows.iter().find(|r| r.id == old).expect("old row");
+        assert_eq!(
+            (row.owner.as_deref(), row.visibility.as_str()),
+            (None, "shared")
+        );
+        assert_eq!(row.superseded_by, Some(private));
+        let detail = get_note_json(&mut tx, &a, private)
+            .expect("note")
+            .expect("visible");
+        assert_eq!(detail["owner"], serde_json::json!(a.username));
+        assert_eq!(detail["visibility"], "private");
+        // B sees only the shared note, and its chain ends there.
+        let (total, rows) = list(&mut tx, &b);
+        assert_eq!(total, 1);
+        assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![old]);
+        assert_eq!(rows[0].superseded_by, None);
+        assert_hidden(
+            &format!("{:?}", rows.iter().map(|r| &r.content).collect::<Vec<_>>()),
+            &secret,
+            "the list",
+        );
+        assert!(load_note(&mut tx, &b, private).expect("load").is_none());
+        assert!(get_note_json(&mut tx, &b, private).expect("load").is_none());
+        let detail = get_note_json(&mut tx, &b, old)
+            .expect("load")
+            .expect("visible");
+        assert_eq!(detail["superseded_by"], Value::Null);
+        assert_hidden(&detail.to_string(), &secret, "the detail");
+        assert_eq!(
+            detail["chain"].as_array().map(Vec::len),
+            Some(1),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn timeline_hides() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping timeline_hides: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, _) = two_accounts(&mut tx);
+        // The timeline counts conversations per day and tool; notes, private
+        // or not, never enter it. A private note leaves it unchanged.
+        let before = timeline_day_rows(&mut tx, None, None, false).expect("timeline");
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "a private note of today",
+            "insight",
+            None,
+        );
+        let after = timeline_day_rows(&mut tx, None, None, false).expect("timeline");
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn status_counts_only_visible_notes_and_vectors() {
+        use crate::access::team_test::{note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping status_counts_only_visible_notes_and_vectors: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            "counted for A only",
+            "insight",
+            None,
+        );
+        tx.execute(
+            "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+             VALUES ('memory_chunk', $1, 'test-status-model', $2::text::vector)",
+            &[
+                &private,
+                &crate::generate_embeddings::vector_literal(&[0.5; 768]),
+            ],
+        )
+        .expect("embed");
+        let (mine, theirs) = (
+            status_body(&mut tx, &a).expect("status"),
+            status_body(&mut tx, &b).expect("status"),
+        );
+        assert_eq!(mine.memory_chunks, theirs.memory_chunks + 1);
+        assert_eq!(mine.embeddings, theirs.embeddings + 1);
     }
 }
 
@@ -6384,11 +6986,16 @@ mod session_tests {
             let mut client = test_db()?;
             match mode {
                 AuthMode::Local => client.batch_execute("BEGIN").expect("begin"),
+                // `access_users` is locked first, as the migration test does,
+                // so copying the three tables cannot deadlock with it.
                 AuthMode::Team => client
                     .batch_execute(
-                        "CREATE TEMP TABLE access_users (LIKE public.access_users INCLUDING ALL); \
+                        "BEGIN; \
+                         LOCK TABLE public.access_users IN SHARE ROW EXCLUSIVE MODE; \
+                         CREATE TEMP TABLE access_users (LIKE public.access_users INCLUDING ALL); \
                          CREATE TEMP TABLE access_sessions (LIKE public.access_sessions INCLUDING ALL); \
-                         CREATE TEMP TABLE access_attempts (LIKE public.access_attempts INCLUDING ALL);",
+                         CREATE TEMP TABLE access_attempts (LIKE public.access_attempts INCLUDING ALL); \
+                         COMMIT;",
                     )
                     .expect("session-local account tables"),
             }
@@ -7183,5 +7790,200 @@ mod session_tests {
         assert_eq!(s.login("alice", PASSWORD).status, 200);
         assert_eq!(stored(), upgraded, "a current hash stays");
         assert_eq!(s.derivations(), vec![1, 1, 1, 1]);
+    }
+
+    /// Team mode on a session-local notes table as well: the routes see
+    /// only the notes of the test, so counts are exact, and its owners can
+    /// be the session-local accounts. Gone with the connection. Without
+    /// named constraints: migration 014 looks its CHECK up by name, and the
+    /// migration test must not find this table's copy.
+    fn team_with_notes() -> Option<Served> {
+        let served = Served::team()?;
+        served
+            .db()
+            .batch_execute(
+                "CREATE TEMP TABLE memory_chunks (LIKE public.memory_chunks \
+                 INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)",
+            )
+            .expect("session-local notes");
+        Some(served)
+    }
+
+    /// Two signed-in accounts: (A's id, A, B).
+    fn two_browsers(s: &Served) -> (i64, Browser, Browser) {
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (name_a, name_b) = (format!("a-{tag}"), format!("b-{tag}"));
+        let a = s.add_account(&name_a, Role::Editor);
+        s.add_account(&name_b, Role::Editor);
+        (
+            a,
+            s.sign_in(&name_a, PASSWORD),
+            s.sign_in(&name_b, PASSWORD),
+        )
+    }
+
+    fn insert_note(
+        s: &Served,
+        owner: Option<i64>,
+        visibility: &str,
+        content: &str,
+        source: &str,
+    ) -> i64 {
+        let id = crate::access::team_test::note(
+            &mut *s.db(),
+            owner,
+            visibility,
+            content,
+            "decision",
+            Some("team-project"),
+        );
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET source_type = $2 WHERE id = $1",
+                &[&id, &source],
+            )
+            .expect("source type");
+        id
+    }
+
+    #[test]
+    fn status_and_audit_count_only_visible() {
+        let Some(s) = team_with_notes() else {
+            eprintln!("skipping status_and_audit_count_only_visible: no PostgreSQL reachable");
+            return;
+        };
+        let (a_id, a, b) = two_browsers(&s);
+        insert_note(
+            &s,
+            Some(a_id),
+            "private",
+            "A's private agent note",
+            "mcp_write",
+        );
+        insert_note(&s, None, "shared", "a shared agent note", "mcp_write");
+        for (browser, notes) in [(&a, 2), (&b, 1)] {
+            let status = s.get("/api/status", browser);
+            assert_eq!(status.status, 200, "{}", status.body);
+            assert_eq!(status.json()["memory_chunks"], notes, "{}", status.body);
+            let audit = s.get("/api/audit", browser);
+            assert_eq!(audit.status, 200, "{}", audit.body);
+            assert_eq!(audit.json()["mcp_writes"], notes, "{}", audit.body);
+        }
+    }
+
+    #[test]
+    fn api_routes_never_show_a_private_note_of_another_account() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping api_routes_never_show_a_private_note_of_another_account: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let (a_id, a, b) = two_browsers(&s);
+        // B asks with the probe word; the secret must not come back.
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (secret, probe) = (format!("secret{tag}"), format!("probe{tag}"));
+        let shared = insert_note(&s, None, "shared", "use diesel for the store", "manual");
+        let private = insert_note(
+            &s,
+            Some(a_id),
+            "private",
+            &format!("no longer diesel, instead sqlx {probe} {secret}? todo"),
+            "ui_pin",
+        );
+        // A's private note replaced the shared one, lapsed and was damaged
+        // by the old reflect, so every list has a reason to show it.
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2, \
+                 superseded_at = now() WHERE id = $1",
+                &[&shared, &private],
+            )
+            .expect("chain");
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET content = content || E'\\n---\\nmore', \
+                 merged_from = ARRAY[id], expires_at = now() - interval '1 hour' WHERE id = $1",
+                &[&private],
+            )
+            .expect("damage");
+        let reads = [
+            format!("/api/memory?status=all&q={probe}"),
+            "/api/memory?status=all".to_string(),
+            format!("/api/memory/{private}"),
+            format!("/api/memory/{shared}"),
+            format!("/api/search?q={probe}"),
+            format!("/api/recall?q={probe}"),
+            format!(
+                "/api/recall?q=diesel&mode=as_of&valid_at={}",
+                chrono::Utc::now().format("%Y-%m-%d")
+            ),
+            "/api/recall?q=diesel&mode=associative".to_string(),
+            format!("/api/context?project=team-project&task={probe}"),
+            "/api/handoff?project=team-project".to_string(),
+            "/api/stale-digest".to_string(),
+            "/api/conflicts".to_string(),
+            "/api/damaged-notes".to_string(),
+            "/api/consolidation/candidates".to_string(),
+            format!("/api/consolidation/proposal?ids={shared},{private}"),
+            "/api/timeline".to_string(),
+            "/api/status".to_string(),
+            "/api/audit".to_string(),
+        ];
+        // The owner gets her note from the list and the detail.
+        for path in &reads[..3] {
+            let answer = s.get(path, &a);
+            assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+            assert!(answer.body.contains(&secret), "{path}: {}", answer.body);
+        }
+        for (i, path) in reads.iter().enumerate() {
+            let answer = s.get(path, &b);
+            // The private note is missing to B; the proposal names a note
+            // that is no longer current (the replaced shared one).
+            let expected = match i {
+                2 => 404,
+                14 => 422,
+                _ => 200,
+            };
+            assert_eq!(answer.status, expected, "{path}: {}", answer.body);
+            assert!(
+                !answer.body.contains(&secret)
+                    && !answer.body.contains(&format!("\"id\":{private}")),
+                "{path} shows A's private note to B: {}",
+                answer.body
+            );
+        }
+        assert_eq!(s.get(&reads[2], &b).status, 404);
+        assert_eq!(s.get(&reads[3], &b).json()["superseded_by"], Value::Null);
+        // Nor can B change it.
+        for (path, body) in [
+            (
+                format!("/api/memory/{private}/supersede"),
+                json!({ "content": "mine" }),
+            ),
+            (format!("/api/memory/{private}/forget"), json!({})),
+            (format!("/api/memory/{private}/keep"), json!({})),
+        ] {
+            let answer = s.write(&path, &b, body);
+            assert_eq!(answer.status, 404, "{path}: {}", answer.body);
+        }
+        let answer = s.write(
+            "/api/consolidate",
+            &b,
+            json!({ "ids": [shared, private], "content": "merged" }),
+        );
+        assert_eq!(answer.status, 404, "{}", answer.body);
+        assert_eq!(s.get(&reads[2], &a).json()["status"], "active");
+        // A pin of B can be private; then only B sees it.
+        let answer = s.write(
+            "/api/memory",
+            &b,
+            json!({ "content": "B's own pin", "category": "insight", "visibility": "private" }),
+        );
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let pin = answer.json()["id"].as_i64().expect("id");
+        assert_eq!(s.get(&format!("/api/memory/{pin}"), &a).status, 404);
+        let mine = s.get(&format!("/api/memory/{pin}"), &b).json();
+        assert_eq!(mine["visibility"], "private");
     }
 }

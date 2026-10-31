@@ -3,7 +3,9 @@
 //! `record_use` counts one use per note when a note is handed to an agent or
 //! to the CLI. The UI reads notes too, but that does not count.
 
+use crate::access::{push_visibility, Actor};
 use chrono::{DateTime, Utc};
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -60,6 +62,8 @@ pub enum ConsolidateError {
     NotFound(i64),
     AlreadySuperseded(i64),
     MixedProjects,
+    /// Shared and private notes, or private notes of two owners.
+    MixedVisibility,
     Db(anyhow::Error),
 }
 
@@ -72,6 +76,7 @@ impl std::fmt::Display for ConsolidateError {
             Self::NotFound(id) => write!(f, "memory note {id} not found"),
             Self::AlreadySuperseded(id) => write!(f, "memory note {id} is already superseded"),
             Self::MixedProjects => write!(f, "the notes belong to different projects"),
+            Self::MixedVisibility => write!(f, "shared and private notes cannot be merged"),
             Self::Db(e) => write!(f, "{e}"),
         }
     }
@@ -102,11 +107,13 @@ fn find(parent: &mut HashMap<i64, i64>, x: i64) -> i64 {
 }
 
 /// Groups of currently valid notes that say nearly the same thing: same
-/// project (or both without one), both with a vector for `model`, cosine at
-/// least `min_similarity`. A group is a connected component of such pairs.
-/// Largest groups first, then by smallest id. Nothing is changed.
+/// project (or both without one), same visibility (private ones of the same
+/// owner), both with a vector for `model`, cosine at least `min_similarity`.
+/// A group is a connected component of such pairs. Only notes `actor` sees
+/// take part. Largest groups first, then by smallest id. Nothing is changed.
 pub fn consolidation_candidates<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     model: &str,
     column: &'static str,
     min_similarity: f64,
@@ -114,21 +121,26 @@ pub fn consolidation_candidates<C: GenericClient>(
     let predicate = crate::temporal::as_of_predicate("$1", "$2");
     let now = Some(Utc::now());
     let known_at: Option<DateTime<Utc>> = None;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&now, &known_at, &model, &min_similarity];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
         &format!(
             "WITH cur AS (
-                 SELECT mc.id, mc.project_name, e.{column} AS v
+                 SELECT mc.id, mc.project_name, mc.visibility, mc.owner_id, e.{column} AS v
                  FROM memory_chunks mc
                  JOIN embeddings e ON e.source_type = 'memory_chunk'
                   AND e.source_id = mc.id AND e.model = $3
                  WHERE COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
-                   AND mc.superseded_by IS NULL AND e.{column} IS NOT NULL AND {predicate})
+                   AND mc.superseded_by IS NULL AND e.{column} IS NOT NULL AND {predicate}
+                   AND {seen})
              SELECT a.id, b.id, (1 - (a.v <=> b.v))::float8 AS sim
              FROM cur a JOIN cur b
                ON a.id < b.id AND a.project_name IS NOT DISTINCT FROM b.project_name
+              AND a.visibility = b.visibility
+              AND (a.visibility = 'shared' OR a.owner_id = b.owner_id)
              WHERE 1 - (a.v <=> b.v) >= $4"
         ),
-        &[&now, &known_at, &model, &min_similarity],
+        &params,
     )?;
     let mut parent: HashMap<i64, i64> = HashMap::new();
     let mut pairs: Vec<(i64, i64, f64)> = Vec::new();
@@ -212,9 +224,12 @@ pub fn longest_text<'a>(texts: impl Iterator<Item = &'a str>) -> &'a str {
 /// Merge `ids` into one new note holding `content`. The sources are closed
 /// like a supersede (they stay in History, a forgotten one stays forgotten);
 /// no source changes its text. One transaction: any refusal writes nothing.
-/// Returns the id of the new note.
+/// A note `actor` does not see counts as missing. The sources share one
+/// visibility; merged private notes stay private to their owner, merged
+/// shared notes give a shared note of `actor`. Returns the id of the new note.
 pub fn consolidate<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     ids: &[i64],
     content: &str,
     category: Option<&str>,
@@ -236,11 +251,15 @@ pub fn consolidate<C: GenericClient>(
         }
     }
     let mut tx = client.transaction()?;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&ids];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = tx.query(
-        "SELECT id, category::text, project_name, COALESCE(status, 'active'), superseded_by,
-                confidence::float8, length(content)
-         FROM memory_chunks WHERE id = ANY($1) ORDER BY id FOR UPDATE",
-        &[&ids],
+        &format!(
+            "SELECT id, category::text, project_name, COALESCE(status, 'active'), superseded_by,
+                    confidence::float8, length(content), visibility, owner_id
+             FROM memory_chunks mc WHERE id = ANY($1) AND {seen} ORDER BY id FOR UPDATE"
+        ),
+        &params,
     )?;
     if let Some(missing) = ids
         .iter()
@@ -249,6 +268,7 @@ pub fn consolidate<C: GenericClient>(
         return Err(ConsolidateError::NotFound(*missing));
     }
     let mut project: Option<Option<String>> = None;
+    let mut visibility: Option<(String, Option<i64>)> = None;
     let mut confidence = f64::MIN;
     // category -> (count, longest content length among its notes, lowest id)
     let mut cats: HashMap<String, (usize, i32, i64)> = HashMap::new();
@@ -263,6 +283,16 @@ pub fn consolidate<C: GenericClient>(
         match &project {
             None => project = Some(p),
             Some(first) if *first != p => return Err(ConsolidateError::MixedProjects),
+            Some(_) => {}
+        }
+        let v: String = r.get(7);
+        // Shared notes of several owners merge; private ones only with their owner's.
+        let owner: Option<i64> = if v == "private" { r.get(8) } else { None };
+        match &visibility {
+            None => visibility = Some((v, owner)),
+            Some((first, first_owner)) if (first.as_str(), *first_owner) != (v.as_str(), owner) => {
+                return Err(ConsolidateError::MixedVisibility)
+            }
             Some(_) => {}
         }
         confidence = confidence.max(r.get::<_, Option<f64>>(5).unwrap_or(0.0));
@@ -280,18 +310,30 @@ pub fn consolidate<C: GenericClient>(
             .expect("at least two notes"),
     };
     let project = project.flatten();
+    let (visibility, owner) = match visibility.expect("at least two notes") {
+        (v, Some(owner)) => (v, Some(owner)),
+        (v, None) => (v, actor.user_id),
+    };
     let category_type = crate::extract_memory::category_column_type(&mut tx)?;
     let new_id: i64 = tx
         .query_one(
             &format!(
                 "INSERT INTO memory_chunks
                      (source_type, content, category, project_name, confidence, status,
-                      merged_from, valid_from)
+                      merged_from, valid_from, owner_id, visibility)
                  VALUES ('consolidation', $1, $2::text::{category_type}, $3, $4::float8,
-                         'active', $5, now())
+                         'active', $5, now(), $6, $7)
                  RETURNING id"
             ),
-            &[&content, &category, &project, &confidence, &ids],
+            &[
+                &content,
+                &category,
+                &project,
+                &confidence,
+                &ids,
+                &owner,
+                &visibility,
+            ],
         )?
         .get(0);
     tx.execute(
@@ -620,6 +662,7 @@ mod tests {
             .collect();
         let new_id = consolidate(
             &mut tx,
+            &Actor::local(),
             &[a, b],
             &format!("same thing, said longer {tag}"),
             None,
@@ -671,21 +714,23 @@ mod tests {
         )
         .expect("supersede c");
         let text = format!("aon merged {tag}");
-        let err = consolidate(&mut tx, &[a, b, c], &text, None).unwrap_err();
+        let err = consolidate(&mut tx, &Actor::local(), &[a, b, c], &text, None).unwrap_err();
         assert!(
             matches!(err, ConsolidateError::AlreadySuperseded(id) if id == c),
             "{err:?}"
         );
-        let err = consolidate(&mut tx, &[a, b, i64::MAX], &text, None).unwrap_err();
+        let err =
+            consolidate(&mut tx, &Actor::local(), &[a, b, i64::MAX], &text, None).unwrap_err();
         assert!(
             matches!(err, ConsolidateError::NotFound(id) if id == i64::MAX),
             "{err:?}"
         );
-        let err = consolidate(&mut tx, &[a], &text, None).unwrap_err();
+        let err = consolidate(&mut tx, &Actor::local(), &[a], &text, None).unwrap_err();
         assert!(matches!(err, ConsolidateError::TooFew), "{err:?}");
-        let err = consolidate(&mut tx, &[a, b], "  ", None).unwrap_err();
+        let err = consolidate(&mut tx, &Actor::local(), &[a, b], "  ", None).unwrap_err();
         assert!(matches!(err, ConsolidateError::EmptyContent), "{err:?}");
-        let err = consolidate(&mut tx, &[a, b], &text, Some("nonsense")).unwrap_err();
+        let err =
+            consolidate(&mut tx, &Actor::local(), &[a, b], &text, Some("nonsense")).unwrap_err();
         assert!(
             matches!(err, ConsolidateError::InvalidCategory(_)),
             "{err:?}"
@@ -724,16 +769,28 @@ mod tests {
         let c = seed_full(&mut tx, &format!("star C {tag}"), "decision", None, 1.0);
         star(&mut tx, a);
         star(&mut tx, b);
-        let new_id = consolidate(&mut tx, &[a, b, c], &format!("star merged {tag}"), None)
-            .expect("consolidate");
+        let new_id = consolidate(
+            &mut tx,
+            &Actor::local(),
+            &[a, b, c],
+            &format!("star merged {tag}"),
+            None,
+        )
+        .expect("consolidate");
         assert_eq!(stars(&mut tx, new_id), 1);
         assert_eq!(stars(&mut tx, a), 0);
         assert_eq!(stars(&mut tx, b), 0);
         // no star before, no star after
         let x = seed_full(&mut tx, &format!("nostar X {tag}"), "decision", None, 1.0);
         let y = seed_full(&mut tx, &format!("nostar Y {tag}"), "decision", None, 1.0);
-        let m = consolidate(&mut tx, &[x, y], &format!("nostar merged {tag}"), None)
-            .expect("consolidate");
+        let m = consolidate(
+            &mut tx,
+            &Actor::local(),
+            &[x, y],
+            &format!("nostar merged {tag}"),
+            None,
+        )
+        .expect("consolidate");
         assert_eq!(stars(&mut tx, m), 0);
     }
 
@@ -750,9 +807,9 @@ mod tests {
         let a = seed_full(&mut tx, &format!("mix A {tag}"), "decision", Some(&p1), 1.0);
         let b = seed_full(&mut tx, &format!("mix B {tag}"), "decision", Some(&p2), 1.0);
         let c = seed_full(&mut tx, &format!("mix C {tag}"), "decision", None, 1.0);
-        let err = consolidate(&mut tx, &[a, b], "merged", None).unwrap_err();
+        let err = consolidate(&mut tx, &Actor::local(), &[a, b], "merged", None).unwrap_err();
         assert!(matches!(err, ConsolidateError::MixedProjects), "{err:?}");
-        let err = consolidate(&mut tx, &[a, c], "merged", None).unwrap_err();
+        let err = consolidate(&mut tx, &Actor::local(), &[a, c], "merged", None).unwrap_err();
         assert!(matches!(err, ConsolidateError::MixedProjects), "{err:?}");
         let status: String = tx
             .query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&a])
@@ -797,8 +854,14 @@ mod tests {
         embed(&mut tx, a, &model, &vec2(1.0, 0.0));
         embed(&mut tx, b, &model, &vec2(0.95, s));
         embed(&mut tx, c, &model, &vec2(0.5, -(0.75_f32).sqrt()));
-        let groups = consolidation_candidates(&mut tx, &model, "embedding_768", MIN_SIMILARITY)
-            .expect("candidates");
+        let groups = consolidation_candidates(
+            &mut tx,
+            &Actor::local(),
+            &model,
+            "embedding_768",
+            MIN_SIMILARITY,
+        )
+        .expect("candidates");
         assert_eq!(groups.len(), 1, "{groups:?}");
         let g = &groups[0];
         assert_eq!(g.notes.iter().map(|n| n.id).collect::<Vec<_>>(), vec![a, b]);
@@ -813,7 +876,8 @@ mod tests {
         );
         // a lower bar pulls the third note in only if it is similar enough
         let loose =
-            consolidation_candidates(&mut tx, &model, "embedding_768", 0.4).expect("candidates");
+            consolidation_candidates(&mut tx, &Actor::local(), &model, "embedding_768", 0.4)
+                .expect("candidates");
         assert_eq!(loose.len(), 1);
         assert_eq!(loose[0].notes.len(), 3);
         assert!(
@@ -855,8 +919,14 @@ mod tests {
         );
         embed(&mut tx, a, &model, &vec2(1.0, 0.0));
         embed(&mut tx, c, "some-other-model", &vec2(1.0, 0.0));
-        let groups = consolidation_candidates(&mut tx, &model, "embedding_768", MIN_SIMILARITY)
-            .expect("candidates");
+        let groups = consolidation_candidates(
+            &mut tx,
+            &Actor::local(),
+            &model,
+            "embedding_768",
+            MIN_SIMILARITY,
+        )
+        .expect("candidates");
         assert!(groups.is_empty(), "{groups:?}");
     }
 
@@ -877,8 +947,14 @@ mod tests {
             &[&b],
         )
         .expect("forget");
-        let new_id = consolidate(&mut tx, &[a, b], &format!("forgot merged {tag}"), None)
-            .expect("consolidate");
+        let new_id = consolidate(
+            &mut tx,
+            &Actor::local(),
+            &[a, b],
+            &format!("forgot merged {tag}"),
+            None,
+        )
+        .expect("consolidate");
         let row = tx
             .query_one(
                 "SELECT status, valid_to IS NOT NULL, superseded_by FROM memory_chunks WHERE id = $1",
@@ -918,8 +994,14 @@ mod tests {
             &[&b],
         )
         .expect("null status");
-        let new_id = consolidate(&mut tx, &[a, b], &format!("null merged {tag}"), None)
-            .expect("consolidate");
+        let new_id = consolidate(
+            &mut tx,
+            &Actor::local(),
+            &[a, b],
+            &format!("null merged {tag}"),
+            None,
+        )
+        .expect("consolidate");
         let row = tx
             .query_one(
                 "SELECT status, superseded_by FROM memory_chunks WHERE id = $1",
@@ -950,5 +1032,144 @@ mod tests {
         // against consolidate, which locks ORDER BY id).
         let sql = RECORD_USE_SQL.to_lowercase();
         assert!(sql.contains("order by id for update"), "{sql}");
+    }
+
+    /// Three notes saying the same thing (cosine 1): a shared one, two of
+    /// A's private ones. Returns (shared, private, private2, model).
+    fn same_three<C: GenericClient>(tx: &mut C, a: &Actor, tag: &str) -> (i64, i64, i64, String) {
+        use crate::access::team_test::note;
+        let model = format!("test-model-{tag}");
+        let project = format!("vis-{tag}");
+        let p = Some(project.as_str());
+        let shared = note(
+            tx,
+            None,
+            "shared",
+            &format!("shared twin {tag}"),
+            "decision",
+            p,
+        );
+        let private = note(
+            tx,
+            a.user_id,
+            "private",
+            &format!("secret twin {tag}"),
+            "decision",
+            p,
+        );
+        let private2 = note(
+            tx,
+            a.user_id,
+            "private",
+            &format!("secret twin two {tag}"),
+            "decision",
+            p,
+        );
+        for id in [shared, private, private2] {
+            embed(tx, id, &model, &vec2(1.0, 0.0));
+        }
+        (shared, private, private2, model)
+    }
+
+    #[test]
+    fn consolidation_candidates_hide() {
+        use crate::access::team_test::{assert_hidden, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping consolidation_candidates_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (shared, private, private2, model) = same_three(&mut tx, &a, &tag);
+        let other = seed_full(
+            &mut tx,
+            &format!("shared twin again {tag}"),
+            "decision",
+            None,
+            1.0,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET project_name = $2 WHERE id = $1",
+            &[&other, &format!("vis-{tag}")],
+        )
+        .expect("project");
+        embed(&mut tx, other, &model, &vec2(1.0, 0.0));
+        let ids = |groups: &[CandidateGroup]| -> Vec<Vec<i64>> {
+            groups
+                .iter()
+                .map(|g| g.notes.iter().map(|n| n.id).collect())
+                .collect()
+        };
+        let mine = consolidation_candidates(&mut tx, &a, &model, "embedding_768", 0.9)
+            .expect("candidates");
+        assert_eq!(
+            ids(&mine),
+            vec![vec![shared, other], vec![private, private2]]
+        );
+        let theirs = consolidation_candidates(&mut tx, &b, &model, "embedding_768", 0.9)
+            .expect("candidates");
+        assert_eq!(ids(&theirs), vec![vec![shared, other]]);
+        assert_hidden(
+            &serde_json::to_string(&theirs).unwrap(),
+            "secret twin",
+            "the groups",
+        );
+        // B cannot merge or even name A's notes.
+        let err = consolidate(&mut tx, &b, &[shared, private], "x", None).unwrap_err();
+        assert!(
+            matches!(err, ConsolidateError::NotFound(id) if id == private),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn consolidation_never_crosses_visibility() {
+        use crate::access::team_test::two_accounts;
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping consolidation_never_crosses_visibility: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, _) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (shared, private, private2, model) = same_three(&mut tx, &a, &tag);
+        // Seen by everyone (local mode) the three are still two groups.
+        let groups =
+            consolidation_candidates(&mut tx, &Actor::local(), &model, "embedding_768", 0.9)
+                .expect("candidates");
+        assert!(groups.iter().all(|g| g.notes.len() == 2), "{groups:?}");
+        assert!(groups
+            .iter()
+            .all(|g| !(g.notes.iter().any(|n| n.id == shared)
+                && g.notes.iter().any(|n| n.id == private))));
+        let err = consolidate(&mut tx, &a, &[shared, private], "x", None).unwrap_err();
+        assert!(matches!(err, ConsolidateError::MixedVisibility), "{err:?}");
+        // A's own private notes merge into a private note of hers.
+        let merged =
+            consolidate(&mut tx, &a, &[private, private2], "one secret twin", None).expect("merge");
+        let row = tx
+            .query_one(
+                "SELECT visibility, owner_id FROM memory_chunks WHERE id = $1",
+                &[&merged],
+            )
+            .expect("row");
+        assert_eq!(row.get::<_, String>(0), "private");
+        assert_eq!(row.get::<_, Option<i64>>(1), a.user_id);
+        // The dedup job sees shared notes only: a private twin is never merged.
+        let dup = format!("dup twin {tag}");
+        let s1 = crate::access::team_test::note(&mut tx, None, "shared", &dup, "decision", None);
+        let p1 =
+            crate::access::team_test::note(&mut tx, a.user_id, "private", &dup, "decision", None);
+        let s2 = crate::access::team_test::note(&mut tx, None, "shared", &dup, "decision", None);
+        crate::reflect_memory::dedup(&mut tx, &Actor::shared_only(), false).expect("dedup");
+        let status = |tx: &mut postgres::Transaction<'_>, id: i64| -> String {
+            tx.query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&id])
+                .expect("row")
+                .get(0)
+        };
+        assert_eq!(status(&mut tx, s1), "superseded");
+        assert_eq!(status(&mut tx, s2), "superseded");
+        assert_eq!(status(&mut tx, p1), "active", "the private twin stays");
     }
 }

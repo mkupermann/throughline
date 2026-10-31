@@ -3,7 +3,9 @@
 //! Lists active decisions/preferences with the tool that produced them and
 //! any supersession chain, so a Claude session can see what Codex decided.
 
+use crate::access::{push_visibility, Actor};
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
 
@@ -73,6 +75,7 @@ fn chain_note(chain: &[ChainLink]) -> Option<String> {
 /// Active (and recently superseded) decisions, optionally scoped to a project.
 pub fn list_decisions<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     project: Option<&str>,
     include_superseded: bool,
     limit: usize,
@@ -82,6 +85,11 @@ pub fn list_decisions<C: GenericClient>(
     } else {
         "ch.status = 'active'"
     };
+    let limit64 = limit as i64;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&project, &limit64];
+    let seen = push_visibility(actor, "ch", &mut params);
+    // A successor the actor does not see ends the chain.
+    let seen_next = push_visibility(actor, "s", &mut params);
     let sql = format!(
         r#"
         SELECT ch.id,
@@ -93,18 +101,19 @@ pub fn list_decisions<C: GenericClient>(
                COALESCE(ch.confidence, 0.5)::float8,
                ch.status::text,
                ch.created_at,
-               ch.superseded_by
+               (SELECT s.id FROM memory_chunks s WHERE s.id = ch.superseded_by AND {seen_next})
         FROM memory_chunks ch
         LEFT JOIN conversations c
           ON ch.source_type = 'conversation' AND c.id = ch.source_id
         WHERE {status_filter}
           AND ch.category IN ('decision','preference','pattern','project_context','workflow')
           AND ($1::text IS NULL OR ch.project_name = $1)
+          AND {seen}
         ORDER BY ch.created_at DESC
         LIMIT $2::bigint
         "#
     );
-    let rows = client.query(&sql, &[&project, &(limit as i64)])?;
+    let rows = client.query(&sql, &params)?;
 
     let mut out = Vec::new();
     let mut tools = std::collections::BTreeSet::new();
@@ -131,15 +140,19 @@ pub fn list_decisions<C: GenericClient>(
             if hops > 5 {
                 break;
             }
+            let mut step: Vec<&(dyn ToSql + Sync)> = vec![&nid];
+            let seen = push_visibility(actor, "ch", &mut step);
             let Ok(parts) = client.query(
-                r#"
+                &format!(
+                    r#"
                 SELECT ch.id, ch.content, COALESCE(c.source_tool, ch.source_type)
                 FROM memory_chunks ch
                 LEFT JOIN conversations c
                   ON ch.source_type = 'conversation' AND c.id = ch.source_id
-                WHERE ch.id = $1
-                "#,
-                &[&nid],
+                WHERE ch.id = $1 AND {seen}
+                "#
+                ),
+                &step,
             ) else {
                 break;
             };
@@ -301,5 +314,58 @@ mod tests {
         assert!(text.contains("decisions: 1"));
         assert!(text.contains("supersession chain"));
         assert!(text.contains("→"));
+    }
+
+    #[test]
+    fn decisions_hide() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping decisions_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let project = format!("dec-{}", uuid::Uuid::new_v4().simple());
+        let secret = format!("secret {project}");
+        let p = Some(project.as_str());
+        let old = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("use diesel {project}"),
+            "decision",
+            p,
+        );
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("use sqlx {secret}"),
+            "decision",
+            p,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2 WHERE id = $1",
+            &[&old, &private],
+        )
+        .expect("chain");
+        let mine = list_decisions(&mut tx, &a, p, true, 50).expect("decisions");
+        assert!(mine.rows.iter().any(|r| r.id == private));
+        let row = mine.rows.iter().find(|r| r.id == old).expect("old row");
+        assert_eq!(row.superseded_by, Some(private));
+        let theirs = list_decisions(&mut tx, &b, p, true, 50).expect("decisions");
+        assert_hidden(&render_text(&theirs), &secret, "the decision text");
+        assert_hidden(
+            &serde_json::to_string(&theirs).unwrap(),
+            &secret,
+            "the decision JSON",
+        );
+        assert!(theirs.rows.iter().all(|r| r.id != private));
+        let row = theirs.rows.iter().find(|r| r.id == old).expect("old row");
+        assert_eq!(
+            row.superseded_by, None,
+            "the chain ends before the private note"
+        );
+        assert_eq!(row.chain.len(), 1);
     }
 }
