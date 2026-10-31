@@ -10,17 +10,27 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 | `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres |
 | `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
-| `throughline-embed.timer`   | hourly at :15    | `throughline embed --limit 10000` — vectors for new notes first, then messages  |
+| `throughline-embed.timer`   | hourly at :15    | Rust `throughline embed --limit 10000` — vectors for new notes first, then messages |
 
 All four services are `Type=oneshot`: they run, finish, and exit. The timer units keep
 them on schedule.
 
-The ingest and embed units invoke the packaged `throughline` command through
-the shared environment. Recall ranks by meaning (cosine) by default, so a note
-needs a vector. A new note gets one when it is written; the embed job fills in
-what that misses, such as notes written while Ollama was down. The extract and backup units retain source-checkout
+The ingest unit invokes the packaged `throughline ingest --all` command through
+the shared environment. The extract and backup units retain source-checkout
 compatibility wrappers; installed and interactive use should prefer
 `throughline extract-memory` and `throughline backup`.
+
+The embed unit needs the Rust runtime: it runs
+`~/.local/share/throughline/rust/target/release/throughline`, which
+`cargo build --release --manifest-path rust/Cargo.toml -p throughline` builds in
+the checkout. The Python CLI's `embed` ignores `OLLAMA_EMBED_MODEL` and uses
+`nomic-embed-text` on Ollama, so after a switch of the embedding model it fills
+nothing recall reads. Recall
+ranks by meaning (cosine) by default, so a note needs a vector of the model the
+server uses. A new note gets one when it is written; the embed job fills in what
+that misses, such as notes written while Ollama was down. With the Compose stack,
+replace its `ExecStart` with the commented `docker compose exec -T web` line in
+the unit, which takes the model from `.env`.
 
 ## Prerequisites
 
@@ -80,7 +90,10 @@ journalctl --user -u throughline-ingest.service -f
 ## Configuration
 
 All four services read `~/.config/throughline/throughline.env`, which owns
-`PGDATABASE`, `PGHOST`, and `PGPORT`. `PGUSER` remains the systemd user. Add
+`PGDATABASE`, `PGHOST`, and `PGPORT`, and for the embed job `OLLAMA_HOST` and
+`OLLAMA_EMBED_MODEL`. Set both to exactly the values the server uses: vectors
+are keyed by the model string, and an empty `OLLAMA_EMBED_MODEL` means the
+default `nomic-embed-text`. `PGUSER` remains the systemd user. Add
 `PGPASSWORD` to the shared file when password authentication is required:
 
 ```bash

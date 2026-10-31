@@ -1,13 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hourly embedding at minute 15, so a note the write itself could not embed
+  does not stay ranked by its words for long.
+
+  This job needs the Rust runtime: the binary that the cargo build in the
+  README ("Develop and contribute") puts into rust/target/release. The Python
+  CLI's embed ignores OLLAMA_EMBED_MODEL and uses nomic-embed-text on Ollama,
+  so after a switch of the model it fills nothing recall reads.
+
+  OLLAMA_EMBED_MODEL and OLLAMA_HOST must match the server exactly, because
+  vectors are keyed by the model string. The values below are the defaults.
+  With the Compose stack, run the container's binary instead, which already
+  reads both from .env: docker compose exec -T web throughline embed, with the
+  same limit, from the checkout.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.claude-memory-embed</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>throughline</string>
+        <string>REPLACE_WITH_ABSOLUTE_PATH/rust/target/release/throughline</string>
         <string>embed</string>
         <string>--limit</string>
         <string>10000</string>
@@ -24,9 +38,13 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>REPLACE_WITH_HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>PGUSER</key>
         <string>REPLACE_WITH_YOUR_USER</string>
+        <key>OLLAMA_HOST</key>
+        <string>http://localhost:11434</string>
+        <key>OLLAMA_EMBED_MODEL</key>
+        <string>nomic-embed-text</string>
     </dict>
 </dict>
 </plist>

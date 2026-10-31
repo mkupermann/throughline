@@ -177,7 +177,10 @@ This loads every plist in `launchd/`. The scheduled jobs are:
 - `com.claude-memory-extract` — daily 02:00 UTC memory extraction
 - `com.claude-memory-backup` — daily 03:00 UTC `pg_dump` with 30-day retention
 - `com.claude-memory-embed` — hourly at minute 15, `throughline embed --limit 10000`:
-  vectors for notes the write itself could not embed, then for messages
+  vectors for notes the write itself could not embed, then for messages. It
+  runs the Rust binary in `rust/target/release/` (the Python CLI's `embed`
+  ignores `OLLAMA_EMBED_MODEL`). Set `OLLAMA_EMBED_MODEL` and
+  `OLLAMA_HOST` in the installed plist to the server's values.
 
 Verify:
 
