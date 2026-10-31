@@ -3,8 +3,9 @@
 //! Loopback-only by default. In local mode (the default) the UI and the REST
 //! API have no login and serve the whole corpus, the same posture as the
 //! Python server. In team mode (`THROUGHLINE_AUTH_MODE=team`) `/api` needs a
-//! session from `POST /api/login` (see `actor_layer`). `/mcp` needs the
-//! agent key (`THROUGHLINE_AGENT_KEY`). `GET /api/recall` and
+//! session from `POST /api/login` or an account's agent key (see
+//! `actor_layer`). `/mcp` needs the agent key: `THROUGHLINE_AGENT_KEY` in
+//! local mode, an account's key in team mode. `GET /api/recall` and
 //! `GET /api/context` count agent use when a valid Bearer key comes with the
 //! request.
 
@@ -190,12 +191,17 @@ pub(crate) fn api_error(status: StatusCode, code: &str, detail: impl Into<String
         .into_response()
 }
 
-/// Whether the call comes from an agent. Only the Bearer scheme marks one: no `Authorization`
-/// header, or another scheme such as `Basic` from an auth proxy, is the UI: `Ok(false)`, nothing
-/// counts. An accepted key is `Ok(true)`. A Bearer header with a wrong or empty key, or while
-/// agent access is off, is a 401 that never names the key.
+/// Whether the call comes from an agent, whose use of the notes it gets is counted. Team mode:
+/// whether [`actor_layer`] authenticated it by an account's agent key; a session's call is the UI,
+/// also with a Bearer header next to the cookie. Local mode: only the Bearer scheme marks one: no
+/// `Authorization` header, or another scheme such as `Basic` from an auth proxy, is the UI:
+/// `Ok(false)`, nothing counts. An accepted key is `Ok(true)`. A Bearer header with a wrong or
+/// empty key, or while agent access is off, is a 401 that never names the key.
 #[allow(clippy::result_large_err)]
-fn agent_call(state: &AppState, headers: &HeaderMap) -> Result<bool, Response> {
+fn agent_call(state: &AppState, actor: &Actor, headers: &HeaderMap) -> Result<bool, Response> {
+    if state.auth_mode == crate::access::AuthMode::Team {
+        return Ok(actor.via == crate::access::Via::AgentKey);
+    }
     let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
         return Ok(false);
     };
@@ -1395,7 +1401,7 @@ async fn context_handler(
     headers: HeaderMap,
     Query(params): Query<ContextParams>,
 ) -> Response {
-    let counted = match agent_call(&state, &headers) {
+    let counted = match agent_call(&state, &actor, &headers) {
         Ok(c) => c,
         Err(resp) => return resp,
     };
@@ -1443,7 +1449,7 @@ async fn recall_handler(
     headers: HeaderMap,
     Query(params): Query<RecallParams>,
 ) -> Response {
-    let counted = match agent_call(&state, &headers) {
+    let counted = match agent_call(&state, &actor, &headers) {
         Ok(c) => c,
         Err(resp) => return resp,
     };
@@ -3783,15 +3789,43 @@ fn without_session(path: &str) -> bool {
     !api || path == "/api/health" || path == "/api/login"
 }
 
+/// Team mode: the account behind the request's agent key
+/// (`Authorization: Bearer <key>`, a key of `throughline account
+/// agent-key`), through [`crate::access::agent_key_actor`]. `Ok(None)`
+/// without a Bearer key, and for a key that is unknown, revoked or of a
+/// disabled account; the caller answers both the same way. The shared
+/// `THROUGHLINE_AGENT_KEY` is not consulted. Neither the key nor the
+/// account name is logged.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn account_key_actor(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<Actor>, Response> {
+    let Some(key) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(crate::agent_key::bearer_credentials)
+        .map(str::to_string)
+    else {
+        return Ok(None);
+    };
+    with_db(state, move |client| {
+        crate::access::agent_key_actor(client, &key)
+    })
+    .await
+}
+
 /// Puts the [`crate::access::Actor`] behind a request into its extensions.
 /// Local mode: [`crate::access::Actor::local`] for everything. Team mode:
-/// the session of the cookie; everything under `/api` except `/api/health`
-/// and `/api/login` needs one (401) and the role of
-/// [`crate::access::required_role`] (403 `forbidden_role`), and writes there
-/// also need the request token and the public URL's Origin (403). The page
-/// and its files pass, so the browser can show the sign-in form; `/mcp`
-/// checks its own key, and its tools check the role. Agent keys on `/api`
-/// come with Task 6.
+/// everything under `/api` except `/api/health` and `/api/login` needs the
+/// session of the cookie or, without a valid session, an account's agent
+/// key ([`account_key_actor`]); a valid session wins over a Bearer header.
+/// Neither: 401, the same answer for a missing session and a refused key.
+/// Then the role of [`crate::access::required_role`] (403
+/// `forbidden_role`). A session's writes also need its request token and the
+/// public URL's Origin (403); a key's writes do not, see below. The page and
+/// its files pass, so the browser can show the sign-in form; `/mcp` checks
+/// its own key, and its tools check the role.
 async fn actor_layer(
     State(state): State<AppState>,
     mut req: axum::extract::Request,
@@ -3813,8 +3847,13 @@ async fn actor_layer(
         }
         None => None,
     };
-    let Some(session) = session else {
-        return unauthorized("sign in first");
+    let (actor, session) = match session {
+        Some(session) => (session.actor.clone(), Some(session)),
+        None => match account_key_actor(&state, req.headers()).await {
+            Ok(Some(actor)) => (actor, None),
+            Ok(None) => return unauthorized("sign in first"),
+            Err(resp) => return resp,
+        },
     };
     // The registered pattern (`/api/memory/{id}`); a path no route matches
     // has none and needs `admin`.
@@ -3823,7 +3862,7 @@ async fn actor_layer(
         .get::<axum::extract::MatchedPath>()
         .map_or("", |matched| matched.as_str());
     let needed = crate::access::required_role(req.method(), pattern);
-    if session.actor.role < needed {
+    if actor.role < needed {
         return forbidden_role(needed);
     }
     let read = matches!(
@@ -3831,16 +3870,29 @@ async fn actor_layer(
         axum::http::Method::GET | axum::http::Method::HEAD
     );
     if !read {
-        if let Some(reason) = write_refusal(
-            req.headers(),
-            &session.request_token,
-            state.public_url.as_deref(),
-        ) {
-            return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
+        match &session {
+            Some(session) => {
+                if let Some(reason) = write_refusal(
+                    req.headers(),
+                    &session.request_token,
+                    state.public_url.as_deref(),
+                ) {
+                    return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
+                }
+            }
+            // Exempt from the request token and Origin check: a request
+            // authenticated by an account's agent key alone. The check
+            // stops cross-site requests riding on a cookie the browser sends
+            // by itself; a Bearer key is never sent that way, and this
+            // request has no valid session. Only `Via::AgentKey` gets here.
+            None if actor.via == crate::access::Via::AgentKey => {}
+            None => return unauthorized("sign in first"),
         }
     }
-    req.extensions_mut().insert(session.actor.clone());
-    req.extensions_mut().insert(session);
+    req.extensions_mut().insert(actor);
+    if let Some(session) = session {
+        req.extensions_mut().insert(session);
+    }
     next.run(req).await
 }
 
@@ -4124,13 +4176,22 @@ async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -
     no_store(resp)
 }
 
+/// A session route without a session: local mode has no accounts; in team
+/// mode the request came with an agent key, which is no sign-in.
+fn no_session(state: &AppState) -> Response {
+    match state.auth_mode {
+        crate::access::AuthMode::Local => local_mode(),
+        crate::access::AuthMode::Team => unauthorized("sign in first"),
+    }
+}
+
 /// `POST /api/logout`: ends this session and clears the cookie.
 async fn logout_handler(
     State(state): State<AppState>,
     session: Option<axum::Extension<crate::access::Session>>,
 ) -> Response {
     let Some(axum::Extension(session)) = session else {
-        return local_mode();
+        return no_session(&state);
     };
     let hash = session.token_hash;
     if let Err(resp) = with_db(&state, move |client| {
@@ -4149,9 +4210,12 @@ async fn logout_handler(
 }
 
 /// `GET /api/me`: who is signed in, and the request token for writes.
-async fn me_handler(session: Option<axum::Extension<crate::access::Session>>) -> Response {
+async fn me_handler(
+    State(state): State<AppState>,
+    session: Option<axum::Extension<crate::access::Session>>,
+) -> Response {
     let Some(axum::Extension(session)) = session else {
-        return local_mode();
+        return no_session(&state);
     };
     no_store(
         Json(serde_json::json!({
@@ -4173,7 +4237,7 @@ async fn password_handler(
     body: axum::body::Bytes,
 ) -> Response {
     let Some(axum::Extension(session)) = session else {
-        return local_mode();
+        return no_session(&state);
     };
     let Ok(PasswordBody { old, new }) = serde_json::from_slice(&body) else {
         return invalid_body("old and new");
@@ -4390,9 +4454,15 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
     })
     .await
     .context("startup check")??;
+    let agent_key = crate::agent_key::key_state();
+    if auth_mode == crate::access::AuthMode::Team {
+        if let Some(note) = crate::agent_key::team_mode_note(&agent_key) {
+            eprintln!("{note}");
+        }
+    }
     let state = AppState {
         db: Arc::new(Mutex::new(client)),
-        agent_key: Arc::new(crate::agent_key::key_state()),
+        agent_key: Arc::new(agent_key),
         mcp_read_only: crate::mcp::read_only_from(
             std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),
         ),
@@ -7356,7 +7426,7 @@ mod session_tests {
             match mode {
                 AuthMode::Local => client.batch_execute("BEGIN").expect("begin"),
                 // `access_users` is locked first, as the migration test does,
-                // so copying the three tables cannot deadlock with it.
+                // so copying the four tables cannot deadlock with it.
                 AuthMode::Team => client
                     .batch_execute(
                         "BEGIN; \
@@ -7364,6 +7434,7 @@ mod session_tests {
                          CREATE TEMP TABLE access_users (LIKE public.access_users INCLUDING ALL); \
                          CREATE TEMP TABLE access_sessions (LIKE public.access_sessions INCLUDING ALL); \
                          CREATE TEMP TABLE access_attempts (LIKE public.access_attempts INCLUDING ALL); \
+                         CREATE TEMP TABLE access_agent_keys (LIKE public.access_agent_keys INCLUDING ALL); \
                          COMMIT;",
                     )
                     .expect("session-local account tables"),
@@ -7803,7 +7874,7 @@ mod session_tests {
                 vec![],
                 vec![("cookie", "throughline_session=not-a-token")],
                 vec![("cookie", unknown.as_str())],
-                // Agent keys on /api come with Task 6.
+                // A key no account has.
                 vec![("authorization", "Bearer 0123456789abcdef0123456789abcdef")],
             ] {
                 let answer = s.send(method.clone(), path, &headers, None);
@@ -8225,41 +8296,93 @@ mod session_tests {
     /// Test value, not a secret: the shared agent key of `/mcp`.
     const AGENT_KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-    /// One JSON-RPC call to `/mcp` with the shared agent key.
-    fn mcp_call(s: &Served, method: &str, params: Value) -> Value {
-        let auth = format!("Bearer {AGENT_KEY}");
+    /// `POST /mcp` with `key` as Bearer, or without `Authorization`.
+    fn mcp_send(s: &Served, key: Option<&str>, method: &str, params: Value) -> Answer {
+        let auth = key.map(|key| format!("Bearer {key}"));
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
-        let answer = s.send(
-            Method::POST,
-            "/mcp",
-            &[
-                ("authorization", auth.as_str()),
-                ("mcp-protocol-version", "2025-11-25"),
-                ("accept", "application/json, text/event-stream"),
-                ("content-type", "application/json"),
-            ],
-            Some(body.to_string()),
-        );
+        let mut headers = vec![
+            ("mcp-protocol-version", "2025-11-25"),
+            ("accept", "application/json, text/event-stream"),
+            ("content-type", "application/json"),
+        ];
+        if let Some(auth) = &auth {
+            headers.push(("authorization", auth.as_str()));
+        }
+        s.send(Method::POST, "/mcp", &headers, Some(body.to_string()))
+    }
+
+    /// One JSON-RPC call to `/mcp` with `key`; the call must get through.
+    fn mcp_call_with(s: &Served, key: &str, method: &str, params: Value) -> Value {
+        let answer = mcp_send(s, Some(key), method, params);
         assert_eq!(answer.status, 200, "{method}: {}", answer.body);
         answer.json()
     }
 
-    /// In team mode the shared agent key is no account: `/mcp` runs as
-    /// `Actor::shared_only()`, a viewer. A private note of A's never comes
-    /// back, and a write is refused. Local mode, same key and same note: it
-    /// comes back. Pins the actor of `mcp_http::mcp_post`.
+    /// One JSON-RPC call to `/mcp` with the shared agent key.
+    fn mcp_call(s: &Served, method: &str, params: Value) -> Value {
+        mcp_call_with(s, AGENT_KEY, method, params)
+    }
+
+    fn mcp_tool(name: &str, args: Value) -> Value {
+        json!({ "name": name, "arguments": args })
+    }
+
+    /// A new account with `role` and an agent key made the way
+    /// `throughline account agent-key` makes one: (id, name, key).
+    fn account_with_key(s: &Served, role: Role) -> (i64, String, String) {
+        let name = format!("{}-{}", role.as_str(), uuid::Uuid::new_v4().simple());
+        let id = s.add_account(&name, role);
+        let (_, key) = crate::accounts_cli::new_agent_key(&mut *s.db(), &name, Some("test"))
+            .expect("agent key");
+        (id, name, key)
+    }
+
+    /// `method path` the way an agent sends it: `Authorization: Bearer
+    /// <key>`, no cookie, no request token, no Origin.
+    fn with_key(s: &Served, method: Method, path: &str, key: &str, body: Option<Value>) -> Answer {
+        let auth = format!("Bearer {key}");
+        let mut headers = vec![("authorization", auth.as_str())];
+        if body.is_some() {
+            headers.push(("content-type", "application/json"));
+        }
+        s.send(method, path, &headers, body.map(|b| b.to_string()))
+    }
+
+    /// How often a note was used, by `access_count`.
+    fn uses(s: &Served, id: i64) -> i64 {
+        s.count(
+            "SELECT COALESCE(access_count, 0)::bigint FROM memory_chunks WHERE id = $1",
+            &[&id],
+        )
+    }
+
+    /// The ids of a recall answer's hits.
+    fn hit_ids(answer: &Answer) -> Vec<i64> {
+        answer.json()["hits"]
+            .as_array()
+            .unwrap_or_else(|| panic!("hits: {}", answer.body))
+            .iter()
+            .map(|h| h["id"].as_i64().expect("id"))
+            .collect()
+    }
+
+    /// Team mode, B's own agent key: no MCP read path shows a private note
+    /// of A's, and a call without any key gets nothing (401). Local mode,
+    /// the shared key and the same kind of note: it comes back. Pins the
+    /// actor of `mcp_http::mcp_post`.
     #[test]
-    fn mcp_agent_key_in_team_mode_sees_shared_notes_only() {
+    fn mcp_account_key_never_sees_another_accounts_private_note() {
         let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
         let Some(s) = team_with_notes_and_key(key()) else {
             eprintln!(
-                "skipping mcp_agent_key_in_team_mode_sees_shared_notes_only: no PostgreSQL reachable"
+                "skipping mcp_account_key_never_sees_another_accounts_private_note: no PostgreSQL reachable"
             );
             return;
         };
         let tag = uuid::Uuid::new_v4().simple().to_string();
         let (secret, probe) = (format!("secret{tag}"), format!("probe{tag}"));
         let a = s.add_account(&format!("a-{tag}"), Role::Editor);
+        let (_, _, key_b) = account_with_key(&s, Role::Editor);
         let private = insert_note(
             &s,
             Some(a),
@@ -8268,17 +8391,16 @@ mod session_tests {
             "manual",
         );
         let shared = insert_note(&s, None, "shared", &format!("{probe} shared"), "manual");
-        let tool = |name: &str, args: Value| json!({ "name": name, "arguments": args });
         for (method, params) in [
-            ("tools/call", tool("recall", json!({ "query": probe }))),
+            ("tools/call", mcp_tool("recall", json!({ "query": probe }))),
             (
                 "tools/call",
-                tool(
+                mcp_tool(
                     "project_context",
                     json!({ "project": "team-project", "task": "x" }),
                 ),
             ),
-            ("tools/call", tool("get_note", json!({ "id": shared }))),
+            ("tools/call", mcp_tool("get_note", json!({ "id": shared }))),
             (
                 "resources/read",
                 json!({ "uri": "throughline://project/team-project/context" }),
@@ -8288,17 +8410,23 @@ mod session_tests {
                 json!({ "name": "handoff", "arguments": { "project": "team-project" } }),
             ),
         ] {
-            let body = mcp_call(&s, method, params.clone());
+            let body = mcp_call_with(&s, &key_b, method, params.clone());
             assert!(body["error"].is_null(), "{method} {params}: {body}");
             assert!(
                 !body.to_string().contains(&secret),
                 "{method} {params}: {body}"
             );
         }
-        let body = mcp_call(&s, "tools/call", tool("get_note", json!({ "id": private })));
-        assert_eq!(body["error"]["message"], "memory chunk not found", "{body}");
-        let body = mcp_call(
+        let body = mcp_call_with(
             &s,
+            &key_b,
+            "tools/call",
+            mcp_tool("get_note", json!({ "id": private })),
+        );
+        assert_eq!(body["error"]["message"], "memory chunk not found", "{body}");
+        let body = mcp_call_with(
+            &s,
+            &key_b,
             "resources/read",
             json!({ "uri": format!("throughline://note/{private}") }),
         );
@@ -8306,24 +8434,26 @@ mod session_tests {
             body["error"].is_object() && !body.to_string().contains(&secret),
             "{body}"
         );
-        // The shared key is a viewer until per-account keys come: its
-        // writes are refused and nothing is stored.
+        // Without any key nothing comes back, and nothing is stored.
         let notes = || s.count("SELECT count(*) FROM memory_chunks", &[]);
         let before = notes();
-        let body = mcp_call(
-            &s,
-            "tools/call",
-            tool("write", json!({ "content": "by the key" })),
-        );
-        assert_eq!(body["error"]["code"], -32602, "{body}");
-        assert_eq!(
-            body["error"]["message"], "tool write needs the editor role",
-            "{body}"
-        );
+        for (method, params) in [
+            ("tools/call", mcp_tool("recall", json!({ "query": probe }))),
+            ("tools/call", mcp_tool("get_note", json!({ "id": shared }))),
+            (
+                "tools/call",
+                mcp_tool("write", json!({ "content": "without a key" })),
+            ),
+        ] {
+            let answer = mcp_send(&s, None, method, params.clone());
+            assert_eq!(answer.status, 401, "{params}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "unauthorized", "{}", answer.body);
+            assert!(!answer.body.contains(&probe), "{}", answer.body);
+        }
         assert_eq!(notes(), before);
         drop(s);
 
-        // Local mode with the same key: the same kind of note is returned.
+        // Local mode with the shared key: the same kind of note is returned.
         let Some(s) = Served::start_with_key(AuthMode::Local, None, key()) else {
             return;
         };
@@ -8343,9 +8473,420 @@ mod session_tests {
             &format!("{probe} {secret}?"),
             "manual",
         );
-        let body = mcp_call(&s, "tools/call", tool("get_note", json!({ "id": private })));
+        let body = mcp_call(
+            &s,
+            "tools/call",
+            mcp_tool("get_note", json!({ "id": private })),
+        );
         assert!(body["error"].is_null(), "{body}");
         assert!(body.to_string().contains(&secret), "{body}");
+    }
+
+    /// Team mode: an account's agent key is that account on `/mcp`, with
+    /// its role. It sees its own private notes and the shared ones, never
+    /// another account's, and `write` makes the note that account's. A
+    /// viewer's key reads but cannot write.
+    #[test]
+    fn account_key_authenticates_mcp_as_that_user() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping account_key_authenticates_mcp_as_that_user: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let probe = format!("probe{tag}");
+        let (a, _, key_a) = account_with_key(&s, Role::Editor);
+        let (b, _, _) = account_with_key(&s, Role::Editor);
+        let (mine_text, theirs_text, shared_text) = (
+            format!("mine{tag}"),
+            format!("theirs{tag}"),
+            format!("shared{tag}"),
+        );
+        let mine = insert_note(
+            &s,
+            Some(a),
+            "private",
+            &format!("{probe} {mine_text}"),
+            "manual",
+        );
+        let theirs = insert_note(
+            &s,
+            Some(b),
+            "private",
+            &format!("{probe} {theirs_text}"),
+            "manual",
+        );
+        let shared = insert_note(
+            &s,
+            None,
+            "shared",
+            &format!("{probe} {shared_text}"),
+            "manual",
+        );
+        let body = mcp_call_with(
+            &s,
+            &key_a,
+            "tools/call",
+            mcp_tool("recall", json!({ "query": probe, "limit": 10 })),
+        );
+        let text = body.to_string();
+        assert!(
+            text.contains(&mine_text) && text.contains(&shared_text),
+            "{body}"
+        );
+        assert!(!text.contains(&theirs_text), "{body}");
+        for (id, visible) in [(mine, true), (shared, true), (theirs, false)] {
+            let body = mcp_call_with(
+                &s,
+                &key_a,
+                "tools/call",
+                mcp_tool("get_note", json!({ "id": id })),
+            );
+            assert_eq!(body["error"].is_null(), visible, "{id}: {body}");
+        }
+        // A write through A's key is A's note.
+        let content = format!("written with A's key {tag}");
+        let body = mcp_call_with(
+            &s,
+            &key_a,
+            "tools/call",
+            mcp_tool("write", json!({ "content": content })),
+        );
+        assert!(body["error"].is_null(), "{body}");
+        let row = s
+            .db()
+            .query_one(
+                "SELECT owner_id, visibility FROM memory_chunks WHERE content = $1",
+                &[&content],
+            )
+            .expect("written note");
+        assert_eq!(row.get::<_, Option<i64>>(0), Some(a));
+        assert_eq!(row.get::<_, String>(1), "shared");
+        // A viewer's key reads, but its write is refused and stores nothing.
+        let (_, _, key_v) = account_with_key(&s, Role::Viewer);
+        let body = mcp_call_with(
+            &s,
+            &key_v,
+            "tools/call",
+            mcp_tool("get_note", json!({ "id": shared })),
+        );
+        assert!(body["error"].is_null(), "{body}");
+        let notes = || s.count("SELECT count(*) FROM memory_chunks", &[]);
+        let before = notes();
+        let body = mcp_call_with(
+            &s,
+            &key_v,
+            "tools/call",
+            mcp_tool("write", json!({ "content": "by a viewer's key" })),
+        );
+        assert_eq!(body["error"]["code"], -32602, "{body}");
+        assert_eq!(
+            body["error"]["message"], "tool write needs the editor role",
+            "{body}"
+        );
+        assert_eq!(notes(), before);
+    }
+
+    /// Team mode ignores `THROUGHLINE_AGENT_KEY`: on `/mcp`, `/api/recall`
+    /// and `/api/context` it gets the answer of no key at all, while an
+    /// account's key gets in on the same server. Local mode, same key: in.
+    #[test]
+    fn global_key_is_refused_in_team_mode_and_accepted_in_local() {
+        let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = team_with_notes_and_key(key()) else {
+            eprintln!(
+                "skipping global_key_is_refused_in_team_mode_and_accepted_in_local: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let (_, _, own) = account_with_key(&s, Role::Editor);
+        let list = || mcp_tool("recall", json!({ "query": "anything" }));
+        assert_eq!(
+            mcp_send(&s, Some(&own), "tools/call", list()).status,
+            200,
+            "control: the account's key"
+        );
+        let refused = mcp_send(&s, Some(AGENT_KEY), "tools/call", list());
+        assert_eq!(refused.status, 401, "{}", refused.body);
+        assert_eq!(
+            refused.header("www-authenticate"),
+            Some("Bearer realm=\"throughline\"")
+        );
+        let without = mcp_send(&s, None, "tools/call", list());
+        assert_eq!(refused.json(), without.json(), "the answer of no key");
+        for path in [
+            "/api/recall?q=anything",
+            "/api/context?project=team-project",
+        ] {
+            let answer = with_key(&s, Method::GET, path, &own, None);
+            assert_eq!(answer.status, 200, "control {path}: {}", answer.body);
+            let refused = with_key(&s, Method::GET, path, AGENT_KEY, None);
+            assert_eq!(refused.status, 401, "{path}: {}", refused.body);
+            let without = s.send(Method::GET, path, &[], None);
+            assert_eq!(refused.json(), without.json(), "{path}: no session");
+            assert!(!refused.body.contains(AGENT_KEY));
+        }
+        drop(s);
+
+        let Some(s) = Served::start_with_key(AuthMode::Local, None, key()) else {
+            return;
+        };
+        assert_eq!(
+            mcp_send(&s, Some(AGENT_KEY), "tools/call", list()).status,
+            200
+        );
+        for path in [
+            "/api/recall?q=anything",
+            "/api/context?project=team-project",
+        ] {
+            let answer = with_key(&s, Method::GET, path, AGENT_KEY, None);
+            assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+        }
+    }
+
+    /// A revoked key gets nothing on either path; another key of the same
+    /// account still works.
+    #[test]
+    fn revoked_key_is_refused() {
+        let Some(s) = team_with_notes() else {
+            eprintln!("skipping revoked_key_is_refused: no PostgreSQL reachable");
+            return;
+        };
+        let (_, name, key) = account_with_key(&s, Role::Editor);
+        let (_, other) =
+            crate::accounts_cli::new_agent_key(&mut *s.db(), &name, None).expect("second key");
+        let recall = || mcp_tool("recall", json!({ "query": "anything" }));
+        let statuses = |key: &str| {
+            (
+                mcp_send(&s, Some(key), "tools/call", recall()).status,
+                with_key(&s, Method::GET, "/api/recall?q=anything", key, None).status,
+            )
+        };
+        assert_eq!(statuses(&key), (200, 200), "before the revocation");
+        let id = s.count(
+            "SELECT id FROM access_agent_keys WHERE key_hash = $1",
+            &[&access::token_hash(&key)],
+        );
+        crate::accounts_cli::revoke_agent_key(&mut *s.db(), &name, id).expect("revoke");
+        assert_eq!(statuses(&key), (401, 401), "after the revocation");
+        assert_eq!(statuses(&other), (200, 200), "the other key");
+    }
+
+    /// A disabled account's key gets nothing on `/mcp` or `/api/recall`;
+    /// enabled again, the same key works.
+    #[test]
+    fn disabled_account_is_refused_on_both_paths() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping disabled_account_is_refused_on_both_paths: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let (_, name, key) = account_with_key(&s, Role::Editor);
+        let recall = || mcp_tool("recall", json!({ "query": "anything" }));
+        let statuses = || {
+            (
+                mcp_send(&s, Some(&key), "tools/call", recall()).status,
+                with_key(&s, Method::GET, "/api/recall?q=anything", &key, None).status,
+            )
+        };
+        assert_eq!(statuses(), (200, 200), "enabled");
+        crate::accounts_cli::disable(&mut *s.db(), &name).expect("disable");
+        assert_eq!(statuses(), (401, 401), "disabled");
+        crate::accounts_cli::enable(&mut *s.db(), &name).expect("enable");
+        assert_eq!(statuses(), (200, 200), "enabled again");
+    }
+
+    /// A valid session cookie wins over a Bearer key: the request is the
+    /// session's account, nothing is counted as an agent's use, a wrong key
+    /// next to it changes nothing, and a write still needs the session's
+    /// request token although the key alone would pass.
+    #[test]
+    fn session_wins_over_bearer() {
+        let Some(s) = team_with_notes() else {
+            eprintln!("skipping session_wins_over_bearer: no PostgreSQL reachable");
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let probe = format!("probe{tag}");
+        let name_a = format!("a-{tag}");
+        let a = s.add_account(&name_a, Role::Editor);
+        let browser = s.sign_in(&name_a, PASSWORD);
+        let (b, _, key_b) = account_with_key(&s, Role::Editor);
+        let mine = insert_note(
+            &s,
+            Some(a),
+            "private",
+            &format!("{probe} mine{tag}"),
+            "manual",
+        );
+        let theirs = insert_note(
+            &s,
+            Some(b),
+            "private",
+            &format!("{probe} theirs{tag}"),
+            "manual",
+        );
+        let path = format!("/api/recall?q={probe}");
+        for (i, bearer) in [format!("Bearer {key_b}"), "Bearer wrong".to_string()]
+            .iter()
+            .enumerate()
+        {
+            let answer = s.send(
+                Method::GET,
+                &path,
+                &[
+                    ("cookie", browser.cookie.as_str()),
+                    ("authorization", bearer.as_str()),
+                ],
+                None,
+            );
+            assert_eq!(answer.status, 200, "bearer {i}: {}", answer.body);
+            assert_eq!(hit_ids(&answer), vec![mine], "{}", answer.body);
+        }
+        assert_eq!((uses(&s, mine), uses(&s, theirs)), (0, 0), "a UI call");
+        let note = json!({ "content": format!("pin {tag}"), "category": "insight" });
+        let auth = format!("Bearer {key_b}");
+        let answer = s.send(
+            Method::POST,
+            "/api/memory",
+            &[
+                ("cookie", browser.cookie.as_str()),
+                ("authorization", auth.as_str()),
+                ("content-type", "application/json"),
+            ],
+            Some(note.to_string()),
+        );
+        assert_eq!(answer.status, 403, "{}", answer.body);
+        assert_eq!(answer.json()["error"], "forbidden_request");
+        // Control: the key alone writes, as B.
+        let answer = with_key(&s, Method::POST, "/api/memory", &key_b, Some(note));
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let id = answer.json()["id"].as_i64().expect("id");
+        assert_eq!(
+            s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
+            b
+        );
+    }
+
+    /// `GET /api/recall` and `/api/context` with an account's key: that
+    /// account's view, and the use of what came back is counted, for a
+    /// viewer's key too (a counter, no content).
+    #[test]
+    fn account_key_authenticates_api_get_and_counts_recall() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping account_key_authenticates_api_get_and_counts_recall: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let probe = format!("probe{tag}");
+        let (a, _, key_a) = account_with_key(&s, Role::Viewer);
+        let (b, _, _) = account_with_key(&s, Role::Editor);
+        let mine = insert_note(
+            &s,
+            Some(a),
+            "private",
+            &format!("{probe} mine{tag}"),
+            "manual",
+        );
+        let theirs = insert_note(
+            &s,
+            Some(b),
+            "private",
+            &format!("{probe} theirs{tag}"),
+            "manual",
+        );
+        let shared = insert_note(
+            &s,
+            None,
+            "shared",
+            &format!("{probe} shared{tag}"),
+            "manual",
+        );
+        let answer = with_key(
+            &s,
+            Method::GET,
+            &format!("/api/recall?q={probe}&limit=10"),
+            &key_a,
+            None,
+        );
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let mut ids = hit_ids(&answer);
+        ids.sort_unstable();
+        assert_eq!(ids, vec![mine, shared], "{}", answer.body);
+        assert_eq!(
+            (uses(&s, mine), uses(&s, shared), uses(&s, theirs)),
+            (1, 1, 0)
+        );
+        let answer = with_key(
+            &s,
+            Method::GET,
+            &format!("/api/context?project=team-project&task={probe}"),
+            &key_a,
+            None,
+        );
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        assert!(
+            !answer.body.contains(&format!("theirs{tag}")),
+            "{}",
+            answer.body
+        );
+        let cited: Vec<i64> = answer.json()["citations"]
+            .as_array()
+            .expect("citations")
+            .iter()
+            .filter(|c| c["kind"] == "memory")
+            .map(|c| c["id"].as_i64().expect("id"))
+            .collect();
+        assert!(cited.contains(&mine), "{}", answer.body);
+        assert!(!cited.contains(&theirs), "{}", answer.body);
+        assert_eq!(uses(&s, mine), 2, "counted again by the context");
+        assert_eq!(uses(&s, theirs), 0);
+    }
+
+    /// The role of the key's account applies like a session's. A write with
+    /// a key needs no request token or Origin: no cookie, nothing a browser
+    /// could be made to send.
+    #[test]
+    fn account_key_role_applies_and_skips_the_browser_write_guard() {
+        let Some(s) = team_with_notes() else {
+            eprintln!(
+                "skipping account_key_role_applies_and_skips_the_browser_write_guard: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let (_, _, viewer) = account_with_key(&s, Role::Viewer);
+        let (editor_id, _, editor) = account_with_key(&s, Role::Editor);
+        let note = || json!({ "content": "pinned by a key", "category": "insight" });
+        let answer = with_key(&s, Method::POST, "/api/memory", &viewer, Some(note()));
+        assert_eq!(answer.status, 403, "{}", answer.body);
+        assert_eq!(answer.json(), forbidden(Role::Editor));
+        for key in [&viewer, &editor] {
+            let answer = with_key(&s, Method::GET, "/api/assistants", key, None);
+            assert_eq!(answer.status, 403, "{}", answer.body);
+            assert_eq!(answer.json(), forbidden(Role::Admin));
+        }
+        let answer = with_key(&s, Method::POST, "/api/memory", &editor, Some(note()));
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let id = answer.json()["id"].as_i64().expect("id");
+        assert_eq!(
+            s.count("SELECT owner_id FROM memory_chunks WHERE id = $1", &[&id]),
+            editor_id
+        );
+        // Session routes need a session: a key is no sign-in.
+        for (method, path) in [
+            (Method::GET, "/api/me"),
+            (Method::POST, "/api/logout"),
+            (Method::POST, "/api/password"),
+        ] {
+            let body = (method == Method::POST).then(|| json!({}));
+            let answer = with_key(&s, method, path, &editor, body);
+            assert_eq!(answer.status, 401, "{path}: {}", answer.body);
+            assert_eq!(answer.json()["error"], "unauthorized", "{path}");
+        }
     }
 
     /// Two signed-in accounts: (A's id, A, B).
@@ -8794,7 +9335,7 @@ mod session_tests {
     #[test]
     fn team_mode_routes_and_mcp_hide_db_error_text() {
         let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
-        let Some(s) = Served::start_with_key(AuthMode::Team, None, key()) else {
+        let Some(s) = Served::team() else {
             eprintln!(
                 "skipping team_mode_routes_and_mcp_hide_db_error_text: no PostgreSQL reachable"
             );
@@ -8826,19 +9367,21 @@ mod session_tests {
             assert_eq!(answer.status, 500, "{path}: {}", answer.body);
             assert_eq!(answer.json(), json!({ "error": "query_failed" }), "{path}");
         }
+        let (_, _, viewer) = account_with_key(&s, Role::Viewer);
         let tool = |name: &str, args: Value| json!({ "name": name, "arguments": args });
         for params in [
             tool("get_note", json!({ "id": 1 })),
             tool("conflicts", json!({})),
             tool("project_context", json!({ "project": "p" })),
         ] {
-            let body = mcp_call(&s, "tools/call", params.clone());
+            let body = mcp_call_with(&s, &viewer, "tools/call", params.clone());
             assert_eq!(body["error"]["code"], -32000, "{params}: {body}");
             assert_eq!(body["error"]["message"], "query_failed", "{params}: {body}");
             assert!(!leaks(&body.to_string()), "{params}: {body}");
         }
-        let body = mcp_call(
+        let body = mcp_call_with(
             &s,
+            &viewer,
             "resources/read",
             json!({ "uri": "throughline://note/1" }),
         );

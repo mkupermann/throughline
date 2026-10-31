@@ -6,7 +6,7 @@
 //! statements. Passwords are hashed before any transaction starts, so
 //! hashing never holds a database lock. Disabling an account ends its
 //! sessions; its agent keys stay in place but stop working, because the
-//! key check (Task 6) requires an enabled account.
+//! key check (`access::agent_key_actor`) requires an enabled account.
 
 use std::path::Path;
 

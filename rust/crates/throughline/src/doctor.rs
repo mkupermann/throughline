@@ -16,7 +16,8 @@ pub struct DoctorReport {
     /// Notes and messages the active model has no vector for.
     pub embedding_missing: String,
     pub generation_local: bool,
-    /// Only the text of `agent_key::doctor_line`, never the key.
+    /// Never the key: `agent_key::doctor_line` in local mode,
+    /// `team mode, <n> account keys` in team mode.
     pub agent_access: String,
     /// `local`, or `team (<n> accounts, <m> private notes)`.
     pub auth_mode: String,
@@ -80,13 +81,26 @@ pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Re
         }
     };
 
-    let auth_mode =
-        crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())
-            .and_then(|mode| crate::access::doctor_line(client, mode))
-            .unwrap_or_else(|e| {
-                notes.push(format!("auth mode: {e:#}"));
-                "unavailable".to_string()
-            });
+    let mode =
+        crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref());
+    let auth_mode = match &mode {
+        Ok(mode) => crate::access::doctor_line(client, *mode),
+        Err(e) => Err(anyhow::anyhow!("{e:#}")),
+    }
+    .unwrap_or_else(|e| {
+        notes.push(format!("auth mode: {e:#}"));
+        "unavailable".to_string()
+    });
+    let agent_access = match agent_access(client, mode.ok(), &crate::agent_key::key_state()) {
+        Ok((line, note)) => {
+            notes.extend(note.map(String::from));
+            line
+        }
+        Err(e) => {
+            notes.push(format!("agent access: {e:#}"));
+            "unavailable".to_string()
+        }
+    };
 
     Ok(DoctorReport {
         database,
@@ -95,10 +109,35 @@ pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Re
         embedding_target,
         embedding_missing,
         generation_local,
-        agent_access: crate::agent_key::doctor_line(&crate::agent_key::key_state()),
+        agent_access,
         auth_mode,
         notes,
     })
+}
+
+/// The `agent access:` line and, when it applies, a note. Local mode (or a
+/// mode that could not be read): the state of `THROUGHLINE_AGENT_KEY`.
+/// Team mode: the number of account keys not revoked, and a note when
+/// `THROUGHLINE_AGENT_KEY` is set, because team mode ignores it. Never the
+/// key itself.
+pub fn agent_access<C: GenericClient>(
+    client: &mut C,
+    mode: Option<crate::access::AuthMode>,
+    key: &crate::agent_key::KeyState,
+) -> Result<(String, Option<&'static str>)> {
+    if mode != Some(crate::access::AuthMode::Team) {
+        return Ok((crate::agent_key::doctor_line(key), None));
+    }
+    let keys: i64 = client
+        .query_one(
+            "SELECT count(*) FROM access_agent_keys WHERE revoked_at IS NULL",
+            &[],
+        )?
+        .get(0);
+    Ok((
+        format!("team mode, {keys} account keys"),
+        crate::agent_key::team_mode_note(key),
+    ))
 }
 
 /// The two progress lines: the target's state (when there is a target) and
@@ -212,6 +251,52 @@ mod tests {
                     &[&source, &model],
                 )
                 .unwrap();
+        }
+    }
+
+    /// Test value, not a secret.
+    const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn agent_access_in_team_mode_counts_account_keys_and_notes_the_ignored_key() {
+        use crate::access::AuthMode;
+        use crate::agent_key::{key_state_from, KeyState, IGNORED_IN_TEAM_MODE};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping agent_access_in_team_mode_counts_account_keys_and_notes_the_ignored_key: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let count = |line: &str| -> i64 {
+            line.strip_prefix("team mode, ")
+                .and_then(|rest| rest.strip_suffix(" account keys"))
+                .unwrap_or_else(|| panic!("{line}"))
+                .parse()
+                .unwrap_or_else(|_| panic!("{line}"))
+        };
+        let (line, note) = agent_access(&mut tx, Some(AuthMode::Team), &KeyState::Off).unwrap();
+        assert_eq!(note, None, "the shared key is not set");
+        let before = count(&line);
+        let (a, _) = crate::access::team_test::two_accounts(&mut tx);
+        let name = a.username.expect("name");
+        let (first, _) = crate::accounts_cli::new_agent_key(&mut tx, &name, None).expect("key");
+        crate::accounts_cli::new_agent_key(&mut tx, &name, None).expect("key");
+        crate::accounts_cli::revoke_agent_key(&mut tx, &name, first).expect("revoke");
+        for state in [key_state_from(Some(KEY)), KeyState::TooShort] {
+            let (line, note) = agent_access(&mut tx, Some(AuthMode::Team), &state).unwrap();
+            assert_eq!(count(&line), before + 1, "one of two keys is revoked");
+            assert_eq!(note, Some(IGNORED_IN_TEAM_MODE), "{state:?}");
+            assert!(!line.contains(KEY) && !IGNORED_IN_TEAM_MODE.contains(KEY));
+        }
+        // Local mode, and a mode that could not be read: the line as before.
+        for mode in [Some(AuthMode::Local), None] {
+            assert_eq!(
+                agent_access(&mut tx, mode, &key_state_from(Some(KEY))).unwrap(),
+                ("on".to_string(), None)
+            );
+            assert_eq!(
+                agent_access(&mut tx, mode, &KeyState::Off).unwrap(),
+                ("off: THROUGHLINE_AGENT_KEY is not set".to_string(), None)
+            );
         }
     }
 
