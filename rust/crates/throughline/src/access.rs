@@ -39,78 +39,82 @@ impl Role {
     }
 }
 
-/// The role a route needs in team mode, by method and path: a request's
-/// path or the pattern the route is registered with (`{id}` is a segment
-/// like any other). A route this table does not know needs `admin`.
-/// Routes that pass without a session (see `server::without_session`) are
-/// not in it.
-pub fn required_role(method: &Method, path: &str) -> Role {
-    route_role(method, path).unwrap_or(Role::Admin)
+/// The role a route needs in team mode, by method and the pattern the
+/// route is registered with (`/api/memory/{id}`, not `/api/memory/7`). A
+/// route this table does not know needs `admin`. Routes that pass without
+/// a session (see `server::without_session`) are not in it.
+pub fn required_role(method: &Method, pattern: &str) -> Role {
+    route_role(method, pattern).unwrap_or(Role::Admin)
 }
 
 /// [`required_role`] without the default: `None` for an unknown route.
-/// `viewer` reads, and every account may sign out, see itself and change
-/// its own password. `editor` asks the model and changes notes and stars.
-/// `admin` runs jobs, imports and writes assistant files.
-pub(crate) fn route_role(method: &Method, path: &str) -> Option<Role> {
-    let rest = path.strip_prefix("/api/")?;
-    let segments: Vec<&str> = rest.split('/').collect();
-    // HEAD is answered by the GET route.
+/// HEAD is answered by the GET route.
+pub(crate) fn route_role(method: &Method, pattern: &str) -> Option<Role> {
     let verb = if *method == Method::HEAD {
         "GET"
     } else {
         method.as_str()
     };
-    let role = match (verb, segments.as_slice()) {
-        ("GET", ["ask"] | ["answer-eval"]) => Role::Editor,
-        (
-            "GET",
-            ["me"]
-            | ["status"]
-            | ["search"]
-            | ["recall"]
-            | ["context"]
-            | ["messages"]
-            | ["messages", _]
-            | ["tools"]
-            | ["memory"]
-            | ["memory", _]
-            | ["consolidation", "candidates" | "proposal"]
-            | ["damaged-notes"]
-            | ["conversations"]
-            | ["conversations", _]
-            | ["projects"]
-            | ["favorites"]
-            | ["timeline"]
-            | ["conflicts"]
-            | ["handoff"]
-            | ["costs"]
-            | ["ingest-status"]
-            | ["audit"]
-            | ["stale-digest"]
-            | ["health-recovery"]
-            | ["assistants"]
-            | ["assistants", _]
-            | ["assistants", "imported", _],
-        ) => Role::Viewer,
-        ("POST", ["logout"] | ["password"]) => Role::Viewer,
-        ("POST", ["memory"] | ["memory", _, "forget" | "keep" | "supersede"] | ["favorites"]) => {
-            Role::Editor
-        }
-        ("DELETE", ["favorites", _, _]) => Role::Editor,
-        (
-            "POST",
-            ["operate"]
-            | ["consolidate"]
-            | ["writeback"]
-            | ["agent-memory", "ingest"]
-            | ["mimo-memory", "ingest"],
-        ) => Role::Admin,
-        ("PUT", ["assistants", "file"]) => Role::Admin,
-        _ => return None,
-    };
-    Some(role)
+    ROUTE_ROLES
+        .iter()
+        .find(|(m, p, _)| *m == verb && *p == pattern)
+        .map(|(_, _, role)| *role)
 }
+
+/// Every route behind a session: method, registered pattern and the role
+/// it needs. `viewer` reads, and every account may sign out, see itself
+/// and change its own password. `editor` asks the model and changes notes
+/// and stars. `admin` runs jobs and imports, merges notes (the proposal
+/// sends note texts to the model) and reads or writes the host's
+/// assistant files.
+pub(crate) const ROUTE_ROLES: &[(&str, &str, Role)] = &[
+    ("POST", "/api/logout", Role::Viewer),
+    ("GET", "/api/me", Role::Viewer),
+    ("POST", "/api/password", Role::Viewer),
+    ("GET", "/api/status", Role::Viewer),
+    ("GET", "/api/search", Role::Viewer),
+    ("GET", "/api/recall", Role::Viewer),
+    ("GET", "/api/context", Role::Viewer),
+    ("GET", "/api/messages", Role::Viewer),
+    ("GET", "/api/messages/{id}", Role::Viewer),
+    ("GET", "/api/tools", Role::Viewer),
+    ("GET", "/api/memory", Role::Viewer),
+    ("GET", "/api/memory/{id}", Role::Viewer),
+    ("GET", "/api/consolidation/candidates", Role::Viewer),
+    ("GET", "/api/damaged-notes", Role::Viewer),
+    ("GET", "/api/conversations", Role::Viewer),
+    ("GET", "/api/conversations/{id}", Role::Viewer),
+    ("GET", "/api/projects", Role::Viewer),
+    ("GET", "/api/favorites", Role::Viewer),
+    ("GET", "/api/timeline", Role::Viewer),
+    ("GET", "/api/conflicts", Role::Viewer),
+    ("GET", "/api/handoff", Role::Viewer),
+    ("GET", "/api/costs", Role::Viewer),
+    ("GET", "/api/ingest-status", Role::Viewer),
+    ("GET", "/api/audit", Role::Viewer),
+    ("GET", "/api/stale-digest", Role::Viewer),
+    ("GET", "/api/health-recovery", Role::Viewer),
+    ("GET", "/api/ask", Role::Editor),
+    ("GET", "/api/answer-eval", Role::Editor),
+    ("POST", "/api/memory", Role::Editor),
+    ("POST", "/api/memory/{id}/forget", Role::Editor),
+    ("POST", "/api/memory/{id}/keep", Role::Editor),
+    ("POST", "/api/memory/{id}/supersede", Role::Editor),
+    ("POST", "/api/favorites", Role::Editor),
+    ("DELETE", "/api/favorites/{kind}/{ref}", Role::Editor),
+    ("GET", "/api/consolidation/proposal", Role::Admin),
+    ("POST", "/api/consolidate", Role::Admin),
+    ("POST", "/api/operate", Role::Admin),
+    ("POST", "/api/writeback", Role::Admin),
+    ("POST", "/api/agent-memory/ingest", Role::Admin),
+    ("POST", "/api/mimo-memory/ingest", Role::Admin),
+    ("GET", "/api/assistants", Role::Admin),
+    ("GET", "/api/assistants/file", Role::Admin),
+    ("PUT", "/api/assistants/file", Role::Admin),
+    ("GET", "/api/assistants/imported", Role::Admin),
+    ("GET", "/api/assistants/imported/{id}", Role::Admin),
+    ("GET", "/api/assistants/{tool}", Role::Admin),
+];
 
 /// How the actor reached the server. `Job` marks a server-wide job (reflect,
 /// entities, writeback, merging) that acts for no account.

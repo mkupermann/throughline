@@ -167,17 +167,23 @@ fn tool_role(name: &str) -> Role {
 }
 
 /// -32000 for a failure of the server. The local user gets the text as
-/// before. In team mode (every other actor) it could repeat another
-/// account's row, so the caller gets `query_failed` and the log the
-/// SQLSTATE and message, as `server::with_db` does. A refused remote model
-/// is no database error and keeps its text.
+/// before. In team mode (every other actor) a database text could repeat
+/// another account's row, and a refused remote model names the model and
+/// the switch that allows it: the caller gets `query_failed` or
+/// `remote_llm_not_allowed`, the log the text, as `server::with_db` does.
 fn internal(actor: &Actor, e: impl Into<anyhow::Error>) -> Value {
     let e = e.into();
-    if actor.via == Via::Local
-        || e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
-            .is_some()
-    {
+    if actor.via == Via::Local {
         return json!({ "code": -32000, "message": e.to_string() });
+    }
+    if e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+        .is_some()
+    {
+        eprintln!("remote model refused: {e}");
+        return json!({
+            "code": -32000,
+            "message": format!("remote_llm_not_allowed: {}", crate::server::REMOTE_LLM_REFUSED)
+        });
     }
     eprintln!("mcp call failed: {}", crate::server::error_for_log(&e));
     json!({ "code": -32000, "message": "query_failed" })
@@ -2654,5 +2660,37 @@ mod tests {
                 "{actor:?}: {body}"
             );
         }
+    }
+
+    /// Team mode keeps the model name and the switch of a refused remote
+    /// model off the agent, as `query_failed` keeps database texts off it;
+    /// the local user gets the text as before.
+    #[test]
+    fn internal_hides_remote_model_refusal_in_team_mode() {
+        let refusal = || {
+            anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+                label: "ollama/marker-model".into(),
+            })
+        };
+        assert_eq!(
+            internal(&Actor::shared_only(), refusal()),
+            json!({
+                "code": -32000,
+                "message": format!(
+                    "remote_llm_not_allowed: {}",
+                    crate::server::REMOTE_LLM_REFUSED
+                )
+            })
+        );
+        let local = internal(&Actor::local(), refusal());
+        let text = local["message"].as_str().expect("message");
+        assert!(
+            text.contains("ollama/marker-model") && text.contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
+            "{local}"
+        );
+        assert_eq!(
+            internal(&Actor::shared_only(), anyhow::anyhow!("row (x) exists"))["message"],
+            "query_failed"
+        );
     }
 }
