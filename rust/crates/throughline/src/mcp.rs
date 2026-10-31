@@ -286,7 +286,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (default, meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match) or weighted (meaning and reliability; full text without embeddings)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (the default in mode current; meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match; the default in the other modes) or weighted (meaning and reliability; full text without embeddings)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -519,7 +519,7 @@ fn call_tool_with<C: GenericClient>(
                     None | Some("") => None,
                     Some(r) => Some(r.parse().map_err(|e: String| invalid(&e))?),
                 };
-            let rank = asked_rank.unwrap_or(crate::recall::DEFAULT_RANK);
+            let rank = asked_rank.unwrap_or(crate::recall::default_rank(mode));
             let date = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, Value> {
                 match optional_str(&args, name, &format!("{name} must be a string"))? {
                     None | Some("") => Ok(None),
