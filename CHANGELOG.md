@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Recall ranks by meaning by default
+
+Measured on 74 questions from one installation with `granite-embedding-multilingual:278m`. Method, numbers and limits are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md#recall-and-public-benchmarks). Entries further down that call full text the default describe the state before this change.
+
+- **Cosine is the default rank of mode `current`.** The rule set before the measurement made it so: full text 50.0 % hit@5, cosine 94.6 %. HTTP `/api/recall`, MCP `recall`, CLI `recall`, the context pack's "Relevant to the task" and "By meaning" in the memory view use it when no rank is named. `as_of`, `associative` and `grounded` keep full text. `rank=cosine` (`--rank cosine`) is new, and `rank=fulltext` gives the old default.
+- **Fallback.** Without a vector for the question (Ollama unreachable, model missing, the embedding call failed), cosine and weighted rank by full text and answer `"degraded": "no_embeddings"`, still with HTTP 200. Without a named rank the default waits at most 3 s for the vector, and after a failure it leaves Ollama alone for 60 s. A named rank waits as before. HTTP and MCP over HTTP embed the question before they take the database.
+- **Vectors at write time.** A pin, an MCP write, a replacement, a merge, a kept note without a vector, and every extracted or imported note gets its vector right after the insert, waiting at most 3 s. A failure is logged and never fails the write. Extraction therefore makes one embedding call per note. A note that still has no vector ranks by its words under cosine, and the answer says `"degraded": "<n> notes without a vector"`.
+- **Context pack.** "Relevant to the task" ranks by the default and stops at the model's match threshold (0.5 for `nomic-embed-text`, 0.68 for granite). The pack answers with a `degraded` field.
+- **With a cloud embedding model** and `THROUGHLINE_ALLOW_REMOTE_LLM` unset, the default recall and every context pack with a task answer 403 `remote_llm_not_allowed` (MCP -32000), where full text answered before. Name `rank=fulltext` to avoid the model.
+- **Calibrated weights for `rank=weighted`.** Cosine 0.85 and reliability 0.15, the other four 0 (before: 0.45, 0.20, 0.10, 0.10, 0.10 and 0.05). On held-out questions they hit 93.8 % at k = 5 against 71.9 % for the old weights, which ties plain cosine. Without a vector for the question, weighted falls back to full text like cosine.
+- **VS Code.** `throughline.rank` gains `default` and `cosine`. `default`, the new default, sends no rank, so the server decides.
+- **`recall-eval`.** `--weights` runs `weighted` with weights of your own, and `--dump-parts` writes the six score parts of every candidate. The full-text method is labelled `fulltext` (it was `current`). `--mode locomo` measures retrieval on the LoCoMo benchmark.
+- **Extraction profile.** `THROUGHLINE_EXTRACT_PROFILE=personal` uses a prompt for conversations between people. Unset keeps the coding prompt, unchanged; an unknown value stops `extract-memory` before it starts.
+- **LoCoMo adapter.** `ingest --source locomo` reads the file named by `THROUGHLINE_LOCOMO_PATH` into `throughline_bench` and refuses any other database. `ingest --source all` leaves it out. The data is licensed CC BY-NC 4.0 and stays out of the repository.
+- **Embed job.** `launchd/com.claude-memory-embed.plist` and `systemd/throughline-embed.service` with its timer run `throughline embed --limit 10000` every hour at minute 15.
+- **No migration.** The schema is unchanged.
+
+### Stricter start checks, sign-out
+
+- `serve` refuses to start, in both modes, on a database that lacks the newest Rust migration (`015_account_stars_untimed.sql`) and asks for `throughline migrate`. Before, it checked only that 014 had run. Applied migrations the Rust list does not know, such as the Python package's `015_project_assignments.sql`, are fine. Compose runs `migrate` before `web`, so a Compose start is unaffected.
+- Team mode refuses a `THROUGHLINE_PUBLIC_URL` with an empty or invalid port. The write check could not read such a port and refused every write from a browser.
+- Sign-out clears the cookie even when the cleanup of expired sessions after it fails.
+
 ### Team mode
 
 The Rust server can now serve one team on one server: accounts, sign-in, three roles and private notes. Local mode stays the default and behaves as before. The guide is [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md).

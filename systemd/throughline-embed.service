@@ -1,0 +1,24 @@
+[Unit]
+Description=Throughline - embed new memory notes and messages
+Documentation=https://github.com/mkupermann/Throughline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# %h expands to the user's home directory, %u to the username.
+WorkingDirectory=%h/.local/share/throughline
+# Notes first, then messages. Recall ranks by cosine, so a note without a
+# vector falls back to its words until this job has run.
+ExecStart=/usr/bin/env throughline embed --limit 10000
+EnvironmentFile=%h/.config/throughline/throughline.env
+Environment="PGUSER=%u"
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# A large backlog after a big ingest can take a while against a local Ollama.
+TimeoutStartSec=2h
+StandardOutput=journal
+StandardError=journal
+Nice=10
+
+[Install]
+WantedBy=default.target

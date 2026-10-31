@@ -127,6 +127,18 @@ the machine. `THROUGHLINE_MEMORY_LANG` forces the language extracted memory and
 generated titles are written in; left unset they follow the session, so German
 sessions produce German memory and English ones English.
 
+`extract-memory` uses a prompt written for coding sessions: it keeps decisions,
+patterns, errors with their fixes and project facts, and skips chit-chat. For
+conversations between people, `THROUGHLINE_EXTRACT_PROFILE=personal` switches to
+a prompt that keeps who people are, what happened to them, what they like and
+what they plan, with times as they were said. Its notes use four of the same
+categories (`contact`, `insight`, `preference`, `decision`). Unset, empty or
+`default` keeps the coding prompt. Any other value stops `extract-memory` before
+it reads a conversation, so a typo never runs the wrong prompt. With `personal`
+the command prints `extraction profile: personal`. On a public benchmark of
+personal dialogues the coding prompt kept no note at all, which is why the
+profile exists ([BENCHMARKS.md](BENCHMARKS.md#part-c-locomo-with-local-models)).
+
 For embeddings, `auto` uses a local Ollama embedding model only. Hosted OpenAI
 is not an embeddings backend. For generation, the probe is Ollama, then an
 OpenAI-compatible endpoint you named in `THROUGHLINE_ANSWER_BASE_URL`.
@@ -222,7 +234,7 @@ Replacing a forgotten note keeps it forgotten. It points at its successor and ge
 
 ## Recall: finding notes by meaning
 
-`recall` finds memory notes for a question and says why each one came up. By default it ranks by meaning: the cosine of the question's vector to each note's vector. Full text and a weighted ranking are there on request. A note gets its vector right after it is written: a pin, a write over HTTP or MCP, a replacement, a merge, a kept note, an extracted or imported note. That waits at most 3 seconds for Ollama, and a failure never fails the write. `throughline embed` fills in what this misses: notes from before, notes written while Ollama was down, and every note after a switch of the embedding model. It embeds memory notes (every status except forgotten) before it turns to messages, so run it regularly, for example hourly.
+`recall` finds memory notes for a question and says why each one came up. By default it ranks by meaning: the cosine of the question's vector to each note's vector. Full text and a weighted ranking are there on request. A note gets its vector right after it is written: a pin, a write over HTTP or MCP, a replacement, a merge, a kept note, an extracted or imported note. That waits at most 3 seconds for Ollama, and a failure never fails the write. `throughline embed` fills in what this misses: notes from before, notes written while Ollama was down, and every note after a switch of the embedding model. It embeds memory notes (every status except forgotten) before it turns to messages, so run it regularly, for example hourly. The shipped schedules do that: [`launchd/com.claude-memory-embed.plist`](../launchd/com.claude-memory-embed.plist) and [`systemd/throughline-embed.timer`](../systemd/throughline-embed.timer) run `throughline embed --limit 10000` every hour at minute 15.
 
 ```bash
 throughline recall "how do we deploy" --project demo --mode current --limit 5
@@ -256,7 +268,13 @@ Without Ollama no vector exists for the question. Full text in `current` does no
 
 A first test on 30 questions gave this: the weighted ranking hit 66.7 % at k = 5 with MRR 0.62, full text 66.7 % with MRR 0.53, cosine 63.3 % with MRR 0.57, random 3.3 %. So the weighted ranking did not beat plain full text on hits. It ranked the right note higher on average, but the bar set beforehand was five points over the better alternative, and that was not reached. Following the rule that came with the bar, full text became the default. Thirty questions from one corpus is a small sample.
 
-The larger measurement (2026-10-31, 74 questions from one corpus, granite vectors, with paraphrases and questions in another language than their note) reversed that: cosine 94.6 % at k = 5, the weighted ranking with the old weights 70.3 %, full text 50.0 %, random 0 %. Cosine became the default. The weighted ranking was then calibrated on 42 of the questions; the best weights, cosine 0.85 and reliability 0.15, hit 93.8 % on the other 32, the same as plain cosine there, so the weighted sum adds nothing over cosine on this set. They are its default now. All of this comes from one installation.
+The larger measurement (2026-10-31, 74 questions from one corpus, granite vectors, with paraphrases and questions in another language than their note) reversed that: cosine 94.6 % at k = 5, the weighted ranking with the old weights 70.3 %, full text 50.0 %, random 0 %. Cosine became the default. The weighted ranking was then calibrated on 42 of the questions; the best weights, cosine 0.85 and reliability 0.15, hit 93.8 % on the other 32, the same as plain cosine there, so the weighted sum adds nothing over cosine on this set. They are its default now. All of this comes from one installation, measured with granite. An install on the default `nomic-embed-text` gets cosine with nomic, which is weaker across languages (see [Embedding model](#embedding-model)). Method, numbers and limits are in [BENCHMARKS.md](BENCHMARKS.md#recall-and-public-benchmarks).
+
+`--weights c,l,r,rel,s,p` runs `weighted` with weights of your own instead of the built-in ones, in the order cosine, word overlap, recency, reliability, strength, provenance. They must be six numbers, none negative, that sum to 1, for example `--weights 0.85,0,0,0.15,0,0`. The JSON report names the weights it used. `--dump-parts <file>` also writes every candidate of every question with its six score parts, all taken at one fixed time, so a search over weights can run offline. Re-ranking the dump with the built-in weights gives exactly the ranks of `weighted`.
+
+`--mode locomo --qa <file> --k 5,10` measures retrieval on the LoCoMo benchmark: every question is asked in its dialogue's project, and a hit is a note from a session that holds one of the question's evidence turns. It runs only with `PGDATABASE=throughline_bench` and counts no use. Ingest the data first with `PGDATABASE=throughline_bench THROUGHLINE_LOCOMO_PATH=<file> throughline ingest --source locomo`. That also refuses every other database, and `ingest --source all` leaves it out. The data is licensed CC BY-NC 4.0, so keep the file, the questions and every result that quotes them outside the repository. The method is in [BENCHMARKS.md](BENCHMARKS.md#part-c-locomo-with-local-models).
+
+Coming, not in this build yet: `throughline bench-answer --qa <file> --out <answers.jsonl> [--sample 400 --seed 7] [--raw]` will answer each question from a context pack of its project with the production answer prompt, and `--raw` from the raw turns through `ask`. It will run only against `throughline_bench` as well.
 
 ## Embedding model
 

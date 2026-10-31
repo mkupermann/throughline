@@ -105,6 +105,18 @@ Migration History wird nicht umgeschrieben oder gelöscht.
 Docker Compose wartet erst auf die PostgreSQL Readiness, startet dann den
 Service `migrate` und startet Web UI oder MCP erst nach erfolgreicher Migration.
 
+Die Rust Laufzeit führt eine eigene Liste, `MIGRATIONS` in
+`rust/crates/throughline/src/migrate.rs`, von `001_rust_core.sql` bis
+`015_account_stars_untimed.sql`. Die nächste Rust Migration ist 016. Beide
+Laufzeiten schreiben in dieselbe Tabelle `applied_migrations`, und die kennt
+nur den Dateinamen. Ein Rust Name darf deshalb keinen Namen aus
+`throughline/migrations/` wiederholen. Dort liegen schon `016_pm_templates.sql`
+bis `018_processing_checkpoints.sql`, und eine gleichnamige Rust Migration
+gälte als erledigt, ohne gelaufen zu sein. Umgekehrt kann eine Datenbank Namen
+enthalten, die die Rust Liste nicht kennt, etwa `015_project_assignments.sql`
+aus dem Python Paket. `throughline serve` übergeht sie und startet nur dann
+nicht, wenn der neueste Name der eigenen Liste fehlt.
+
 ## Web UI
 
 Die React SPA hat acht Route Komponenten:

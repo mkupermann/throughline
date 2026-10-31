@@ -1,9 +1,204 @@
 # Throughline Benchmarks
 
+The first section, [Recall and public benchmarks](#recall-and-public-benchmarks),
+measures how well the Rust runtime finds notes (2026-10-31). Everything after it
+is historical.
+
 Historical, reproducible numbers from a real developer laptop. Nothing here is
 a synthetic stress test — every measurement was made against the author's
 Claude Code corpus in `~/.claude/projects/` before the multi-adapter runtime.
 They are not claims about the current nine-adapter ingest command.
+
+## Recall and public benchmarks
+
+Measured on 2026-10-31 with the Rust runtime. Three questions: which ranking
+`recall` should use by default, which weights the weighted ranking needs, and
+how Throughline does on a public long-term memory benchmark with local models
+only. Every bar below was written down before the run it judges and was not
+moved afterwards. A result that missed its bar is reported as such.
+
+### Setup
+
+- One installation: an Apple M5 Max with 36 GB, PostgreSQL 16 with pgvector,
+  Ollama on the same machine.
+- A copy of one real corpus, not the live database: about 1,600 current notes
+  (1,595 at the start of part B), every one with a vector.
+- Embedding model `granite-embedding-multilingual:278m` for notes and questions.
+- Every number comes from `throughline recall-eval`. It runs the real recall
+  path and counts no use, so measuring changed no note's strength.
+  k = 5, seed 7. MRR counts down to rank 50.
+
+### The test set
+
+74 questions with known answer notes, frozen by SHA-256 before the first run.
+The questions and notes are private, so the set is not in this repository; the
+method works on any corpus (see [Reproducing](#reproducing-the-recall-numbers)).
+
+- 60 come from the earlier multilingual set: 30 questions and their 30
+  translations. 25 ask in the language of their note, 25 in another language,
+  10 are unclear.
+- 14 are modelled on questions the corpus owner really asked in the 90 days
+  before. He approved them; he did not write them. The rule asked for questions
+  he wrote himself, so this is a deviation. Their answer notes were found by
+  pooling the top results of every method plus a manual search, and checked
+  against the full note text.
+- A bias named before the run: the cross-language questions were built so that
+  no word of the question appears in its note. That works against full text on
+  purpose. The results are shown with and without them.
+
+### Part A: the default ranking
+
+The rule was fixed after the first recall measurement (30 questions), before
+this one: full text stays the default only if it beats the best alternative by
+at least 5 points hit@5 on the whole set. Otherwise the alternative with the
+higher hit@5 becomes the default, on a tie the one with the higher MRR.
+
+hit@5, with MRR for the whole set:
+
+| Method | All 74 | Same language (25) | Cross-language (25) | Unclear (10) | Owner's questions (14) | Without cross-language (49) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Full text (the default until then) | 50.0 % (MRR 0.388) | 80.0 % | 8.0 % | 50.0 % | 71.4 % | 71.4 % |
+| Weighted, old weights | 70.3 % (MRR 0.596) | 92.0 % | 36.0 % | 80.0 % | 85.7 % | 87.8 % |
+| Cosine | 94.6 % (MRR 0.818) | 100.0 % | 88.0 % | 100.0 % | 92.9 % | 98.0 % |
+| Random | 0.0 % (MRR 0.010) | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| Phrase match | 0.0 % (MRR 0.000) | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+
+Paired bootstrap over 36 groups of questions that share answer notes, 1,000
+draws: cosine minus full text +44.6 points (95 % interval +34.7 to +53.4),
+weighted minus full text +20.3 points (+11.0 to +28.8).
+
+By the rule, full text was 44.6 points behind instead of 5 ahead. Cosine had
+the highest hit@5 and became the default ranking of mode `current`. It also
+leads without the cross-language questions (98.0 % against 71.4 %) and on the
+owner's questions (92.9 % against 71.4 %), so the bias named above does not
+decide the outcome. Random and phrase match found nothing in the top five; for
+random the expected value over these candidate pools was 3.4 %.
+
+### Part B: weights of the weighted ranking
+
+- The questions were split into a calibration part (42 questions) and a test
+  part (32 questions) by group, so a question and its translation never land on
+  different sides. Seed 7.
+- A grid with step 0.05 over the six weights (cosine, word overlap, recency,
+  reliability, strength, provenance; sum 1) has 53,130 vectors. It ran on the
+  calibration part only. The best was cosine 0.85 and reliability 0.15, the
+  other four 0. It hit 95.2 % there, the old weights 69.0 %.
+- The bar, set before: the calibrated weights must beat the 95th percentile of
+  20 random weight vectors on the test part, and they become the default of
+  `rank=weighted` only if they lead the old weights there by at least 5 points
+  hit@5.
+- The test part ran once, through the real path:
+
+| Test part, 32 questions | hit@5 | MRR |
+| --- | --- | --- |
+| Calibrated (0.85 / 0 / 0 / 0.15 / 0 / 0) | 93.8 % | 0.771 |
+| Old weights (0.45 / 0.20 / 0.10 / 0.10 / 0.10 / 0.05) | 71.9 % | 0.632 |
+| Cosine | 93.8 % | 0.772 |
+| Full text | 53.1 % | 0.433 |
+| Random | 6.3 % | 0.030 |
+
+The 20 random vectors (Dirichlet, seed 7) hit between 1 and 20 of the 32
+questions; their 95th percentile is 18.1. The calibrated weights hit 30, above
+all 20, and 21.9 points over the old weights. Both bars are met, so they are the
+default of `rank=weighted` now. Said plainly: the calibrated vector is cosine
+with a little reliability, and on the test part it ties plain cosine. On this
+set the weighted sum adds nothing over cosine.
+
+### Part C: LoCoMo with local models
+
+[LoCoMo](https://github.com/snap-research/locomo) (Maharana et al., 2024) is a
+public benchmark for long-term conversational memory: 10 long dialogues
+between two speakers, 272 sessions, 1,986 questions in five categories
+(single-hop, multi-hop, temporal, open-domain, adversarial), each with the
+turns that hold the answer. Its licence is CC BY-NC 4.0. No part of the data,
+and no result that quotes it, is in this repository.
+
+- **Separate database.** The data goes into `throughline_bench` only. The
+  `locomo` adapter refuses any other database name, and `ingest --source all`
+  does not include it. It reads the file named by `THROUGHLINE_LOCOMO_PATH`;
+  there is no default path.
+- **Mapping.** Each LoCoMo session becomes one Throughline conversation, each
+  dialogue one project. Turns keep their session date.
+- **Same pipeline as in use.** Ingest, `extract-memory`, `embed`, recall. Local
+  Ollama only: `qwen3.6:27b` for extraction and answers, granite for vectors,
+  thinking off and a context of 16,384 tokens.
+- **Extraction profile.** The production prompt is written for coding sessions
+  and skips small talk. A probe on 2 dialogues (38 sessions) gave 0 notes per
+  session with it. The stop rule set before the probe (fewer than one note per
+  session) switched to `THROUGHLINE_EXTRACT_PROFILE=personal`, which gave 11.1
+  notes per session at 42.8 s per session (measured over the 19 sessions before
+  the machine went to sleep).
+- **Retrieval.** `recall-eval --mode locomo` asks every question in its
+  dialogue's project, with the default rank and with full text, weighted and
+  cosine for comparison. A hit means a returned note comes from a session that
+  holds one of the question's evidence turns. That is session level: notes do
+  not record which turn they came from. Recall@5 and recall@10 per category,
+  with n. The adversarial category is reported apart and stays out of the
+  headline.
+- **Answers.** A context pack for the question's project, then the production
+  answer prompt on `qwen3.6:27b`. The same model judges each answer three times
+  with the yes/no template of the Mem0 paper, and the majority counts. The same
+  model answering and judging is a limitation, and a local judge's score is not
+  comparable to scores judged by a hosted model. The judge is checked against
+  50 answers labelled by hand; agreement below 80 % means the answer score is
+  reported as unreliable.
+
+> **Placeholder.** Results: to be filled from `results-C-*`.
+
+### Limitations
+
+- One person, one machine, one corpus, one embedding model. The numbers hold
+  for this installation.
+- Measured with granite on one installation. An install on the default
+  `nomic-embed-text` gets cosine with nomic, which is weaker across languages.
+  In the earlier multilingual measurement on 60 of these questions, nomic found
+  92 % of the same-language and 8 % of the cross-language questions at k = 5;
+  full text found 80 % and 8 % of them here. The 74-question run was not
+  repeated with nomic.
+- 74 questions: one question is 1.4 points on the whole set and 3.1 points on
+  the test part of part B.
+- Only mode `current` was measured. The cosine default applies there only;
+  `as_of`, `associative` and `grounded` keep full text when no rank is named.
+- The weighted ranking with the old weights read the clock and the use
+  counts, so a re-run of part A can move it slightly. Full text and cosine
+  depend on neither.
+- The owner's questions were approved by him, not written by him (see above).
+- MRR here counts down to rank 50. The earlier multilingual measurement
+  counted to rank 10, so its MRRs are not comparable.
+
+### What the default costs: a vector per note
+
+Cosine needs a vector for every note. A note now gets its vector right after it
+is written: a pin, a write over HTTP or MCP, a replacement, a merge, a kept
+note, an extracted or imported note. That is one call to the embedding model
+per note, with at most 3 s of waiting. A failure never fails the write. If
+Ollama is down or too slow, further calls pause for 60 s, and in that time the
+default recall ranks by words. Extraction now makes one embedding call per
+note, on the same Ollama that runs the extraction model. The time per note was
+not measured on its own, and the extraction timings in part C were taken
+before this existed. A note the write could not embed is ranked by its words
+until `throughline embed` gives it a vector, and the answer says how many such
+notes it saw. The shipped `launchd/` and `systemd/` templates run `embed`
+hourly at minute 15.
+
+### Reproducing the recall numbers
+
+Write a set of questions from your own notes, as a JSON array of
+`{"q": "...", "project": "..." or null, "expected": [note ids]}`, and keep it
+outside the repository if the notes are private. Then:
+
+```bash
+# Part A: every method on the whole set
+throughline recall-eval --set my-set.json --k 5 --seed 7 --json
+
+# Part B: the six score parts of every candidate, for an offline grid
+throughline recall-eval --set calibration.json --k 5 --seed 7 --json \
+  --dump-parts parts.json
+
+# Part B: one weight vector on the held-out questions, through the real path
+throughline recall-eval --set test.json --k 5 --seed 7 --json \
+  --weights 0.85,0,0,0.15,0,0
+```
 
 ## Test Rig
 
