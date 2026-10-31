@@ -2934,6 +2934,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.meaning.title": "Rank the hits by meaning (cosine of the embeddings). Without a reachable Ollama they are ranked by words, and a notice says so.",
       "mem.score": "score ",
       "mem.degraded": "Ollama not reachable — ranked by words, not by meaning",
+      "mem.noVectors": "{n} notes have no vector yet and were ranked by words. The next embed run adds them.",
       "mem.asof.valid": "was valid",
       "mem.asof.known": "was known",
       "supersede.kind": "Kind",
@@ -3661,6 +3662,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.meaning.title": "Treffer nach Bedeutung ordnen (Kosinus der Embeddings). Ist Ollama nicht erreichbar, werden sie nach Wörtern geordnet, und ein Hinweis sagt das.",
       "mem.score": "Score ",
       "mem.degraded": "Ollama nicht erreichbar, Rangfolge nach Wörtern statt nach Bedeutung",
+      "mem.noVectors": "{n} Notizen haben noch keinen Vektor und wurden nach Wörtern geordnet. Der nächste Embed-Lauf ergänzt sie.",
       "mem.asof.valid": "galt",
       "mem.asof.known": "war bekannt",
       "supersede.kind": "Art",
@@ -6982,7 +6984,12 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       const data = await fetchJson("/api/recall?" + p.toString());
       const hits = data.hits || [];
       if (note) {
-        note.textContent = data.degraded ? t("mem.degraded") : "";
+        // "no_embeddings": no vector for the question; "<n> notes without a
+        // vector": those notes were ranked by their words.
+        const missing = /^(\d+) notes without a vector$/.exec(data.degraded || "");
+        note.textContent = !data.degraded ? ""
+          : missing ? t("mem.noVectors").replace("{n}", missing[1])
+          : t("mem.degraded");
         note.hidden = !data.degraded;
       }
       el.innerHTML = hits.map((h) => {

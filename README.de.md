@@ -175,7 +175,7 @@ Durchsuche Notizen, filtere Kategorien und klappe Karten auf. **Ingest agent mem
 
 Jede Notiz zeigt, ab wann sie gilt und, sobald sie ersetzt ist, bis wann. Das ist getrennt vom Zeitpunkt der Erfassung. **Stand am** nimmt ein Datum und beantwortet mit „galt“ oder „war bekannt“, was an diesem Tag galt oder was Throughline bis dahin erfasst hatte. Beim Ersetzen fragt der Dialog, ob es eine Aktualisierung oder eine Korrektur ist. **Nach Bedeutung** ordnet die aktuellen Notizen über `recall` nach Bedeutung. Ohne Ollama sagt die Ansicht das und fällt auf Wörter zurück.
 
-Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachigen Modell `granite-embedding:278m`, das Du selbst einschaltest, findet eine deutsche Frage eine englische Notiz und umgekehrt, und zwar in **Nach Bedeutung**, `--rank weighted`, `as_of`, `grounded`, der semantischen Suche und Ask. Der Standard-Abruf ordnet nach Volltext und findet eine Notiz in einer anderen Sprache nur über Wörter, die beide teilen. Messung und Umschalten des Modells stehen in [docs/USAGE.md](docs/USAGE.md#embedding-model).
+Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachigen Modell `granite-embedding:278m`, das Du selbst einschaltest, findet eine deutsche Frage eine englische Notiz und umgekehrt, und zwar im Standard-Abruf, in **Nach Bedeutung**, `--rank weighted`, `as_of`, `grounded`, der semantischen Suche und Ask. Volltext (`--rank fulltext`, und der Rückfall ohne Ollama) findet eine Notiz in einer anderen Sprache nur über Wörter, die beide teilen. Messung und Umschalten des Modells stehen in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
 ![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 

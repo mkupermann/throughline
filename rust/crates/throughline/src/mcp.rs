@@ -65,9 +65,63 @@ pub fn run_stdio<C: GenericClient>(client: &mut C, ctx: &McpContext) -> Result<(
     Ok(())
 }
 
+/// The question vector of a message, embedded before the DB is touched;
+/// `None` when nothing was embedded ahead, so the tool embeds it itself.
+pub type Prepared = Option<Option<crate::recall::QueryEmbedding>>;
+
+/// The vector that `recall`, `project_context` or the `before_coding` prompt
+/// of `msg` will rank by, embedded now with the rank's own timeout and, for
+/// the default rank, `breaker`. MCP over HTTP calls this outside the shared
+/// DB lock. Arguments the tool would refuse, other messages and a refusal by
+/// the remote-model lock give `None`, and the tool then answers as before.
+pub fn prepare_query_vector(msg: &Value, breaker: &crate::embedding::EmbedBreaker) -> Prepared {
+    let params = msg.get("params")?;
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let text = |key: &str| -> Option<Option<String>> {
+        match args.get(key) {
+            None | Some(Value::Null) => Some(None),
+            Some(Value::String(t)) if t.trim().is_empty() => Some(None),
+            Some(Value::String(t)) => crate::recall::check_query(t).ok().map(|_| Some(t.clone())),
+            Some(_) => None,
+        }
+    };
+    let name = params.get("name").and_then(|n| n.as_str());
+    let method = msg.get("method").and_then(|m| m.as_str());
+    match (method, name) {
+        (Some("tools/call"), Some("recall")) => {
+            let query = text("query")??;
+            let mode = match args.get("mode").and_then(|m| m.as_str()) {
+                None | Some("") => crate::recall::RecallMode::Current,
+                Some(m) => m.parse().ok()?,
+            };
+            let rank = match args.get("rank").and_then(|r| r.as_str()) {
+                None | Some("") => None,
+                Some(r) => Some(r.parse().ok()?),
+            };
+            crate::recall::question_vector(&query, mode, rank, breaker).ok()
+        }
+        (Some("tools/call"), Some("project_context"))
+        | (Some("prompts/get"), Some("before_coding")) => {
+            let task = text("task")?;
+            crate::context_pack::task_embedding(task.as_deref(), breaker).ok()
+        }
+        _ => None,
+    }
+}
+
 /// Answer one JSON-RPC message. A message without `id` is a notification
 /// and gets no body, whatever its method.
 pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext) -> Reply {
+    dispatch_with(client, msg, ctx, None)
+}
+
+/// [`dispatch`] with the question vector embedded ahead, see [`prepare_query_vector`].
+pub fn dispatch_with<C: GenericClient>(
+    client: &mut C,
+    msg: &Value,
+    ctx: &McpContext,
+    prepared: Prepared,
+) -> Reply {
     let Some(id) = msg.get("id").cloned() else {
         return Reply {
             status: 202,
@@ -112,13 +166,13 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
                 "code": -32602,
                 "message": format!("tool {name} needs the {} role", tool_role(name).as_str())
             })),
-            _ => call_tool(client, &ctx.actor, &params),
+            _ => call_tool_with(client, &ctx.actor, &params, prepared),
         },
         "resources/list" => Ok(resources_list()),
         "resources/templates/list" => Ok(resource_templates_list()),
         "resources/read" => read_resource(client, &ctx.actor, &params, modern),
         "prompts/list" => Ok(prompts_list()),
-        "prompts/get" => get_prompt(client, &ctx.actor, &params),
+        "prompts/get" => get_prompt(client, &ctx.actor, &params, prepared),
         "ping" => Ok(json!({})),
         "server/discover" => Ok(discover_result(capabilities(), ctx.transport)),
         other => Err(json!({
@@ -232,7 +286,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (default, meaning; ranks by full text and says degraded when no embedding is reachable), fulltext (word match) or weighted (meaning and reliability; needs embeddings)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (default, meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match) or weighted (meaning and reliability; full text without embeddings)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -360,8 +414,13 @@ fn build_pack<C: GenericClient>(
     project: &str,
     task: Option<&str>,
     budget: usize,
+    prepared: Prepared,
 ) -> Result<crate::context_pack::ContextPack, Value> {
-    let emb = crate::context_pack::task_embedding(task).map_err(|e| internal(actor, e))?;
+    let emb = match prepared {
+        Some(emb) => emb,
+        None => crate::context_pack::task_embedding(task, &crate::embedding::BREAKER)
+            .map_err(|e| internal(actor, e))?,
+    };
     crate::context_pack::build_context(
         client,
         actor,
@@ -388,10 +447,20 @@ fn optional_str<'a>(args: &'a Value, name: &str, message: &str) -> Result<Option
     }
 }
 
+#[cfg(test)]
 fn call_tool<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     params: &Value,
+) -> Result<Value, Value> {
+    call_tool_with(client, actor, params, None)
+}
+
+fn call_tool_with<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    params: &Value,
+    prepared: Prepared,
 ) -> Result<Value, Value> {
     let name = params
         .get("name")
@@ -445,10 +514,12 @@ fn call_tool<C: GenericClient>(
                 None | Some("") => crate::recall::RecallMode::Current,
                 Some(m) => m.parse().map_err(|e: String| invalid(&e))?,
             };
-            let rank = match optional_str(&args, "rank", "rank must be a string")? {
-                None | Some("") => crate::recall::DEFAULT_RANK,
-                Some(r) => r.parse().map_err(|e: String| invalid(&e))?,
-            };
+            let asked_rank: Option<crate::recall::Rank> =
+                match optional_str(&args, "rank", "rank must be a string")? {
+                    None | Some("") => None,
+                    Some(r) => Some(r.parse().map_err(|e: String| invalid(&e))?),
+                };
+            let rank = asked_rank.unwrap_or(crate::recall::DEFAULT_RANK);
             let date = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, Value> {
                 match optional_str(&args, name, &format!("{name} must be a string"))? {
                     None | Some("") => Ok(None),
@@ -470,10 +541,15 @@ fn call_tool<C: GenericClient>(
                 .and_then(|l| l.as_i64())
                 .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
                 .clamp(1, 50) as usize;
-            let emb = if crate::recall::needs_embedding(mode, rank) {
-                crate::recall::query_embedding(query).map_err(|e| internal(actor, e))?
-            } else {
-                None
+            let emb = match prepared {
+                Some(emb) => emb,
+                None => crate::recall::question_vector(
+                    query,
+                    mode,
+                    asked_rank,
+                    &crate::embedding::BREAKER,
+                )
+                .map_err(|e| internal(actor, e))?,
             };
             let q = crate::recall::RecallQuery {
                 actor,
@@ -521,7 +597,7 @@ fn call_tool<C: GenericClient>(
                         ))
                     })?,
             };
-            let pack = build_pack(client, actor, project, task, budget)?;
+            let pack = build_pack(client, actor, project, task, budget, prepared)?;
             let ids = crate::context_pack::cited_note_ids(&pack);
             crate::lifecycle::record_use_or_log(client, &ids);
             Ok(text_result(
@@ -632,6 +708,7 @@ fn call_tool<C: GenericClient>(
                 )
                 .map_err(|e| internal(actor, e))?
                 .get(0);
+            crate::generate_embeddings::embed_written_note(client, id);
             Ok(text_result(format!("{{\"id\":{id}}}")))
         }
         "forget" => {
@@ -819,6 +896,7 @@ fn read_resource<C: GenericClient>(
             name,
             None,
             crate::context_pack::DEFAULT_BUDGET,
+            None,
         )?;
         crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
         serde_json::to_string(&pack).map_err(|e| internal(actor, e))?
@@ -881,6 +959,7 @@ fn get_prompt<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     params: &Value,
+    prepared: Prepared,
 ) -> Result<Value, Value> {
     let invalid = |m: &str| json!({ "code": -32602, "message": m });
     let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -906,6 +985,7 @@ fn get_prompt<C: GenericClient>(
         project,
         task,
         crate::context_pack::DEFAULT_BUDGET,
+        prepared,
     )?;
     crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
     let instruction = if name == "handoff" {

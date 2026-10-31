@@ -1,10 +1,10 @@
 //! Context pack: header, section headings and cited lines packed into a hard token budget.
 
 use crate::access::{push_visibility, Actor};
+use crate::embedding::EmbedBreaker;
 use crate::recall::{
-    candidates, fulltext_ranks, needs_embedding, query_embedding, query_words, recall, Candidate,
-    CandidateFilter, QueryEmbedding, RecallHit, RecallMode, RecallQuery, DEFAULT_RANK,
-    MAX_QUERY_CHARS,
+    candidates, fulltext_ranks, query_words, question_vector, recall, Candidate, CandidateFilter,
+    QueryEmbedding, Rank, RecallHit, RecallMode, RecallQuery, DEFAULT_RANK, MAX_QUERY_CHARS,
 };
 use chrono::{DateTime, Utc};
 use postgres::GenericClient;
@@ -67,6 +67,9 @@ pub struct ContextPack {
     pub within_budget: bool,
     pub skipped: usize,
     pub estimate: &'static str,
+    /// Why "Relevant to the task" did not rank fully by meaning: the
+    /// `degraded` of its recall (no question vector, or notes without one).
+    pub degraded: Option<String>,
 }
 
 /// The notes a pack cites (kind `memory`); these are the ones a use counts for.
@@ -162,6 +165,7 @@ pub fn pack(header: &str, lines: &[Line], budget: usize) -> Result<ContextPack, 
         within_budget: used <= budget,
         skipped,
         estimate: "max(words, ceil(chars/4))",
+        degraded: None,
     })
 }
 
@@ -310,18 +314,39 @@ fn candidate_line(section: Section, c: &Candidate, origins: &mut HashMap<i64, Or
     )
 }
 
-/// The question vector for `task` when [`DEFAULT_RANK`] uses one: the text the
-/// pack ranks by, embedded once. No task gives `None`, and so does an
-/// unreachable Ollama; the pack then ranks by full text. A refusal by the
-/// remote-model lock is an error.
-pub fn task_embedding(task: Option<&str>) -> anyhow::Result<Option<QueryEmbedding>> {
+/// The question vector for `task` by the default rank: the text the pack
+/// ranks by, embedded once, on the quick path with `breaker` (see
+/// [`question_vector`]). No task gives `None`, and so does an unreachable or
+/// slow Ollama; the pack then ranks by full text and says `degraded`. A
+/// refusal by the remote-model lock is an error.
+pub fn task_embedding(
+    task: Option<&str>,
+    breaker: &EmbedBreaker,
+) -> anyhow::Result<Option<QueryEmbedding>> {
     match task.map(str::trim).filter(|t| !t.is_empty()) {
-        Some(t) if needs_embedding(RecallMode::Current, DEFAULT_RANK) => {
+        Some(t) => {
             let text: String = t.chars().take(MAX_QUERY_CHARS).collect();
-            query_embedding(&text)
+            question_vector(&text, RecallMode::Current, None, breaker)
         }
-        _ => Ok(None),
+        None => Ok(None),
     }
+}
+
+fn header_for(project: &str, budget: usize) -> String {
+    format!(
+        "Context for {} · {} · budget {} tokens (estimated)",
+        project,
+        ymd(Utc::now()),
+        budget
+    )
+}
+
+/// Whether the header of a pack for `project` fits `budget`; checked before
+/// any query runs, and before the task is embedded.
+pub fn check_header(project: &str, budget: usize) -> anyhow::Result<()> {
+    pack(&header_for(project, budget), &[], budget)
+        .map(|_| ())
+        .map_err(anyhow::Error::new)
 }
 
 /// Gathers the sections for `req.project` and packs them into `req.budget` tokens.
@@ -332,12 +357,7 @@ pub fn build_context<C: GenericClient>(
     req: &ContextRequest,
     emb: Option<&QueryEmbedding>,
 ) -> anyhow::Result<ContextPack> {
-    let header = format!(
-        "Context for {} · {} · budget {} tokens (estimated)",
-        req.project,
-        ymd(Utc::now()),
-        req.budget
-    );
+    let header = header_for(req.project, req.budget);
     // The header must fit before any query runs.
     pack(&header, &[], req.budget).map_err(anyhow::Error::new)?;
     let mut lines: Vec<Line> = Vec::new();
@@ -381,17 +401,24 @@ pub fn build_context<C: GenericClient>(
         lines.push(candidate_line(Section::Decisions, c, &mut origins));
     }
 
+    let mut degraded = None;
     if let Some(task) = task {
         let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
         let q = RecallQuery {
             text: &text,
             ..query
         };
-        let hits = recall(client, &q, emb)?.hits;
-        for h in hits {
-            // Score 0 is not relevant to the task: no shared word under full
-            // text, no vector (or an orthogonal one) under cosine.
-            if h.score <= 0.0 || h.status == "stale" || !shown.insert(h.id) {
+        let result = recall(client, &q, emb)?;
+        degraded = result.degraded;
+        // Under cosine a note counts as relevant from the model's own "matches
+        // the question" threshold on (the one `as_of` uses), so a weak match
+        // never fills the budget. Under full text any shared word does.
+        let floor = match (DEFAULT_RANK, emb) {
+            (Rank::Cosine, Some(e)) => e.min_cosine,
+            _ => 0.0,
+        };
+        for h in result.hits {
+            if h.score <= 0.0 || h.score < floor || h.status == "stale" || !shown.insert(h.id) {
                 continue;
             }
             lines.push(hit_line(Section::Relevant, &h, &mut origins));
@@ -463,11 +490,14 @@ pub fn build_context<C: GenericClient>(
             }),
         });
     }
-    if sources.is_empty() {
-        return Ok(first);
-    }
-    lines.extend(sources);
-    pack(&header, &lines, req.budget).map_err(anyhow::Error::new)
+    let mut out = if sources.is_empty() {
+        first
+    } else {
+        lines.extend(sources);
+        pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?
+    };
+    out.degraded = degraded;
+    Ok(out)
 }
 
 /// Recent human sessions of the project: the summary as title, else the first user message.
@@ -1007,7 +1037,8 @@ mod tests {
             v[..2].copy_from_slice(&head);
             v
         };
-        for (id, head) in [(words, [0.3, 0.95]), (meaning, [1.0, 0.0])] {
+        // cos 0.70 and 1.0, both above the floor of 0.5 below
+        for (id, head) in [(words, [0.7, 0.714]), (meaning, [1.0, 0.0])] {
             tx.execute(
                 "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
                  VALUES ('memory_chunk', $1, $2, $3::text::vector)",
@@ -1041,6 +1072,59 @@ mod tests {
         let r = relevant_lines(&out);
         assert_eq!(r.len(), 1, "{}", out.text);
         assert!(r[0].contains("quokka habitat survey notes"), "{r:#?}");
+    }
+
+    #[test]
+    fn context_pack_relevant_section_stops_at_min_cosine() {
+        db_tx!("context_pack_relevant_section_stops_at_min_cosine", tx);
+        let p = proj();
+        let model = format!("test-embed-{}", uuid::Uuid::new_v4());
+        let close = insert(
+            &mut tx,
+            &seed("marsupial burrow census", Some(&p), "insight", 3),
+        );
+        let weak = insert(
+            &mut tx,
+            &seed("quarterly invoice layout", Some(&p), "insight", 4),
+        );
+        let vec768 = |head: [f32; 2]| {
+            let mut v = vec![0.0f32; 768];
+            v[..2].copy_from_slice(&head);
+            v
+        };
+        // cos 0.9 and 0.6: the weak one is under the model's floor of 0.68
+        for (id, head) in [(close, [0.9, 0.436]), (weak, [0.6, 0.8])] {
+            tx.execute(
+                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+                 VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+                &[
+                    &id,
+                    &model,
+                    &crate::generate_embeddings::vector_literal(&vec768(head)),
+                ],
+            )
+            .unwrap();
+        }
+        let emb = QueryEmbedding {
+            model,
+            column: "embedding_768",
+            vector: vec768([1.0, 0.0]),
+            min_cosine: 0.68,
+        };
+        let req = ContextRequest {
+            project: &p,
+            task: Some("burrow survey"),
+            budget: 8_000,
+        };
+        let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
+        let r = relevant_lines(&out);
+        assert_eq!(r.len(), 1, "{}", out.text);
+        assert!(r[0].contains("marsupial burrow census"), "{r:#?}");
+        assert!(
+            !out.text.contains("quarterly invoice layout"),
+            "{}",
+            out.text
+        );
     }
 
     /// Six decisions: the three newest do not mention the task words, two older ones do

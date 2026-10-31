@@ -11,6 +11,133 @@ pub struct EmbedSummary {
     pub errors: usize,
 }
 
+/// A note's vector from the active model.
+pub struct NoteVector {
+    pub model: String,
+    pub column: &'static str,
+    pub vector: Vec<f32>,
+}
+
+/// `content` embedded as a document with the active model, within
+/// [`embedding::QUICK_EMBED_TIMEOUT`]. `None` while `breaker` is open or
+/// when the call fails; a failure is logged and opens `breaker`.
+pub fn note_vector(content: &str, breaker: &embedding::EmbedBreaker) -> Option<NoteVector> {
+    #[cfg(test)]
+    if let Some(v) = write_fixture::vector_for(content) {
+        return Some(v);
+    }
+    let now = embedding::now_ms();
+    if breaker.is_open(now) {
+        return None;
+    }
+    let text = content.to_string();
+    let result = embedding::within(embedding::QUICK_EMBED_TIMEOUT, move || {
+        let backend = embedding::resolve()?;
+        let vector = embedding::embed_text(&backend, &text, embedding::TextKind::Document)?;
+        // A wrong size would fail the insert and with it the caller's transaction.
+        anyhow::ensure!(
+            vector.len() == backend.dim,
+            "{} values, the column takes {}",
+            vector.len(),
+            backend.dim
+        );
+        Ok(NoteVector {
+            model: backend.model,
+            column: backend.column,
+            vector,
+        })
+    });
+    match result {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!("embed at write: {e:#}");
+            breaker.trip(now);
+            None
+        }
+    }
+}
+
+/// Gives note `id` a vector of the active model right after it was written,
+/// so it ranks by meaning at once. The write never fails for it: no Ollama,
+/// a missing model, a refusal, a timeout or a failed insert is logged, and
+/// the `embed` job fills the gap later. A note that already has a vector of
+/// the active model, a forgotten or an empty note is left alone.
+pub fn embed_written_note<C: GenericClient>(client: &mut C, id: i64) {
+    let model = embedding::configured_model();
+    let row = client.query_opt(
+        "SELECT left(mc.content, 4000) FROM memory_chunks mc \
+         WHERE mc.id = $1 AND COALESCE(mc.status, 'active') <> 'forgotten' \
+           AND COALESCE(mc.content, '') <> '' \
+           AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.source_type = 'memory_chunk' \
+                           AND e.source_id = mc.id AND e.model = $2)",
+        &[&id, &model],
+    );
+    let text: String = match row {
+        Ok(Some(r)) => r.get(0),
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("embed at write: note {id}: {e}");
+            return;
+        }
+    };
+    let Some(v) = note_vector(&text, &embedding::BREAKER) else {
+        return;
+    };
+    let column = v.column;
+    if let Err(e) = client.execute(
+        &format!(
+            "INSERT INTO embeddings (source_type, source_id, model, {column}) \
+             VALUES ('memory_chunk', $1, $2, $3::text::vector) \
+             ON CONFLICT (source_type, source_id, model) DO UPDATE SET {column} = EXCLUDED.{column}"
+        ),
+        &[&id, &v.model, &vector_literal(&v.vector)],
+    ) {
+        eprintln!("embed at write: insert {id}: {e}");
+    }
+}
+
+/// Test notes get a vector at write time without Ollama.
+#[cfg(test)]
+pub(crate) mod write_fixture {
+    use std::sync::Mutex;
+
+    static FIXTURES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+    /// While `f` runs, a note whose text holds `tag` gets the vector
+    /// `[1, 0, …]` of `model` when it is written. Other notes are untouched.
+    pub(crate) fn with<T>(tag: &str, model: &str, f: impl FnOnce() -> T) -> T {
+        struct Pop(String);
+        impl Drop for Pop {
+            fn drop(&mut self) {
+                FIXTURES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .retain(|(t, _)| *t != self.0);
+            }
+        }
+        FIXTURES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((tag.to_string(), model.to_string()));
+        let _pop = Pop(tag.to_string());
+        f()
+    }
+
+    pub(crate) fn vector_for(content: &str) -> Option<super::NoteVector> {
+        let fixtures = FIXTURES.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, model) = fixtures
+            .iter()
+            .find(|(t, _)| content.contains(t.as_str()))?;
+        let mut vector = vec![0.0; 768];
+        vector[0] = 1.0;
+        Some(super::NoteVector {
+            model: model.clone(),
+            column: "embedding_768",
+            vector,
+        })
+    }
+}
+
 /// `"[a,b,…]"` text literal for a pgvector value (`$n::text::vector`).
 pub fn vector_literal(v: &[f32]) -> String {
     format!(
