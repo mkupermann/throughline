@@ -1,12 +1,13 @@
 //! MCP over Streamable HTTP at `POST /mcp`: one JSON-RPC message per
-//! request, answered with plain JSON. Only agents holding
-//! `THROUGHLINE_AGENT_KEY` get in.
+//! request, answered with plain JSON. Only agents holding the agent key get
+//! in: `THROUGHLINE_AGENT_KEY` in local mode, a key of their account in team
+//! mode.
 
-use crate::access::Actor;
+use crate::access::{Actor, AuthMode};
 use crate::agent_key::{check_bearer, KeyCheck};
 use crate::mcp::{dispatch, McpContext, Reply};
 use crate::mcp_protocol::{classify_http, Transport, INVALID_REQUEST, PARSE_ERROR};
-use crate::server::{api_error, unauthorized, with_db, AppState};
+use crate::server::{account_key_actor, api_error, unauthorized, with_db, AppState};
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -35,30 +36,42 @@ fn invalid(code: i64, message: &str) -> Response {
 }
 
 /// One JSON-RPC message. The key is checked before the body is read, so a
-/// client without it learns nothing from body handling. Local mode passes
-/// [`Actor::local`]; in team mode the shared agent key is no account and
-/// sees shared notes only.
+/// client without it learns nothing from body handling. Local mode:
+/// `THROUGHLINE_AGENT_KEY`, and the actor is [`Actor::local`]. Team mode: the
+/// key of an account, which is the actor with its role; the shared key is
+/// not consulted, and no key, an unknown or revoked one or one of a disabled
+/// account get the same 401.
 pub async fn mcp_post(
     State(state): State<AppState>,
     actor: Option<Extension<Actor>>,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    // A header that is not text is checked as an empty value and fails.
-    let authorization = headers
-        .get(header::AUTHORIZATION)
-        .map(|v| v.to_str().unwrap_or(""));
-    match check_bearer(&state.agent_key, authorization) {
-        KeyCheck::Accepted => {}
-        KeyCheck::Off | KeyCheck::TooShort => {
-            return api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "agent_access_off",
-                "agent access is off: set THROUGHLINE_AGENT_KEY (at least 32 characters) and restart",
-            );
+    let actor = match state.auth_mode {
+        AuthMode::Team => match account_key_actor(&state, &headers).await {
+            Ok(Some(actor)) => actor,
+            Ok(None) => return unauthorized("invalid credentials"),
+            Err(resp) => return resp,
+        },
+        AuthMode::Local => {
+            // A header that is not text is checked as an empty value and fails.
+            let authorization = headers
+                .get(header::AUTHORIZATION)
+                .map(|v| v.to_str().unwrap_or(""));
+            match check_bearer(&state.agent_key, authorization) {
+                KeyCheck::Accepted => {}
+                KeyCheck::Off | KeyCheck::TooShort => {
+                    return api_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "agent_access_off",
+                        "agent access is off: set THROUGHLINE_AGENT_KEY (at least 32 characters) and restart",
+                    );
+                }
+                KeyCheck::Missing | KeyCheck::Wrong => return unauthorized("invalid credentials"),
+            }
+            actor.map_or_else(Actor::shared_only, |Extension(actor)| actor)
         }
-        KeyCheck::Missing | KeyCheck::Wrong => return unauthorized("invalid credentials"),
-    }
+    };
     // Any read error counts as too large: the limit is the error that can be
     // answered, a dropped connection gets no answer anyway.
     let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY).await else {
@@ -90,7 +103,7 @@ pub async fn mcp_post(
     let ctx = McpContext {
         transport: Transport::Http,
         read_only: state.mcp_read_only,
-        actor: actor.map_or_else(Actor::shared_only, |Extension(actor)| actor),
+        actor,
     };
     // vereinfacht: Einbetten der Frage läuft unter der DB-Sperre, ausbauen wenn K7 reißt
     match with_db(&state, move |client| Ok(dispatch(client, &msg, &ctx))).await {

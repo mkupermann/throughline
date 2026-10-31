@@ -2,7 +2,9 @@
 //!
 //! `THROUGHLINE_AGENT_KEY` is sent as `Authorization: Bearer <key>`. Only the
 //! SHA-256 digest of the key is kept, and the key value never appears in a
-//! response, an error, a log line or `doctor` output.
+//! response, an error, a log line or `doctor` output. It is the agent key of
+//! local mode; team mode ignores it and takes the keys of accounts
+//! ([`crate::access::agent_key_actor`]).
 
 use sha2::{Digest, Sha256};
 
@@ -46,7 +48,7 @@ pub fn key_state() -> KeyState {
 }
 
 /// Credentials of an `Authorization: Bearer <credentials>` value.
-fn bearer_credentials(header: &str) -> Option<&str> {
+pub(crate) fn bearer_credentials(header: &str) -> Option<&str> {
     let header = header.trim_start();
     let end = header.find([' ', '\t'])?;
     let (scheme, rest) = header.split_at(end);
@@ -99,6 +101,16 @@ pub fn generate() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
+}
+
+/// What team mode says about a set `THROUGHLINE_AGENT_KEY`, in `doctor`
+/// and once at startup. Never the key.
+pub const IGNORED_IN_TEAM_MODE: &str = "THROUGHLINE_AGENT_KEY is ignored in team mode: \
+     each agent uses a key of its account (throughline account agent-key <name>)";
+
+/// [`IGNORED_IN_TEAM_MODE`] when the variable is set at all (also too short).
+pub fn team_mode_note(state: &KeyState) -> Option<&'static str> {
+    (*state != KeyState::Off).then_some(IGNORED_IN_TEAM_MODE)
 }
 
 pub fn doctor_line(state: &KeyState) -> String {
@@ -233,6 +245,19 @@ mod tests {
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
         assert!(matches!(key_state_from(Some(&a)), KeyState::Ready(_)));
+    }
+
+    #[test]
+    fn team_mode_note_only_when_the_key_is_set() {
+        assert_eq!(team_mode_note(&KeyState::Off), None);
+        for state in [ready(), KeyState::TooShort] {
+            assert_eq!(
+                team_mode_note(&state),
+                Some(IGNORED_IN_TEAM_MODE),
+                "{state:?}"
+            );
+        }
+        assert!(!IGNORED_IN_TEAM_MODE.contains(KEY));
     }
 
     #[test]

@@ -3,8 +3,9 @@
 //!
 //! `local` (the default) is the single-user behaviour: no login, every note
 //! visible. `team` needs accounts. Notes are `shared` or `private` to their
-//! owner, and server-wide jobs run as [`Actor::shared_only`]. Sessions and
-//! the failed sign-in counts live here too; their routes are in `server`.
+//! owner, and server-wide jobs run as [`Actor::shared_only`]. Sessions,
+//! the failed sign-in counts and the lookup of account agent keys live here
+//! too; their routes are in `server`.
 
 use anyhow::{bail, Context, Result};
 use axum::http::Method;
@@ -169,7 +170,7 @@ impl Actor {
 
 /// Owner and visibility of a note `actor` creates. `shared` is the default;
 /// `private` needs an account, because a note without an owner (local mode,
-/// jobs, the shared agent key) can never be private. `Err` is the message
+/// jobs) can never be private. `Err` is the message
 /// for a 422 or a JSON-RPC -32602.
 pub fn new_note_owner(
     actor: &Actor,
@@ -652,6 +653,28 @@ pub fn session<C: GenericClient>(client: &mut C, token: &str) -> Result<Option<S
 /// [`session`]'s actor.
 pub fn session_actor<C: GenericClient>(client: &mut C, token: &str) -> Result<Option<Actor>> {
     Ok(session(client, token)?.map(|s| s.actor))
+}
+
+/// The account behind an agent key (`throughline account agent-key`), with
+/// the account's role, as [`Via::AgentKey`]. `None` for an unknown or
+/// revoked key or a disabled account. The key is looked up by its SHA-256,
+/// so the key itself is never compared with anything stored.
+pub fn agent_key_actor<C: GenericClient>(client: &mut C, presented: &str) -> Result<Option<Actor>> {
+    let Some(row) = client.query_opt(
+        "SELECT u.id, u.username, u.role FROM access_agent_keys k \
+         JOIN access_users u ON u.id = k.user_id \
+         WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND u.enabled",
+        &[&token_hash(presented)],
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(Actor {
+        user_id: Some(row.get(0)),
+        username: Some(row.get(1)),
+        role: Role::parse(row.get(2))?,
+        via: Via::AgentKey,
+    }))
 }
 
 /// Ends one session (sign-out); returns how many rows went.
