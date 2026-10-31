@@ -7,6 +7,7 @@
 
 use anyhow::{bail, Context, Result};
 use postgres::GenericClient;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -223,6 +224,147 @@ pub(crate) fn visibility_predicate_at(
     }
 }
 
+/// A well-formed hash no password matches, for accounts that do not exist:
+/// verifying against it costs the same as against a real one.
+pub const DUMMY_HASH: &str = "scrypt2$15$00000000000000000000000000000000$\
+    0000000000000000000000000000000000000000000000000000000000000000\
+    0000000000000000000000000000000000000000000000000000000000000000";
+
+/// scrypt cost of new hashes: N = 2^15, r = 8, p = 1 (32 MiB). The cost is
+/// part of the stored string, so it can rise later. Python-era hashes
+/// (`scrypt$salt$digest`) used N = 2^17 (128 MiB).
+const HASH_LOG_N: u8 = 15;
+const LEGACY_LOG_N: u8 = 17;
+
+/// Passwords have 15 to 128 characters, as in the Python era.
+fn password_length_ok(password: &str) -> bool {
+    (15..=128).contains(&password.chars().count())
+}
+
+/// `scrypt2$15$<salt hex 32>$<digest hex 128>` with a fresh random salt.
+/// Refuses a password outside 15..=128 characters. Slow on purpose: never
+/// call it while holding a database lock.
+pub fn hash_password(password: &str) -> Result<String> {
+    if !password_length_ok(password) {
+        bail!("use a password with 15 to 128 characters");
+    }
+    let salt = random_salt();
+    let digest = derive(password, &salt, HASH_LOG_N)?;
+    Ok(format!(
+        "scrypt2${HASH_LOG_N}${}${}",
+        to_hex(&salt),
+        to_hex(&digest)
+    ))
+}
+
+/// Whether `password` matches `encoded` (`scrypt2$<15..=17>$…` or the
+/// Python-era `scrypt$<salt>$<digest>`). Every call with a password of
+/// valid length runs exactly one scrypt: an unknown or malformed hash is
+/// checked against [`DUMMY_HASH`] and fails, so the time spent does not
+/// tell a broken or missing account from a wrong password. The digest is
+/// compared over all 64 bytes before deciding.
+pub fn verify_password(password: &str, encoded: &str) -> bool {
+    if !password_length_ok(password) {
+        return false;
+    }
+    let (known, (log_n, salt, expected)) = match parse_hash(encoded) {
+        Some(parts) => (true, parts),
+        None => (false, DUMMY_PARTS),
+    };
+    let Ok(actual) = derive(password, &salt, log_n) else {
+        return false;
+    };
+    let mut diff = 0u8;
+    for (a, b) in actual.iter().zip(expected.iter()) {
+        diff |= a ^ b;
+    }
+    known && diff == 0
+}
+
+/// [`DUMMY_HASH`] parsed.
+const DUMMY_PARTS: (u8, [u8; 16], [u8; 64]) = (HASH_LOG_N, [0; 16], [0; 64]);
+
+/// (log_n, salt, digest) of a stored hash, or `None` for anything else.
+/// The cost is capped at 2^17 so a stored value cannot ask for more memory
+/// than the Python-era hashes did.
+fn parse_hash(encoded: &str) -> Option<(u8, [u8; 16], [u8; 64])> {
+    let parts: Vec<&str> = encoded.split('$').collect();
+    let (log_n, salt, digest) = match parts.as_slice() {
+        ["scrypt2", log_n, salt, digest] => {
+            let log_n = match *log_n {
+                "15" => 15,
+                "16" => 16,
+                "17" => 17,
+                _ => return None,
+            };
+            (log_n, salt, digest)
+        }
+        ["scrypt", salt, digest] => (LEGACY_LOG_N, salt, digest),
+        _ => return None,
+    };
+    Some((log_n, from_hex(salt)?, from_hex(digest)?))
+}
+
+fn derive(password: &str, salt: &[u8], log_n: u8) -> Result<[u8; 64]> {
+    #[cfg(test)]
+    DERIVATIONS.with(|d| d.borrow_mut().push(log_n));
+    let params = scrypt::Params::new(log_n, 8, 1, 64)
+        .map_err(|_| anyhow::anyhow!("invalid scrypt parameters"))?;
+    let mut out = [0u8; 64];
+    scrypt::scrypt(password.as_bytes(), salt, &params, &mut out)
+        .map_err(|_| anyhow::anyhow!("invalid scrypt output length"))?;
+    Ok(out)
+}
+
+/// 16 bytes from two random (v4) UUIDs: SHA-256 over their 244 random bits,
+/// cut to 128. `uuid` already draws from the operating system.
+fn random_salt() -> [u8; 16] {
+    let mut hasher = Sha256::new();
+    hasher.update(uuid::Uuid::new_v4().as_bytes());
+    hasher.update(uuid::Uuid::new_v4().as_bytes());
+    let digest = hasher.finalize();
+    let mut salt = [0u8; 16];
+    salt.copy_from_slice(&digest[..16]);
+    salt
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Exactly `2 * N` hex digits (either case), nothing else.
+fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
+    let text = text.as_bytes();
+    if text.len() != 2 * N {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (byte, pair) in out.iter_mut().zip(text.chunks_exact(2)) {
+        let high = char::from(pair[0]).to_digit(16)?;
+        let low = char::from(pair[1]).to_digit(16)?;
+        *byte = (high * 16 + low) as u8;
+    }
+    Some(out)
+}
+
+/// SHA-256 hex of a token, agent key or attempt key: what the database keeps.
+pub fn token_hash(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+/// `access_attempts.key` of an account's failed sign-ins: the hash of
+/// `account:<name>`, as the Python era wrote it, so the table holds no
+/// account names.
+pub fn attempt_key(username: &str) -> String {
+    token_hash(&format!("account:{username}"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// `log_n` of every scrypt run on this thread, for the timing-shape test.
+    static DERIVATIONS: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +438,171 @@ mod tests {
             )
             .expect("insert note")
             .get(0)
+    }
+
+    // Python-era hashes as `throughline/api/access.py` wrote them, made with
+    //   docker run --rm python:3.12-slim python3 -c 'import hashlib; ...
+    //   d = hashlib.scrypt(pw.encode(), salt=bytes.fromhex(salt), n=2**17,
+    //       r=8, p=1, maxmem=256 * 1024**2, dklen=64)
+    //   print(f"scrypt${salt}${d.hex()}")'
+    // Test values, not secrets.
+    const LEGACY: [(&str, &str); 3] = [
+        (
+            "correct horse battery staple 1",
+            "scrypt$00112233445566778899aabbccddeeff$b7a11a1da4c37f8ce0fd857b975d4ea6658d9d7c907b441932f25c5551380b9563dfcf56f1636c169255c63d0be2e7367eb570e2aba9adb75d900072aecd00aa",
+        ),
+        (
+            "Grüße aus Köln, Passwort Nummer 2",
+            "scrypt$0f1e2d3c4b5a69788796a5b4c3d2e1f0$2e789cb52c291f9efc9ad3d75c2328060f0be51e56738b3505d7d81921cb77bd903414ca9f5a6825039493f442314b701ac67ab99c4367a80ad9faf59bba0b07",
+        ),
+        (
+            "correct horse battery staple 3 with $ signs",
+            "scrypt$deadbeefcafebabe0123456789abcdef$e8e30a26bf0ec8180d023f982fdd6ebc9b661ff9ad054bfd31c16ad530c301e586c246465e50e8b4fc5909239ee1311465e2b12a76f4f2f0d8466c64bc555ca6",
+        ),
+    ];
+
+    // The same Python call with n=2**15, written as `scrypt2$15$...`: pins
+    // the parameters of new hashes. Test value, not a secret.
+    const NEW_FORMAT: (&str, &str) = (
+        "correct horse battery staple 4",
+        "scrypt2$15$a1b2c3d4e5f60718293a4b5c6d7e8f90$a29c0d25639b5209b251b8d6d58f97db08fc868b70416068a19d959738e40be64714ff9f81f8d5bc754df12cb1f90ba5a28986687d50af0342aca332dd43258c",
+    );
+
+    /// Runs `f` and returns the `log_n` of each scrypt run it made.
+    fn derivations(f: impl FnOnce()) -> Vec<u8> {
+        DERIVATIONS.with(|d| d.borrow_mut().clear());
+        f();
+        DERIVATIONS.with(|d| d.borrow().clone())
+    }
+
+    #[test]
+    fn new_hashes_use_scrypt2_and_verify() {
+        let password = "correct horse battery staple 1";
+        let first = hash_password(password).expect("hash");
+        let second = hash_password(password).expect("hash");
+        assert_ne!(first, second, "every hash gets its own salt");
+        for encoded in [&first, &second] {
+            let parts: Vec<&str> = encoded.split('$').collect();
+            assert_eq!(parts.len(), 4, "{encoded}");
+            assert_eq!((parts[0], parts[1]), ("scrypt2", "15"));
+            assert_eq!((parts[2].len(), parts[3].len()), (32, 128));
+            assert!(parts[2..].iter().all(|p| p
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))));
+            assert!(verify_password(password, encoded));
+            assert!(!verify_password("correct horse battery staple 2", encoded));
+        }
+        let (password, encoded) = NEW_FORMAT;
+        assert!(verify_password(password, encoded), "Python n=2**15 vector");
+        assert!(!verify_password("correct horse battery staple 5", encoded));
+        // An upper-case digest is the same digest.
+        assert!(verify_password(
+            password,
+            &encoded.to_uppercase().replace("SCRYPT2", "scrypt2")
+        ));
+    }
+
+    #[test]
+    fn legacy_python_hashes_verify() {
+        for (password, encoded) in LEGACY {
+            assert_eq!(
+                derivations(|| assert!(verify_password(password, encoded), "{password}")),
+                vec![17],
+                "legacy hashes use n=2**17"
+            );
+        }
+        assert!(!verify_password(
+            "correct horse battery staple 2",
+            LEGACY[0].1
+        ));
+    }
+
+    #[test]
+    fn unknown_format_is_rejected_in_constant_shape() {
+        let password = LEGACY[0].0;
+        let (salt, digest) = LEGACY[0].1["scrypt$".len()..]
+            .split_once('$')
+            .expect("legacy vector");
+        let unknown = [
+            String::new(),
+            "plain text".to_string(),
+            format!("bcrypt${salt}${digest}"),
+            format!("SCRYPT${salt}${digest}"),
+            format!("scrypt${salt}"),
+            format!("scrypt${salt}${digest}$"),
+            format!("scrypt${}${digest}", &salt[2..]),
+            format!("scrypt${salt}${}", &digest[2..]),
+            format!("scrypt${salt}${digest}00"),
+            format!("scrypt$zz{}${digest}", &salt[2..]),
+            format!("scrypt${salt}$+f{}", &digest[2..]),
+            format!("scrypt2${salt}${digest}"),
+            format!("scrypt2$14${salt}${digest}"),
+            format!("scrypt2$18${salt}${digest}"),
+            format!("scrypt2$30${salt}${digest}"),
+            format!("scrypt2$015${salt}${digest}"),
+            format!("scrypt2$+15${salt}${digest}"),
+            format!("scrypt2$15${salt}${digest}$"),
+            format!("scrypt2$15$ {}${digest}", &salt[1..]),
+        ];
+        for encoded in &unknown {
+            assert_eq!(
+                derivations(|| assert!(!verify_password(password, encoded), "{encoded}")),
+                vec![15],
+                "one run at the dummy cost for {encoded:?}"
+            );
+        }
+        // The dummy itself is a valid hash that nothing matches.
+        assert_eq!(
+            derivations(|| assert!(!verify_password(password, DUMMY_HASH))),
+            vec![15]
+        );
+        assert_eq!(
+            derivations(|| assert!(verify_password(NEW_FORMAT.0, NEW_FORMAT.1))),
+            vec![15]
+        );
+    }
+
+    #[test]
+    fn password_length_is_enforced() {
+        for password in [
+            String::new(),
+            "q".to_string(),
+            "x".repeat(14),
+            "ä".repeat(14),
+            "x".repeat(129),
+            "ä".repeat(129),
+        ] {
+            let err = hash_password(&password).expect_err("refused").to_string();
+            assert!(err.contains("15 to 128 characters"), "{err}");
+            if !password.is_empty() {
+                assert!(
+                    !err.contains(&password),
+                    "the error leaves the password out"
+                );
+            }
+            assert!(
+                derivations(|| assert!(!verify_password(&password, DUMMY_HASH))).is_empty(),
+                "no hashing for a password of {} characters",
+                password.chars().count()
+            );
+        }
+        // Characters, not bytes: 15 umlauts are 30 bytes and fine.
+        for password in ["ä".repeat(15), "x".repeat(128)] {
+            let encoded = hash_password(&password).expect("in range");
+            assert!(verify_password(&password, &encoded));
+        }
+    }
+
+    #[test]
+    fn dummy_hash_and_token_hash_have_the_stored_shape() {
+        assert_eq!(DUMMY_HASH.len(), "scrypt2$15$".len() + 32 + 1 + 128);
+        assert!(DUMMY_HASH.starts_with("scrypt2$15$"));
+        assert_eq!(
+            token_hash("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // Python: token_hash("account:" + username).
+        assert_eq!(attempt_key("alice"), token_hash("account:alice"));
     }
 
     #[test]

@@ -4,9 +4,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use throughline::types::IngestSummary;
 use throughline::{
-    adapters, agent_key, answer_eval, ask, audit, config, conflicts, context_pack, costs,
-    decisions, doctor, embedding, export_markdown, export_otel, extract_memory,
-    generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
+    access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, config, conflicts,
+    context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
+    extract_memory, generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
     memory_writeback, migrate, ops_jobs, project_instructions, recall, recall_eval, reflect_memory,
     repair, retention, search, server, stale_digest, temporal, types,
 };
@@ -139,6 +139,11 @@ enum Command {
     Doctor,
     /// Print a new key for agents that reach Throughline over HTTP.
     AgentKey,
+    /// Team-mode accounts: create, list, roles, passwords, agent keys.
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
     /// Print a resume brief for a new agent session.
     Handoff {
         #[arg(long)]
@@ -302,6 +307,188 @@ enum Command {
         #[arg(long = "allow-short-retention")]
         allow_short_retention: bool,
     },
+}
+
+const ROLES: [&str; 3] = ["viewer", "editor", "admin"];
+
+/// Passwords never come from arguments: they are typed at the terminal
+/// (hidden) or read from an owner-only file.
+#[derive(Subcommand)]
+enum AccountCommand {
+    /// Create an account; asks for its password.
+    Add {
+        name: String,
+        #[arg(long, default_value = "viewer", value_parser = ROLES)]
+        role: String,
+        /// Shown in the web UI (default: the account name).
+        #[arg(long)]
+        display_name: Option<String>,
+        /// Read the password from this file (owner-only, chmod 600).
+        #[arg(long)]
+        password_file: Option<std::path::PathBuf>,
+    },
+    /// List accounts and their active agent keys.
+    List,
+    /// Change an account's role; ends its sessions.
+    Role {
+        name: String,
+        #[arg(value_parser = ROLES)]
+        role: String,
+    },
+    /// Enable an account.
+    Enable { name: String },
+    /// Disable an account; ends its sessions, its agent keys stop working.
+    Disable { name: String },
+    /// Clear an account's failed sign-ins.
+    Unlock { name: String },
+    /// Set a new password; ends the account's sessions.
+    Password {
+        name: String,
+        /// Read the password from this file (owner-only, chmod 600).
+        #[arg(long)]
+        password_file: Option<std::path::PathBuf>,
+    },
+    /// Create an agent key for an account and print it once.
+    AgentKey {
+        name: String,
+        /// What the key is for, shown by `account list`.
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Revoke an account's agent key by its id (see `account list`).
+    AgentKeyRevoke { name: String, id: i64 },
+}
+
+/// Output leaves account names out except in `list` and in errors.
+fn run_account(command: AccountCommand) -> Result<()> {
+    let connect = || {
+        config::DbConfig::from_env()
+            .connect()
+            .context("connect to PostgreSQL")
+    };
+    match command {
+        AccountCommand::Add {
+            name,
+            role,
+            display_name,
+            password_file,
+        } => {
+            accounts_cli::validate_username(&name)?;
+            let role = access::Role::parse(&role)?;
+            let mut client = connect()?;
+            if accounts_cli::exists(&mut client, &name)? {
+                anyhow::bail!("account `{name}` already exists");
+            }
+            let password = accounts_cli::read_password(password_file.as_deref(), true)?;
+            accounts_cli::add(&mut client, &name, display_name.as_deref(), role, &password)?;
+            println!("Account created with role {}.", role.as_str());
+            if access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())
+                .is_ok_and(|mode| mode == access::AuthMode::Local)
+            {
+                println!("With accounts in the database the server starts only with THROUGHLINE_AUTH_MODE=team.");
+            }
+        }
+        AccountCommand::List => {
+            let mut client = connect()?;
+            let accounts = accounts_cli::list(&mut client)?;
+            if accounts.is_empty() {
+                println!("No accounts.");
+                return Ok(());
+            }
+            let mut rows = vec![[
+                "NAME".to_string(),
+                "DISPLAY NAME".to_string(),
+                "ROLE".to_string(),
+                "ENABLED".to_string(),
+            ]];
+            rows.extend(accounts.into_iter().map(|a| {
+                [
+                    a.username,
+                    a.display_name,
+                    a.role.as_str().to_string(),
+                    if a.enabled { "yes" } else { "no" }.to_string(),
+                ]
+            }));
+            print_table(&rows);
+            let keys = accounts_cli::active_agent_keys(&mut client)?;
+            if !keys.is_empty() {
+                println!();
+                let mut rows = vec![[
+                    "KEY ID".to_string(),
+                    "ACCOUNT".to_string(),
+                    "LABEL".to_string(),
+                ]];
+                rows.extend(
+                    keys.into_iter()
+                        .map(|k| [k.id.to_string(), k.username, k.label.unwrap_or_default()]),
+                );
+                print_table(&rows);
+            }
+        }
+        AccountCommand::Role { name, role } => {
+            let role = access::Role::parse(&role)?;
+            let ended = accounts_cli::set_role(&mut connect()?, &name, role)?;
+            println!("Role set to {}; {ended} session(s) ended.", role.as_str());
+        }
+        AccountCommand::Enable { name } => {
+            accounts_cli::enable(&mut connect()?, &name)?;
+            println!("Account enabled.");
+        }
+        AccountCommand::Disable { name } => {
+            let ended = accounts_cli::disable(&mut connect()?, &name)?;
+            println!("Account disabled; {ended} session(s) ended, its agent keys no longer work.");
+        }
+        AccountCommand::Unlock { name } => {
+            if accounts_cli::unlock(&mut connect()?, &name)? {
+                println!("Failed sign-ins cleared.");
+            } else {
+                println!("No failed sign-ins were recorded.");
+            }
+        }
+        AccountCommand::Password {
+            name,
+            password_file,
+        } => {
+            let mut client = connect()?;
+            if !accounts_cli::exists(&mut client, &name)? {
+                anyhow::bail!("no account named `{name}`");
+            }
+            let password = accounts_cli::read_password(password_file.as_deref(), true)?;
+            let ended = accounts_cli::set_password(&mut client, &name, &password)?;
+            println!("Password changed; {ended} session(s) ended.");
+        }
+        AccountCommand::AgentKey { name, label } => {
+            let (id, key) = accounts_cli::new_agent_key(&mut connect()?, &name, label.as_deref())?;
+            println!("{key}");
+            println!(
+                "Agent key {id}. It is shown only now; the agent sends it as \
+                 `Authorization: Bearer <key>`."
+            );
+        }
+        AccountCommand::AgentKeyRevoke { name, id } => {
+            accounts_cli::revoke_agent_key(&mut connect()?, &name, id)?;
+            println!("Agent key {id} revoked.");
+        }
+    }
+    Ok(())
+}
+
+/// Left-aligned columns, two spaces apart.
+fn print_table<const N: usize>(rows: &[[String; N]]) {
+    let mut widths = [0usize; N];
+    for row in rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(cell.chars().count());
+        }
+    }
+    for row in rows {
+        let line: Vec<String> = row
+            .iter()
+            .zip(widths)
+            .map(|(cell, width)| format!("{cell:<width$}"))
+            .collect();
+        println!("{}", line.join("  ").trim_end());
+    }
 }
 
 fn main() -> Result<()> {
@@ -932,6 +1119,7 @@ fn main() -> Result<()> {
                 }
             );
         }
+        Command::Account { command } => run_account(command)?,
         Command::AgentKey => {
             println!("{}", agent_key::generate());
             println!("Put it into .env as THROUGHLINE_AGENT_KEY and restart the server.");
