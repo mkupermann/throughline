@@ -20,38 +20,78 @@ pub struct NoteVector {
 
 /// `content` embedded as a document with the active model, within
 /// [`embedding::QUICK_EMBED_TIMEOUT`]. `None` while `breaker` is open or
-/// when the call fails; a failure is logged and opens `breaker`.
+/// when the call fails; see [`note_vector_with`] for what is remembered.
 pub fn note_vector(content: &str, breaker: &embedding::EmbedBreaker) -> Option<NoteVector> {
     #[cfg(test)]
     if let Some(v) = write_fixture::vector_for(content) {
         return Some(v);
     }
-    let now = embedding::now_ms();
+    let text = content.to_string();
+    note_vector_with(breaker, embedding::now_ms(), move || {
+        embedding::within(embedding::QUICK_EMBED_TIMEOUT, move || {
+            let backend = embedding::resolve()?;
+            let vector = embedding::embed_text(&backend, &text, embedding::TextKind::Document)?;
+            check_note_vector(&vector, backend.dim)?;
+            Ok(NoteVector {
+                model: backend.model,
+                column: backend.column,
+                vector,
+            })
+        })
+    })
+}
+
+/// A vector Ollama gave that the insert would refuse.
+#[derive(Debug)]
+pub(crate) struct RejectedVector(String);
+
+impl std::fmt::Display for RejectedVector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RejectedVector {}
+
+/// A vector the insert can take: `dim` values, all finite. pgvector refuses
+/// NaN and infinity, and a refused insert would fail the caller's
+/// transaction.
+pub(crate) fn check_note_vector(vector: &[f32], dim: usize) -> anyhow::Result<()> {
+    if vector.len() != dim {
+        return Err(
+            RejectedVector(format!("{} values, the column takes {dim}", vector.len())).into(),
+        );
+    }
+    if let Some(i) = vector.iter().position(|x| !x.is_finite()) {
+        return Err(RejectedVector(format!("value {i} is {}", vector[i])).into());
+    }
+    Ok(())
+}
+
+/// [`note_vector`] with the clock and the embedder passed in. A failure is
+/// logged; only one that says Ollama is down or slow (unreachable, missing
+/// model, an HTTP error, no answer in time) opens `breaker`. A refusal by
+/// the remote-model lock or a refused vector does not, so the next default
+/// recall still asks and answers as it should.
+pub(crate) fn note_vector_with(
+    breaker: &embedding::EmbedBreaker,
+    now: i64,
+    embed: impl FnOnce() -> anyhow::Result<NoteVector>,
+) -> Option<NoteVector> {
     if breaker.is_open(now) {
         return None;
     }
-    let text = content.to_string();
-    let result = embedding::within(embedding::QUICK_EMBED_TIMEOUT, move || {
-        let backend = embedding::resolve()?;
-        let vector = embedding::embed_text(&backend, &text, embedding::TextKind::Document)?;
-        // A wrong size would fail the insert and with it the caller's transaction.
-        anyhow::ensure!(
-            vector.len() == backend.dim,
-            "{} values, the column takes {}",
-            vector.len(),
-            backend.dim
-        );
-        Ok(NoteVector {
-            model: backend.model,
-            column: backend.column,
-            vector,
-        })
-    });
-    match result {
+    match embed() {
         Ok(v) => Some(v),
         Err(e) => {
             eprintln!("embed at write: {e:#}");
-            breaker.trip(now);
+            let refused = e
+                .downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+                .is_some()
+                || e.downcast_ref::<RejectedVector>().is_some();
+            if !refused {
+                breaker.trip(now);
+            }
             None
         }
     }
@@ -61,8 +101,67 @@ pub fn note_vector(content: &str, breaker: &embedding::EmbedBreaker) -> Option<N
 /// so it ranks by meaning at once. The write never fails for it: no Ollama,
 /// a missing model, a refusal, a timeout or a failed insert is logged, and
 /// the `embed` job fills the gap later. A note that already has a vector of
-/// the active model, a forgotten or an empty note is left alone.
+/// the active model, a forgotten or an empty note is left alone. Uses the
+/// process breaker, [`embedding::BREAKER`].
 pub fn embed_written_note<C: GenericClient>(client: &mut C, id: i64) {
+    embed_written_note_with(client, id, &embedding::BREAKER)
+}
+
+const NOTE_VECTOR_SAVEPOINT: &str = "throughline_note_vector";
+
+/// [`embed_written_note`] with the breaker passed in. Inside a transaction
+/// block its statements run under a savepoint of their own, so an error
+/// rolls back only them and never aborts the caller's transaction.
+/// `client.transaction()` would do the same for a `Transaction`, but on a
+/// plain client inside a `BEGIN` it would end the caller's block.
+pub fn embed_written_note_with<C: GenericClient>(
+    client: &mut C,
+    id: i64,
+    breaker: &embedding::EmbedBreaker,
+) {
+    // In a transaction block that began before this statement, now() is
+    // older than the statement; outside one they are the same instant.
+    let in_block = match client.query_one(
+        "SELECT now() <> statement_timestamp() OR txid_current_if_assigned() IS NOT NULL",
+        &[],
+    ) {
+        Ok(row) => row.get::<_, bool>(0),
+        Err(e) => {
+            eprintln!("embed at write: note {id}: {e}");
+            return;
+        }
+    };
+    if in_block {
+        if let Err(e) = client.batch_execute(&format!("SAVEPOINT {NOTE_VECTOR_SAVEPOINT}")) {
+            eprintln!("embed at write: note {id}: {e}");
+            return;
+        }
+    }
+    let result = store_note_vector(client, id, breaker);
+    if in_block {
+        let end = if result.is_ok() {
+            format!("RELEASE SAVEPOINT {NOTE_VECTOR_SAVEPOINT}")
+        } else {
+            format!(
+                "ROLLBACK TO SAVEPOINT {NOTE_VECTOR_SAVEPOINT}; \
+                 RELEASE SAVEPOINT {NOTE_VECTOR_SAVEPOINT}"
+            )
+        };
+        if let Err(e) = client.batch_execute(&end) {
+            eprintln!("embed at write: note {id}: {e}");
+        }
+    }
+    if let Err(e) = result {
+        eprintln!("embed at write: note {id}: {e}");
+    }
+}
+
+/// The SELECT, the embedding and the INSERT of [`embed_written_note_with`].
+fn store_note_vector<C: GenericClient>(
+    client: &mut C,
+    id: i64,
+    breaker: &embedding::EmbedBreaker,
+) -> Result<(), postgres::Error> {
     let model = embedding::configured_model();
     let row = client.query_opt(
         "SELECT left(mc.content, 4000) FROM memory_chunks mc \
@@ -71,29 +170,24 @@ pub fn embed_written_note<C: GenericClient>(client: &mut C, id: i64) {
            AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.source_type = 'memory_chunk' \
                            AND e.source_id = mc.id AND e.model = $2)",
         &[&id, &model],
-    );
-    let text: String = match row {
-        Ok(Some(r)) => r.get(0),
-        Ok(None) => return,
-        Err(e) => {
-            eprintln!("embed at write: note {id}: {e}");
-            return;
-        }
+    )?;
+    let Some(row) = row else {
+        return Ok(());
     };
-    let Some(v) = note_vector(&text, &embedding::BREAKER) else {
-        return;
+    let text: String = row.get(0);
+    let Some(v) = note_vector(&text, breaker) else {
+        return Ok(());
     };
     let column = v.column;
-    if let Err(e) = client.execute(
+    client.execute(
         &format!(
             "INSERT INTO embeddings (source_type, source_id, model, {column}) \
              VALUES ('memory_chunk', $1, $2, $3::text::vector) \
              ON CONFLICT (source_type, source_id, model) DO UPDATE SET {column} = EXCLUDED.{column}"
         ),
         &[&id, &v.model, &vector_literal(&v.vector)],
-    ) {
-        eprintln!("embed at write: insert {id}: {e}");
-    }
+    )?;
+    Ok(())
 }
 
 /// Test notes get a vector at write time without Ollama.
@@ -101,35 +195,60 @@ pub fn embed_written_note<C: GenericClient>(client: &mut C, id: i64) {
 pub(crate) mod write_fixture {
     use std::sync::Mutex;
 
-    static FIXTURES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+    type Fixture = (String, String, Option<Vec<f32>>);
+    static FIXTURES: Mutex<Vec<Fixture>> = Mutex::new(Vec::new());
 
     /// While `f` runs, a note whose text holds `tag` gets the vector
     /// `[1, 0, …]` of `model` when it is written. Other notes are untouched.
     pub(crate) fn with<T>(tag: &str, model: &str, f: impl FnOnce() -> T) -> T {
+        with_fixture(tag, model, None, f)
+    }
+
+    /// [`with`], with `vector` as it is, unchecked: a test can hand the
+    /// insert a vector it refuses.
+    pub(crate) fn with_vector<T>(
+        tag: &str,
+        model: &str,
+        vector: Vec<f32>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        with_fixture(tag, model, Some(vector), f)
+    }
+
+    fn with_fixture<T>(
+        tag: &str,
+        model: &str,
+        vector: Option<Vec<f32>>,
+        f: impl FnOnce() -> T,
+    ) -> T {
         struct Pop(String);
         impl Drop for Pop {
             fn drop(&mut self) {
                 FIXTURES
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .retain(|(t, _)| *t != self.0);
+                    .retain(|(t, _, _)| *t != self.0);
             }
         }
-        FIXTURES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((tag.to_string(), model.to_string()));
+        FIXTURES.lock().unwrap_or_else(|e| e.into_inner()).push((
+            tag.to_string(),
+            model.to_string(),
+            vector,
+        ));
         let _pop = Pop(tag.to_string());
         f()
     }
 
     pub(crate) fn vector_for(content: &str) -> Option<super::NoteVector> {
         let fixtures = FIXTURES.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, model) = fixtures
+        let (_, model, given) = fixtures
             .iter()
-            .find(|(t, _)| content.contains(t.as_str()))?;
-        let mut vector = vec![0.0; 768];
-        vector[0] = 1.0;
+            .find(|(t, _, _)| content.contains(t.as_str()))?;
+        let vector = given.clone().unwrap_or_else(|| {
+            let mut v = vec![0.0; 768];
+            v[0] = 1.0;
+            v
+        });
         Some(super::NoteVector {
             model: model.clone(),
             column: "embedding_768",
@@ -486,6 +605,113 @@ mod tests {
             )
             .unwrap()
             .get(0)
+    }
+
+    #[test]
+    fn write_time_embed_failure_does_not_abort_the_callers_transaction() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping write_time_embed_failure_does_not_abort_the_callers_transaction: no PostgreSQL reachable");
+            return;
+        };
+        // Everything rolls back with this one at the end.
+        let mut outer = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let model = format!("test-embed-fail-{tag}");
+        let conv: i64 = outer
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES ($1, '/fictional/embed-fail', now()) RETURNING id",
+                &[&uuid::Uuid::new_v4()],
+            )
+            .unwrap()
+            .get(0);
+        // Three values for a 768 column: the insert of the vector fails.
+        let id = write_fixture::with_vector(&tag, &model, vec![1.0, 0.0, 0.0], || {
+            // The caller's own transaction, like an extraction window.
+            let mut window = outer.transaction().unwrap();
+            let item = crate::extract_memory::ExtractedMemory {
+                content: format!("note {tag}"),
+                category: "insight".into(),
+                tags: vec![],
+                confidence: 0.8,
+            };
+            let id =
+                crate::extract_memory::insert_memory(&mut window, conv, &item, chrono::Utc::now())
+                    .expect("the note is written");
+            // The window's next statement runs and the window commits.
+            window
+                .execute(
+                    "UPDATE conversations SET memory_extracted_until = now() WHERE id = $1",
+                    &[&conv],
+                )
+                .expect("the window is not aborted");
+            window.commit().expect("the window commits");
+            id
+        });
+        let kept: i64 = outer
+            .query_one("SELECT count(*) FROM memory_chunks WHERE id = $1", &[&id])
+            .unwrap()
+            .get(0);
+        assert_eq!(kept, 1, "the note survives the failed vector");
+        assert!(embedded_rows(&mut outer, &model, "memory_chunk").is_empty());
+    }
+
+    #[test]
+    fn note_vector_rejects_non_finite_values() {
+        let mut v = vec![0.0f32; 768];
+        assert!(check_note_vector(&v, 768).is_ok());
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            v[3] = bad;
+            assert!(check_note_vector(&v, 768).is_err(), "{bad}");
+        }
+        assert!(check_note_vector(&[0.0; 767], 768).is_err());
+        // A refused vector is not Ollama being down: the breaker stays shut.
+        let breaker = embedding::EmbedBreaker::new();
+        let got = note_vector_with(&breaker, 1_000, || {
+            check_note_vector(&[f32::NAN], 1)?;
+            unreachable!("a NaN never passes")
+        });
+        assert!(got.is_none());
+        assert!(!breaker.is_open(1_001));
+    }
+
+    #[test]
+    fn refused_write_does_not_open_the_breaker() {
+        let t0 = 1_000_000;
+        let asks = |breaker: &embedding::EmbedBreaker| {
+            let asked = Cell::new(false);
+            let _ = crate::recall::question_vector_with(
+                crate::recall::RecallMode::Current,
+                None,
+                breaker,
+                t0 + 1,
+                || {
+                    asked.set(true);
+                    Ok(None)
+                },
+                || unreachable!("the default rank takes the quick path"),
+            );
+            asked.get()
+        };
+        // A write refused by the remote-model lock is logged, not remembered,
+        // so the next default recall still asks and gets its refusal.
+        let breaker = embedding::EmbedBreaker::new();
+        let got = note_vector_with(&breaker, t0, || {
+            Err(anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+                label: "ollama/x".into(),
+            }))
+        });
+        assert!(got.is_none());
+        assert!(!breaker.is_open(t0 + 1));
+        assert!(asks(&breaker));
+        // An unreachable Ollama on a write is remembered, for queries too.
+        let shared = embedding::EmbedBreaker::new();
+        let got = note_vector_with(&shared, t0, || {
+            Err(anyhow::anyhow!("ollama unreachable at http://127.0.0.1:1"))
+        });
+        assert!(got.is_none());
+        assert!(shared.is_open(t0 + 1));
+        assert!(!asks(&shared));
     }
 
     fn embedded_rows<C: GenericClient>(client: &mut C, model: &str, source: &str) -> Vec<i64> {

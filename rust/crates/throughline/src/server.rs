@@ -1321,7 +1321,8 @@ struct RecallParams {
     valid_at: Option<String>,
     known_at: Option<String>,
     limit: Option<i64>,
-    /// `cosine` (default, `DEFAULT_RANK`) | `fulltext` | `weighted`
+    /// `cosine` | `fulltext` | `weighted`; without it `default_rank(mode)`:
+    /// cosine in `current`, full text in the other modes.
     rank: Option<String>,
 }
 
@@ -1359,7 +1360,7 @@ fn parse_recall_params(
         None => None,
         Some(r) => Some(r.parse().map_err(invalid)?),
     };
-    let rank = asked_rank.unwrap_or(crate::recall::DEFAULT_RANK);
+    let rank = asked_rank.unwrap_or(crate::recall::default_rank(mode));
     let (valid_at, known_at) = parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref())?;
     if mode == crate::recall::RecallMode::AsOf && valid_at.is_none() && known_at.is_none() {
         return Err(invalid("as_of needs valid_at or known_at".into()));
@@ -2763,6 +2764,7 @@ async fn memory_create(
         .project_name
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
+    let breaker = state.embed_breaker.clone();
     match with_db(&state, move |client| {
         let category_type = crate::extract_memory::category_column_type(client)?;
         let row = client.query_one(
@@ -2776,7 +2778,7 @@ async fn memory_create(
             &[&content, &category, &project, &owner, &visibility],
         )?;
         let id: i64 = row.get(0);
-        crate::generate_embeddings::embed_written_note(client, id);
+        crate::generate_embeddings::embed_written_note_with(client, id, &breaker);
         Ok::<i64, anyhow::Error>(id)
     })
     .await
@@ -4733,7 +4735,8 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
         auth_mode,
         public_url: std::env::var("THROUGHLINE_PUBLIC_URL").ok(),
         login: Default::default(),
-        embed_breaker: Default::default(),
+        // One failure memory per process: writes outside a handler use it too.
+        embed_breaker: crate::embedding::BREAKER.clone(),
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -5494,9 +5497,12 @@ mod tests {
             pin(format!("pin {tag}"))
         });
         assert_eq!(vectors(pinned), 1, "pin #{pinned}");
-        // Without a reachable Ollama the write still succeeds, with no vector.
+        // Without a reachable Ollama the write still succeeds, with no vector;
+        // the pin's own breaker was shut, so the call did reach for Ollama.
+        assert!(!state.embed_breaker.is_open(crate::embedding::now_ms()));
         let bare = crate::recall::test_ollama::unreachable(|| pin(format!("bare {tag}")));
         assert_eq!(vectors(bare), 0);
+        assert!(state.embed_breaker.is_open(crate::embedding::now_ms()));
         state
             .db
             .lock()
@@ -5579,6 +5585,75 @@ mod tests {
             .expect("lock")
             .batch_execute("ROLLBACK")
             .expect("rollback");
+    }
+
+    #[test]
+    fn default_rank_applies_to_current_only() {
+        use crate::recall::{default_rank, Rank, RecallMode, DEFAULT_RANK};
+        assert_eq!(default_rank(RecallMode::Current), DEFAULT_RANK);
+        for mode in [
+            RecallMode::AsOf,
+            RecallMode::Associative,
+            RecallMode::Grounded,
+        ] {
+            assert_eq!(default_rank(mode), Rank::Fulltext, "{mode:?}");
+        }
+        // HTTP: a request without `rank` gets its mode's default.
+        let p = |mode: &str, valid_at: Option<&str>| RecallParams {
+            q: Some("x".into()),
+            project: None,
+            mode: Some(mode.into()),
+            valid_at: valid_at.map(String::from),
+            known_at: None,
+            limit: None,
+            rank: None,
+        };
+        let rank = |mode: &str, v: Option<&str>| parse_recall_params(&p(mode, v)).unwrap().rank;
+        assert_eq!(rank("current", None), DEFAULT_RANK);
+        assert_eq!(rank("associative", None), Rank::Fulltext);
+        assert_eq!(rank("grounded", None), Rank::Fulltext);
+        assert_eq!(rank("as_of", Some("2026-01-31")), Rank::Fulltext);
+        // MCP: associative without a rank needs no question vector, so an
+        // unreachable Ollama changes nothing there; current says so.
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping default_rank_applies_to_current_only (DB part): no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let id = seed_note(&mut tx, &format!("wombat burrow {tag}"), "insight");
+        let ctx = crate::mcp::McpContext {
+            actor: Actor::local(),
+            transport: crate::mcp_protocol::Transport::Http,
+            read_only: false,
+        };
+        let ask = |tx: &mut postgres::Transaction, mode: &str| {
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "recall",
+                            "arguments": { "query": format!("wombat {tag}"), "mode": mode } } });
+            let body = crate::recall::test_ollama::unreachable(|| {
+                crate::mcp::dispatch(tx, &msg, &ctx).body.expect("body")
+            });
+            let text = body["result"]["content"][0]["text"]
+                .as_str()
+                .expect("text")
+                .to_string();
+            serde_json::from_str::<serde_json::Value>(&text).expect("payload")
+        };
+        let assoc = ask(&mut tx, "associative");
+        assert!(assoc["degraded"].is_null(), "{assoc}");
+        assert!(
+            assoc["hits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|h| h["id"] == id),
+            "{assoc}"
+        );
+        let current = ask(&mut tx, "current");
+        assert_eq!(current["degraded"], "no_embeddings", "{current}");
     }
 
     #[test]

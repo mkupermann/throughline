@@ -60,12 +60,23 @@ pub enum Rank {
     Cosine,
 }
 
-/// The rank of a request that names none: HTTP, MCP `recall` and
-/// `project_context`, the CLI `recall` and the context pack. Cosine since
+/// The rank of a request in mode `current` that names none (see
+/// [`default_rank`]): HTTP, MCP `recall` and `project_context`, the CLI
+/// `recall` and the context pack. Cosine since
 /// 2026-10-31: on 74 questions it hit 94.6 % at k = 5, full text 50.0 %, and
 /// the rule set in block 2 makes the method with the most hits the default.
 /// Without a question vector it ranks by full text and says `degraded`.
 pub const DEFAULT_RANK: Rank = Rank::Cosine;
+
+/// The rank of a request in `mode` that names none: [`DEFAULT_RANK`] in
+/// `current`, the only mode it was measured on; full text, as before
+/// 2026-10-31, in `as_of`, `associative` and `grounded`.
+pub fn default_rank(mode: RecallMode) -> Rank {
+    match mode {
+        RecallMode::Current => DEFAULT_RANK,
+        RecallMode::AsOf | RecallMode::Associative | RecallMode::Grounded => Rank::Fulltext,
+    }
+}
 
 impl Rank {
     pub fn as_str(self) -> &'static str {
@@ -155,7 +166,7 @@ pub fn query_embedding(text: &str) -> anyhow::Result<Option<QueryEmbedding>> {
 }
 
 /// The question's vector for a request whose rank is `rank`; `None` means the
-/// caller named no rank, so [`DEFAULT_RANK`] applies. The default path waits
+/// caller named no rank, so [`default_rank`] of `mode` applies. That path waits
 /// at most [`crate::embedding::QUICK_EMBED_TIMEOUT`] and skips Ollama while
 /// `breaker` is open; an explicit rank keeps the long timeouts and ignores
 /// the breaker. A refusal by the remote-model lock is an error either way.
@@ -189,7 +200,7 @@ pub(crate) fn question_vector_with(
     quick: impl FnOnce() -> anyhow::Result<Option<QueryEmbedding>>,
     long: impl FnOnce() -> anyhow::Result<Option<QueryEmbedding>>,
 ) -> anyhow::Result<Option<QueryEmbedding>> {
-    if !needs_embedding(mode, rank.unwrap_or(DEFAULT_RANK)) {
+    if !needs_embedding(mode, rank.unwrap_or(default_rank(mode))) {
         return Ok(None);
     }
     match rank {
@@ -1110,7 +1121,9 @@ pub(crate) fn recall_with<C: GenericClient>(
         hits,
         degraded: if needs_embedding(q.mode, q.rank) && emb.is_none() {
             Some("no_embeddings".to_string())
-        } else if without_vector > 0 {
+        } else if without_vector == 1 {
+            Some("1 note without a vector".to_string())
+        } else if without_vector > 1 {
             Some(format!("{without_vector} notes without a vector"))
         } else {
             None
@@ -2758,8 +2771,10 @@ mod tests {
         assert_eq!(Some(hit(near).score), hit(near).why.cosine);
         assert!(position(&r, fresh) < position(&r, near));
         assert!(position(&r, near) < position(&r, far));
-        // Every candidate with a vector: nothing to report.
         embed(&mut tx, fresh, &model, &vec768(&[0.5, 0.5]));
+        let r = recall(&mut tx, &q, Some(&emb)).unwrap();
+        assert_eq!(r.degraded.as_deref(), Some("1 note without a vector"));
+        // Every candidate with a vector: nothing to report.
         embed(&mut tx, half, &model, &vec768(&[0.1, 0.9]));
         let r = recall(&mut tx, &q, Some(&emb)).unwrap();
         assert_eq!(r.degraded, None);
@@ -2936,8 +2951,8 @@ mod tests {
             })
             .collect();
         let text = format!("zebra kiwi {tag}");
-        // Without a vector every rank falls back to full text.
-        for rank in [Rank::Fulltext, Rank::Weighted, Rank::Cosine] {
+        // Without a vector `weighted` falls back to full text.
+        for rank in [Rank::Fulltext, Rank::Weighted] {
             let mut q = query(&text, Some(&project));
             q.mode = RecallMode::AsOf;
             q.valid_at = Some(at(2026, 6, 1));

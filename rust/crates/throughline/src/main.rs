@@ -73,8 +73,8 @@ enum Command {
         known_at: Option<String>,
         #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
         limit: usize,
-        /// cosine | fulltext | weighted; without it the default, cosine,
-        /// which waits briefly for Ollama and otherwise ranks by full text.
+        /// cosine | fulltext | weighted; without it cosine in mode current
+        /// (waits briefly for Ollama, else full text), full text otherwise.
         #[arg(long)]
         rank: Option<String>,
         /// Print the full result as JSON.
@@ -571,7 +571,7 @@ fn main() -> Result<()> {
                 .map(str::parse)
                 .transpose()
                 .map_err(|e: String| anyhow::anyhow!(e))?;
-            let rank = asked_rank.unwrap_or(recall::DEFAULT_RANK);
+            let rank = asked_rank.unwrap_or(recall::default_rank(mode));
             recall::check_query(&text).map_err(|e| anyhow::anyhow!(e))?;
             let date =
                 |name: &str, v: Option<String>| -> Result<Option<chrono::DateTime<chrono::Utc>>> {

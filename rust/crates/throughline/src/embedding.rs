@@ -28,6 +28,20 @@ pub const QUICK_EMBED_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// How long a failed quick embedding keeps Ollama out of the quick paths.
 pub const BREAKER_WINDOW_MS: i64 = 60_000;
 
+/// `url` for a message: scheme, host and port, without userinfo, path,
+/// query or fragment.
+pub fn url_for_log(url: &str) -> String {
+    let url = url.trim();
+    let (scheme, rest) = url.split_once("://").map_or(("", url), |(s, r)| (s, r));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let hostport = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    if scheme.is_empty() {
+        hostport.to_string()
+    } else {
+        format!("{scheme}://{hostport}")
+    }
+}
+
 /// `f` on its own thread, given up after `timeout`. The thread runs on to
 /// its own timeouts; its late result is dropped.
 pub fn within<T, F>(timeout: std::time::Duration, f: F) -> Result<T>
@@ -41,7 +55,12 @@ where
     });
     match recv.recv_timeout(timeout) {
         Ok(result) => result,
-        Err(_) => Err(anyhow!("no answer within {} ms", timeout.as_millis())),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(anyhow!("no answer within {} ms", timeout.as_millis()))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(anyhow!("the embedding thread panicked"))
+        }
     }
 }
 
@@ -79,9 +98,11 @@ impl EmbedBreaker {
     }
 }
 
-/// The breaker of this process for the paths without a server state: the
-/// CLI, MCP over stdio and the embedding of a note at write time.
-pub static BREAKER: EmbedBreaker = EmbedBreaker::new();
+/// The one breaker of this process, shared by question and write-time
+/// embeddings: the server's `AppState` holds it, the CLI and MCP over stdio
+/// use it directly.
+pub static BREAKER: std::sync::LazyLock<std::sync::Arc<EmbedBreaker>> =
+    std::sync::LazyLock::new(Default::default);
 
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -315,7 +336,7 @@ fn ollama(base: &str, model: &str) -> Result<EmbeddingBackend> {
             let tags: serde_json::Value = client
                 .get(format!("{base}/api/tags"))
                 .send()
-                .map_err(|_| anyhow!("ollama unreachable at {base}"))?
+                .map_err(|_| anyhow!("ollama unreachable at {}", url_for_log(&base)))?
                 .json()?;
             let available = tags["models"]
                 .as_array()
@@ -610,6 +631,52 @@ mod tests {
         assert!(err
             .downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
             .is_some());
+    }
+
+    #[test]
+    fn unreachable_log_text_has_no_credentials() {
+        assert_eq!(
+            url_for_log("http://user:secret@127.0.0.1:11434/api?token=x#f"),
+            "http://127.0.0.1:11434"
+        );
+        assert_eq!(
+            url_for_log(" https://ollama.local/ "),
+            "https://ollama.local"
+        );
+        assert_eq!(url_for_log("u:p@host:1?k=v"), "host:1");
+        // The text `resolve` gives for a host that does not answer.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .unwrap()
+            .port();
+        let err = ollama(
+            &format!("http://user:secret@127.0.0.1:{port}?key=hidden"),
+            "nomic-embed-text",
+        )
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("ollama unreachable at http://127.0.0.1:"),
+            "{text}"
+        );
+        for leak in ["user", "secret", "hidden"] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
+    }
+
+    #[test]
+    fn within_tells_a_panic_from_a_timeout() {
+        let e = within(std::time::Duration::from_secs(5), || -> Result<()> {
+            panic!("boom")
+        })
+        .unwrap_err();
+        assert!(e.to_string().contains("panicked"), "{e}");
+        let e = within(std::time::Duration::from_millis(50), || -> Result<()> {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(e.to_string().contains("no answer within 50 ms"), "{e}");
     }
 
     #[test]
