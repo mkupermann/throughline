@@ -7,10 +7,13 @@
 //! the failed sign-in counts live here too; their routes are in `server`.
 
 use anyhow::{bail, Context, Result};
+use axum::http::Method;
 use postgres::GenericClient;
 use sha2::{Digest, Sha256};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Ordered: `viewer` < `editor` < `admin`, each allowed what the one
+/// before it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
     Viewer,
     Editor,
@@ -34,6 +37,79 @@ impl Role {
             Role::Admin => "admin",
         }
     }
+}
+
+/// The role a route needs in team mode, by method and path: a request's
+/// path or the pattern the route is registered with (`{id}` is a segment
+/// like any other). A route this table does not know needs `admin`.
+/// Routes that pass without a session (see `server::without_session`) are
+/// not in it.
+pub fn required_role(method: &Method, path: &str) -> Role {
+    route_role(method, path).unwrap_or(Role::Admin)
+}
+
+/// [`required_role`] without the default: `None` for an unknown route.
+/// `viewer` reads, and every account may sign out, see itself and change
+/// its own password. `editor` asks the model and changes notes and stars.
+/// `admin` runs jobs, imports and writes assistant files.
+pub(crate) fn route_role(method: &Method, path: &str) -> Option<Role> {
+    let rest = path.strip_prefix("/api/")?;
+    let segments: Vec<&str> = rest.split('/').collect();
+    // HEAD is answered by the GET route.
+    let verb = if *method == Method::HEAD {
+        "GET"
+    } else {
+        method.as_str()
+    };
+    let role = match (verb, segments.as_slice()) {
+        ("GET", ["ask"] | ["answer-eval"]) => Role::Editor,
+        (
+            "GET",
+            ["me"]
+            | ["status"]
+            | ["search"]
+            | ["recall"]
+            | ["context"]
+            | ["messages"]
+            | ["messages", _]
+            | ["tools"]
+            | ["memory"]
+            | ["memory", _]
+            | ["consolidation", "candidates" | "proposal"]
+            | ["damaged-notes"]
+            | ["conversations"]
+            | ["conversations", _]
+            | ["projects"]
+            | ["favorites"]
+            | ["timeline"]
+            | ["conflicts"]
+            | ["handoff"]
+            | ["costs"]
+            | ["ingest-status"]
+            | ["audit"]
+            | ["stale-digest"]
+            | ["health-recovery"]
+            | ["assistants"]
+            | ["assistants", _]
+            | ["assistants", "imported", _],
+        ) => Role::Viewer,
+        ("POST", ["logout"] | ["password"]) => Role::Viewer,
+        ("POST", ["memory"] | ["memory", _, "forget" | "keep" | "supersede"] | ["favorites"]) => {
+            Role::Editor
+        }
+        ("DELETE", ["favorites", _, _]) => Role::Editor,
+        (
+            "POST",
+            ["operate"]
+            | ["consolidate"]
+            | ["writeback"]
+            | ["agent-memory", "ingest"]
+            | ["mimo-memory", "ingest"],
+        ) => Role::Admin,
+        ("PUT", ["assistants", "file"]) => Role::Admin,
+        _ => return None,
+    };
+    Some(role)
 }
 
 /// How the actor reached the server. `Job` marks a server-wide job (reflect,

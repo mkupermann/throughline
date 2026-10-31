@@ -4,7 +4,7 @@
 //! it lines from stdin, and the `/mcp` handler in `mcp_http` feeds it HTTP
 //! request bodies.
 
-use crate::access::{push_visibility, Actor};
+use crate::access::{push_visibility, Actor, Role, Via};
 use crate::mcp_protocol::{
     discover_result, negotiate_legacy, request_version, supported_versions, unsupported_version,
     Transport, METHOD_NOT_FOUND, MODERN_VERSION,
@@ -108,6 +108,10 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
                 "code": -32602,
                 "message": format!("tool {name} is not available: the server is read-only")
             })),
+            Some(name) if ctx.actor.role < tool_role(name) => Err(json!({
+                "code": -32602,
+                "message": format!("tool {name} needs the {} role", tool_role(name).as_str())
+            })),
             _ => call_tool(client, &ctx.actor, &params),
         },
         "resources/list" => Ok(resources_list()),
@@ -151,6 +155,33 @@ fn capabilities() -> Value {
 
 /// The tools that change notes; read-only mode hides and refuses them.
 const WRITE_TOOLS: &[&str] = &["write", "forget", "supersede", "keep"];
+
+/// The role a tool needs: `editor` for the tools that change notes,
+/// `viewer` for every other. The local user is an admin.
+fn tool_role(name: &str) -> Role {
+    if WRITE_TOOLS.contains(&name) {
+        Role::Editor
+    } else {
+        Role::Viewer
+    }
+}
+
+/// -32000 for a failure of the server. The local user gets the text as
+/// before. In team mode (every other actor) it could repeat another
+/// account's row, so the caller gets `query_failed` and the log the
+/// SQLSTATE and message, as `server::with_db` does. A refused remote model
+/// is no database error and keeps its text.
+fn internal(actor: &Actor, e: impl Into<anyhow::Error>) -> Value {
+    let e = e.into();
+    if actor.via == Via::Local
+        || e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
+            .is_some()
+    {
+        return json!({ "code": -32000, "message": e.to_string() });
+    }
+    eprintln!("mcp call failed: {}", crate::server::error_for_log(&e));
+    json!({ "code": -32000, "message": "query_failed" })
+}
 
 /// The tool list for this caller. `write` offers `visibility` only to an
 /// account: without one (local mode, the shared agent key) a note is always
@@ -334,7 +365,7 @@ fn build_pack<C: GenericClient>(
     )
     .map_err(|e| match crate::context_pack::input_error(&e) {
         Some(_) => json!({ "code": -32602, "message": e.to_string() }),
-        None => json!({ "code": -32000, "message": e.to_string() }),
+        None => internal(actor, e),
     })
 }
 
@@ -374,8 +405,8 @@ fn call_tool<C: GenericClient>(
             let limit = args.get("limit").and_then(|l| l.as_i64()).unwrap_or(10) as i32;
             let project = optional_str(&args, "project", "project must be a string")?
                 .filter(|p| !p.is_empty());
-            let hits = search::search(client, query, limit, project)
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            let hits =
+                search::search(client, query, limit, project).map_err(|e| internal(actor, e))?;
             let payload = serde_json::to_string(
                 &hits
                     .iter()
@@ -431,8 +462,7 @@ fn call_tool<C: GenericClient>(
                 .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
                 .clamp(1, 50) as usize;
             let emb = if crate::recall::needs_embedding(mode, rank) {
-                crate::recall::query_embedding(query)
-                    .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
+                crate::recall::query_embedding(query).map_err(|e| internal(actor, e))?
             } else {
                 None
             };
@@ -446,13 +476,13 @@ fn call_tool<C: GenericClient>(
                 limit,
                 rank,
             };
-            let result = crate::recall::recall(client, &q, emb.as_ref())
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+            let result =
+                crate::recall::recall(client, &q, emb.as_ref()).map_err(|e| internal(actor, e))?;
             let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
             crate::lifecycle::record_use_or_log(client, &ids);
-            Ok(text_result(serde_json::to_string(&result).map_err(
-                |e| json!({ "code": -32000, "message": e.to_string() }),
-            )?))
+            Ok(text_result(
+                serde_json::to_string(&result).map_err(|e| internal(actor, e))?,
+            ))
         }
         "project_context" => {
             let invalid = |m: &str| json!({ "code": -32602, "message": m });
@@ -485,9 +515,9 @@ fn call_tool<C: GenericClient>(
             let pack = build_pack(client, actor, project, task, budget)?;
             let ids = crate::context_pack::cited_note_ids(&pack);
             crate::lifecycle::record_use_or_log(client, &ids);
-            Ok(text_result(serde_json::to_string(&pack).map_err(
-                |e| json!({ "code": -32000, "message": e.to_string() }),
-            )?))
+            Ok(text_result(
+                serde_json::to_string(&pack).map_err(|e| internal(actor, e))?,
+            ))
         }
         "get_note" => {
             let id = args
@@ -495,7 +525,7 @@ fn call_tool<C: GenericClient>(
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| json!({ "code": -32602, "message": "id required" }))?;
             let note = crate::server::get_note_json(client, actor, id)
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
+                .map_err(|e| internal(actor, e))?
                 .ok_or_else(|| json!({ "code": -32000, "message": "memory chunk not found" }))?;
             crate::lifecycle::record_use_or_log(client, &[id]);
             Ok(text_result(note.to_string()))
@@ -504,10 +534,10 @@ fn call_tool<C: GenericClient>(
             let project = optional_str(&args, "project", "project must be a string")?
                 .filter(|p| !p.is_empty());
             let report = crate::conflicts::find_conflicts(client, actor, project, 0.85)
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-            Ok(text_result(serde_json::to_string(&report).map_err(
-                |e| json!({ "code": -32000, "message": e.to_string() }),
-            )?))
+                .map_err(|e| internal(actor, e))?;
+            Ok(text_result(
+                serde_json::to_string(&report).map_err(|e| internal(actor, e))?,
+            ))
         }
         "keep" => {
             let id = args
@@ -527,13 +557,13 @@ fn call_tool<C: GenericClient>(
                     "code": -32000,
                     "message": "has_successor: memory chunk was replaced by a newer note and stays superseded"
                 })),
-                Err(e) => Err(json!({ "code": -32000, "message": e.to_string() })),
+                Err(e) => Err(internal(actor, e)),
             }
         }
         "list_projects" => {
             let rows = client
                 .query("SELECT name FROM projects ORDER BY name", &[])
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+                .map_err(|e| internal(actor, e))?;
             let names: Vec<String> = rows.into_iter().map(|r| r.get(0)).collect();
             Ok(text_result(
                 serde_json::to_string(&names).unwrap_or_default(),
@@ -579,7 +609,7 @@ fn call_tool<C: GenericClient>(
                 }));
             }
             let category_type = crate::extract_memory::category_column_type(client)
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+                .map_err(|e| internal(actor, e))?;
             let id: i64 = client
                 .query_one(
                     &format!(
@@ -591,7 +621,7 @@ fn call_tool<C: GenericClient>(
                     ),
                     &[&content, &category, &project, &owner, &visibility],
                 )
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
+                .map_err(|e| internal(actor, e))?
                 .get(0);
             Ok(text_result(format!("{{\"id\":{id}}}")))
         }
@@ -615,7 +645,7 @@ fn call_tool<C: GenericClient>(
                     ),
                     &params,
                 )
-                .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+                .map_err(|e| internal(actor, e))?;
             Ok(text_result(format!("{{\"forgotten\":{n}}}")))
         }
         "supersede" => {
@@ -678,6 +708,7 @@ fn call_tool<C: GenericClient>(
                     e @ (SupersedeError::ValidFromInFuture
                     | SupersedeError::ValidFromBeforePredecessor),
                 ) => Err(json!({ "code": -32602, "message": e.to_string() })),
+                Err(SupersedeError::Db(e)) => Err(internal(actor, e)),
                 Err(e) => Err(json!({ "code": -32000, "message": e.to_string() })),
             }
         }
@@ -758,11 +789,10 @@ fn read_resource<C: GenericClient>(
             "data": { "uri": uri }
         })
     };
-    let internal = |e: anyhow::Error| json!({ "code": -32000, "message": e.to_string() });
     let text = if uri == PROJECTS_URI {
         let rows = client
             .query("SELECT name FROM projects ORDER BY name", &[])
-            .map_err(|e| internal(e.into()))?;
+            .map_err(|e| internal(actor, e))?;
         let names: Vec<String> = rows.into_iter().map(|r| r.get(0)).collect();
         serde_json::to_string(&names).unwrap_or_default()
     } else if let Some(name) = uri
@@ -782,13 +812,13 @@ fn read_resource<C: GenericClient>(
             crate::context_pack::DEFAULT_BUDGET,
         )?;
         crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
-        serde_json::to_string(&pack).map_err(|e| internal(e.into()))?
+        serde_json::to_string(&pack).map_err(|e| internal(actor, e))?
     } else if let Some(id) = uri
         .strip_prefix(NOTE_PREFIX)
         .and_then(|id| id.parse::<i64>().ok())
     {
         let note = crate::server::get_note_json(client, actor, id)
-            .map_err(internal)?
+            .map_err(|e| internal(actor, e))?
             .ok_or_else(not_found)?;
         crate::lifecycle::record_use_or_log(client, &[id]);
         note.to_string()
@@ -2548,5 +2578,81 @@ mod tests {
             .unwrap()
             .iter()
             .all(|t| t["name"] != "write"));
+    }
+
+    /// `write`, `forget`, `supersede` and `keep` need `editor`: a viewer and
+    /// the shared agent key of team mode (a viewer until per-account keys
+    /// come) get -32602 naming the role, and nothing changes. Reads stay.
+    #[test]
+    fn mcp_write_tools_need_editor() {
+        use crate::access::Role;
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_write_tools_need_editor: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let id = seed_note(&mut tx, "2026-01-01T00:00:00Z".parse().unwrap());
+        let call = |tx: &mut postgres::Transaction<'_>, actor: &Actor, name: &str, args: Value| {
+            let ctx = McpContext {
+                actor: actor.clone(),
+                transport: Transport::Http,
+                read_only: false,
+            };
+            dispatch(
+                tx,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                         "params": { "name": name, "arguments": args } }),
+                &ctx,
+            )
+            .body
+            .expect("body")
+        };
+        let writes = [
+            ("write", json!({ "content": "a note of a viewer" })),
+            ("forget", json!({ "ids": [id] })),
+            (
+                "supersede",
+                json!({ "id": id, "content": "replaced by a viewer" }),
+            ),
+            ("keep", json!({ "id": id })),
+        ];
+        let count = |tx: &mut postgres::Transaction<'_>| -> i64 {
+            tx.query_one("SELECT count(*) FROM memory_chunks", &[])
+                .unwrap()
+                .get(0)
+        };
+        let before = count(&mut tx);
+        for actor in [Actor::shared_only(), Actor::for_user(1, "v", Role::Viewer)] {
+            for (name, args) in &writes {
+                let body = call(&mut tx, &actor, name, args.clone());
+                assert_eq!(body["error"]["code"], -32602, "{name}: {body}");
+                assert_eq!(
+                    body["error"]["message"],
+                    format!("tool {name} needs the editor role"),
+                    "{name}: {body}"
+                );
+            }
+            let body = call(&mut tx, &actor, "get_note", json!({ "id": id }));
+            assert!(body["error"].is_null(), "a viewer reads: {body}");
+        }
+        assert_eq!(count(&mut tx), before, "nothing written");
+        let status: String = tx
+            .query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&id])
+            .unwrap()
+            .get(0);
+        assert_eq!(status, "active");
+        // An editor, an admin and the local user get past the check.
+        for actor in [
+            Actor::for_user(1, "e", Role::Editor),
+            Actor::for_user(1, "a", Role::Admin),
+            Actor::local(),
+        ] {
+            let body = call(&mut tx, &actor, "keep", json!({ "id": id }));
+            assert_eq!(
+                body["result"]["content"][0]["text"],
+                json!({ "id": id, "status": "active" }).to_string(),
+                "{actor:?}: {body}"
+            );
+        }
     }
 }
