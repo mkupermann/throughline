@@ -18,6 +18,8 @@ pub struct DoctorReport {
     pub generation_local: bool,
     /// Only the text of `agent_key::doctor_line`, never the key.
     pub agent_access: String,
+    /// `local`, or `team (<n> accounts, <m> private notes)`.
+    pub auth_mode: String,
     pub notes: Vec<String>,
 }
 
@@ -76,6 +78,14 @@ pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
         }
     };
 
+    let auth_mode =
+        crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())
+            .and_then(|mode| crate::access::doctor_line(client, mode))
+            .unwrap_or_else(|e| {
+                notes.push(format!("auth mode: {e:#}"));
+                "unavailable".to_string()
+            });
+
     Ok(DoctorReport {
         database,
         generation,
@@ -84,6 +94,7 @@ pub fn run<C: GenericClient>(client: &mut C) -> Result<DoctorReport> {
         embedding_missing,
         generation_local,
         agent_access: crate::agent_key::doctor_line(&crate::agent_key::key_state()),
+        auth_mode,
         notes,
     })
 }

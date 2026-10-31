@@ -328,6 +328,63 @@ const MEMORY_SUPERSEDED_BY_INDEX: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_memory_superseded_by ON memory_chunks (superseded_by) WHERE superseded_by IS NOT NULL;
 "#;
 
+/// Team mode. Accounts, sessions and login attempts as in the Python-era
+/// schema, but sessions without `last_seen_at`, plus per-account agent keys.
+/// The Python audit trail goes: `access_audit`, its append-only trigger and
+/// the `access_changes` trigger on every table it was attached to (CASCADE on
+/// the trigger function reaches all of them). Notes get an owner (NULL for
+/// existing notes) and a visibility (existing notes are shared); favorites
+/// become per account (NULL in local mode). Idempotent, so the Python-era
+/// schema and a fresh Rust schema end up the same.
+const TEAM_MODE: &str = r#"
+CREATE TABLE IF NOT EXISTS access_users (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username text UNIQUE NOT NULL CHECK (username ~ '^[a-z0-9][a-z0-9._@-]{0,119}$'),
+    display_name text NOT NULL,
+    password_hash text NOT NULL,
+    role text NOT NULL CHECK (role IN ('viewer', 'editor', 'admin')),
+    enabled boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS access_sessions (
+    token_hash text PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES access_users(id) ON DELETE CASCADE,
+    csrf_token text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+);
+ALTER TABLE access_sessions DROP COLUMN IF EXISTS last_seen_at;
+CREATE INDEX IF NOT EXISTS access_sessions_user ON access_sessions (user_id);
+CREATE TABLE IF NOT EXISTS access_attempts (
+    key text PRIMARY KEY,
+    attempts integer NOT NULL,
+    window_start timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS access_agent_keys (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES access_users(id) ON DELETE CASCADE,
+    key_hash text NOT NULL UNIQUE,
+    label text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS access_agent_keys_user ON access_agent_keys (user_id);
+
+DROP FUNCTION IF EXISTS public.record_access_change() CASCADE;
+DROP TABLE IF EXISTS access_audit;
+DROP FUNCTION IF EXISTS public.protect_access_audit();
+
+ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS owner_id bigint REFERENCES access_users(id);
+ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFAULT 'shared'
+    CONSTRAINT memory_chunks_visibility_check CHECK (visibility IN ('shared', 'private'));
+
+ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_id bigint
+    REFERENCES access_users(id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX IF NOT EXISTS favorites_kind_ref_user_key
+    ON favorites (kind, ref, (COALESCE(user_id, 0)));
+ALTER TABLE favorites DROP CONSTRAINT IF EXISTS favorites_kind_ref_key;
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -347,6 +404,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "013_memory_superseded_by_index.sql",
         MEMORY_SUPERSEDED_BY_INDEX,
     ),
+    ("014_team_mode.sql", TEAM_MODE),
 ];
 
 /// `migration_name` matches the Python package's `applied_migrations` table
@@ -542,14 +600,19 @@ mod tests {
         assert_eq!(first, second);
     }
 
+    fn migration(name: &str) -> &'static str {
+        MIGRATIONS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .unwrap_or_else(|| panic!("{name} is registered"))
+            .1
+    }
+
     #[test]
-    fn superseded_by_index_is_the_last_migration() {
-        let (name, sql) = MIGRATIONS.last().expect("migrations");
-        assert_eq!(*name, "013_memory_superseded_by_index.sql");
+    fn superseded_by_index_migration_runs_twice() {
+        let sql = migration("013_memory_superseded_by_index.sql");
         let Some(mut client) = test_db() else {
-            eprintln!(
-                "skipping superseded_by_index_is_the_last_migration: no PostgreSQL reachable"
-            );
+            eprintln!("skipping superseded_by_index_migration_runs_twice: no PostgreSQL reachable");
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
@@ -566,5 +629,202 @@ mod tests {
             .get(0);
         assert!(def.contains("(superseded_by)"), "{def}");
         assert!(def.contains("WHERE (superseded_by IS NOT NULL)"), "{def}");
+    }
+
+    /// The state before 014 on any database: the Python-era access block of
+    /// `sql/schema.sql` (sessions with `last_seen_at`, the audit table with
+    /// its append-only trigger, `access_changes` on two tables) and notes and
+    /// favorites without the 014 columns.
+    const BEFORE_TEAM_MODE: &str = r#"
+CREATE TABLE IF NOT EXISTS access_users (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username text UNIQUE NOT NULL,
+    display_name text NOT NULL,
+    password_hash text NOT NULL,
+    role text NOT NULL CHECK (role IN ('viewer', 'editor', 'admin')),
+    enabled boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS access_sessions (
+    token_hash text PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES access_users(id) ON DELETE CASCADE,
+    csrf_token text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+);
+ALTER TABLE access_sessions ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now();
+CREATE TABLE IF NOT EXISTS access_audit (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor text NOT NULL,
+    action text NOT NULL,
+    entity_type text NOT NULL
+);
+CREATE OR REPLACE FUNCTION public.record_access_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO public.access_audit(actor, action, entity_type) VALUES ('operator', TG_OP, TG_TABLE_NAME);
+    RETURN COALESCE(NEW, OLD);
+END $$;
+DROP TRIGGER IF EXISTS access_changes ON access_users;
+CREATE TRIGGER access_changes AFTER INSERT OR UPDATE OR DELETE ON access_users
+    FOR EACH ROW EXECUTE FUNCTION public.record_access_change();
+DROP TRIGGER IF EXISTS access_changes ON access_sessions;
+CREATE TRIGGER access_changes AFTER INSERT OR UPDATE OR DELETE ON access_sessions
+    FOR EACH ROW EXECUTE FUNCTION public.record_access_change();
+CREATE OR REPLACE FUNCTION public.protect_access_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Audit records are append-only'; END $$;
+DROP TRIGGER IF EXISTS access_audit_immutable ON access_audit;
+CREATE TRIGGER access_audit_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON access_audit
+    FOR EACH STATEMENT EXECUTE FUNCTION public.protect_access_audit();
+ALTER TABLE memory_chunks DROP COLUMN IF EXISTS owner_id, DROP COLUMN IF EXISTS visibility;
+ALTER TABLE favorites DROP COLUMN IF EXISTS user_id;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'favorites_kind_ref_key') THEN
+        ALTER TABLE favorites ADD CONSTRAINT favorites_kind_ref_key UNIQUE (kind, ref);
+    END IF;
+END $$;
+"#;
+
+    #[test]
+    fn migration_014_creates_access_tables_and_drops_audit() {
+        let (name, sql) = MIGRATIONS.last().expect("migrations");
+        assert_eq!(*name, "014_team_mode.sql");
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping migration_014_creates_access_tables_and_drops_audit: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        tx.batch_execute(BEFORE_TEAM_MODE)
+            .expect("state before 014");
+        let category_type = crate::extract_memory::category_column_type(&mut tx).expect("type");
+        let note: i64 = tx
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, content, category) \
+                     VALUES ('manual', 'note before team mode', 'insight'::text::{category_type}) \
+                     RETURNING id"
+                ),
+                &[],
+            )
+            .expect("insert note")
+            .get(0);
+        let user: i64 = tx
+            .query_one(
+                "INSERT INTO access_users (username, display_name, password_hash, role) \
+                 VALUES ($1, 'Kept', 'not-a-hash', 'admin') RETURNING id",
+                &[&format!("kept-{}", uuid::Uuid::new_v4())],
+            )
+            .expect("insert account")
+            .get(0);
+        tx.execute(
+            "INSERT INTO access_sessions (token_hash, user_id, csrf_token, expires_at) \
+             VALUES ($1, $2, 'request', now() + interval '1 day')",
+            &[&uuid::Uuid::new_v4().to_string(), &user],
+        )
+        .expect("insert session");
+        let one = |tx: &mut postgres::Transaction, q: &str| -> i64 {
+            tx.query_one(q, &[]).expect(q).get(0)
+        };
+        assert!(one(&mut tx, "SELECT count(*) FROM access_audit") >= 2);
+        let note_ref = note.to_string();
+        tx.execute(
+            "INSERT INTO favorites (kind, ref) VALUES ('memory', $1)",
+            &[&note_ref],
+        )
+        .expect("favorite before 014");
+
+        // twice: a second run is a no-op
+        tx.batch_execute(sql).expect("first run");
+        tx.batch_execute(sql).expect("second run");
+
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_class WHERE relname = 'access_audit'"
+            ),
+            0
+        );
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_trigger WHERE tgname = 'access_changes'"
+            ),
+            0
+        );
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_proc \
+                 WHERE proname IN ('record_access_change', 'protect_access_audit')"
+            ),
+            0
+        );
+        for table in [
+            "access_users",
+            "access_sessions",
+            "access_attempts",
+            "access_agent_keys",
+        ] {
+            let found: Option<String> = tx
+                .query_one("SELECT to_regclass($1)::text", &[&table])
+                .expect("regclass")
+                .get(0);
+            assert_eq!(found.as_deref(), Some(table));
+        }
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM information_schema.columns \
+                 WHERE table_name = 'access_sessions' AND column_name = 'last_seen_at'"
+            ),
+            0
+        );
+        // Accounts and sessions stay; existing notes are shared, without owner.
+        assert_eq!(
+            one(
+                &mut tx,
+                &format!("SELECT count(*) FROM access_sessions WHERE user_id = {user}")
+            ),
+            1
+        );
+        let row = tx
+            .query_one(
+                "SELECT visibility, owner_id FROM memory_chunks WHERE id = $1",
+                &[&note],
+            )
+            .expect("note");
+        assert_eq!(row.get::<_, String>(0), "shared");
+        assert_eq!(row.get::<_, Option<i64>>(1), None);
+        let mut savepoint = tx.transaction().expect("savepoint");
+        assert!(savepoint
+            .execute(
+                "UPDATE memory_chunks SET visibility = 'secret' WHERE id = $1",
+                &[&note],
+            )
+            .is_err());
+        drop(savepoint);
+
+        // One favorite per item and account; local mode is the NULL account.
+        crate::favorites::add(&mut tx, crate::favorites::FavKind::Memory, &note_ref)
+            .expect("favorite again");
+        let per_user = "INSERT INTO favorites (kind, ref, user_id) VALUES ('memory', $1, $2) \
+                        ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING";
+        assert_eq!(tx.execute(per_user, &[&note_ref, &user]).unwrap(), 1);
+        assert_eq!(tx.execute(per_user, &[&note_ref, &user]).unwrap(), 0);
+        assert_eq!(
+            one(
+                &mut tx,
+                &format!("SELECT count(*) FROM favorites WHERE kind = 'memory' AND ref = '{note}'")
+            ),
+            2
+        );
+        assert_eq!(
+            one(
+                &mut tx,
+                "SELECT count(*) FROM pg_constraint WHERE conname = 'favorites_kind_ref_key'"
+            ),
+            0
+        );
     }
 }

@@ -1,5 +1,6 @@
 //! Throughline library — shared by the CLI binary and integration tests.
 
+pub mod access;
 pub mod adapters;
 pub mod agent_key;
 pub mod agent_memory;

@@ -949,6 +949,7 @@ fn main() -> Result<()> {
             }
             println!("embedding missing: {}", report.embedding_missing);
             println!("agent access: {}", report.agent_access);
+            println!("auth mode: {}", report.auth_mode);
             for n in report.notes {
                 println!("note: {n}");
             }
