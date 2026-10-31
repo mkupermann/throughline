@@ -1,8 +1,10 @@
 //! `throughline account`: team-mode accounts, their passwords and agent keys.
 //!
-//! Every change runs in its own transaction (a savepoint when the caller
-//! already has one). Passwords are hashed before that transaction starts,
-//! so hashing never holds a database lock. Disabling an account ends its
+//! `add`, `set_role`, `disable`, `set_password`, `new_agent_key` and
+//! `revoke_agent_key` run in a transaction of their own (a savepoint when
+//! the caller already has one); `enable` and `unlock` are single
+//! statements. Passwords are hashed before any transaction starts, so
+//! hashing never holds a database lock. Disabling an account ends its
 //! sessions; its agent keys stay in place but stop working, because the
 //! key check (Task 6) requires an enabled account.
 
@@ -294,17 +296,18 @@ pub fn read_password(file: Option<&Path>, confirm: bool) -> Result<String> {
     }
 }
 
-/// The file's text without trailing line breaks. On Unix the file must not
-/// be readable or writable by group or others (`chmod 600`), as the Python
-/// command required.
+/// The file's text without trailing line breaks. On Unix the file must have
+/// no group or other permission bits (0600, 0400 and 0700 are fine), as the
+/// Python command required. The mode is read from the opened file, so the
+/// file checked is the file read.
 pub fn read_password_file(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let context = || format!("read the password file {}", path.display());
+    let mut file = std::fs::File::open(path).with_context(context)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(path)
-            .with_context(|| format!("read the password file {}", path.display()))?
-            .permissions()
-            .mode();
+        let mode = file.metadata().with_context(context)?.permissions().mode();
         if mode & 0o077 != 0 {
             bail!(
                 "the password file {} must be readable only by its owner (chmod 600)",
@@ -312,8 +315,8 @@ pub fn read_password_file(path: &Path) -> Result<String> {
             );
         }
     }
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("read the password file {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).with_context(context)?;
     let text =
         String::from_utf8(bytes).map_err(|_| anyhow!("the password file is not UTF-8 text"))?;
     Ok(text.trim_end_matches(['\r', '\n']).to_string())
@@ -350,55 +353,70 @@ mod tty {
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
 
-    use anyhow::{bail, Context, Result};
+    use anyhow::{anyhow, bail, Context, Result};
 
-    /// Switches the terminal's echo off for its lifetime.
-    struct EchoOff(File);
+    /// While it lives, the terminal neither shows typing nor turns Ctrl-C
+    /// into a signal. Dropping it restores the state saved with `stty -g`,
+    /// on errors too.
+    struct Hidden {
+        tty: File,
+        saved: String,
+    }
 
-    impl EchoOff {
-        fn new(tty: &File) -> Result<EchoOff> {
-            let tty = tty.try_clone().context("open the terminal")?;
-            if !stty(&tty, "-echo") {
-                bail!("cannot hide the typed password (stty failed): use --password-file");
-            }
-            Ok(EchoOff(tty))
+    impl Hidden {
+        fn new(tty: &File) -> Result<Hidden> {
+            let failed =
+                || anyhow!("cannot hide the typed password (stty failed): use --password-file");
+            let saved = stty(tty, &["-g"]).ok_or_else(failed)?;
+            let hidden = Hidden {
+                tty: tty.try_clone().context("open the terminal")?,
+                saved: saved.trim().to_string(),
+            };
+            stty(&hidden.tty, &["-echo", "-isig"]).ok_or_else(failed)?;
+            Ok(hidden)
         }
     }
 
-    impl Drop for EchoOff {
+    impl Drop for Hidden {
         fn drop(&mut self) {
-            stty(&self.0, "echo");
+            stty(&self.tty, &[self.saved.as_str()]);
         }
     }
 
-    fn stty(tty: &File, setting: &str) -> bool {
-        tty.try_clone().is_ok_and(|input| {
-            Command::new("stty")
-                .arg(setting)
-                .stdin(input)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        })
+    /// Runs `stty` on the terminal and returns its output, or `None` when
+    /// it fails.
+    fn stty(tty: &File, args: &[&str]) -> Option<String> {
+        let output = Command::new("stty")
+            .args(args)
+            .stdin(tty.try_clone().ok()?)
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     /// One line typed at the controlling terminal without echo, or `None`
-    /// when the process has no terminal.
+    /// when the process has no terminal. Echo goes off before the prompt
+    /// appears, and Ctrl-C (a 0x03 byte in the line) cancels.
     pub fn read_hidden(prompt: &str) -> Result<Option<String>> {
         let Ok(mut tty) = File::options().read(true).write(true).open("/dev/tty") else {
             return Ok(None);
         };
+        let hidden = Hidden::new(&tty)?;
         write!(tty, "{prompt}")?;
         tty.flush()?;
         let mut line = String::new();
-        let read = {
-            let _echo = EchoOff::new(&tty)?;
-            BufReader::new(&tty).read_line(&mut line)
-        };
+        let read = BufReader::new(&tty).read_line(&mut line);
         writeln!(tty)?;
+        drop(hidden);
         if read.context("read the password from the terminal")? == 0 {
             bail!("no password entered");
+        }
+        if line.contains('\x03') {
+            bail!("password entry cancelled");
         }
         Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
     }
@@ -416,6 +434,7 @@ mod tty {
 mod tests {
     use super::*;
     use crate::access;
+    use std::time::Duration;
 
     fn test_db() -> Option<postgres::Client> {
         let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
@@ -534,7 +553,7 @@ mod tests {
             )
             .unwrap()
             .get(0);
-        assert!(stored.starts_with("scrypt2$15$"), "{stored}");
+        assert!(stored.starts_with("scrypt2$15,8,3$"), "{stored}");
         assert!(access::verify_password(PASSWORD, &stored));
 
         let names = [ann.as_str(), bob.as_str()];
@@ -631,6 +650,84 @@ mod tests {
         refused(disable(&mut tx, &c));
         // Non-admins are never held back.
         disable(&mut tx, &a).expect("an editor");
+    }
+
+    /// Drops a test schema on a fresh connection, also when the test fails.
+    struct DropSchema(String);
+
+    impl Drop for DropSchema {
+        fn drop(&mut self) {
+            if let Some(mut client) = test_db() {
+                let _ = client.batch_execute(&format!("DROP SCHEMA IF EXISTS {} CASCADE", self.0));
+            }
+        }
+    }
+
+    #[test]
+    fn last_admin_rule_holds_across_connections() {
+        let (Some(mut setup), Some(mut a), Some(mut b)) = (test_db(), test_db(), test_db()) else {
+            eprintln!(
+                "skipping last_admin_rule_holds_across_connections: \
+                 three PostgreSQL connections are needed"
+            );
+            return;
+        };
+        // A second connection only sees committed admins, so they live in a
+        // schema of their own and never in the shared account tables.
+        let schema = format!("test_admins_{}", uuid::Uuid::new_v4().simple());
+        setup
+            .batch_execute(&format!(
+                "CREATE SCHEMA {schema}; \
+                 CREATE TABLE {schema}.access_users (LIKE public.access_users INCLUDING ALL); \
+                 CREATE TABLE {schema}.access_sessions (LIKE public.access_sessions INCLUDING ALL); \
+                 INSERT INTO {schema}.access_users (username, display_name, password_hash, role) \
+                     VALUES ('admin-1', 'One', 'not-a-hash', 'admin'), \
+                            ('admin-2', 'Two', 'not-a-hash', 'admin');"
+            ))
+            .expect("test schema");
+        let _cleanup = DropSchema(schema.clone());
+        let session = format!("SET search_path TO {schema}; SET lock_timeout = '20s'");
+        a.batch_execute(&session).expect("search path");
+        b.batch_execute(&session).expect("search path");
+
+        // A demotes admin-1 and keeps its transaction open.
+        let mut tx = a.transaction().expect("begin");
+        set_role(&mut tx, "admin-1", Role::Editor).expect("admin-2 remains");
+
+        // B demotes admin-2 meanwhile: it has to wait for A, then refuse.
+        let (done, outcome) = std::sync::mpsc::channel();
+        let other = std::thread::spawn(move || {
+            let result = set_role(&mut b, "admin-2", Role::Editor).map_err(|e| e.to_string());
+            let _ = done.send(result);
+        });
+        assert!(
+            outcome.recv_timeout(Duration::from_millis(500)).is_err(),
+            "B must wait while A holds the admins"
+        );
+        tx.commit().expect("A commits");
+        let err = outcome
+            .recv_timeout(Duration::from_secs(15))
+            .expect("B finishes once A has committed")
+            .expect_err("admin-2 is the last admin now");
+        assert!(err.contains("last enabled admin"), "{err}");
+        other.join().expect("B's thread");
+
+        let roles: Vec<(String, String)> = setup
+            .query(
+                &format!("SELECT username, role FROM {schema}.access_users ORDER BY username"),
+                &[],
+            )
+            .expect("roles")
+            .iter()
+            .map(|row| (row.get(0), row.get(1)))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                ("admin-1".to_string(), "editor".to_string()),
+                ("admin-2".to_string(), "admin".to_string())
+            ]
+        );
     }
 
     #[test]
@@ -842,7 +939,7 @@ mod tests {
             assert!(err.contains("chmod 600"), "{mode:o}: {err}");
             assert!(!err.contains(PASSWORD), "{err}");
         }
-        for mode in [0o600, 0o400] {
+        for mode in [0o600, 0o400, 0o700] {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
             assert_eq!(read_password_file(&path).expect("owner only"), PASSWORD);
         }

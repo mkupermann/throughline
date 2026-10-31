@@ -224,24 +224,62 @@ pub(crate) fn visibility_predicate_at(
     }
 }
 
+/// scrypt cost of new hashes as literals, so [`HASH_COST`] and
+/// [`DUMMY_HASH`] are built from the same numbers: N = 2^15, r = 8, p = 3
+/// (32 MiB, the OWASP-listed equivalent of 2^17/8/1).
+macro_rules! hash_cost {
+    (log_n) => {
+        15
+    };
+    (r) => {
+        8
+    };
+    (p) => {
+        3
+    };
+}
+
 /// A well-formed hash no password matches, for accounts that do not exist:
 /// verifying against it costs the same as against a real one.
-pub const DUMMY_HASH: &str = "scrypt2$15$00000000000000000000000000000000$\
-    0000000000000000000000000000000000000000000000000000000000000000\
-    0000000000000000000000000000000000000000000000000000000000000000";
+pub const DUMMY_HASH: &str = concat!(
+    "scrypt2$",
+    hash_cost!(log_n),
+    ",",
+    hash_cost!(r),
+    ",",
+    hash_cost!(p),
+    "$00000000000000000000000000000000$",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+);
 
-/// scrypt cost of new hashes: N = 2^15, r = 8, p = 1 (32 MiB). The cost is
-/// part of the stored string, so it can rise later. Python-era hashes
-/// (`scrypt$salt$digest`) used N = 2^17 (128 MiB).
-const HASH_LOG_N: u8 = 15;
-const LEGACY_LOG_N: u8 = 17;
+/// An scrypt cost. Stored hashes carry it, so it can rise later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cost {
+    log_n: u8,
+    r: u32,
+    p: u32,
+}
+
+const HASH_COST: Cost = Cost {
+    log_n: hash_cost!(log_n),
+    r: hash_cost!(r),
+    p: hash_cost!(p),
+};
+/// Python-era hashes (`scrypt$salt$digest`): N = 2^17, r = 8, p = 1 (128 MiB).
+const LEGACY_COST: Cost = Cost {
+    log_n: 17,
+    r: 8,
+    p: 1,
+};
 
 /// Passwords have 15 to 128 characters, as in the Python era.
 fn password_length_ok(password: &str) -> bool {
     (15..=128).contains(&password.chars().count())
 }
 
-/// `scrypt2$15$<salt hex 32>$<digest hex 128>` with a fresh random salt.
+/// `scrypt2$<log_n>,<r>,<p>$<salt hex 32>$<digest hex 128>` with
+/// [`HASH_COST`] and a fresh random salt.
 /// Refuses a password outside 15..=128 characters. Slow on purpose: never
 /// call it while holding a database lock.
 pub fn hash_password(password: &str) -> Result<String> {
@@ -249,16 +287,20 @@ pub fn hash_password(password: &str) -> Result<String> {
         bail!("use a password with 15 to 128 characters");
     }
     let salt = random_salt();
-    let digest = derive(password, &salt, HASH_LOG_N)?;
+    let digest = derive(password, &salt, HASH_COST)?;
     Ok(format!(
-        "scrypt2${HASH_LOG_N}${}${}",
+        "scrypt2${},{},{}${}${}",
+        HASH_COST.log_n,
+        HASH_COST.r,
+        HASH_COST.p,
         to_hex(&salt),
         to_hex(&digest)
     ))
 }
 
-/// Whether `password` matches `encoded` (`scrypt2$<15..=17>$…` or the
-/// Python-era `scrypt$<salt>$<digest>`). Every call with a password of
+/// Whether `password` matches `encoded` (`scrypt2$<log_n>,<r>,<p>$…` with
+/// a cost from the allow-list, or the Python-era `scrypt$<salt>$<digest>`).
+/// Every call with a password of
 /// valid length runs exactly one scrypt: an unknown or malformed hash is
 /// checked against [`DUMMY_HASH`] and fails, so the time spent does not
 /// tell a broken or missing account from a wrong password. The digest is
@@ -267,11 +309,11 @@ pub fn verify_password(password: &str, encoded: &str) -> bool {
     if !password_length_ok(password) {
         return false;
     }
-    let (known, (log_n, salt, expected)) = match parse_hash(encoded) {
+    let (known, (cost, salt, expected)) = match parse_hash(encoded) {
         Some(parts) => (true, parts),
         None => (false, DUMMY_PARTS),
     };
-    let Ok(actual) = derive(password, &salt, log_n) else {
+    let Ok(actual) = derive(password, &salt, cost) else {
         return false;
     };
     let mut diff = 0u8;
@@ -282,33 +324,50 @@ pub fn verify_password(password: &str, encoded: &str) -> bool {
 }
 
 /// [`DUMMY_HASH`] parsed.
-const DUMMY_PARTS: (u8, [u8; 16], [u8; 64]) = (HASH_LOG_N, [0; 16], [0; 64]);
+const DUMMY_PARTS: (Cost, [u8; 16], [u8; 64]) = (HASH_COST, [0; 16], [0; 64]);
 
-/// (log_n, salt, digest) of a stored hash, or `None` for anything else.
-/// The cost is capped at 2^17 so a stored value cannot ask for more memory
-/// than the Python-era hashes did.
-fn parse_hash(encoded: &str) -> Option<(u8, [u8; 16], [u8; 64])> {
+/// (cost, salt, digest) of a stored hash, or `None` for anything else.
+fn parse_hash(encoded: &str) -> Option<(Cost, [u8; 16], [u8; 64])> {
     let parts: Vec<&str> = encoded.split('$').collect();
-    let (log_n, salt, digest) = match parts.as_slice() {
-        ["scrypt2", log_n, salt, digest] => {
-            let log_n = match *log_n {
-                "15" => 15,
-                "16" => 16,
-                "17" => 17,
-                _ => return None,
-            };
-            (log_n, salt, digest)
-        }
-        ["scrypt", salt, digest] => (LEGACY_LOG_N, salt, digest),
+    let (cost, salt, digest) = match parts.as_slice() {
+        ["scrypt2", cost, salt, digest] => (parse_cost(cost)?, salt, digest),
+        ["scrypt", salt, digest] => (LEGACY_COST, salt, digest),
         _ => return None,
     };
-    Some((log_n, from_hex(salt)?, from_hex(digest)?))
+    Some((cost, from_hex(salt)?, from_hex(digest)?))
 }
 
-fn derive(password: &str, salt: &[u8], log_n: u8) -> Result<[u8; 64]> {
+/// `<log_n>,<r>,<p>` from an allow-list: log_n 15..=17, r 8, p 1..=3. A
+/// stored value can ask for at most 128 MiB (as the Python-era hashes did)
+/// and three passes.
+fn parse_cost(text: &str) -> Option<Cost> {
+    let fields: Vec<&str> = text.split(',').collect();
+    let [log_n, r, p] = fields.as_slice() else {
+        return None;
+    };
+    let log_n = match *log_n {
+        "15" => 15,
+        "16" => 16,
+        "17" => 17,
+        _ => return None,
+    };
+    let r = match *r {
+        "8" => 8,
+        _ => return None,
+    };
+    let p = match *p {
+        "1" => 1,
+        "2" => 2,
+        "3" => 3,
+        _ => return None,
+    };
+    Some(Cost { log_n, r, p })
+}
+
+fn derive(password: &str, salt: &[u8], cost: Cost) -> Result<[u8; 64]> {
     #[cfg(test)]
-    DERIVATIONS.with(|d| d.borrow_mut().push(log_n));
-    let params = scrypt::Params::new(log_n, 8, 1, 64)
+    DERIVATIONS.with(|d| d.borrow_mut().push(cost));
+    let params = scrypt::Params::new(cost.log_n, cost.r, cost.p, 64)
         .map_err(|_| anyhow::anyhow!("invalid scrypt parameters"))?;
     let mut out = [0u8; 64];
     scrypt::scrypt(password.as_bytes(), salt, &params, &mut out)
@@ -361,8 +420,8 @@ pub fn attempt_key(username: &str) -> String {
 
 #[cfg(test)]
 thread_local! {
-    /// `log_n` of every scrypt run on this thread, for the timing-shape test.
-    static DERIVATIONS: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The cost of every scrypt run on this thread, for the timing-shape test.
+    static DERIVATIONS: std::cell::RefCell<Vec<Cost>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
@@ -461,15 +520,30 @@ mod tests {
         ),
     ];
 
-    // The same Python call with n=2**15, written as `scrypt2$15$...`: pins
-    // the parameters of new hashes. Test value, not a secret.
+    // The same Python call with n=2**15, r=8, p=3, written as
+    // `scrypt2$15,8,3$...`: pins the parameters of new hashes. Test value,
+    // not a secret.
     const NEW_FORMAT: (&str, &str) = (
         "correct horse battery staple 4",
-        "scrypt2$15$a1b2c3d4e5f60718293a4b5c6d7e8f90$a29c0d25639b5209b251b8d6d58f97db08fc868b70416068a19d959738e40be64714ff9f81f8d5bc754df12cb1f90ba5a28986687d50af0342aca332dd43258c",
+        "scrypt2$15,8,3$a1b2c3d4e5f60718293a4b5c6d7e8f90$ee763cb233a52a4900ea4bad95bd7054127dc42e482e72ed5bfac08d024f5631fecb03bf47f6fc90608467bbfdc24a8085c591d2fa36a788991fe7b076af5c11",
     );
 
-    /// Runs `f` and returns the `log_n` of each scrypt run it made.
-    fn derivations(f: impl FnOnce()) -> Vec<u8> {
+    // Another allowed cost (n=2**16, r=8, p=2), same Python call.
+    const OTHER_COST: (&str, &str) = (
+        "correct horse battery staple 5",
+        "scrypt2$16,8,2$5f4e3d2c1b0a99887766554433221100$ce3d465ae95afd7b90cd1584c7c301a5c27487cb368007b084bf57d47f88c7f562dcf9bb4a7ae7e88abfeacdab4e4eec67ba55f8216f50389857fea8bcb9f30d",
+    );
+
+    /// The cost new hashes are made with, written out rather than taken
+    /// from the constant under test.
+    const SHIPPED: Cost = Cost {
+        log_n: 15,
+        r: 8,
+        p: 3,
+    };
+
+    /// Runs `f` and returns the cost of each scrypt run it made.
+    fn derivations(f: impl FnOnce()) -> Vec<Cost> {
         DERIVATIONS.with(|d| d.borrow_mut().clear());
         f();
         DERIVATIONS.with(|d| d.borrow().clone())
@@ -484,7 +558,7 @@ mod tests {
         for encoded in [&first, &second] {
             let parts: Vec<&str> = encoded.split('$').collect();
             assert_eq!(parts.len(), 4, "{encoded}");
-            assert_eq!((parts[0], parts[1]), ("scrypt2", "15"));
+            assert_eq!((parts[0], parts[1]), ("scrypt2", "15,8,3"));
             assert_eq!((parts[2].len(), parts[3].len()), (32, 128));
             assert!(parts[2..].iter().all(|p| p
                 .chars()
@@ -492,9 +566,32 @@ mod tests {
             assert!(verify_password(password, encoded));
             assert!(!verify_password("correct horse battery staple 2", encoded));
         }
+        assert_eq!(
+            derivations(|| {
+                hash_password(password).expect("hash");
+            }),
+            vec![SHIPPED]
+        );
         let (password, encoded) = NEW_FORMAT;
-        assert!(verify_password(password, encoded), "Python n=2**15 vector");
+        assert!(
+            verify_password(password, encoded),
+            "Python 2**15/8/3 vector"
+        );
         assert!(!verify_password("correct horse battery staple 5", encoded));
+        let (other, other_encoded) = OTHER_COST;
+        assert_eq!(
+            derivations(|| assert!(verify_password(other, other_encoded))),
+            vec![Cost {
+                log_n: 16,
+                r: 8,
+                p: 2
+            }],
+            "Python 2**16/8/2 vector"
+        );
+        // A legacy digest written in the new form, with its cost spelled out.
+        let (legacy_password, legacy) = LEGACY[0];
+        let rewritten = legacy.replacen("scrypt$", "scrypt2$17,8,1$", 1);
+        assert!(verify_password(legacy_password, &rewritten), "{rewritten}");
         // An upper-case digest is the same digest.
         assert!(verify_password(
             password,
@@ -507,7 +604,7 @@ mod tests {
         for (password, encoded) in LEGACY {
             assert_eq!(
                 derivations(|| assert!(verify_password(password, encoded), "{password}")),
-                vec![17],
+                vec![LEGACY_COST],
                 "legacy hashes use n=2**17"
             );
         }
@@ -536,29 +633,44 @@ mod tests {
             format!("scrypt$zz{}${digest}", &salt[2..]),
             format!("scrypt${salt}$+f{}", &digest[2..]),
             format!("scrypt2${salt}${digest}"),
-            format!("scrypt2$14${salt}${digest}"),
-            format!("scrypt2$18${salt}${digest}"),
-            format!("scrypt2$30${salt}${digest}"),
-            format!("scrypt2$015${salt}${digest}"),
-            format!("scrypt2$+15${salt}${digest}"),
-            format!("scrypt2$15${salt}${digest}$"),
-            format!("scrypt2$15$ {}${digest}", &salt[1..]),
+            // The first format of this branch carried log_n only.
+            format!("scrypt2$15${salt}${digest}"),
+            format!("scrypt2$17${salt}${digest}"),
+            // Costs outside the allow-list: log_n 15..=17, r 8, p 1..=3.
+            format!("scrypt2$14,8,1${salt}${digest}"),
+            format!("scrypt2$18,8,1${salt}${digest}"),
+            format!("scrypt2$30,8,1${salt}${digest}"),
+            format!("scrypt2$17,16,1${salt}${digest}"),
+            format!("scrypt2$17,4,1${salt}${digest}"),
+            format!("scrypt2$15,8,4${salt}${digest}"),
+            format!("scrypt2$15,8,0${salt}${digest}"),
+            format!("scrypt2$15,8,99999${salt}${digest}"),
+            // Malformed cost fields.
+            format!("scrypt2$15,8${salt}${digest}"),
+            format!("scrypt2$15,8,3,1${salt}${digest}"),
+            format!("scrypt2$015,8,1${salt}${digest}"),
+            format!("scrypt2$+15,8,1${salt}${digest}"),
+            format!("scrypt2$15,08,1${salt}${digest}"),
+            format!("scrypt2$ 15,8,1${salt}${digest}"),
+            format!("scrypt2$15;8;1${salt}${digest}"),
+            format!("scrypt2$17,8,1${salt}${digest}$"),
+            format!("scrypt2$17,8,1$ {}${digest}", &salt[1..]),
         ];
         for encoded in &unknown {
             assert_eq!(
                 derivations(|| assert!(!verify_password(password, encoded), "{encoded}")),
-                vec![15],
+                vec![SHIPPED],
                 "one run at the dummy cost for {encoded:?}"
             );
         }
         // The dummy itself is a valid hash that nothing matches.
         assert_eq!(
             derivations(|| assert!(!verify_password(password, DUMMY_HASH))),
-            vec![15]
+            vec![SHIPPED]
         );
         assert_eq!(
             derivations(|| assert!(verify_password(NEW_FORMAT.0, NEW_FORMAT.1))),
-            vec![15]
+            vec![SHIPPED]
         );
     }
 
@@ -593,10 +705,34 @@ mod tests {
         }
     }
 
+    /// The cost of one hash on this machine. Run it in a release build:
+    /// `cargo test --release -p throughline --lib -- --ignored hash_password_timing --nocapture`
+    #[test]
+    #[ignore = "timing only, run by hand in a release build"]
+    fn hash_password_timing() {
+        let mut runs: Vec<std::time::Duration> = (0..5)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                hash_password("correct horse battery staple 1").expect("hash");
+                start.elapsed()
+            })
+            .collect();
+        runs.sort();
+        let start = std::time::Instant::now();
+        verify_password(LEGACY[0].0, LEGACY[0].1);
+        let legacy = start.elapsed();
+        eprintln!(
+            "hash_password x5 (sorted): {runs:?}; median {:?}; one legacy verify (2^17/8/1): {legacy:?}",
+            runs[2]
+        );
+    }
+
     #[test]
     fn dummy_hash_and_token_hash_have_the_stored_shape() {
-        assert_eq!(DUMMY_HASH.len(), "scrypt2$15$".len() + 32 + 1 + 128);
-        assert!(DUMMY_HASH.starts_with("scrypt2$15$"));
+        assert_eq!(DUMMY_HASH.len(), "scrypt2$15,8,3$".len() + 32 + 1 + 128);
+        assert!(DUMMY_HASH.starts_with("scrypt2$15,8,3$"));
+        assert_eq!(parse_hash(DUMMY_HASH), Some(DUMMY_PARTS));
+        assert_eq!(DUMMY_PARTS.0, SHIPPED);
         assert_eq!(
             token_hash("abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
