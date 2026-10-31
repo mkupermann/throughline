@@ -24,9 +24,36 @@ pub struct DoctorReport {
     pub notes: Vec<String>,
 }
 
+/// The report for a client of the server (`GET /api/health-recovery`),
+/// running in `mode` with `key`. In team mode the client gets neither the
+/// text of a failed `auth mode` or `agent access` check (it goes to the log,
+/// without row values) nor the note that the host sets
+/// `THROUGHLINE_AGENT_KEY`. Local mode gets what `throughline doctor` gets.
+pub fn for_client<C: GenericClient>(
+    client: &mut C,
+    actor: &crate::access::Actor,
+    mode: crate::access::AuthMode,
+    key: &crate::agent_key::KeyState,
+) -> Result<DoctorReport> {
+    let team = mode == crate::access::AuthMode::Team;
+    report(client, actor, Ok(mode), key, team)
+}
+
 /// The report as `actor` may see it: the embedding progress counts only the
 /// notes `actor` sees (the CLI passes [`crate::access::Actor::local`]).
 pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Result<DoctorReport> {
+    let mode =
+        crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref());
+    report(client, actor, mode, &crate::agent_key::key_state(), false)
+}
+
+fn report<C: GenericClient>(
+    client: &mut C,
+    actor: &crate::access::Actor,
+    mode: Result<crate::access::AuthMode>,
+    key: &crate::agent_key::KeyState,
+    team_client: bool,
+) -> Result<DoctorReport> {
     let mut notes = Vec::new();
 
     let database = match client.batch_execute("SELECT 1") {
@@ -81,23 +108,23 @@ pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Re
         }
     };
 
-    let mode =
-        crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref());
     let auth_mode = match &mode {
         Ok(mode) => crate::access::doctor_line(client, *mode),
         Err(e) => Err(anyhow::anyhow!("{e:#}")),
     }
     .unwrap_or_else(|e| {
-        notes.push(format!("auth mode: {e:#}"));
+        notes.push(failure_note("auth mode", &e, team_client));
         "unavailable".to_string()
     });
-    let agent_access = match agent_access(client, mode.ok(), &crate::agent_key::key_state()) {
+    let agent_access = match agent_access(client, mode.ok(), key) {
         Ok((line, note)) => {
-            notes.extend(note.map(String::from));
+            if !team_client {
+                notes.extend(note.map(String::from));
+            }
             line
         }
         Err(e) => {
-            notes.push(format!("agent access: {e:#}"));
+            notes.push(failure_note("agent access", &e, team_client));
             "unavailable".to_string()
         }
     };
@@ -115,11 +142,22 @@ pub fn run<C: GenericClient>(client: &mut C, actor: &crate::access::Actor) -> Re
     })
 }
 
+/// The note of a failed check. A team-mode client gets no error text, which
+/// could repeat database detail; the log gets it without row values.
+fn failure_note(what: &str, e: &anyhow::Error, team_client: bool) -> String {
+    if team_client {
+        eprintln!("doctor {what}: {}", crate::server::error_for_log(e));
+        format!("{what}: unavailable")
+    } else {
+        format!("{what}: {e:#}")
+    }
+}
+
 /// The `agent access:` line and, when it applies, a note. Local mode (or a
 /// mode that could not be read): the state of `THROUGHLINE_AGENT_KEY`.
-/// Team mode: the number of account keys not revoked, and a note when
-/// `THROUGHLINE_AGENT_KEY` is set, because team mode ignores it. Never the
-/// key itself.
+/// Team mode: the number of account keys that work (not revoked, account
+/// enabled), and a note when `THROUGHLINE_AGENT_KEY` is set, because team
+/// mode ignores it. Never the key itself.
 pub fn agent_access<C: GenericClient>(
     client: &mut C,
     mode: Option<crate::access::AuthMode>,
@@ -130,7 +168,9 @@ pub fn agent_access<C: GenericClient>(
     }
     let keys: i64 = client
         .query_one(
-            "SELECT count(*) FROM access_agent_keys WHERE revoked_at IS NULL",
+            "SELECT count(*) FROM access_agent_keys k \
+             JOIN access_users u ON u.id = k.user_id \
+             WHERE k.revoked_at IS NULL AND u.enabled",
             &[],
         )?
         .get(0);
@@ -276,14 +316,32 @@ mod tests {
         let (line, note) = agent_access(&mut tx, Some(AuthMode::Team), &KeyState::Off).unwrap();
         assert_eq!(note, None, "the shared key is not set");
         let before = count(&line);
-        let (a, _) = crate::access::team_test::two_accounts(&mut tx);
+        let (a, b) = crate::access::team_test::two_accounts(&mut tx);
         let name = a.username.expect("name");
         let (first, _) = crate::accounts_cli::new_agent_key(&mut tx, &name, None).expect("key");
         crate::accounts_cli::new_agent_key(&mut tx, &name, None).expect("key");
         crate::accounts_cli::revoke_agent_key(&mut tx, &name, first).expect("revoke");
+        // B's key stops working with B's account: it is not counted.
+        let (b_id, b_name) = (b.user_id.expect("id"), b.username.expect("name"));
+        crate::accounts_cli::new_agent_key(&mut tx, &b_name, None).expect("key");
+        let line = |tx: &mut postgres::Transaction<'_>| {
+            agent_access(tx, Some(AuthMode::Team), &KeyState::Off)
+                .unwrap()
+                .0
+        };
+        assert_eq!(count(&line(&mut tx)), before + 2, "B enabled");
+        tx.execute(
+            "UPDATE access_users SET enabled = false WHERE id = $1",
+            &[&b_id],
+        )
+        .expect("disable B");
         for state in [key_state_from(Some(KEY)), KeyState::TooShort] {
             let (line, note) = agent_access(&mut tx, Some(AuthMode::Team), &state).unwrap();
-            assert_eq!(count(&line), before + 1, "one of two keys is revoked");
+            assert_eq!(
+                count(&line),
+                before + 1,
+                "one of A's two keys is revoked, B is disabled"
+            );
             assert_eq!(note, Some(IGNORED_IN_TEAM_MODE), "{state:?}");
             assert!(!line.contains(KEY) && !IGNORED_IN_TEAM_MODE.contains(KEY));
         }
@@ -298,6 +356,68 @@ mod tests {
                 ("off: THROUGHLINE_AGENT_KEY is not set".to_string(), None)
             );
         }
+    }
+
+    /// A team-mode client gets neither error text nor the note about the
+    /// host's `THROUGHLINE_AGENT_KEY`; `throughline doctor` gets both.
+    #[test]
+    fn team_mode_client_report_has_no_error_text_and_no_key_note() {
+        use crate::access::{Actor, AuthMode};
+        use crate::agent_key::{key_state_from, IGNORED_IN_TEAM_MODE};
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping team_mode_client_report_has_no_error_text_and_no_key_note: no PostgreSQL"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let key = key_state_from(Some(KEY));
+        // Every report in a savepoint of its own: the first failed query
+        // would abort the transaction for the rest.
+        let notes = |tx: &mut postgres::Transaction<'_>, team_client: bool| {
+            let mut sp = tx.transaction().expect("savepoint");
+            let report = if team_client {
+                for_client(&mut sp, &Actor::shared_only(), AuthMode::Team, &key)
+            } else {
+                report(
+                    &mut sp,
+                    &Actor::shared_only(),
+                    Ok(AuthMode::Team),
+                    &key,
+                    false,
+                )
+            };
+            report.expect("report").notes
+        };
+        let fine = notes(&mut tx, true);
+        assert!(
+            !fine.iter().any(|n| n.contains("THROUGHLINE_AGENT_KEY")),
+            "{fine:?}"
+        );
+        let cli = notes(&mut tx, false);
+        assert!(cli.iter().any(|n| n == IGNORED_IN_TEAM_MODE), "{cli:?}");
+        // Accounts and notes without the columns the two checks read.
+        tx.batch_execute(
+            "CREATE TEMP TABLE access_users (id bigint); \
+             CREATE TEMP TABLE memory_chunks (id bigint)",
+        )
+        .expect("broken tables");
+        let checks = |notes: Vec<String>| -> Vec<String> {
+            notes
+                .into_iter()
+                .filter(|n| n.starts_with("auth mode:") || n.starts_with("agent access:"))
+                .collect()
+        };
+        assert_eq!(
+            checks(notes(&mut tx, true)),
+            ["auth mode: unavailable", "agent access: unavailable"]
+        );
+        let cli = checks(notes(&mut tx, false));
+        assert_eq!(cli.len(), 2, "{cli:?}");
+        assert!(
+            cli.iter().all(|n| n.contains("db error")),
+            "the CLI shows the error: {cli:?}"
+        );
     }
 
     #[test]
