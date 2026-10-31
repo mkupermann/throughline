@@ -1,5 +1,6 @@
 //! Context pack: header, section headings and cited lines packed into a hard token budget.
 
+use crate::access::{push_visibility, Actor};
 use crate::recall::{
     candidates, fulltext_ranks, query_words, recall, Candidate, CandidateFilter, QueryEmbedding,
     Rank, RecallHit, RecallMode, RecallQuery, MAX_QUERY_CHARS,
@@ -312,6 +313,7 @@ fn candidate_line(section: Section, c: &Candidate, origins: &mut HashMap<i64, Or
 /// A `PackError` comes back as an error with the text of the variant.
 pub fn build_context<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     req: &ContextRequest,
     emb: Option<&QueryEmbedding>,
 ) -> anyhow::Result<ContextPack> {
@@ -330,6 +332,7 @@ pub fn build_context<C: GenericClient>(
     // One query for the current notes of the project; Decisions and OpenQuestions share it.
     // Stale notes belong to the review section only, so they are not shown twice.
     let query = RecallQuery {
+        actor,
         text: "",
         project: Some(req.project),
         mode: RecallMode::Current,
@@ -397,7 +400,7 @@ pub fn build_context<C: GenericClient>(
         lines.push(candidate_line(Section::OpenQuestions, c, &mut origins));
     }
 
-    review(client, req.project, &shown, &mut lines)?;
+    review(client, actor, req.project, &shown, &mut lines)?;
 
     // Sources: the sessions behind the lines that made it into the pack, first appearance first.
     let first = pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?;
@@ -497,13 +500,18 @@ fn sessions<C: GenericClient>(
 /// Notes that are stale or have lapsed and have no successor; replaced and forgotten notes stay out.
 fn review<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     project: &str,
     shown: &HashSet<i64>,
     lines: &mut Vec<Line>,
 ) -> anyhow::Result<()> {
     let skip: Vec<i64> = shown.iter().copied().collect();
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> =
+        vec![&project, &skip, &REVIEW_LIMIT];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        "SELECT mc.id, mc.content, COALESCE(mc.status, 'active'),
+        &format!(
+            "SELECT mc.id, mc.content, COALESCE(mc.status, 'active'),
                 COALESCE(mc.valid_from, mc.source_at, mc.created_at)
            FROM memory_chunks mc
           WHERE (mc.project_name = $1 OR mc.project_name IS NULL)
@@ -511,9 +519,11 @@ fn review<C: GenericClient>(
             AND mc.superseded_by IS NULL
             AND NOT (mc.id = ANY($2))
             AND (mc.status = 'stale' OR mc.expires_at <= now() OR mc.valid_to <= now())
+            AND {seen}
           ORDER BY COALESCE(mc.valid_from, mc.source_at, mc.created_at) DESC, mc.id
-          LIMIT $3",
-        &[&project, &skip, &REVIEW_LIMIT],
+          LIMIT $3"
+        ),
+        &params,
     )?;
     for r in rows {
         let id: i64 = r.get(0);
@@ -854,6 +864,7 @@ mod tests {
     fn ctx<C: GenericClient>(tx: &mut C, project: &str, task: Option<&str>) -> ContextPack {
         build_context(
             tx,
+            &Actor::local(),
             &ContextRequest {
                 project,
                 task,
@@ -1056,7 +1067,7 @@ mod tests {
             task: Some("quokka habitat"),
             budget: 70,
         };
-        let out = build_context(&mut tx, &req, None).unwrap();
+        let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
         let d = decision_lines(&out);
         assert!(out.within_budget);
         assert_eq!(d.len(), 2, "{}", out.text);
@@ -1215,6 +1226,7 @@ mod tests {
         let project = "word ".repeat(200);
         let e = build_context(
             &mut tx,
+            &Actor::local(),
             &ContextRequest {
                 project: &project,
                 task: Some("x"),
@@ -1240,5 +1252,80 @@ mod tests {
                 Utc::now().format("%Y-%m-%d")
             )
         );
+    }
+
+    #[test]
+    fn context_pack_hides() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        db_tx!("context_pack_hides", tx);
+        let (a, b) = two_accounts(&mut tx);
+        let p = proj();
+        let secret = format!("secret {p}");
+        // A decision, an open question and a lapsed note of A's, all private.
+        let owner = a.user_id;
+        note(
+            &mut tx,
+            owner,
+            "private",
+            &format!("we chose {secret}"),
+            "decision",
+            Some(&p),
+        );
+        note(
+            &mut tx,
+            owner,
+            "private",
+            &format!("todo open {secret}?"),
+            "insight",
+            Some(&p),
+        );
+        let lapsed = note(
+            &mut tx,
+            owner,
+            "private",
+            &format!("lapsed {secret}"),
+            "insight",
+            Some(&p),
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET expires_at = now() - interval '1 day' WHERE id = $1",
+            &[&lapsed],
+        )
+        .unwrap();
+        let shared = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("shared decision {p}"),
+            "decision",
+            Some(&p),
+        );
+        let pack = |tx: &mut postgres::Transaction<'_>, actor: &Actor| {
+            build_context(
+                tx,
+                actor,
+                &ContextRequest {
+                    project: &p,
+                    task: Some("secret"),
+                    budget: 8_000,
+                },
+                None,
+            )
+            .unwrap()
+        };
+        let mine = pack(&mut tx, &a);
+        assert!(
+            mine.text.contains(&secret),
+            "A sees her notes: {}",
+            mine.text
+        );
+        let theirs = pack(&mut tx, &b);
+        assert_hidden(&theirs.text, &secret, "the context pack");
+        assert_hidden(
+            &serde_json::to_string(&theirs).unwrap(),
+            &secret,
+            "the pack JSON",
+        );
+        assert!(cited_note_ids(&theirs).contains(&shared), "{}", theirs.text);
     }
 }

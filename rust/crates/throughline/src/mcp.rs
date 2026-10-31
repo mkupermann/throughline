@@ -4,6 +4,7 @@
 //! it lines from stdin, and the `/mcp` handler in `mcp_http` feeds it HTTP
 //! request bodies.
 
+use crate::access::{push_visibility, Actor};
 use crate::mcp_protocol::{
     discover_result, negotiate_legacy, request_version, supported_versions, unsupported_version,
     Transport, METHOD_NOT_FOUND, MODERN_VERSION,
@@ -13,6 +14,7 @@ use crate::server::{
     supersede_memory, validate_supersede, Successor, SupersedeError, SupersedeKind,
 };
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -22,6 +24,8 @@ pub struct McpContext {
     pub transport: Transport,
     /// Hides and refuses the tools that change notes.
     pub read_only: bool,
+    /// Whose notes the tools, resources and prompts show and change.
+    pub actor: Actor,
 }
 
 /// The transport-independent answer: an HTTP-style status and an optional
@@ -104,13 +108,13 @@ pub fn dispatch<C: GenericClient>(client: &mut C, msg: &Value, ctx: &McpContext)
                 "code": -32602,
                 "message": format!("tool {name} is not available: the server is read-only")
             })),
-            _ => call_tool(client, &params),
+            _ => call_tool(client, &ctx.actor, &params),
         },
         "resources/list" => Ok(resources_list()),
         "resources/templates/list" => Ok(resource_templates_list()),
-        "resources/read" => read_resource(client, &params, modern),
+        "resources/read" => read_resource(client, &ctx.actor, &params, modern),
         "prompts/list" => Ok(prompts_list()),
-        "prompts/get" => get_prompt(client, &params),
+        "prompts/get" => get_prompt(client, &ctx.actor, &params),
         "ping" => Ok(json!({})),
         "server/discover" => Ok(discover_result(capabilities(), ctx.transport)),
         other => Err(json!({
@@ -261,7 +265,13 @@ fn tools_list() -> Value {
                             "default": "insight",
                             "description": "Use decision to record a decision"
                         },
-                        "project": { "type": "string" }
+                        "project": { "type": "string" },
+                        "visibility": {
+                            "type": "string",
+                            "enum": ["shared", "private"],
+                            "default": "shared",
+                            "description": "private: only your account sees the note"
+                        }
                     },
                     "required": ["content"]
                 }
@@ -300,12 +310,14 @@ fn tools_list() -> Value {
 /// A context pack for a project; a refused request is -32602, anything else -32000.
 fn build_pack<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     project: &str,
     task: Option<&str>,
     budget: usize,
 ) -> Result<crate::context_pack::ContextPack, Value> {
     crate::context_pack::build_context(
         client,
+        actor,
         &crate::context_pack::ContextRequest {
             project,
             task,
@@ -329,7 +341,11 @@ fn optional_str<'a>(args: &'a Value, name: &str, message: &str) -> Result<Option
     }
 }
 
-fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, Value> {
+fn call_tool<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    params: &Value,
+) -> Result<Value, Value> {
     let name = params
         .get("name")
         .and_then(|n| n.as_str())
@@ -414,6 +430,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 None
             };
             let q = crate::recall::RecallQuery {
+                actor,
                 text: query,
                 project,
                 mode,
@@ -458,7 +475,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                         ))
                     })?,
             };
-            let pack = build_pack(client, project, task, budget)?;
+            let pack = build_pack(client, actor, project, task, budget)?;
             let ids = crate::context_pack::cited_note_ids(&pack);
             crate::lifecycle::record_use_or_log(client, &ids);
             Ok(text_result(serde_json::to_string(&pack).map_err(
@@ -470,7 +487,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .get("id")
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| json!({ "code": -32602, "message": "id required" }))?;
-            let note = crate::server::get_note_json(client, id)
+            let note = crate::server::get_note_json(client, actor, id)
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
                 .ok_or_else(|| json!({ "code": -32000, "message": "memory chunk not found" }))?;
             crate::lifecycle::record_use_or_log(client, &[id]);
@@ -479,7 +496,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
         "conflicts" => {
             let project = optional_str(&args, "project", "project must be a string")?
                 .filter(|p| !p.is_empty());
-            let report = crate::conflicts::find_conflicts(client, project, 0.85)
+            let report = crate::conflicts::find_conflicts(client, actor, project, 0.85)
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
             Ok(text_result(serde_json::to_string(&report).map_err(
                 |e| json!({ "code": -32000, "message": e.to_string() }),
@@ -491,7 +508,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| json!({ "code": -32602, "message": "id required" }))?;
             // keep_memory counts the use inside its own transaction.
-            match crate::server::keep_memory(client, id) {
+            match crate::server::keep_memory(client, actor, id) {
                 Ok(crate::server::KeepOutcome::Kept) => Ok(text_result(
                     json!({ "id": id, "status": "active" }).to_string(),
                 )),
@@ -540,6 +557,9 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             if content.trim().is_empty() {
                 return Err(json!({ "code": -32602, "message": "content required" }));
             }
+            let visibility = optional_str(&args, "visibility", "visibility must be a string")?;
+            let (owner, visibility) = crate::access::new_note_owner(actor, visibility)
+                .map_err(|m| json!({ "code": -32602, "message": m }))?;
             // Every category extraction uses, which is also every label of the
             // database enum; the UI list leaves out `contact`.
             if !crate::extract_memory::CATEGORIES.contains(&category.as_str()) {
@@ -557,12 +577,12 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 .query_one(
                     &format!(
                         r#"
-                    INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at)
-                    VALUES ('mcp_write', $1, $2::text::{category_type}, $3, 0.9, 'active', now())
+                    INSERT INTO memory_chunks (source_type, content, category, project_name, confidence, status, source_at, owner_id, visibility)
+                    VALUES ('mcp_write', $1, $2::text::{category_type}, $3, 0.9, 'active', now(), $4, $5)
                     RETURNING id
                     "#
                     ),
-                    &[&content, &category, &project],
+                    &[&content, &category, &project, &owner, &visibility],
                 )
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?
                 .get(0);
@@ -577,10 +597,16 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
             if ids.is_empty() {
                 return Err(json!({ "code": -32602, "message": "ids required" }));
             }
+            // Only notes the actor sees; the count says nothing about others.
+            let mut params: Vec<&(dyn ToSql + Sync)> = vec![&ids];
+            let seen = push_visibility(actor, "mc", &mut params);
             let n = client
                 .execute(
-                    "UPDATE memory_chunks SET status = 'forgotten', updated_at = now() WHERE id = ANY($1)",
-                    &[&ids],
+                    &format!(
+                        "UPDATE memory_chunks mc SET status = 'forgotten', updated_at = now() \
+                         WHERE id = ANY($1) AND {seen}"
+                    ),
+                    &params,
                 )
                 .map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
             Ok(text_result(format!("{{\"forgotten\":{n}}}")))
@@ -631,7 +657,7 @@ fn call_tool<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, 
                 tags: Vec::new(),
                 source_at: None,
             };
-            match supersede_memory(client, id, &successor) {
+            match supersede_memory(client, actor, id, &successor) {
                 Ok((old_id, new_id)) => Ok(text_result(format!(
                     "{{\"old_id\":{old_id},\"new_id\":{new_id}}}"
                 ))),
@@ -709,6 +735,7 @@ fn percent_decode(s: &str) -> Option<String> {
 
 fn read_resource<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     params: &Value,
     modern: bool,
 ) -> Result<Value, Value> {
@@ -740,14 +767,20 @@ fn read_resource<C: GenericClient>(
         if name.is_empty() {
             return Err(not_found());
         }
-        let pack = build_pack(client, name, None, crate::context_pack::DEFAULT_BUDGET)?;
+        let pack = build_pack(
+            client,
+            actor,
+            name,
+            None,
+            crate::context_pack::DEFAULT_BUDGET,
+        )?;
         crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
         serde_json::to_string(&pack).map_err(|e| internal(e.into()))?
     } else if let Some(id) = uri
         .strip_prefix(NOTE_PREFIX)
         .and_then(|id| id.parse::<i64>().ok())
     {
-        let note = crate::server::get_note_json(client, id)
+        let note = crate::server::get_note_json(client, actor, id)
             .map_err(internal)?
             .ok_or_else(not_found)?;
         crate::lifecycle::record_use_or_log(client, &[id]);
@@ -798,7 +831,11 @@ fn escape_data_block(text: &str) -> String {
     out
 }
 
-fn get_prompt<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value, Value> {
+fn get_prompt<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    params: &Value,
+) -> Result<Value, Value> {
     let invalid = |m: &str| json!({ "code": -32602, "message": m });
     let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
     if name != "before_coding" && name != "handoff" {
@@ -817,7 +854,13 @@ fn get_prompt<C: GenericClient>(client: &mut C, params: &Value) -> Result<Value,
     if let Some(t) = task {
         crate::recall::check_query(t).map_err(|e| invalid(&e))?;
     }
-    let pack = build_pack(client, project, task, crate::context_pack::DEFAULT_BUDGET)?;
+    let pack = build_pack(
+        client,
+        actor,
+        project,
+        task,
+        crate::context_pack::DEFAULT_BUDGET,
+    )?;
     crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
     let instruction = if name == "handoff" {
         format!("Summarise the state of project {project} for the next session.")
@@ -849,6 +892,7 @@ mod tests {
 
     fn ctx() -> McpContext {
         McpContext {
+            actor: Actor::local(),
             transport: Transport::Http,
             read_only: false,
         }
@@ -1163,6 +1207,7 @@ mod tests {
         ] {
             let err = call_tool(
                 &mut tx,
+                &Actor::local(),
                 &json!({ "name": "project_context", "arguments": bad }),
             )
             .expect_err("refused");
@@ -1179,6 +1224,7 @@ mod tests {
         let mut tx = client.transaction().unwrap();
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({
                 "name": "project_context",
                 "arguments": { "project": "word ".repeat(200), "budget": 64 }
@@ -1189,7 +1235,12 @@ mod tests {
     }
 
     fn call_text(client: &mut impl GenericClient, name: &str, args: Value) -> Value {
-        let out = call_tool(client, &json!({ "name": name, "arguments": args })).expect("ok");
+        let out = call_tool(
+            client,
+            &Actor::local(),
+            &json!({ "name": name, "arguments": args }),
+        )
+        .expect("ok");
         let text = out["content"][0]["text"].as_str().expect("text");
         serde_json::from_str(text).expect("json payload")
     }
@@ -1326,6 +1377,7 @@ mod tests {
         };
         let err = call_tool(
             &mut client,
+            &Actor::local(),
             &json!({ "name": "recall", "arguments": { "query": "x", "mode": "foo" } }),
         )
         .unwrap_err();
@@ -1341,6 +1393,7 @@ mod tests {
         for rank in [json!("foo"), json!(5)] {
             let err = call_tool(
                 &mut client,
+                &Actor::local(),
                 &json!({ "name": "recall", "arguments": { "query": "x", "rank": rank } }),
             )
             .err()
@@ -1358,6 +1411,7 @@ mod tests {
         let query = format!("{}x", "abc ".repeat(500));
         let err = call_tool(
             &mut client,
+            &Actor::local(),
             &json!({ "name": "recall", "arguments": { "query": query } }),
         )
         .expect_err("2001 characters must be refused");
@@ -1481,6 +1535,7 @@ mod tests {
         let old = seed_note(&mut tx, start);
         let out = call_tool(
             &mut tx,
+            &Actor::local(),
             &supersede_call(json!({
                 "id": old,
                 "content": "mcp same-day successor",
@@ -1517,7 +1572,7 @@ mod tests {
         ] {
             let mut args = json!({ "id": old, "content": "mcp typed successor" });
             args[field] = value.clone();
-            let err = call_tool(&mut tx, &supersede_call(args))
+            let err = call_tool(&mut tx, &Actor::local(), &supersede_call(args))
                 .expect_err("a non-string must not fall back to the default");
             assert_eq!(err["code"], -32602, "{field}={value}: {err}");
             assert!(
@@ -1536,6 +1591,7 @@ mod tests {
         // null counts as absent
         call_tool(
             &mut tx,
+            &Actor::local(),
             &supersede_call(json!({
                 "id": old, "content": "mcp typed successor", "kind": null, "valid_from": null,
             })),
@@ -1598,6 +1654,7 @@ mod tests {
         assert_eq!(lone["chain"].as_array().unwrap().len(), 1, "{lone}");
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "get_note", "arguments": { "id": -5 } }),
         )
         .expect_err("unknown id");
@@ -1605,6 +1662,7 @@ mod tests {
         assert_eq!(err["message"], "memory chunk not found");
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "get_note", "arguments": { "id": "x" } }),
         )
         .expect_err("bad id");
@@ -1647,6 +1705,7 @@ mod tests {
         .expect("forget");
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "get_note", "arguments": { "id": id } }),
         )
         .expect_err("a forgotten note is not found");
@@ -1664,7 +1723,7 @@ mod tests {
             "a note not served counts nothing"
         );
         // the UI detail still shows it, for restore
-        let detail = crate::server::load_note(&mut tx, id)
+        let detail = crate::server::load_note(&mut tx, &Actor::local(), id)
             .expect("load")
             .expect("row");
         assert_eq!(detail["status"], "forgotten");
@@ -1711,6 +1770,7 @@ mod tests {
         assert_eq!(use_count(&mut tx, other), 0);
         let _ = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "get_note", "arguments": { "id": -5 } }),
         );
     }
@@ -1753,6 +1813,7 @@ mod tests {
         }
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "conflicts", "arguments": { "project": 5 } }),
         )
         .expect_err("non-string project");
@@ -1777,13 +1838,18 @@ mod tests {
         assert_eq!(use_count(&mut tx, id), 1);
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "keep", "arguments": { "id": -5 } }),
         )
         .expect_err("unknown");
         assert_eq!(err["code"], -32000);
         assert_eq!(err["message"], "not_found: memory chunk not found");
-        let err =
-            call_tool(&mut tx, &json!({ "name": "keep", "arguments": {} })).expect_err("no id");
+        let err = call_tool(
+            &mut tx,
+            &Actor::local(),
+            &json!({ "name": "keep", "arguments": {} }),
+        )
+        .expect_err("no id");
         assert_eq!(err["code"], -32602);
     }
 
@@ -1798,6 +1864,7 @@ mod tests {
         replace(&mut tx, old, "mcp keep successor");
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "keep", "arguments": { "id": old } }),
         )
         .expect_err("superseded");
@@ -1885,6 +1952,7 @@ mod tests {
         let mut tx = client.transaction().unwrap();
         let err = call_tool(
             &mut tx,
+            &Actor::local(),
             &json!({ "name": "write", "arguments": { "content": "x", "category": "nonsense" } }),
         )
         .expect_err("unknown category");
@@ -1899,6 +1967,7 @@ mod tests {
         };
         let mut tx = client.transaction().unwrap();
         let ro = McpContext {
+            actor: Actor::local(),
             transport: Transport::Http,
             read_only: true,
         };
@@ -2273,5 +2342,164 @@ mod tests {
             "{text}"
         );
         assert!(text[open..].contains(&tag), "{text}");
+    }
+
+    #[test]
+    fn mcp_tools_resources_prompts_hide() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_tools_resources_prompts_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("mcp-{tag}");
+        // B asks with the probe word; the secret must not come back.
+        let (secret, probe) = (format!("secret{tag}"), format!("probe{tag}"));
+        let p = Some(project.as_str());
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("we chose {probe} {secret}?"),
+            "decision",
+            p,
+        );
+        let shared = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("shared rule {tag}"),
+            "decision",
+            p,
+        );
+        let as_actor = |actor: &Actor| McpContext {
+            actor: actor.clone(),
+            transport: Transport::Http,
+            read_only: false,
+        };
+        let call =
+            |tx: &mut postgres::Transaction<'_>, ctx: &McpContext, method: &str, params: Value| {
+                dispatch(
+                    tx,
+                    &json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }),
+                    ctx,
+                )
+                .body
+                .expect("body")
+            };
+        let tool =
+            |name: &str, args: Value| ("tools/call", json!({ "name": name, "arguments": args }));
+        let reads = [
+            tool("recall", json!({ "query": probe })),
+            tool(
+                "recall",
+                json!({ "query": format!("rule {tag}"), "mode": "associative" }),
+            ),
+            tool(
+                "project_context",
+                json!({ "project": project, "task": probe }),
+            ),
+            tool("get_note", json!({ "id": private })),
+            tool("get_note", json!({ "id": shared })),
+            tool("conflicts", json!({ "project": project })),
+            tool("search", json!({ "query": probe })),
+            (
+                "resources/read",
+                json!({ "uri": format!("throughline://note/{private}") }),
+            ),
+            (
+                "resources/read",
+                json!({ "uri": format!("throughline://project/{project}/context") }),
+            ),
+            (
+                "prompts/get",
+                json!({ "name": "before_coding", "arguments": { "project": project, "task": probe } }),
+            ),
+            (
+                "prompts/get",
+                json!({ "name": "handoff", "arguments": { "project": project } }),
+            ),
+        ];
+        // A, the owner, gets her note through the tool, the resource and the prompt.
+        let mine = as_actor(&a);
+        for i in [3, 7, 10] {
+            let body = call(&mut tx, &mine, reads[i].0, reads[i].1.clone());
+            assert!(body.to_string().contains(&secret), "{}: {body}", reads[i].0);
+        }
+        let theirs = as_actor(&b);
+        for (method, params) in &reads {
+            let body = call(&mut tx, &theirs, method, params.clone());
+            assert_hidden(&body.to_string(), &secret, &format!("{method} {params}"));
+        }
+        // B cannot change the note either; every refusal looks like a missing id.
+        for (name, args) in [
+            ("keep", json!({ "id": private })),
+            ("supersede", json!({ "id": private, "content": "mine now" })),
+        ] {
+            let body = call(
+                &mut tx,
+                &theirs,
+                "tools/call",
+                json!({ "name": name, "arguments": args }),
+            );
+            assert!(
+                body["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("not found"),
+                "{body}"
+            );
+        }
+        let body = call(
+            &mut tx,
+            &theirs,
+            "tools/call",
+            json!({ "name": "forget", "arguments": { "ids": [private] } }),
+        );
+        assert_eq!(
+            body["result"]["content"][0]["text"], "{\"forgotten\":0}",
+            "{body}"
+        );
+        let status: String = tx
+            .query_one(
+                "SELECT status FROM memory_chunks WHERE id = $1",
+                &[&private],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(status, "active");
+    }
+
+    #[test]
+    fn mcp_write_sets_owner_and_visibility() {
+        use crate::access::team_test::two_accounts;
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_write_sets_owner_and_visibility: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let (a, _) = two_accounts(&mut tx);
+        for (visibility, owner) in [(None, a.user_id), (Some("private"), a.user_id)] {
+            let mut args = json!({ "content": "a note of A" });
+            if let Some(v) = visibility {
+                args["visibility"] = json!(v);
+            }
+            let out = call_tool(&mut tx, &a, &json!({ "name": "write", "arguments": args }))
+                .expect("write");
+            let text = out["content"][0]["text"].as_str().unwrap();
+            let id = serde_json::from_str::<Value>(text).unwrap()["id"]
+                .as_i64()
+                .unwrap();
+            let row = tx
+                .query_one(
+                    "SELECT owner_id, visibility FROM memory_chunks WHERE id = $1",
+                    &[&id],
+                )
+                .unwrap();
+            assert_eq!(row.get::<_, Option<i64>>(0), owner);
+            assert_eq!(row.get::<_, String>(1), visibility.unwrap_or("shared"));
+        }
     }
 }

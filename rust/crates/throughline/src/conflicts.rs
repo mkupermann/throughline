@@ -1,6 +1,8 @@
 //! Cross-tool conflict detection (read-only).
 
+use crate::access::{push_visibility, Actor};
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
 
@@ -37,14 +39,25 @@ const CONTRADICTION_MARKERS: &[&str] = &[
 
 pub fn find_conflicts<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     project: Option<&str>,
     min_similarity: f32,
 ) -> Result<ConflictReport> {
     let mut report = ConflictReport::default();
+    // Both sides of a pair must be notes the actor sees. Each query binds
+    // the project as $1, then the filter of the older and the newer side.
+    let pair = |old: &str, new: &str| -> (Vec<&(dyn ToSql + Sync)>, String) {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&project];
+        let seen_old = push_visibility(actor, old, &mut params);
+        let seen_new = push_visibility(actor, new, &mut params);
+        (params, format!("{seen_old} AND {seen_new}"))
+    };
 
     // 1. Documented supersession (cross-tool when both sides map to different source tools).
+    let (params, seen) = pair("o", "n");
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT o.id, o.content, o.project_name,
                n.id, n.content,
                COALESCE(co.source_tool, o.source_type, ''),
@@ -56,9 +69,11 @@ pub fn find_conflicts<C: GenericClient>(
         WHERE o.superseded_by IS NOT NULL
           AND ($1::text IS NULL OR o.project_name = $1)
           AND COALESCE(co.source_tool, o.source_type, '') <> COALESCE(cn.source_tool, n.source_type, '')
+          AND {seen}
         LIMIT 200
-        "#,
-        &[&project],
+        "#
+        ),
+        &params,
     )?;
     for r in rows {
         report.conflicts.push(Conflict {
@@ -74,8 +89,10 @@ pub fn find_conflicts<C: GenericClient>(
     }
 
     // 2. Contradiction-marker pairs in the same project/category.
+    let (params, seen) = pair("a", "b");
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT a.id, a.content, a.project_name,
                b.id, b.content
         FROM memory_chunks a
@@ -94,9 +111,11 @@ pub fn find_conflicts<C: GenericClient>(
             OR lower(b.content) LIKE '%stattdessen%'
             OR lower(b.content) LIKE '%nicht mehr%'
           )
+          AND {seen}
         LIMIT 100
-        "#,
-        &[&project],
+        "#
+        ),
+        &params,
     )?;
     for r in rows {
         let b: String = r.get(4);
@@ -119,8 +138,10 @@ pub fn find_conflicts<C: GenericClient>(
     }
 
     // 3. Stale-tool drift: old unused chunk vs newer chunk same project/category.
+    let (params, seen) = pair("o", "n");
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT o.id, o.content, o.project_name,
                n.id, n.content
         FROM memory_chunks o
@@ -133,9 +154,11 @@ pub fn find_conflicts<C: GenericClient>(
           AND n.created_at > o.created_at
           AND COALESCE(o.access_count, 0) = 0
           AND ($1::text IS NULL OR o.project_name = $1)
+          AND {seen}
         LIMIT 100
-        "#,
-        &[&project],
+        "#
+        ),
+        &params,
     )?;
     for r in rows {
         report.conflicts.push(Conflict {
@@ -160,5 +183,58 @@ mod tests {
         let markers = super::CONTRADICTION_MARKERS;
         assert!(markers.contains(&"no longer"));
         assert!(markers.contains(&"stattdessen"));
+    }
+
+    #[test]
+    fn conflicts_hide() {
+        use super::*;
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping conflicts_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let project = format!("cf-{}", uuid::Uuid::new_v4().simple());
+        let secret = format!("secret {project}");
+        let p = Some(project.as_str());
+        // A shared decision, A's private reversal of it (a marker pair) and
+        // a documented replacement across tools by the private note.
+        let shared = note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("use diesel {project}"),
+            "decision",
+            p,
+        );
+        let private = note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("no longer diesel, instead sqlx {secret}"),
+            "decision",
+            p,
+        );
+        tx.execute(
+            "UPDATE memory_chunks SET superseded_by = $2, source_type = 'ui_pin' WHERE id = $1",
+            &[&shared, &private],
+        )
+        .expect("chain");
+        let mine = find_conflicts(&mut tx, &a, p, 0.85).expect("conflicts");
+        assert!(
+            mine.conflicts.iter().any(|c| c.right_id == Some(private)),
+            "A sees the pair"
+        );
+        let theirs = find_conflicts(&mut tx, &b, p, 0.85).expect("conflicts");
+        assert_hidden(
+            &serde_json::to_string(&theirs).unwrap(),
+            &secret,
+            "the conflicts",
+        );
+        assert!(theirs
+            .conflicts
+            .iter()
+            .all(|c| c.left_id != Some(private) && c.right_id != Some(private)));
     }
 }

@@ -1,7 +1,9 @@
 //! Self-reflecting memory maintenance (dedup / contradictions / stale).
 
+use crate::access::{push_visibility, Actor};
 use crate::llm::{self, GenerationBackend};
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 
 #[derive(Debug, Default)]
@@ -21,30 +23,44 @@ impl ReflectSummary {
     }
 }
 
-/// Mark chunks expired / stale when their expiry has passed.
-pub fn expire_stale<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectSummary> {
+/// Mark chunks expired / stale when their expiry has passed. Like every
+/// reflect mode it works on the notes `actor` sees; the job passes
+/// [`Actor::shared_only`].
+pub fn expire_stale<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    dry_run: bool,
+) -> Result<ReflectSummary> {
     let mut summary = ReflectSummary {
         mode: "stale".into(),
         dry_run,
         ..Default::default()
     };
+    let mut params: Vec<&(dyn ToSql + Sync)> = Vec::new();
+    let seen = push_visibility(actor, "mc", &mut params);
     if dry_run {
         let row = client.query_one(
-            "SELECT COUNT(*) FROM memory_chunks WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < now()",
-            &[],
+            &format!(
+                "SELECT COUNT(*) FROM memory_chunks mc WHERE status = 'active' \
+                 AND expires_at IS NOT NULL AND expires_at < now() AND {seen}"
+            ),
+            &params,
         )?;
         summary.examined = row.get::<_, i64>(0) as usize;
         return Ok(summary);
     }
     let n = client.execute(
-        r#"
-        UPDATE memory_chunks
+        &format!(
+            r#"
+        UPDATE memory_chunks mc
         SET status = 'stale', updated_at = now()
         WHERE status = 'active'
           AND expires_at IS NOT NULL
           AND expires_at < now()
-        "#,
-        &[],
+          AND {seen}
+        "#
+        ),
+        &params,
     )?;
     summary.examined = n as usize;
     summary.acted = n as usize;
@@ -52,24 +68,34 @@ pub fn expire_stale<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<R
 }
 
 /// Collapse near-duplicate (category, project, content-prefix) groups into
-/// one new `consolidation` note each. With `dry_run` only the groups are counted.
-pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectSummary> {
+/// one new `consolidation` note each. A group holds notes of one visibility
+/// (private ones of one owner). With `dry_run` only the groups are counted.
+pub fn dedup<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    dry_run: bool,
+) -> Result<ReflectSummary> {
     let mut summary = ReflectSummary {
         mode: "dedup".into(),
         dry_run,
         ..Default::default()
     };
+    let mut params: Vec<&(dyn ToSql + Sync)> = Vec::new();
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT project_name, category, left(content, 80) AS head,
                array_agg(id ORDER BY id), array_agg(content ORDER BY id)
-        FROM memory_chunks
-        WHERE status = 'active'
-        GROUP BY project_name, category, left(content, 80)
+        FROM memory_chunks mc
+        WHERE status = 'active' AND {seen}
+        GROUP BY project_name, category, left(content, 80), visibility,
+                 CASE WHEN visibility = 'private' THEN owner_id END
         HAVING COUNT(*) > 1
         LIMIT 100
-        "#,
-        &[],
+        "#
+        ),
+        &params,
     )?;
     for row in rows {
         let ids: Vec<i64> = row.get(3);
@@ -85,7 +111,7 @@ pub fn dedup<C: GenericClient>(client: &mut C, dry_run: bool) -> Result<ReflectS
         // One new note holds the longest text; the duplicates are closed like
         // a supersede. No existing note changes its content.
         let text = crate::lifecycle::longest_text(contents.iter().map(String::as_str));
-        match crate::lifecycle::consolidate(client, &ids, text, None) {
+        match crate::lifecycle::consolidate(client, actor, &ids, text, None) {
             Ok(_) => summary.acted += 1,
             Err(e) => {
                 eprintln!("dedup: group {ids:?} not merged: {e}");
@@ -104,6 +130,7 @@ Consider if it says the opposite of what was previously chosen. Answer YES or NO
 /// Flag possible contradictions via the generation backend (opt-in, limited).
 pub fn contradictions<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     backend: &GenerationBackend,
     dry_run: bool,
     limit: usize,
@@ -114,14 +141,20 @@ pub fn contradictions<C: GenericClient>(
         dry_run,
         ..Default::default()
     };
+    let limit = limit as i64;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&limit];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        r#"
-        SELECT id, content, category FROM memory_chunks
+        &format!(
+            r#"
+        SELECT id, content, category FROM memory_chunks mc
         WHERE status = 'active' AND category IN ('decision','pattern','preference')
+          AND {seen}
         ORDER BY created_at DESC
         LIMIT $1::bigint
-        "#,
-        &[&(limit as i64)],
+        "#
+        ),
+        &params,
     )?;
     summary.examined = rows.len();
     for row in rows {
@@ -152,13 +185,17 @@ pub fn is_contradiction(answer: &str) -> bool {
 /// Run all maintenance modes.
 pub fn run_all<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     backend: Option<&GenerationBackend>,
     dry_run: bool,
     limit: usize,
 ) -> Result<Vec<ReflectSummary>> {
-    let mut out = vec![dedup(client, dry_run)?, expire_stale(client, dry_run)?];
+    let mut out = vec![
+        dedup(client, actor, dry_run)?,
+        expire_stale(client, actor, dry_run)?,
+    ];
     if let Some(b) = backend {
-        out.push(contradictions(client, b, dry_run, limit)?);
+        out.push(contradictions(client, actor, b, dry_run, limit)?);
     }
     Ok(out)
 }
@@ -249,7 +286,7 @@ mod tests {
         };
         let first = seed("(first)", "2026-01-01T00:00:00Z");
         let second = seed("(second)", "2026-02-01T00:00:00Z");
-        dedup(&mut tx, false).expect("dedup");
+        dedup(&mut tx, &Actor::shared_only(), false).expect("dedup");
 
         let new_note: Option<i64> = tx
             .query_opt(
@@ -336,7 +373,7 @@ mod tests {
         let long = format!("{head} because the weekend on-call is thin");
         let a = seed_dup(&mut tx, &short);
         let b = seed_dup(&mut tx, &long);
-        dedup(&mut tx, false).expect("dedup");
+        dedup(&mut tx, &Actor::shared_only(), false).expect("dedup");
 
         let rows = contents(&mut tx, &format!("{tag}%"));
         for (id, content, _) in &rows {
@@ -375,10 +412,10 @@ mod tests {
         let head = format!("{tag} backups run nightly at two and are kept for fourteen days");
         seed_dup(&mut tx, &format!("{head} (a)"));
         seed_dup(&mut tx, &format!("{head} (b)"));
-        dedup(&mut tx, false).expect("first dedup");
+        dedup(&mut tx, &Actor::shared_only(), false).expect("first dedup");
         let after_first = contents(&mut tx, &format!("{tag}%"));
         assert_eq!(after_first.len(), 3);
-        dedup(&mut tx, false).expect("second dedup");
+        dedup(&mut tx, &Actor::shared_only(), false).expect("second dedup");
         let after_second = contents(&mut tx, &format!("{tag}%"));
         assert_eq!(
             after_second, after_first,
@@ -409,7 +446,7 @@ mod tests {
             &[&bad_b, &bad_a],
         )
         .expect("mark replaced");
-        let summary = dedup(&mut tx, false).expect("dedup goes on");
+        let summary = dedup(&mut tx, &Actor::shared_only(), false).expect("dedup goes on");
         assert_eq!(summary.failed, 1, "{summary:?}");
         let status = |tx: &mut postgres::Transaction, id: i64| -> String {
             tx.query_one("SELECT status FROM memory_chunks WHERE id = $1", &[&id])

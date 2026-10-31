@@ -1,6 +1,8 @@
 //! R6 — agent accountability: what Throughline did, what agents wrote.
 
+use crate::access::{push_visibility, Actor};
 use anyhow::Result;
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use serde::Serialize;
 
@@ -24,30 +26,46 @@ pub struct AuditReport {
 }
 
 /// Summarise Throughline self-actions and agent (MCP) writes.
-pub fn audit<C: GenericClient>(client: &mut C, since_days: i32) -> Result<AuditReport> {
+pub fn audit<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    since_days: i32,
+) -> Result<AuditReport> {
     let mut notes = Vec::new();
     let since = format!("{since_days} days");
+    // Note counts bind the window as $1 and the actor's filter after it.
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&since];
+    let seen = push_visibility(actor, "mc", &mut params);
 
     let mcp_writes: i64 = client
         .query_one(
-            "SELECT COUNT(*) FROM memory_chunks WHERE source_type = 'mcp_write' AND created_at > now() - ($1 || ' days')::interval",
-            &[&since],
+            &format!(
+                "SELECT COUNT(*) FROM memory_chunks mc WHERE source_type = 'mcp_write' \
+                 AND created_at > now() - ($1 || ' days')::interval AND {seen}"
+            ),
+            &params,
         )
         .map(|r| r.get(0))
         .unwrap_or(0);
 
     let forgotten: i64 = client
         .query_one(
-            "SELECT COUNT(*) FROM memory_chunks WHERE status = 'forgotten' AND created_at > now() - ($1 || ' days')::interval",
-            &[&since],
+            &format!(
+                "SELECT COUNT(*) FROM memory_chunks mc WHERE status = 'forgotten' \
+                 AND created_at > now() - ($1 || ' days')::interval AND {seen}"
+            ),
+            &params,
         )
         .map(|r| r.get(0))
         .unwrap_or(0);
 
     let superseded: i64 = client
         .query_one(
-            "SELECT COUNT(*) FROM memory_chunks WHERE superseded_at IS NOT NULL AND superseded_at > now() - ($1 || ' days')::interval",
-            &[&since],
+            &format!(
+                "SELECT COUNT(*) FROM memory_chunks mc WHERE superseded_at IS NOT NULL \
+                 AND superseded_at > now() - ($1 || ' days')::interval AND {seen}"
+            ),
+            &params,
         )
         .map(|r| r.get(0))
         .unwrap_or(0);
@@ -86,16 +104,19 @@ pub fn audit<C: GenericClient>(client: &mut C, since_days: i32) -> Result<AuditR
 
     // MCP writes by project
     if let Ok(rows) = client.query(
-        r#"
+        &format!(
+            r#"
         SELECT COALESCE(project_name, '(none)'), COUNT(*), MAX(created_at)
-        FROM memory_chunks
+        FROM memory_chunks mc
         WHERE source_type = 'mcp_write'
           AND created_at > now() - ($1 || ' days')::interval
+          AND {seen}
         GROUP BY 1
         ORDER BY 2 DESC
         LIMIT 20
-        "#,
-        &[&since],
+        "#
+        ),
+        &params,
     ) {
         for r in rows {
             entries.push(AuditEntry {

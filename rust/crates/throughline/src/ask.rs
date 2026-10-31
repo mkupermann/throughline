@@ -3,6 +3,7 @@
 //! Fail-soft: when generation is unavailable, returns retrieved excerpts with
 //! source references so the caller still gets useful context.
 
+use crate::access::Actor;
 use crate::llm::{self, GenerationBackend};
 use crate::search::{self, SearchHit};
 use anyhow::Result;
@@ -75,15 +76,35 @@ fn fail_soft_listing(sources: &[SourceRef], model_label: &str, err: Option<&str>
 
 pub fn ask<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     question: &str,
     backend: &GenerationBackend,
     limit: i32,
 ) -> Result<AskAnswer> {
     llm::ensure_local_or_allowed(backend)?;
+    ask_with(client, actor, question, backend, limit, |prompt| {
+        llm::complete(
+            backend,
+            Some("You answer from local memory excerpts. Cite [n] for each claim."),
+            prompt,
+        )
+    })
+}
+
+/// [`ask`] with the model call passed in: the prompt holds only excerpts
+/// of what `actor` may see.
+fn ask_with<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    question: &str,
+    backend: &GenerationBackend,
+    limit: i32,
+    generate: impl FnOnce(&str) -> Result<String>,
+) -> Result<AskAnswer> {
     // Hybrid retrieval: semantic (when embeddings exist) + lexical + memory/instructions.
     // Pure lexical `search_from` misses natural-language questions (whole-string ILIKE).
     let embed = crate::embedding::resolve().ok();
-    let hits: Vec<SearchHit> = search::hybrid(client, embed.as_ref(), question, limit)?;
+    let hits: Vec<SearchHit> = search::hybrid(client, actor, embed.as_ref(), question, limit)?;
     let (excerpts, sources) = build_excerpts(&hits);
 
     if sources.is_empty() {
@@ -100,11 +121,7 @@ pub fn ask<C: GenericClient>(
     let prompt = format!(
         "Answer using ONLY the excerpts. Cite sources as [n]. If the excerpts do not contain the answer, say so.\n\nQuestion: {question}\n\nExcerpts:\n{excerpts}"
     );
-    match llm::complete(
-        backend,
-        Some("You answer from local memory excerpts. Cite [n] for each claim."),
-        &prompt,
-    ) {
+    match generate(&prompt) {
         Ok(answer) => {
             // Trim and clean the answer; ensure it cites at least one source.
             let clean = answer.trim().to_string();
@@ -223,10 +240,62 @@ mod tests {
             model: "m".into(),
             api_key: None,
         };
-        let err = ask(&mut client, "q", &backend, 5).unwrap_err();
+        let err = ask(&mut client, &Actor::local(), "q", &backend, 5).unwrap_err();
         assert!(
             err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn ask_sources_hide() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping ask_sources_hide: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, b) = two_accounts(&mut tx);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let secret = format!("secret-{tag}");
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("plan {tag} {secret}"),
+            "decision",
+            None,
+        );
+        note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("plan {tag} shared"),
+            "decision",
+            None,
+        );
+        // The model is a closure that keeps the prompt it was given.
+        let backend = GenerationBackend {
+            kind: llm::BackendKind::Ollama,
+            label: "fake".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            model: "fake".into(),
+            api_key: None,
+        };
+        let mut asked = |actor: &Actor| {
+            let mut prompt = String::new();
+            let answer = ask_with(&mut tx, actor, &tag, &backend, 12, |p| {
+                prompt = p.to_string();
+                Ok("from [1]".into())
+            })
+            .expect("ask");
+            (prompt, answer)
+        };
+        let (prompt, _) = asked(&a);
+        assert!(prompt.contains(&secret), "A's own note reaches her prompt");
+        let (prompt, answer) = asked(&b);
+        assert_hidden(&prompt, &secret, "the prompt");
+        assert_hidden(&format!("{:?}", answer.sources), &secret, "the sources");
+        assert!(prompt.contains(&format!("plan {tag} shared")), "{prompt}");
     }
 }

@@ -1,7 +1,9 @@
 //! Write distilled memory back into the project's own instruction file
 //! (AGENTS.md / CLAUDE.md) so the next agent session starts with it.
 
+use crate::access::{push_visibility, Actor};
 use anyhow::{Context, Result};
+use postgres::types::ToSql;
 use postgres::GenericClient;
 use std::path::{Path, PathBuf};
 
@@ -75,6 +77,7 @@ fn merge_block(existing: String, block: &str) -> String {
 /// in this repository's file.
 pub fn writeback<C: GenericClient>(
     client: &mut C,
+    actor: &Actor,
     root: &Path,
     project: Option<&str>,
     limit: usize,
@@ -91,16 +94,22 @@ pub fn writeback<C: GenericClient>(
                 )
             })?,
     };
+    let limit = limit as i64;
+    let mut params: Vec<&(dyn ToSql + Sync)> = vec![&project, &limit];
+    let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        r#"
-        SELECT content FROM memory_chunks
+        &format!(
+            r#"
+        SELECT content FROM memory_chunks mc
         WHERE status = 'active'
           AND category IN ('decision', 'preference', 'project_context', 'workflow', 'error_solution')
           AND project_name = $1
+          AND {seen}
         ORDER BY created_at DESC
         LIMIT $2::bigint
-        "#,
-        &[&project, &(limit as i64)],
+        "#
+        ),
+        &params,
     )?;
     let items: Vec<String> = rows
         .into_iter()
@@ -197,9 +206,47 @@ mod tests {
         let root = dir.path().join(&mine);
         std::fs::create_dir_all(&root).unwrap();
 
-        let summary = writeback(&mut tx, &root, None, 1000).expect("writeback");
+        let summary =
+            writeback(&mut tx, &Actor::shared_only(), &root, None, 1000).expect("writeback");
         let text = std::fs::read_to_string(&summary.file).unwrap();
         assert!(text.contains(&format!("mine note {tag}")), "{text}");
         assert!(!text.contains(&format!("other note {tag}")), "{text}");
+    }
+
+    #[test]
+    fn writeback_skips_private() {
+        use crate::access::team_test::{assert_hidden, note, two_accounts};
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping writeback_skips_private: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let (a, _) = two_accounts(&mut tx);
+        let project = format!("wb-{}", uuid::Uuid::new_v4().simple());
+        let secret = format!("secret {project}");
+        let p = Some(project.as_str());
+        note(
+            &mut tx,
+            a.user_id,
+            "private",
+            &format!("decided {secret}"),
+            "decision",
+            p,
+        );
+        note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("shared rule {project}"),
+            "decision",
+            p,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let summary =
+            writeback(&mut tx, &Actor::shared_only(), dir.path(), p, 1000).expect("writeback");
+        let text = std::fs::read_to_string(&summary.file).unwrap();
+        assert!(text.contains(&format!("shared rule {project}")), "{text}");
+        assert_hidden(&text, &secret, "AGENTS.md");
+        assert_eq!(summary.items_written, 1);
     }
 }

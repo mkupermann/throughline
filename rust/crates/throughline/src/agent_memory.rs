@@ -254,9 +254,15 @@ fn ingest_agent_memory_from<C: GenericClient>(
                         tags,
                         source_at: Some(mtime),
                     };
-                    crate::server::supersede_memory(&mut tx, id, &successor)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .context("supersede agent memory chunk")?;
+                    // An import job: the successor is shared and has no owner.
+                    crate::server::supersede_memory(
+                        &mut tx,
+                        &crate::access::Actor::shared_only(),
+                        id,
+                        &successor,
+                    )
+                    .map_err(|e| anyhow::anyhow!("{e}"))
+                    .context("supersede agent memory chunk")?;
                 }
                 None => {
                     tx.execute(
@@ -298,10 +304,11 @@ fn ingest_agent_memory_from<C: GenericClient>(
     Ok((files_scanned, upserted))
 }
 
-/// List agent-memory (and other) chunks for the GUI.
+/// List agent-memory (and other) chunks for the GUI: the notes `actor` sees.
 #[allow(clippy::type_complexity)]
 pub fn list_memory<C: GenericClient>(
     client: &mut C,
+    actor: &crate::access::Actor,
     q: Option<String>,
     category: Option<String>,
     limit: i32,
@@ -317,24 +324,34 @@ pub fn list_memory<C: GenericClient>(
     )>,
 )> {
     let q_pat = q.map(|s| format!("%{}%", s.replace('%', "\\%")));
+    let mut count_params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&q_pat, &category];
+    let count_seen = crate::access::push_visibility(actor, "mc", &mut count_params);
     let total: i64 = client
         .query_one(
-            "SELECT COUNT(*)::bigint FROM memory_chunks
-             WHERE status = 'active'
-               AND ($1::text IS NULL OR content ILIKE $1 OR COALESCE(project_name,'') ILIKE $1)
-               AND ($2::text IS NULL OR category::text = $2)",
-            &[&q_pat, &category],
+            &format!(
+                "SELECT COUNT(*)::bigint FROM memory_chunks mc
+                 WHERE status = 'active'
+                   AND ($1::text IS NULL OR content ILIKE $1 OR COALESCE(project_name,'') ILIKE $1)
+                   AND ($2::text IS NULL OR category::text = $2) AND {count_seen}"
+            ),
+            &count_params,
         )?
         .get(0);
+    let (limit, offset) = (limit as i64, offset as i64);
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> =
+        vec![&q_pat, &category, &limit, &offset];
+    let seen = crate::access::push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        "SELECT id, left(content, 280), category::text, project_name, created_at
-         FROM memory_chunks
-         WHERE status = 'active'
-           AND ($1::text IS NULL OR content ILIKE $1 OR COALESCE(project_name,'') ILIKE $1)
-           AND ($2::text IS NULL OR category::text = $2)
-         ORDER BY created_at DESC
-         LIMIT $3 OFFSET $4",
-        &[&q_pat, &category, &(limit as i64), &(offset as i64)],
+        &format!(
+            "SELECT id, left(content, 280), category::text, project_name, created_at
+             FROM memory_chunks mc
+             WHERE status = 'active'
+               AND ($1::text IS NULL OR content ILIKE $1 OR COALESCE(project_name,'') ILIKE $1)
+               AND ($2::text IS NULL OR category::text = $2) AND {seen}
+             ORDER BY created_at DESC
+             LIMIT $3 OFFSET $4"
+        ),
+        &params,
     )?;
     let items = rows
         .into_iter()
@@ -343,10 +360,12 @@ pub fn list_memory<C: GenericClient>(
     Ok((total, items))
 }
 
-/// Full chunk body for detail view.
+/// Full chunk body for detail view; `None` for an unknown id or a note
+/// `actor` does not see.
 #[allow(clippy::type_complexity)]
 pub fn get_memory<C: GenericClient>(
     client: &mut C,
+    actor: &crate::access::Actor,
     id: i64,
 ) -> Result<
     Option<(
@@ -356,10 +375,14 @@ pub fn get_memory<C: GenericClient>(
         chrono::DateTime<chrono::Utc>,
     )>,
 > {
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&id];
+    let seen = crate::access::push_visibility(actor, "mc", &mut params);
     let rows = client.query(
-        "SELECT content, category::text, project_name, created_at
-         FROM memory_chunks WHERE id = $1",
-        &[&id],
+        &format!(
+            "SELECT content, category::text, project_name, created_at
+             FROM memory_chunks mc WHERE id = $1 AND {seen}"
+        ),
+        &params,
     )?;
     Ok(rows
         .into_iter()
@@ -562,6 +585,7 @@ mod tests {
         let ui_text = "Use SQLite for the local store, PostgreSQL only on the server.";
         let (_, ui) = crate::server::supersede_memory(
             &mut tx,
+            &crate::access::Actor::local(),
             imported,
             &crate::server::Successor {
                 content: ui_text,
