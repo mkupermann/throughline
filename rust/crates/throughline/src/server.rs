@@ -3677,7 +3677,7 @@ struct PasswordBody {
     new: String,
 }
 
-/// The account a sign-in checks against.
+/// The account a password check ran against.
 struct StoredAccount {
     id: i64,
     display_name: String,
@@ -3686,24 +3686,36 @@ struct StoredAccount {
     password_hash: String,
 }
 
-/// `POST /api/login {username, password}`. One password check for every
-/// outcome: an unknown, disabled or locked account is checked against
-/// [`crate::access::DUMMY_HASH`], and all three answer like a wrong
-/// password (a locked one with 429).
-async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
-    if state.auth_mode == crate::access::AuthMode::Local {
-        return local_mode();
-    }
-    let Ok(LoginBody { username, password }) = serde_json::from_slice(&body) else {
-        return invalid_body("username and password");
-    };
+/// What a password check found.
+enum Credentials {
+    /// The right password for an enabled account; its count is cleared.
+    Valid(StoredAccount),
+    /// Wrong password, unknown or disabled account: one answer for all.
+    Invalid,
+    /// More than 10 attempts on the account within 15 minutes, or more
+    /// than 60 checks server-wide this minute.
+    TooMany,
+}
+
+/// The one way a password is checked, for sign-in and password change:
+/// the server-wide limit (refused before any hashing), then one short
+/// `with_db` that sweeps, reserves the attempt and reads the account, then
+/// exactly one `verify_password` off the lock, against
+/// [`crate::access::DUMMY_HASH`] when the account is unknown, disabled or
+/// over its limit, so all of these take the same time.
+#[allow(clippy::result_large_err)]
+async fn check_credentials(
+    state: &AppState,
+    username: &str,
+    password: String,
+) -> Result<Credentials, Response> {
     if !state.login.admit() {
-        return too_many_attempts();
+        return Ok(Credentials::TooMany);
     }
-    let name = username.clone();
-    let looked_up = with_db(&state, move |client| {
+    let name = username.to_string();
+    let (allowed, account) = with_db(state, move |client| {
         crate::access::sweep_expired(client)?;
-        let allowed = crate::access::login_allowed(client, &name)?;
+        let allowed = crate::access::reserve_attempt(client, &name)?;
         let account = client
             .query_opt(
                 "SELECT id, display_name, role, enabled, password_hash \
@@ -3719,45 +3731,55 @@ async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -
             });
         Ok((allowed, account))
     })
-    .await;
-    let (allowed, account) = match looked_up {
-        Ok(found) => found,
-        Err(resp) => return resp,
-    };
-    let checked = account
+    .await?;
+    let target = account
         .as_ref()
         .filter(|a| a.enabled && allowed)
         .map(|a| a.password_hash.clone());
-    let target = checked.clone();
-    let outcome = off_the_lock(&state, move || {
+    let ok = off_the_lock(state, move || {
         let hash = target.as_deref().unwrap_or(crate::access::DUMMY_HASH);
-        let ok = crate::access::verify_password(&password, hash);
-        // A Python-era hash is replaced once the password is known.
-        let rehash = (ok && crate::access::is_legacy_hash(hash))
-            .then(|| crate::access::hash_password(&password).ok())
-            .flatten();
-        (ok, rehash)
+        crate::access::verify_password(&password, hash)
     })
-    .await;
-    let (ok, rehash) = match outcome {
-        Ok(result) => result,
+    .await?;
+    if !allowed {
+        return Ok(Credentials::TooMany);
+    }
+    let Some(account) = account.filter(|a| ok && a.enabled) else {
+        return Ok(Credentials::Invalid);
+    };
+    let name = username.to_string();
+    with_db(state, move |client| {
+        crate::access::clear_failures(client, &name)
+    })
+    .await?;
+    Ok(Credentials::Valid(account))
+}
+
+/// `POST /api/login {username, password}` through [`check_credentials`].
+async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
+    if state.auth_mode == crate::access::AuthMode::Local {
+        return local_mode();
+    }
+    let Ok(LoginBody { username, password }) = serde_json::from_slice(&body) else {
+        return invalid_body("username and password");
+    };
+    let account = match check_credentials(&state, &username, password.clone()).await {
+        Ok(Credentials::Valid(account)) => account,
+        Ok(Credentials::Invalid) => return unauthorized("invalid credentials"),
+        Ok(Credentials::TooMany) => return too_many_attempts(),
         Err(resp) => return resp,
     };
-    if !allowed {
-        return too_many_attempts();
-    }
-    let (true, Some(account), Some(checked)) = (ok, account, checked) else {
-        let name = username.clone();
-        return match with_db(&state, move |client| {
-            crate::access::record_failure(client, &name)
-        })
-        .await
-        {
-            Ok(()) => unauthorized("invalid credentials"),
-            Err(resp) => resp,
-        };
+    // A Python-era hash is replaced now that the password is known. If
+    // that fails the old hash stays and the sign-in goes on.
+    let rehash = if crate::access::is_legacy_hash(&account.password_hash) {
+        match off_the_lock(&state, move || crate::access::hash_password(&password)).await {
+            Ok(hashed) => hashed.ok(),
+            Err(resp) => return resp,
+        }
+    } else {
+        None
     };
-    let (id, name) = (account.id, username.clone());
+    let (id, checked) = (account.id, account.password_hash.clone());
     let opened = with_db(&state, move |client| {
         let mut tx = client.transaction()?;
         // Disabled or given a new password since the check: no session.
@@ -3777,7 +3799,6 @@ async fn login_handler(State(state): State<AppState>, body: axum::body::Bytes) -
                 &[&id, hash],
             )?;
         }
-        crate::access::clear_failures(&mut tx, &name)?;
         let session = crate::access::new_session(&mut tx, id)?;
         tx.commit()?;
         Ok(Some(session))
@@ -3846,9 +3867,9 @@ async fn me_handler(session: Option<axum::Extension<crate::access::Session>>) ->
     )
 }
 
-/// `POST /api/password {old, new}`: one check of the old password under
-/// the sign-in limits, then the new hash; every other session of the
-/// account ends.
+/// `POST /api/password {old, new}`: the old password through
+/// [`check_credentials`], then the new hash off the lock; every other
+/// session of the account ends.
 async fn password_handler(
     State(state): State<AppState>,
     session: Option<axum::Extension<crate::access::Session>>,
@@ -3870,55 +3891,28 @@ async fn password_handler(
     let (Some(id), Some(username)) = (session.actor.user_id, session.actor.username.clone()) else {
         return unauthorized("sign in first");
     };
-    if !state.login.admit() {
-        return too_many_attempts();
-    }
-    let name = username.clone();
-    let looked_up = with_db(&state, move |client| {
-        let allowed = crate::access::login_allowed(client, &name)?;
-        let hash: Option<String> = client
-            .query_opt(
-                "SELECT password_hash FROM access_users WHERE id = $1 AND enabled",
-                &[&id],
-            )?
-            .map(|row| row.get(0));
-        Ok((allowed, hash))
-    })
-    .await;
-    let (allowed, stored) = match looked_up {
-        Ok(found) => found,
+    let account = match check_credentials(&state, &username, old).await {
+        Ok(Credentials::Valid(account)) if account.id == id => account,
+        Ok(Credentials::Valid(_) | Credentials::Invalid) => {
+            return unauthorized("invalid credentials")
+        }
+        Ok(Credentials::TooMany) => return too_many_attempts(),
         Err(resp) => return resp,
     };
-    let checked = stored.filter(|_| allowed);
-    let target = checked.clone();
-    let outcome = off_the_lock(&state, move || {
-        let hash = target.as_deref().unwrap_or(crate::access::DUMMY_HASH);
-        let ok = crate::access::verify_password(&old, hash);
-        let new_hash = ok
-            .then(|| crate::access::hash_password(&new).ok())
-            .flatten();
-        (ok, new_hash)
-    })
-    .await;
-    let (ok, new_hash) = match outcome {
-        Ok(result) => result,
+    // The old password was right: a failure from here on is the server's,
+    // not a failed attempt.
+    let new_hash = match off_the_lock(&state, move || crate::access::hash_password(&new)).await {
+        Ok(Ok(hash)) => hash,
+        Ok(Err(_)) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "password_not_stored",
+                "the new password could not be hashed",
+            )
+        }
         Err(resp) => return resp,
     };
-    if !allowed {
-        return too_many_attempts();
-    }
-    let (true, Some(checked), Some(new_hash)) = (ok, checked, new_hash) else {
-        let name = username.clone();
-        return match with_db(&state, move |client| {
-            crate::access::record_failure(client, &name)
-        })
-        .await
-        {
-            Ok(()) => unauthorized("invalid credentials"),
-            Err(resp) => resp,
-        };
-    };
-    let current = session.token_hash;
+    let (checked, current) = (account.password_hash, session.token_hash);
     let changed = with_db(&state, move |client| {
         let mut tx = client.transaction()?;
         let updated = tx.execute(
@@ -3933,13 +3927,13 @@ async fn password_handler(
             "DELETE FROM access_sessions WHERE user_id = $1 AND token_hash <> $2",
             &[&id, &current],
         )?;
-        crate::access::clear_failures(&mut tx, &username)?;
         tx.commit()?;
         Ok(true)
     })
     .await;
     match changed {
         Ok(true) => Json(serde_json::json!({ "status": "changed" })).into_response(),
+        // Disabled or given another password since the check.
         Ok(false) => unauthorized("invalid credentials"),
         Err(resp) => resp,
     }
@@ -6471,6 +6465,34 @@ mod session_tests {
             )
         }
 
+        /// `n` sign-ins sent at once; their status codes.
+        fn logins_at_once(&self, username: &str, password: &str, n: usize) -> Vec<u16> {
+            let body = json!({ "username": username, "password": password }).to_string();
+            let url = format!("{}/api/login", self.base);
+            self.rt.block_on(async {
+                let client = reqwest::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .expect("client");
+                let tasks: Vec<_> = (0..n)
+                    .map(|_| {
+                        let request = client
+                            .post(&url)
+                            .header("content-type", "application/json")
+                            .body(body.clone());
+                        tokio::spawn(async move {
+                            request.send().await.expect("send").status().as_u16()
+                        })
+                    })
+                    .collect();
+                let mut statuses = Vec::new();
+                for task in tasks {
+                    statuses.push(task.await.expect("sign-in task"));
+                }
+                statuses
+            })
+        }
+
         fn sign_in(&self, username: &str, password: &str) -> Browser {
             let answer = self.login(username, password);
             assert_eq!(answer.status, 200, "sign-in: {}", answer.body);
@@ -6724,6 +6746,27 @@ mod session_tests {
     }
 
     #[test]
+    fn concurrent_wrong_passwords_lock_after_ten() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping concurrent_wrong_passwords_lock_after_ten: no PostgreSQL reachable"
+            );
+            return;
+        };
+        s.add_account("alice", Role::Editor);
+        // Twenty guesses at once: each one reserves its attempt before the
+        // hash, so ten are checked and ten are refused, however they
+        // interleave.
+        let statuses = s.logins_at_once("alice", WRONG, 20);
+        let checked = statuses.iter().filter(|&&code| code == 401).count();
+        let refused = statuses.iter().filter(|&&code| code == 429).count();
+        assert_eq!((checked, refused), (10, 10), "{statuses:?}");
+        // Every one of them cost one scrypt run, the refused ones too.
+        assert_eq!(s.derivations(), vec![1; 20]);
+        assert_eq!(s.login("alice", PASSWORD).status, 429, "still locked");
+    }
+
+    #[test]
     fn api_without_session_is_401_except_health_and_login() {
         let Some(s) = Served::team() else {
             eprintln!(
@@ -6833,6 +6876,36 @@ mod session_tests {
             assert_eq!(answer.json()["error"], "forbidden_request");
             assert!(!answer.body.contains(token), "the token is not echoed");
         }
+        // An Origin the outer guard accepts, because it matches the Host the
+        // request names, but which is not the public URL's host: only the
+        // team-mode check refuses it.
+        let port = s.base.rsplit(':').next().expect("port");
+        let (host, elsewhere) = (
+            format!("localhost:{port}"),
+            format!("http://localhost:{port}"),
+        );
+        let answer = send(&[
+            ("host", host.as_str()),
+            ("x-throughline-request-token", token),
+            ("origin", elsewhere.as_str()),
+        ]);
+        assert_eq!(answer.status, 403, "{}", answer.body);
+        assert_eq!(
+            answer.json()["detail"],
+            "the request must come from THROUGHLINE_PUBLIC_URL"
+        );
+        // Control: the guard lets that Host and Origin through on a read.
+        let read = s.send(
+            Method::GET,
+            "/api/me",
+            &[
+                ("cookie", alice.cookie.as_str()),
+                ("host", host.as_str()),
+                ("origin", elsewhere.as_str()),
+            ],
+            None,
+        );
+        assert_eq!(read.status, 200, "{}", read.body);
         // Reads need neither.
         assert_eq!(s.get("/api/me", &alice).status, 200);
     }
@@ -7102,9 +7175,13 @@ mod session_tests {
         let upgraded = stored();
         assert!(upgraded.starts_with("scrypt2$15,8,3$"), "{upgraded}");
         assert!(access::verify_password(PASSWORD, &upgraded));
-        assert_eq!(s.derivations(), vec![1, 2], "the check, then the new hash");
+        assert_eq!(
+            s.derivations(),
+            vec![1, 1, 1],
+            "the failed check, then the check and the new hash"
+        );
         assert_eq!(s.login("alice", PASSWORD).status, 200);
         assert_eq!(stored(), upgraded, "a current hash stays");
-        assert_eq!(s.derivations(), vec![1, 2, 1]);
+        assert_eq!(s.derivations(), vec![1, 1, 1, 1]);
     }
 }

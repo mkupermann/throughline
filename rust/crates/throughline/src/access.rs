@@ -434,8 +434,10 @@ pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
 pub const SESSION_COOKIE: &str = "throughline_session";
 /// A session lasts seven days from sign-in; the cookie's Max-Age says the same.
 pub const SESSION_SECONDS: i64 = 7 * 24 * 60 * 60;
-/// Failed sign-ins an account may have within 15 minutes.
-const MAX_FAILURES: i32 = 10;
+/// The window failed sign-ins are counted in: 15 minutes.
+pub const ATTEMPT_WINDOW_SECONDS: i64 = 15 * 60;
+/// Sign-in attempts an account may have within [`ATTEMPT_WINDOW_SECONDS`].
+const MAX_ATTEMPTS: i32 = 10;
 
 /// 32 random bytes as 64 hex digits: SHA-256 over three random (v4) UUIDs
 /// (366 random bits), the source [`random_salt`] draws from.
@@ -478,10 +480,15 @@ pub fn new_session<C: GenericClient>(
     let request_token = random_token();
     let row = client.query_opt(
         "INSERT INTO access_sessions (token_hash, user_id, csrf_token, expires_at) \
-         SELECT $1, id, $3, now() + interval '7 days' FROM access_users \
+         SELECT $1, id, $3, now() + $4::bigint * interval '1 second' FROM access_users \
          WHERE id = $2 AND enabled \
          RETURNING expires_at",
-        &[&token_hash(&token), &user_id, &request_token],
+        &[
+            &token_hash(&token),
+            &user_id,
+            &request_token,
+            &SESSION_SECONDS,
+        ],
     )?;
     let Some(row) = row else {
         bail!("no enabled account with id {user_id}");
@@ -547,50 +554,44 @@ pub fn end_all_sessions<C: GenericClient>(client: &mut C, user_id: i64) -> Resul
     )?)
 }
 
-/// Deletes expired sessions and failure counts whose 15 minutes have
-/// passed. Runs at every sign-in, so neither table keeps what it no longer
+/// Deletes expired sessions and failure counts whose window has passed.
+/// Runs at every password check, so neither table keeps what it no longer
 /// needs.
 pub fn sweep_expired<C: GenericClient>(client: &mut C) -> Result<()> {
-    client.batch_execute(
-        "DELETE FROM access_sessions WHERE expires_at <= now(); \
-         DELETE FROM access_attempts WHERE window_start <= now() - interval '15 minutes';",
+    client.execute("DELETE FROM access_sessions WHERE expires_at <= now()", &[])?;
+    client.execute(
+        "DELETE FROM access_attempts \
+         WHERE window_start < now() - $1::bigint * interval '1 second'",
+        &[&ATTEMPT_WINDOW_SECONDS],
     )?;
     Ok(())
 }
 
-/// Whether `username` may try a password: fewer than 10 failures in the
-/// last 15 minutes. A count whose window has passed is deleted first.
-pub fn login_allowed<C: GenericClient>(client: &mut C, username: &str) -> Result<bool> {
-    let key = attempt_key(username);
-    client.execute(
-        "DELETE FROM access_attempts \
-         WHERE key = $1 AND window_start <= now() - interval '15 minutes'",
-        &[&key],
-    )?;
-    let failures: i32 = client
-        .query_opt(
-            "SELECT attempts FROM access_attempts WHERE key = $1",
-            &[&key],
-        )?
-        .map_or(0, |row| row.get(0));
-    Ok(failures < MAX_FAILURES)
-}
-
-/// Counts a failed sign-in of an existing account. A name without an
-/// account leaves nothing behind. A count whose window has passed starts
-/// over.
-pub fn record_failure<C: GenericClient>(client: &mut C, username: &str) -> Result<()> {
-    client.execute(
+/// Reserves one attempt for `username` before its password is checked, in
+/// one statement, so attempts running at the same time cannot all pass a
+/// check made before any of them is counted. `true` while the account has
+/// had at most 10 attempts in its window; a count whose window has passed
+/// starts over. A successful check clears the count ([`clear_failures`]).
+/// A name without an account stores nothing and is always `true`: its
+/// check fails against the dummy hash anyway.
+pub fn reserve_attempt<C: GenericClient>(client: &mut C, username: &str) -> Result<bool> {
+    let row = client.query_opt(
         "INSERT INTO access_attempts (key, attempts, window_start) \
          SELECT $1, 1, now() WHERE EXISTS (SELECT 1 FROM access_users WHERE username = $2) \
          ON CONFLICT (key) DO UPDATE SET \
-             attempts = CASE WHEN access_attempts.window_start <= now() - interval '15 minutes' \
-                        THEN 1 ELSE access_attempts.attempts + 1 END, \
-             window_start = CASE WHEN access_attempts.window_start <= now() - interval '15 minutes' \
-                            THEN now() ELSE access_attempts.window_start END",
-        &[&attempt_key(username), &username],
+             attempts = CASE \
+                 WHEN access_attempts.window_start < now() - $3::bigint * interval '1 second' \
+                 THEN 1 ELSE access_attempts.attempts + 1 END, \
+             window_start = CASE \
+                 WHEN access_attempts.window_start < now() - $3::bigint * interval '1 second' \
+                 THEN now() ELSE access_attempts.window_start END \
+         RETURNING attempts",
+        &[&attempt_key(username), &username, &ATTEMPT_WINDOW_SECONDS],
     )?;
-    Ok(())
+    Ok(match row {
+        Some(row) => row.get::<_, i32>(0) <= MAX_ATTEMPTS,
+        None => true,
+    })
 }
 
 /// Forgets an account's failed sign-ins (after a successful one).
