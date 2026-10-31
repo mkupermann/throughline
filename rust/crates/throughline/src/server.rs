@@ -28,6 +28,8 @@ pub struct AppState {
     pub agent_key: Arc<crate::agent_key::KeyState>,
     /// `THROUGHLINE_MCP_READ_ONLY`, read once at start.
     pub mcp_read_only: bool,
+    /// `THROUGHLINE_AUTH_MODE`, read and checked once at start.
+    pub auth_mode: crate::access::AuthMode,
 }
 
 #[derive(Serialize)]
@@ -3290,7 +3292,7 @@ fn allowed_hosts(public_url: Option<&str>, extra: Option<&str>) -> Vec<String> {
 }
 
 /// Lowercased host of `host[:port]` or `[v6]:port`.
-fn host_of(authority: &str) -> String {
+pub(crate) fn host_of(authority: &str) -> String {
     let a = authority.trim();
     let host = match a.strip_prefix('[') {
         Some(rest) => rest.split(']').next().unwrap_or(""),
@@ -3446,12 +3448,28 @@ pub fn app(state: AppState) -> Router {
 }
 
 pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()> {
+    // Before binding. Everything that can fail runs on the blocking pool:
+    // the sync client blocks even when an early return drops it (see `with_db`).
+    let (client, auth_mode) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let mut client = client;
+        let mode =
+            crate::access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())?;
+        crate::access::check_startup(
+            &mut client,
+            mode,
+            std::env::var("THROUGHLINE_PUBLIC_URL").ok().as_deref(),
+        )?;
+        Ok((client, mode))
+    })
+    .await
+    .context("startup check")??;
     let state = AppState {
         db: Arc::new(Mutex::new(client)),
         agent_key: Arc::new(crate::agent_key::key_state()),
         mcp_read_only: crate::mcp::read_only_from(
             std::env::var("THROUGHLINE_MCP_READ_ONLY").ok().as_deref(),
         ),
+        auth_mode,
     };
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -3478,6 +3496,7 @@ mod tests {
             embedding_missing: "unavailable".into(),
             generation_local: true,
             agent_access: "off".into(),
+            auth_mode: "local".into(),
             notes: Vec::new(),
         };
         let actions = recovery_actions(&report, "granite-embedding:278m");
@@ -3821,6 +3840,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = RecallParams {
@@ -3878,6 +3898,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::key_state_from(Some(TEST_AGENT_KEY))),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         }
     }
 
@@ -4045,6 +4066,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         // A panic inside a request leaves a poisoned lock and an open transaction.
@@ -4086,6 +4108,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let call = |headers: HeaderMap| {
@@ -4292,6 +4315,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         for params in [
@@ -4660,6 +4684,7 @@ mod tests {
             db: Arc::new(Mutex::new(client)),
             agent_key: Arc::new(crate::agent_key::KeyState::Off),
             mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let params = ContextParams {

@@ -150,6 +150,7 @@ mod tests {
                 db: Arc::new(Mutex::new(client)),
                 agent_key: Arc::new(key),
                 mcp_read_only: false,
+                auth_mode: crate::access::AuthMode::Local,
             };
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             let listener = rt

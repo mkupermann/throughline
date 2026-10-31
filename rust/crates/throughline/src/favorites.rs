@@ -91,10 +91,12 @@ pub struct Favorite {
 }
 
 /// Insert a favorite. A duplicate `(kind, ref)` is a no-op (idempotent).
+/// The conflict target is the per-account key of migration 014; local mode
+/// stars without an account (`user_id` NULL).
 pub fn add<C: GenericClient>(c: &mut C, kind: FavKind, r: &str) -> anyhow::Result<()> {
     c.execute(
         "INSERT INTO favorites (kind, ref) VALUES ($1, $2) \
-         ON CONFLICT (kind, ref) DO NOTHING",
+         ON CONFLICT (kind, ref, (COALESCE(user_id, 0))) DO NOTHING",
         &[&kind.as_str(), &r],
     )?;
     Ok(())
