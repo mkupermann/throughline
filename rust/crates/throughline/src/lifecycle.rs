@@ -351,14 +351,16 @@ pub fn consolidate<C: GenericClient>(
     // Stars are UI marks, not memory: the actor's stars on the sources become
     // one star on the new note. Other accounts' stars stay; a job (no
     // account) moves only the stars without an account, i.e. local mode's.
+    // An account's star gets no time.
     let refs: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
     let new_ref = new_id.to_string();
     let mut star: Vec<&(dyn ToSql + Sync)> = vec![&refs, &new_ref];
     let mine = crate::favorites::push_mine(actor, "f", &mut star);
+    let at = crate::favorites::star_time_sql(3);
     tx.execute(
         &format!(
-            "INSERT INTO favorites (kind, ref, user_id)
-             SELECT 'memory', $2, $3 WHERE EXISTS
+            "INSERT INTO favorites (kind, ref, user_id, created_at)
+             SELECT 'memory', $2, $3, {at} WHERE EXISTS
                  (SELECT 1 FROM favorites f WHERE f.kind = 'memory' AND f.ref = ANY($1) AND {mine})
              ON CONFLICT DO NOTHING"
         ),
@@ -1159,6 +1161,14 @@ mod tests {
         let err = consolidate(&mut tx, &a, &[shared, private], "x", None).unwrap_err();
         assert!(matches!(err, ConsolidateError::MixedVisibility), "{err:?}");
         // A's own private notes merge into a private note of hers.
+        let starred = crate::favorites::add(
+            &mut tx,
+            &a,
+            crate::favorites::FavKind::Memory,
+            &private.to_string(),
+        )
+        .expect("star");
+        assert!(starred);
         let merged =
             consolidate(&mut tx, &a, &[private, private2], "one secret twin", None).expect("merge");
         let row = tx
@@ -1169,6 +1179,16 @@ mod tests {
             .expect("row");
         assert_eq!(row.get::<_, String>(0), "private");
         assert_eq!(row.get::<_, Option<i64>>(1), a.user_id);
+        // Her star moved to the merged note, still without a time.
+        let star: Option<chrono::DateTime<chrono::Utc>> = tx
+            .query_one(
+                "SELECT created_at FROM favorites \
+                 WHERE kind = 'memory' AND ref = $1 AND user_id = $2",
+                &[&merged.to_string(), &a.user_id],
+            )
+            .expect("the star moved")
+            .get(0);
+        assert_eq!(star, None);
         // The dedup job sees shared notes only: a private twin is never merged.
         let dup = format!("dup twin {tag}");
         let s1 = crate::access::team_test::note(&mut tx, None, "shared", &dup, "decision", None);

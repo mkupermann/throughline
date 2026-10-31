@@ -401,7 +401,7 @@ ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS visibility text NOT NULL DEFA
     CONSTRAINT memory_chunks_visibility_check CHECK (visibility IN ('shared', 'private'));
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'memory_chunks_private_has_owner'
-                   AND conrelid = 'public.memory_chunks'::regclass) THEN
+                   AND conrelid = 'memory_chunks'::regclass) THEN
         ALTER TABLE memory_chunks ADD CONSTRAINT memory_chunks_private_has_owner
             CHECK (visibility = 'shared' OR owner_id IS NOT NULL);
     END IF;
@@ -411,6 +411,15 @@ ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_id bigint REFERENCES access_
 CREATE UNIQUE INDEX IF NOT EXISTS favorites_kind_ref_user_key
     ON favorites (kind, ref, (COALESCE(user_id, 0)));
 ALTER TABLE favorites DROP CONSTRAINT IF EXISTS favorites_kind_ref_key;
+"#;
+
+/// Team mode keeps no activity time per account: an account's star has no
+/// `created_at`, and stars made before this migration lose theirs. Local
+/// stars (`user_id` NULL) keep their time and the column its default.
+/// Idempotent.
+const ACCOUNT_STARS_UNTIMED: &str = r#"
+ALTER TABLE favorites ALTER COLUMN created_at DROP NOT NULL;
+UPDATE favorites SET created_at = NULL WHERE user_id IS NOT NULL AND created_at IS NOT NULL;
 "#;
 
 /// Migrations the Rust CLI owns. The Python package has its own numbered
@@ -433,6 +442,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         MEMORY_SUPERSEDED_BY_INDEX,
     ),
     ("014_team_mode.sql", TEAM_MODE),
+    ("015_account_stars_untimed.sql", ACCOUNT_STARS_UNTIMED),
 ];
 
 /// `migration_name` matches the Python package's `applied_migrations` table
@@ -659,18 +669,31 @@ mod tests {
         assert!(def.contains("WHERE (superseded_by IS NOT NULL)"), "{def}");
     }
 
+    /// Copies of `tables` in a schema of their own, first on the search
+    /// path of `tx`. A migration test changes these copies, never the shared
+    /// tables, so it takes no lock that other tests running at the same time
+    /// wait for (a column drop on the shared `memory_chunks` and `favorites`
+    /// could deadlock with a test that reads and writes both). Rolled back
+    /// with `tx`.
+    fn own_schema(tx: &mut postgres::Transaction, tables: &[&str]) {
+        let schema = format!("test_migration_{}", uuid::Uuid::new_v4().simple());
+        let mut sql = format!("CREATE SCHEMA {schema}; SET LOCAL search_path TO {schema}, public;");
+        for table in tables {
+            sql.push_str(&format!(
+                "CREATE TABLE {schema}.{table} (LIKE public.{table} INCLUDING ALL);"
+            ));
+        }
+        tx.batch_execute(&sql).expect("schema of the test");
+    }
+
     /// The state before 014 on any database: the Python-era access block of
     /// `sql/schema.sql` (sessions with `last_seen_at`, the audit table with
     /// its append-only trigger, `access_changes` on two tables, the two other
     /// functions that write the audit) and notes and favorites without the
-    /// 014 columns. `access_users` is locked first, as in the access tests,
-    /// so the two cannot deadlock.
+    /// 014 columns. Run after [`own_schema`]: the account tables and the
+    /// changed notes and favorites are the test's own. The audit table is in
+    /// `public`, where the Python-era functions write it.
     const BEFORE_TEAM_MODE: &str = r#"
-DO $$ BEGIN
-    IF to_regclass('public.access_users') IS NOT NULL THEN
-        LOCK TABLE access_users IN SHARE ROW EXCLUSIVE MODE;
-    END IF;
-END $$;
 CREATE TABLE IF NOT EXISTS access_users (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username text UNIQUE NOT NULL,
@@ -688,7 +711,7 @@ CREATE TABLE IF NOT EXISTS access_sessions (
     expires_at timestamptz NOT NULL
 );
 ALTER TABLE access_sessions ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now();
-CREATE TABLE IF NOT EXISTS access_audit (
+CREATE TABLE IF NOT EXISTS public.access_audit (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     actor text NOT NULL,
     action text NOT NULL,
@@ -707,8 +730,8 @@ CREATE TRIGGER access_changes AFTER INSERT OR UPDATE OR DELETE ON access_session
     FOR EACH ROW EXECUTE FUNCTION public.record_access_change();
 CREATE OR REPLACE FUNCTION public.protect_access_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'Audit records are append-only'; END $$;
-DROP TRIGGER IF EXISTS access_audit_immutable ON access_audit;
-CREATE TRIGGER access_audit_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON access_audit
+DROP TRIGGER IF EXISTS access_audit_immutable ON public.access_audit;
+CREATE TRIGGER access_audit_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON public.access_audit
     FOR EACH STATEMENT EXECUTE FUNCTION public.protect_access_audit();
 CREATE OR REPLACE FUNCTION public.audit_processing_lifecycle() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -739,8 +762,7 @@ END $$;
 
     #[test]
     fn migration_014_creates_access_tables_and_drops_audit() {
-        let (name, sql) = MIGRATIONS.last().expect("migrations");
-        assert_eq!(*name, "014_team_mode.sql");
+        let sql = migration("014_team_mode.sql");
         let Some(mut client) = test_db() else {
             eprintln!(
                 "skipping migration_014_creates_access_tables_and_drops_audit: no PostgreSQL reachable"
@@ -748,6 +770,7 @@ END $$;
             return;
         };
         let mut tx = client.transaction().expect("begin test tx");
+        own_schema(&mut tx, &["memory_chunks", "favorites"]);
         tx.batch_execute(BEFORE_TEAM_MODE)
             .expect("state before 014");
         let category_type = crate::extract_memory::category_column_type(&mut tx).expect("type");
@@ -946,5 +969,78 @@ END $$;
             ),
             0
         );
+    }
+
+    #[test]
+    fn migration_015_takes_the_time_off_account_stars() {
+        use crate::access::{Actor, Role};
+        use crate::favorites::FavKind;
+        let sql = migration("015_account_stars_untimed.sql");
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping migration_015_takes_the_time_off_account_stars: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        own_schema(&mut tx, &["favorites"]);
+        // After 014: every star has a time.
+        tx.batch_execute("ALTER TABLE favorites ALTER COLUMN created_at SET NOT NULL")
+            .expect("state before 015");
+        let star =
+            "INSERT INTO favorites (kind, ref, user_id) VALUES ('project', $1, $2) RETURNING id";
+        let local: i64 = tx
+            .query_one(star, &[&"tl-local-star", &None::<i64>])
+            .expect("local star")
+            .get(0);
+        let account: i64 = tx
+            .query_one(star, &[&"tl-account-star", &Some(7_i64)])
+            .expect("account star")
+            .get(0);
+
+        // twice: a second run is a no-op
+        tx.batch_execute(sql).expect("first run");
+        tx.batch_execute(sql).expect("second run");
+
+        let time =
+            |tx: &mut postgres::Transaction, r: &str| -> Option<chrono::DateTime<chrono::Utc>> {
+                tx.query_one("SELECT created_at FROM favorites WHERE ref = $1", &[&r])
+                    .expect(r)
+                    .get(0)
+            };
+        assert!(
+            time(&mut tx, "tl-local-star").is_some(),
+            "a local star keeps its time"
+        );
+        assert_eq!(
+            time(&mut tx, "tl-account-star"),
+            None,
+            "an account's star loses it"
+        );
+        assert!(local < account);
+        // New stars: local mode with a time, an account without one.
+        let user = Actor::for_user(7, "seven", Role::Editor);
+        crate::favorites::add(&mut tx, &Actor::local(), FavKind::Project, "tl-local-new")
+            .expect("local star");
+        for r in ["tl-account-new", "tl-account-newer"] {
+            crate::favorites::add(&mut tx, &user, FavKind::Project, r).expect("account star");
+        }
+        assert!(time(&mut tx, "tl-local-new").is_some());
+        assert_eq!(time(&mut tx, "tl-account-new"), None);
+        // Without a time the account's stars come newest first by id, and
+        // their JSON has no time at all.
+        let listed = crate::favorites::list(&mut tx, &user, None).expect("list");
+        let refs: Vec<&str> = listed.iter().map(|f| f.ref_.as_str()).collect();
+        assert_eq!(
+            refs,
+            ["tl-account-newer", "tl-account-new", "tl-account-star"]
+        );
+        let json = serde_json::to_value(&listed[0]).expect("json");
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "project", "ref": "tl-account-newer" })
+        );
+        let local = crate::favorites::list(&mut tx, &Actor::local(), None).expect("list");
+        assert!(local.iter().all(|f| f.created_at.is_some()), "{local:?}");
     }
 }

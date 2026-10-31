@@ -87,6 +87,7 @@ fn migrate_ingest_and_search_roundtrip() {
 
     let hits = throughline::search_module::search(
         &mut client,
+        &throughline::access::Actor::local(),
         &format!("rust e2e needle {session}"),
         10,
         None,
