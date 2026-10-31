@@ -2,8 +2,9 @@
 
 use crate::access::{push_visibility, Actor};
 use crate::recall::{
-    candidates, fulltext_ranks, query_words, recall, Candidate, CandidateFilter, QueryEmbedding,
-    Rank, RecallHit, RecallMode, RecallQuery, MAX_QUERY_CHARS,
+    candidates, fulltext_ranks, needs_embedding, query_embedding, query_words, recall, Candidate,
+    CandidateFilter, QueryEmbedding, RecallHit, RecallMode, RecallQuery, DEFAULT_RANK,
+    MAX_QUERY_CHARS,
 };
 use chrono::{DateTime, Utc};
 use postgres::GenericClient;
@@ -309,6 +310,20 @@ fn candidate_line(section: Section, c: &Candidate, origins: &mut HashMap<i64, Or
     )
 }
 
+/// The question vector for `task` when [`DEFAULT_RANK`] uses one: the text the
+/// pack ranks by, embedded once. No task gives `None`, and so does an
+/// unreachable Ollama; the pack then ranks by full text. A refusal by the
+/// remote-model lock is an error.
+pub fn task_embedding(task: Option<&str>) -> anyhow::Result<Option<QueryEmbedding>> {
+    match task.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) if needs_embedding(RecallMode::Current, DEFAULT_RANK) => {
+            let text: String = t.chars().take(MAX_QUERY_CHARS).collect();
+            query_embedding(&text)
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Gathers the sections for `req.project` and packs them into `req.budget` tokens.
 /// A `PackError` comes back as an error with the text of the variant.
 pub fn build_context<C: GenericClient>(
@@ -339,7 +354,7 @@ pub fn build_context<C: GenericClient>(
         valid_at: None,
         known_at: None,
         limit: RELEVANT_LIMIT,
-        rank: Rank::Fulltext,
+        rank: DEFAULT_RANK,
     };
     let mut current: Vec<Candidate> = candidates(client, CandidateFilter::Current, &query, emb)?
         .into_iter()
@@ -374,7 +389,8 @@ pub fn build_context<C: GenericClient>(
         };
         let hits = recall(client, &q, emb)?.hits;
         for h in hits {
-            // Without a match the full-text rank is 0: not relevant to the task.
+            // Score 0 is not relevant to the task: no shared word under full
+            // text, no vector (or an orthogonal one) under cosine.
             if h.score <= 0.0 || h.status == "stale" || !shown.insert(h.id) {
                 continue;
             }
@@ -960,6 +976,71 @@ mod tests {
         let with = ctx(&mut tx, &p, Some("quokka"));
         assert!(with.text.contains("## Relevant to the task"));
         assert!(with.text.contains("quokka detail"));
+    }
+
+    fn relevant_lines(out: &ContextPack) -> Vec<&str> {
+        out.text
+            .lines()
+            .skip_while(|l| *l != "## Relevant to the task")
+            .skip(1)
+            .take_while(|l| l.starts_with("- "))
+            .collect()
+    }
+
+    #[test]
+    fn context_pack_uses_default_rank() {
+        db_tx!("context_pack_uses_default_rank", tx);
+        let p = proj();
+        let model = format!("test-embed-{}", uuid::Uuid::new_v4());
+        // `words` shares the task's words but has a distant vector, `meaning`
+        // shares no word and has the closest vector.
+        let words = insert(
+            &mut tx,
+            &seed("quokka habitat survey notes", Some(&p), "insight", 3),
+        );
+        let meaning = insert(
+            &mut tx,
+            &seed("marsupial burrow census", Some(&p), "insight", 4),
+        );
+        let vec768 = |head: [f32; 2]| {
+            let mut v = vec![0.0f32; 768];
+            v[..2].copy_from_slice(&head);
+            v
+        };
+        for (id, head) in [(words, [0.3, 0.95]), (meaning, [1.0, 0.0])] {
+            tx.execute(
+                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+                 VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+                &[
+                    &id,
+                    &model,
+                    &crate::generate_embeddings::vector_literal(&vec768(head)),
+                ],
+            )
+            .unwrap();
+        }
+        let emb = QueryEmbedding {
+            model,
+            column: "embedding_768",
+            vector: vec768([1.0, 0.0]),
+            min_cosine: 0.5,
+        };
+        let req = ContextRequest {
+            project: &p,
+            task: Some("quokka habitat"),
+            budget: 8_000,
+        };
+        // The default rank is cosine: the closest vector leads, word match or not.
+        let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
+        let r = relevant_lines(&out);
+        assert_eq!(r.len(), 2, "{}", out.text);
+        assert!(r[0].contains("marsupial burrow census"), "{r:#?}");
+        assert!(r[1].contains("quokka habitat survey notes"), "{r:#?}");
+        // Without a vector for the task it ranks by full text: only the word match.
+        let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
+        let r = relevant_lines(&out);
+        assert_eq!(r.len(), 1, "{}", out.text);
+        assert!(r[0].contains("quokka habitat survey notes"), "{r:#?}");
     }
 
     /// Six decisions: the three newest do not mention the task words, two older ones do

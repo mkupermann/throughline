@@ -73,8 +73,8 @@ enum Command {
         known_at: Option<String>,
         #[arg(long, default_value_t = recall::DEFAULT_LIMIT)]
         limit: usize,
-        /// fulltext (default) | weighted | cosine
-        #[arg(long, default_value = "fulltext")]
+        /// cosine (default) | fulltext | weighted
+        #[arg(long, default_value = recall::DEFAULT_RANK.as_str())]
         rank: String,
         /// Print the full result as JSON.
         #[arg(long)]
@@ -637,6 +637,7 @@ fn main() -> Result<()> {
             if let Some(t) = task {
                 recall::check_query(t).map_err(|e| anyhow::anyhow!(e))?;
             }
+            let emb = context_pack::task_embedding(task)?;
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
@@ -648,7 +649,7 @@ fn main() -> Result<()> {
                     task,
                     budget,
                 },
-                None,
+                emb.as_ref(),
             )?;
             let ids = context_pack::cited_note_ids(&pack);
             lifecycle::record_use_or_log(&mut client, &ids);
@@ -1383,9 +1384,20 @@ mod tests {
     }
 
     #[test]
+    fn cli_recall_rank_defaults_to_default_rank() {
+        match Cli::try_parse_from(["throughline", "recall", "x"])
+            .unwrap()
+            .command
+        {
+            Command::Recall { rank, .. } => assert_eq!(rank, recall::DEFAULT_RANK.as_str()),
+            _ => unreachable!("recall parses to Recall"),
+        }
+    }
+
+    #[test]
     fn recall_eval_weights_flag_parses_six_values_summing_to_one() {
         assert_eq!(recall_eval_weights(&[]).unwrap(), None);
-        let w = recall_eval_weights(&["--weights", "0.45,0.20,0.10,0.10,0.10,0.05"])
+        let w = recall_eval_weights(&["--weights", "0.85,0,0,0.15,0,0"])
             .unwrap()
             .unwrap();
         assert_eq!(w, recall::WEIGHTS);

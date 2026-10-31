@@ -2290,7 +2290,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
               <option value="asc" data-i18n="sort.oldNew">Old to new</option>
             </select>
           </label>
-          <button class="btn btn-ghost togglable" id="memory-meaning" type="button" aria-pressed="false" data-i18n="mem.meaning">By meaning</button>
+          <button class="btn btn-ghost togglable" id="memory-meaning" type="button" aria-pressed="false" data-i18n="mem.meaning" data-i18n-attr="title:mem.meaning.title" title="Rank the hits by meaning (cosine of the embeddings). Without a reachable Ollama they are ranked by words, and a notice says so.">By meaning</button>
           <button class="btn btn-ghost togglable fav-toggle" id="memory-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
           <button class="btn btn-primary" id="memory-go" type="button" data-i18n="mem.searchBtn">Search</button>
           <button class="btn btn-ghost" id="memory-ingest" type="button" data-min-role="admin" data-i18n="mem.ingest">Import memory</button>
@@ -2931,8 +2931,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.sourceAt": "source from ",
       "mem.asof": "As of",
       "mem.meaning": "By meaning",
+      "mem.meaning.title": "Rank the hits by meaning (cosine of the embeddings). Without a reachable Ollama they are ranked by words, and a notice says so.",
       "mem.score": "score ",
-      "mem.degraded": "Ollama not reachable — ranked without meaning",
+      "mem.degraded": "Ollama not reachable — ranked by words, not by meaning",
       "mem.asof.valid": "was valid",
       "mem.asof.known": "was known",
       "supersede.kind": "Kind",
@@ -3657,8 +3658,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.sourceAt": "Quelle vom ",
       "mem.asof": "Stand am",
       "mem.meaning": "Nach Bedeutung",
+      "mem.meaning.title": "Treffer nach Bedeutung ordnen (Kosinus der Embeddings). Ist Ollama nicht erreichbar, werden sie nach Wörtern geordnet, und ein Hinweis sagt das.",
       "mem.score": "Score ",
-      "mem.degraded": "Ollama nicht erreichbar, Rangfolge ohne Bedeutung",
+      "mem.degraded": "Ollama nicht erreichbar, Rangfolge nach Wörtern statt nach Bedeutung",
       "mem.asof.valid": "galt",
       "mem.asof.known": "war bekannt",
       "supersede.kind": "Art",
@@ -6968,13 +6970,14 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
-  // "By meaning": the weighted recall ranking over current notes, no paging.
+  // "By meaning": recall over current notes with the server's default rank
+  // (cosine), no paging. Without Ollama it ranks by words and says degraded.
   async function loadMemoryMeaning(el) {
     const note = $("memory-degraded");
     const pager = $("memory-pager");
     if (pager) pager.hidden = true;
     if (note) note.hidden = true;
-    const p = new URLSearchParams({ mode: "current", rank: "weighted", limit: "50", q: state.memory.q });
+    const p = new URLSearchParams({ mode: "current", limit: "50", q: state.memory.q });
     try {
       const data = await fetchJson("/api/recall?" + p.toString());
       const hits = data.hits || [];

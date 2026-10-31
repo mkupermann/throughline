@@ -1318,7 +1318,7 @@ struct RecallParams {
     valid_at: Option<String>,
     known_at: Option<String>,
     limit: Option<i64>,
-    /// `fulltext` (default) | `weighted` | `cosine`
+    /// `cosine` (default, `DEFAULT_RANK`) | `fulltext` | `weighted`
     rank: Option<String>,
 }
 
@@ -1351,7 +1351,7 @@ fn parse_recall_params(
         .map(str::trim)
         .filter(|r| !r.is_empty())
     {
-        None => crate::recall::Rank::default(),
+        None => crate::recall::DEFAULT_RANK,
         Some(r) => r.parse().map_err(invalid)?,
     };
     let (valid_at, known_at) = parse_as_of(params.valid_at.as_deref(), params.known_at.as_deref())?;
@@ -1434,7 +1434,22 @@ async fn context_handler(
         Ok(p) => p,
         Err((status, code, detail)) => return api_error(status, code, detail),
     };
-    // The default ranking is full text and needs no question vector.
+    // The default rank may embed the task: before the shared DB lock, as in
+    // `/api/recall`. Without Ollama the pack ranks by full text.
+    let emb = match parsed.task.clone() {
+        Some(task) => match tokio::task::spawn_blocking(move || {
+            crate::context_pack::task_embedding(Some(&task))
+        })
+        .await
+        {
+            Ok(Ok(emb)) => emb,
+            Ok(Err(e)) => {
+                return remote_llm_refused(state.auth_mode == crate::access::AuthMode::Team, &e)
+            }
+            Err(_) => None,
+        },
+        None => None,
+    };
     // An error that is the caller's input (a header too large for the budget) travels as the
     // inner `Err`, so it is not reported as a database failure.
     match with_db(
@@ -1447,7 +1462,7 @@ async fn context_handler(
                 task: parsed.task.as_deref(),
                 budget: parsed.budget,
             },
-            None,
+            emb.as_ref(),
         ) {
             Ok(pack) => {
                 if counted {
@@ -4730,6 +4745,23 @@ mod tests {
         );
     }
 
+    /// "By meaning" asks `/api/recall` without `rank`, so it gets
+    /// `DEFAULT_RANK`; the label holds only while that rank uses vectors.
+    #[test]
+    fn page_ranks_by_meaning_with_the_default_rank() {
+        let call = INDEX_HTML
+            .split_once("async function loadMemoryMeaning(el) {")
+            .and_then(|(_, rest)| rest.split_once(r#"fetchJson("/api/recall?""#))
+            .map(|(body, _)| body)
+            .expect("loadMemoryMeaning and its recall call");
+        assert!(call.contains(r#"mode: "current""#), "{call}");
+        assert!(!call.contains("rank"), "{call}");
+        assert!(crate::recall::needs_embedding(
+            crate::recall::RecallMode::Current,
+            crate::recall::DEFAULT_RANK
+        ));
+    }
+
     /// Team mode needs the page's sign-in form and the request token on
     /// writes; a later edit of the page must not drop them silently.
     #[test]
@@ -5346,6 +5378,16 @@ mod tests {
             assert_eq!(h["why"]["fulltext"], h["score"], "{h}");
             assert!(h["why"]["cosine"].is_null(), "{h}");
         }
+        // Without `rank` the default (cosine) falls back the same way.
+        let d = ask(None);
+        assert_eq!(d["degraded"], "no_embeddings", "{d}");
+        let default_ids: Vec<i64> = d["hits"]
+            .as_array()
+            .expect("hits")
+            .iter()
+            .filter_map(|h| h["id"].as_i64())
+            .collect();
+        assert_eq!(default_ids, ids, "{d}");
         state
             .db
             .lock()
@@ -6248,12 +6290,12 @@ mod tests {
         let dflt = parse_recall_params(&p(None, None, None)).unwrap();
         assert_eq!(dflt.mode, crate::recall::RecallMode::Current);
         assert_eq!(dflt.limit, 10);
-        assert_eq!(dflt.rank, crate::recall::Rank::Fulltext);
+        assert_eq!(dflt.rank, crate::recall::DEFAULT_RANK);
         let w = parse_recall_params(&ranked("weighted")).unwrap();
         assert_eq!(w.rank, crate::recall::Rank::Weighted);
         assert_eq!(
             parse_recall_params(&ranked(" ")).unwrap().rank,
-            crate::recall::Rank::Fulltext
+            crate::recall::DEFAULT_RANK
         );
     }
 
