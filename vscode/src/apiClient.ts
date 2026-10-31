@@ -106,9 +106,17 @@ export interface HealthRecovery {
   [key: string]: unknown;
 }
 
+/** A ranking the server knows. Without one the server takes its default. */
+export type Rank = "cosine" | "fulltext" | "weighted";
+
+/** The `throughline.rank` setting: a ranking, or `undefined` for the server's default. */
+export function rankFromSetting(value: string | undefined): Rank | undefined {
+  return value === "cosine" || value === "fulltext" || value === "weighted" ? value : undefined;
+}
+
 export interface RecallOptions {
   project?: string;
-  rank?: "fulltext" | "weighted";
+  rank?: Rank;
   limit?: number;
 }
 

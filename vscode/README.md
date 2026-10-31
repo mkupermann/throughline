@@ -30,7 +30,7 @@ The key lives in VS Code's secret storage under `throughline.agentKey`. It is ne
 | `throughline.url` | `http://127.0.0.1:8788` | Address of the Throughline server, `http` or `https`. The only address the extension calls. User settings only: a workspace's `.vscode/settings.json` cannot change it, so an opened repository cannot send your key elsewhere. Any other scheme falls back to the default, with one warning. |
 | `throughline.project` | empty | Project name. Empty means the name of the workspace folder. Set per workspace. |
 | `throughline.contextBudget` | `2000` | Token budget of a context pack, kept between 64 and 32768. |
-| `throughline.rank` | `fulltext` | Ranking for recall: `fulltext` or `weighted` (needs embeddings). |
+| `throughline.rank` | `default` | Ranking for recall. `default` sends none, so the server's default applies: cosine (by meaning), or full text when the server cannot reach Ollama. `cosine`, `fulltext` and `weighted` pick one. |
 
 ## Commands
 

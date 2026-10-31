@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `throughline.rank` defaults to `default`: recall sends no rank and gets the server's default, cosine since the server's switch on 2026-10-31 (full text when the server cannot reach Ollama). The setting also offers `cosine`. `fulltext` and `weighted` stay available.
 - Team mode: when `/api` answers 401 and an agent key is stored, the call is repeated once with `Authorization: Bearer <key>`. A second 401 asks for `Throughline: Set Agent Key`; without a key the status bar reads "sign-in required", not "key rejected". Local mode is unchanged. Error messages never show the key.
 
 ## 0.1.0
