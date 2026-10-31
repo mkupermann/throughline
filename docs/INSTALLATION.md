@@ -171,11 +171,13 @@ the first six user-facing surfaces; project and detail pages open from links.
 ./scripts/install.sh
 ```
 
-This installs three launchd jobs:
+This loads every plist in `launchd/`. The scheduled jobs are:
 
 - `com.claude-memory-ingest` — hourly ingestion
 - `com.claude-memory-extract` — daily 02:00 UTC memory extraction
 - `com.claude-memory-backup` — daily 03:00 UTC `pg_dump` with 30-day retention
+- `com.claude-memory-embed` — hourly at minute 15, `throughline embed --limit 10000`:
+  vectors for notes the write itself could not embed, then for messages
 
 Verify:
 

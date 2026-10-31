@@ -146,6 +146,18 @@ only when migration succeeds. On a native installation, run `throughline migrate
 `createdb` and every upgrade. An older schema initialized from `sql/schema.sql` is detected
 and baselined before later migrations apply; migration history is never rewritten.
 
+The Rust runtime keeps its own list, `MIGRATIONS` in
+`rust/crates/throughline/src/migrate.rs`, from `001_rust_core.sql` to
+`015_account_stars_untimed.sql`. The next Rust migration is 016. Both runtimes
+record into the same `applied_migrations` table, keyed by file name only, so a
+Rust name must not repeat a name from `throughline/migrations/`, which already
+holds `016_pm_templates.sql` to `018_processing_checkpoints.sql`; the ledger
+would count it as applied without running it. The other way round, a database
+can hold applied names the Rust list does not know, such as
+`015_project_assignments.sql` from the Python package. `throughline serve`
+ignores those and refuses to start only when the newest name of its own list is
+missing.
+
 ---
 
 ## 4. Ingestion pipeline

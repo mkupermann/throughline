@@ -1,0 +1,14 @@
+[Unit]
+Description=Throughline - hourly embedding at minute 15
+Documentation=https://github.com/mkupermann/Throughline
+
+[Timer]
+# Every hour at minute 15, away from the ingest on the hour.
+OnCalendar=*-*-* *:15:00
+# If the machine was off when a run was due, run it as soon as possible.
+Persistent=true
+RandomizedDelaySec=2min
+Unit=throughline-embed.service
+
+[Install]
+WantedBy=timers.target
