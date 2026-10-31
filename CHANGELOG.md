@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Team mode
+
+The Rust server can now serve one team on one server: accounts, sign-in, three roles and private notes. Local mode stays the default and behaves as before. The guide is [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md).
+
+- **Two modes.** `THROUGHLINE_AUTH_MODE` is `local` (default) or `team`; any other value refuses to start. `local` refuses a database with accounts or private notes. `team` needs an enabled admin and `THROUGHLINE_PUBLIC_URL` with https (http only on loopback). `doctor` prints the mode.
+- **Accounts on the server's command line.** `throughline account add|list|role|enable|disable|unlock|password|agent-key|agent-key-revoke`. Passwords come from a hidden prompt or an owner-only file, never from an argument. New hashes are `scrypt2`; Python-era `scrypt$` hashes keep working and are rehashed at the next sign-in. The last enabled admin cannot be demoted or disabled.
+- **Sessions.** `POST /api/login`, `/api/logout`, `GET /api/me`, `POST /api/password`. The cookie is HttpOnly, SameSite=Strict, Secure on https, and lasts a fixed seven days; the database keeps only its hash. Writes need the request token and an Origin on the public URL. 10 failed sign-ins per account in 15 minutes and 60 password checks per minute server-wide give 429.
+- **Roles.** `viewer` reads, `editor` also writes, keeps, forgets, supersedes, stars and asks the model, `admin` also runs jobs, merges, writes back and reads the AI configuration. The same roles apply to MCP tools.
+- **Private notes.** Notes have an owner and `shared` or `private` visibility. A private note reaches its owner only, on every HTTP and MCP read path. Existing notes stay shared. Jobs see shared notes only. Stars are per account.
+- **Agent keys per account.** `throughline account agent-key <name>` prints a key once and stores its hash. The key acts as its account on `/mcp` and as Bearer on `/api`. The global `THROUGHLINE_AGENT_KEY` is ignored in team mode (401). The VS Code extension retries a 401 once with the stored key.
+- **No surveillance.** No sign-in history, no last-seen, no access log, no log line with an account name.
+- **The page.** Sign-in form, account and role in the top bar, change password, sign out, a private choice when pinning, buttons hidden by role.
+- **Migration 014 deletes data. Back up first.** It drops the table `access_audit` with its rows, the audit triggers (`record_access_change`, `audit_processing_lifecycle`) and `access_sessions.last_seen_at`. It adds `memory_chunks.owner_id`/`visibility`, `favorites.user_id` and `access_agent_keys`. The table `conversation_project_changes` is kept.
+
 ### VS Code extension
 
 A VS Code extension in `vscode/`, installed from a local VSIX. No marketplace release, no server change.

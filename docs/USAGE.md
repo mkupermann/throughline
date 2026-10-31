@@ -529,6 +529,16 @@ Looking goes through `/api` without a key and does not count as use. Writing and
 
 There is no marketplace release. Build the VSIX with `npm ci && npm run package` in `vscode/`, install it with `code --install-extension`, then run **Throughline: Set Agent Key**. Commands, settings and the hand-over are in the [extension README](../vscode/README.md).
 
+## Team mode
+
+When your server runs with `THROUGHLINE_AUTH_MODE=team`, you have an account on it. Setting it up, roles and limits are in [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md). Day to day it looks like this:
+
+- **Sign in.** The page opens with a sign-in form: name and password from whoever runs the server. A session lasts seven days and then asks again. The top bar shows your name, your role, "Change password" and "Sign out".
+- **Change your password.** "Change password" asks for the current one and the new one twice (15 to 128 characters). Your other sessions end, this one stays. A forgotten password is reset by the operator with `throughline account password <name>`.
+- **Private notes.** When you pin a note, tick "Private: only I can see this note". Nobody else sees it, admins included. Without the tick a note is shared. Over MCP, `write` takes `"visibility": "private"`. A note cannot be made private later, and keeping or superseding a note does not change who sees it.
+- **What your role allows.** A viewer reads. An editor also writes, keeps, forgets and supersedes notes, sets stars and asks the model. An admin also runs jobs and sees the AI configuration. Buttons you may not use are hidden.
+- **Agents and VS Code.** The global `THROUGHLINE_AGENT_KEY` does not work in team mode. Ask the operator for a key of your account (`throughline account agent-key <name>`). Claude Code, Codex and Cline send it as `Authorization: Bearer <key>`, exactly as in [Agent access over HTTP](#agent-access-over-http). In VS Code, store it with **Throughline: Set Agent Key**: the extension retries a 401 once with the key, so recall and the context pack work, and they count as use. The agent sees and writes what your account sees and writes.
+
 ## The continue loop
 
 The handoff brief is only useful if it reaches the next session without

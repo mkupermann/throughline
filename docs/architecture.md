@@ -82,6 +82,20 @@ embeddings and the ingestion ledger. `pgvector` supplies the vector type and HNS
   path. HTTP answers with plain JSON, no SSE and no sessions. The dispatcher speaks the
   modern `2026-07-28` protocol and the legacy `2025-11-25` and `2025-06-18` handshakes
   (stdio also `2024-11-05`). Use is counted per note where a note is handed to an agent.
+- **Rust web server access** (`rust/crates/throughline/src/access.rs`, `server.rs`) — every
+  request passes the request guard (Host, Origin, `Sec-Fetch-Site`) and then a middleware
+  that builds an `Actor { user_id, username, role, via }` and hands it to the handler. In
+  local mode the actor is the local operator (`admin`, sees every note). In team mode
+  (`THROUGHLINE_AUTH_MODE=team`) it comes from the session cookie or an account's agent key;
+  without either, every `/api` route except `/api/health` and `/api/login` answers 401.
+  `access::ROUTE_ROLES` maps each (method, route pattern) to `viewer`, `editor` or `admin`,
+  and a route missing from the table needs `admin`: `viewer` reads, `editor` also writes,
+  keeps, forgets and supersedes notes, sets stars and asks the model, `admin` also runs jobs,
+  merges, writes back and owns the AI configuration. MCP tools use the same roles. Every query that returns notes or
+  computes over them adds `access::visibility_predicate(actor, alias)`:
+  `(visibility = 'shared' OR owner_id = $n)` for an account, `TRUE` in local mode,
+  shared only for server jobs. Setup and limits:
+  [TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md).
 - **GUI** (`throughline/api/` and `web/src/`) — one FastAPI process serves the JSON API and
   built React SPA. It has eight route components: Overview, Find, Timeline, Curate, Project,
   Detail, Operate, and Console. Overview, Find, Timeline, Curate, Operate, and Console are
@@ -286,8 +300,9 @@ once an hour, at negligible cost.
 **Local-first as a hard constraint, not a deployment option.** Native services bind to
 loopback. Compose publishes only loopback ports, requires a database password, runs the
 application as an unprivileged user, and mounts tool directories read-only. Transcripts can
-contain credentials, client names, and unreleased work. The API has no authentication, so a
-remote bind requires the operator's own authentication and TLS. See [SECURITY.md](../SECURITY.md).
+contain credentials, client names, and unreleased work. In local mode the API has no
+authentication, so a remote bind requires team mode (sign-in, roles, private notes) or the
+operator's own authentication, and TLS in both cases. See [SECURITY.md](../SECURITY.md).
 
 **Supersession rather than deletion.** Memory that turns out to be wrong is marked, not
 erased — `superseded_by` and `status` preserve both the old fact and
