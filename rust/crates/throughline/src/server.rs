@@ -259,22 +259,17 @@ where
     match joined {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(e)) => {
-            let msg = e.to_string();
             if e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
                 .is_some()
             {
-                Err(api_error(
-                    StatusCode::FORBIDDEN,
-                    "remote_llm_not_allowed",
-                    msg,
-                ))
+                Err(remote_llm_refused(team, &e))
             } else if team {
                 Err(hidden_failure(&e))
             } else {
                 Err(api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "query_failed",
-                    msg,
+                    e.to_string(),
                 ))
             }
         }
@@ -299,6 +294,22 @@ fn without_detail(code: &str) -> Response {
         Json(serde_json::json!({ "error": code })),
     )
         .into_response()
+}
+
+/// The detail of a refused remote model in team mode.
+pub(crate) const REMOTE_LLM_REFUSED: &str = "the configured model is not local";
+
+/// 403 `remote_llm_not_allowed`. The refusal names the model and the
+/// switch that allows it; team mode logs that and gives the client
+/// [`REMOTE_LLM_REFUSED`], local mode gives the text as before.
+fn remote_llm_refused(team: bool, e: &anyhow::Error) -> Response {
+    let detail = if team {
+        eprintln!("remote model refused: {e}");
+        REMOTE_LLM_REFUSED.to_string()
+    } else {
+        e.to_string()
+    };
+    api_error(StatusCode::FORBIDDEN, "remote_llm_not_allowed", detail)
 }
 
 /// Team mode's answer to a failed query: `query_failed` without the text,
@@ -659,6 +670,10 @@ async fn recent(
     Extension(actor): Extension<Actor>,
     Query(params): Query<RecentParams>,
 ) -> Response {
+    // Export over HTTP is an admin's; the local user is one.
+    if params.csv && actor.role < crate::access::Role::Admin {
+        return forbidden_role(crate::access::Role::Admin);
+    }
     let limit = if params.csv {
         params.limit.clamp(1, 50_000)
     } else {
@@ -1455,11 +1470,7 @@ async fn recall_handler(
         {
             Ok(Ok(emb)) => emb,
             Ok(Err(e)) => {
-                return api_error(
-                    StatusCode::FORBIDDEN,
-                    "remote_llm_not_allowed",
-                    e.to_string(),
-                )
+                return remote_llm_refused(state.auth_mode == crate::access::AuthMode::Team, &e)
             }
             Err(_) => None,
         }
@@ -3482,10 +3493,16 @@ async fn assistants_imported_handler(
     }
 }
 
+/// A stored copy of a host file. `config_import::get` takes no actor, so
+/// the handler checks the admin role the route table gives it as well.
 async fn assistants_imported_file_handler(
     State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
     Path(id): Path<i64>,
 ) -> Response {
+    if actor.role < crate::access::Role::Admin {
+        return forbidden_role(crate::access::Role::Admin);
+    }
     match with_db(&state, move |client| crate::config_import::get(client, id)).await {
         Ok(Some(file)) => Json(file).into_response(),
         Ok(None) => (
@@ -3799,7 +3816,13 @@ async fn actor_layer(
     let Some(session) = session else {
         return unauthorized("sign in first");
     };
-    let needed = crate::access::required_role(req.method(), req.uri().path());
+    // The registered pattern (`/api/memory/{id}`); a path no route matches
+    // has none and needs `admin`.
+    let pattern = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or("", |matched| matched.as_str());
+    let needed = crate::access::required_role(req.method(), pattern);
     if session.actor.role < needed {
         return forbidden_role(needed);
     }
@@ -4414,25 +4437,41 @@ mod tests {
         );
     }
 
-    /// Every registered route either passes without a session or has an
-    /// entry of its own in the role table: the `admin` default for unknown
-    /// routes must not stand in for a missing entry.
+    /// The role table and the registered routes behind a session are the
+    /// same set of (method, pattern), both ways: a new route can neither
+    /// go without an entry nor fall into one meant for another route.
     #[test]
     fn required_role_table_is_complete() {
-        use crate::access::{required_role, route_role, Role};
+        use crate::access::{required_role, route_role, Role, ROUTE_ROLES};
         use axum::http::Method;
+        use std::collections::BTreeSet;
         let table = route_table();
-        let mut missing = Vec::new();
+        let registered: BTreeSet<String> = table
+            .iter()
+            .filter(|(_, path)| !without_session(path))
+            .map(|(method, path)| format!("{method} {path}"))
+            .collect();
+        let roles: BTreeSet<String> = ROUTE_ROLES
+            .iter()
+            .map(|(method, path, _)| format!("{method} {path}"))
+            .collect();
+        assert_eq!(roles.len(), ROUTE_ROLES.len(), "a route twice in the table");
+        assert_eq!(
+            registered.difference(&roles).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "registered routes without a role"
+        );
+        assert_eq!(
+            roles.difference(&registered).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "roles for routes that are not registered"
+        );
         for (method, path) in &table {
-            if without_session(path) {
-                continue;
-            }
-            match route_role(method, path) {
-                Some(role) => assert_eq!(required_role(method, path), role, "{method} {path}"),
-                None => missing.push(format!("{method} {path}")),
+            if !without_session(path) {
+                let role = route_role(method, path).expect("an entry");
+                assert_eq!(required_role(method, path), role, "{method} {path}");
             }
         }
-        assert!(missing.is_empty(), "routes without a role: {missing:?}");
         let open: Vec<String> = table
             .iter()
             .filter(|(_, path)| without_session(path))
@@ -4454,39 +4493,49 @@ mod tests {
                 "DELETE /mcp",
             ]
         );
-        // The roles the plan names, on patterns and on request paths.
+        // The roles the plan and the rulings name.
         for (method, path, role) in [
             (Method::GET, "/api/status", Role::Viewer),
             (Method::HEAD, "/api/status", Role::Viewer),
-            (Method::GET, "/api/memory/7", Role::Viewer),
+            (Method::GET, "/api/memory/{id}", Role::Viewer),
             (Method::GET, "/api/me", Role::Viewer),
+            (Method::GET, "/api/consolidation/candidates", Role::Viewer),
             (Method::GET, "/api/ask", Role::Editor),
             (Method::HEAD, "/api/ask", Role::Editor),
             (Method::GET, "/api/answer-eval", Role::Editor),
-            (Method::POST, "/api/memory/7/forget", Role::Editor),
+            (Method::POST, "/api/memory", Role::Editor),
+            (Method::POST, "/api/memory/{id}/forget", Role::Editor),
             (Method::POST, "/api/memory/{id}/keep", Role::Editor),
-            (Method::POST, "/api/memory/7/supersede", Role::Editor),
+            (Method::POST, "/api/memory/{id}/supersede", Role::Editor),
             (Method::POST, "/api/favorites", Role::Editor),
-            (Method::DELETE, "/api/favorites/memory/7", Role::Editor),
+            (Method::DELETE, "/api/favorites/{kind}/{ref}", Role::Editor),
+            (Method::GET, "/api/consolidation/proposal", Role::Admin),
             (Method::POST, "/api/operate", Role::Admin),
             (Method::POST, "/api/consolidate", Role::Admin),
             (Method::POST, "/api/writeback", Role::Admin),
             (Method::POST, "/api/agent-memory/ingest", Role::Admin),
             (Method::POST, "/api/mimo-memory/ingest", Role::Admin),
+            (Method::GET, "/api/assistants", Role::Admin),
+            (Method::GET, "/api/assistants/file", Role::Admin),
             (Method::PUT, "/api/assistants/file", Role::Admin),
-            (Method::GET, "/api/assistants/file", Role::Viewer),
+            (Method::GET, "/api/assistants/imported", Role::Admin),
+            (Method::GET, "/api/assistants/imported/{id}", Role::Admin),
+            (Method::GET, "/api/assistants/{tool}", Role::Admin),
         ] {
             assert_eq!(route_role(&method, path), Some(role), "{method} {path}");
         }
-        // Unknown routes have no entry and need `admin`.
+        // Unknown routes, request paths instead of patterns among them, have
+        // no entry and need `admin`.
         for (method, path) in [
+            (Method::GET, ""),
             (Method::GET, "/api"),
             (Method::GET, "/api/nope"),
+            (Method::GET, "/api/memory/7"),
+            (Method::POST, "/api/memory/7/forget"),
             (Method::DELETE, "/api/status"),
-            (Method::PATCH, "/api/memory/7"),
-            (Method::PUT, "/api/assistants/claude"),
-            (Method::POST, "/api/memory/7/forget/now"),
-            (Method::GET, "/api/memory/7/forget"),
+            (Method::PATCH, "/api/memory/{id}"),
+            (Method::PUT, "/api/assistants/{tool}"),
+            (Method::GET, "/api/memory/{id}/forget"),
         ] {
             assert_eq!(route_role(&method, path), None, "{method} {path}");
             assert_eq!(required_role(&method, path), Role::Admin, "{method} {path}");
@@ -8426,8 +8475,13 @@ mod session_tests {
             assert_eq!(answer.status, 200, "{path}: {}", answer.body);
             assert!(answer.body.contains(&secret), "{path}: {}", answer.body);
         }
+        // The merge proposal is an admin's: C, an admin who is not A, asks
+        // for it in B's place. A role opens no other account's note.
+        let name_c = format!("c-{tag}");
+        s.add_account(&name_c, Role::Admin);
+        let c = s.sign_in(&name_c, PASSWORD);
         for (i, path) in reads.iter().enumerate() {
-            let answer = s.get(path, &b);
+            let answer = s.get(path, if i == 14 { &c } else { &b });
             // The private note is missing to B; the proposal names a note
             // that is no longer current (the replaced shared one).
             let expected = match i {
@@ -8459,9 +8513,6 @@ mod session_tests {
         }
         // Merging needs an admin, and an admin's role does not open
         // another account's private note either.
-        let name_c = format!("c-{tag}");
-        s.add_account(&name_c, Role::Admin);
-        let c = s.sign_in(&name_c, PASSWORD);
         let answer = s.write(
             "/api/consolidate",
             &c,
@@ -8581,15 +8632,20 @@ mod session_tests {
         };
         let viewer = s.browser_with(Role::Viewer);
         let refused = walk(&s, &viewer, Role::Viewer);
-        // Every write but the viewer's own sign-out and password, and both
-        // routes that ask a model.
+        // Every write but the viewer's own sign-out and password, the
+        // routes that send text to a model, and the host's assistant files.
         let mut expected: Vec<String> = gated()
             .into_iter()
             .filter(|(method, path, _)| {
-                *method != Method::GET && !["/api/logout", "/api/password"].contains(path)
+                (*method != Method::GET && !["/api/logout", "/api/password"].contains(path))
+                    || path.starts_with("/api/assistants")
             })
             .map(|(method, path, _)| format!("{method} {path}"))
-            .chain(["GET /api/ask".into(), "GET /api/answer-eval".into()])
+            .chain([
+                "GET /api/ask".into(),
+                "GET /api/answer-eval".into(),
+                "GET /api/consolidation/proposal".into(),
+            ])
             .collect();
         expected.sort();
         let mut refused_sorted = refused.clone();
@@ -8605,14 +8661,22 @@ mod session_tests {
         );
         assert_eq!(bare.status, 403, "{}", bare.body);
         assert_eq!(bare.json(), forbidden(Role::Editor));
-        // HEAD is a GET.
-        let head = s.send(
-            Method::HEAD,
-            "/api/ask",
-            &[("cookie", viewer.cookie.as_str())],
-            None,
-        );
-        assert_eq!(head.status, 403);
+        // HEAD is a GET, with the GET route's role.
+        let head = |path: &str| {
+            s.send(
+                Method::HEAD,
+                path,
+                &[("cookie", viewer.cookie.as_str())],
+                None,
+            )
+            .status
+        };
+        assert_eq!(head("/api/ask"), 403);
+        assert_eq!(head("/api/memory/1"), 200);
+        // A path no route matches needs `admin`.
+        let unknown = s.get("/api/nope", &viewer);
+        assert_eq!(unknown.status, 403, "{}", unknown.body);
+        assert_eq!(unknown.json(), forbidden(Role::Admin));
         // Without a session it stays 401.
         for (method, path) in [(Method::GET, "/api/ask"), (Method::POST, "/api/operate")] {
             let answer = s.send(method.clone(), path, &[("origin", s.base.as_str())], None);
@@ -8649,6 +8713,12 @@ mod session_tests {
         assert_eq!(
             refused,
             [
+                "GET /api/assistants",
+                "GET /api/assistants/file",
+                "GET /api/assistants/imported",
+                "GET /api/assistants/imported/{id}",
+                "GET /api/assistants/{tool}",
+                "GET /api/consolidation/proposal",
                 "POST /api/agent-memory/ingest",
                 "POST /api/consolidate",
                 "POST /api/mimo-memory/ingest",
@@ -8691,6 +8761,8 @@ mod session_tests {
             let answer = s.call(method.clone(), &concrete(path), &admin);
             assert_eq!(answer.body, "reached", "{method} {path}");
         }
+        // A path no route matches reaches the router's 404.
+        assert_eq!(s.get("/api/nope", &admin).status, 404);
         // The request token still applies to an admin.
         let bare = s.send(
             Method::POST,
@@ -8720,10 +8792,12 @@ mod session_tests {
     /// MCP tools answer `query_failed` without the database text. Local
     /// mode, same table: the text is there, so the check could see it.
     #[test]
-    fn team_mode_hides_db_error_detail() {
+    fn team_mode_routes_and_mcp_hide_db_error_text() {
         let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
         let Some(s) = Served::start_with_key(AuthMode::Team, None, key()) else {
-            eprintln!("skipping team_mode_hides_db_error_detail: no PostgreSQL reachable");
+            eprintln!(
+                "skipping team_mode_routes_and_mcp_hide_db_error_text: no PostgreSQL reachable"
+            );
             return;
         };
         // Session-local and without the columns every note query reads.
@@ -8794,6 +8868,106 @@ mod session_tests {
             leaks(&answer.json()["detail"].to_string()),
             "{}",
             answer.body
+        );
+    }
+
+    /// CSV export over HTTP is an admin's (design: "Export über HTTP"); the
+    /// page of the same list stays a viewer's. Local mode exports as before.
+    #[test]
+    fn conversations_csv_needs_admin() {
+        let Some(s) = Served::team() else {
+            eprintln!("skipping conversations_csv_needs_admin: no PostgreSQL reachable");
+            return;
+        };
+        for role in [Role::Viewer, Role::Editor] {
+            let browser = s.browser_with(role);
+            let csv = s.get("/api/conversations?csv=1&limit=1", &browser);
+            assert_eq!(csv.status, 403, "{role:?}: {}", csv.body);
+            assert_eq!(csv.json(), forbidden(Role::Admin));
+            let page = s.get("/api/conversations?limit=1", &browser);
+            assert_eq!(page.status, 200, "{role:?}: {}", page.body);
+        }
+        let admin = s.browser_with(Role::Admin);
+        let csv = s.get("/api/conversations?csv=1&limit=1", &admin);
+        assert_eq!(csv.status, 200, "{}", csv.body);
+        assert_eq!(csv.header("content-type"), Some("text/csv; charset=utf-8"));
+        drop(s);
+
+        let Some(s) = Served::start(AuthMode::Local, None) else {
+            return;
+        };
+        let csv = s.send(Method::GET, "/api/conversations?csv=1&limit=1", &[], None);
+        assert_eq!(csv.status, 200, "{}", csv.body);
+        assert_eq!(csv.header("content-type"), Some("text/csv; charset=utf-8"));
+    }
+
+    /// The refusal of a non-local model names the model and the switch that
+    /// allows it. Team mode keeps both off the client, from recall's
+    /// embedding refusal and from `with_db`; the code stays. Local mode
+    /// answers as before.
+    #[test]
+    fn team_mode_hides_remote_model_refusal() {
+        let refusal = || {
+            anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+                label: "ollama/marker-model".into(),
+            })
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let read = |resp: Response| {
+            let status = resp.status();
+            let body = rt
+                .block_on(axum::body::to_bytes(resp.into_body(), 64 * 1024))
+                .expect("body");
+            (
+                status,
+                serde_json::from_slice::<Value>(&body).expect("json"),
+            )
+        };
+        let hidden = json!({ "error": "remote_llm_not_allowed", "detail": REMOTE_LLM_REFUSED });
+        let (status, body) = read(remote_llm_refused(true, &refusal()));
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body, hidden);
+        let (status, body) = read(remote_llm_refused(false, &refusal()));
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let detail = body["detail"].as_str().expect("detail");
+        assert!(
+            detail.contains("ollama/marker-model")
+                && detail.contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
+            "{body}"
+        );
+
+        let Some(client) = test_db() else {
+            eprintln!("skipping the with_db half of team_mode_hides_remote_model_refusal: no PostgreSQL reachable");
+            return;
+        };
+        let mut state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: AuthMode::Team,
+            public_url: None,
+            login: Default::default(),
+        };
+        let fail = |state: &AppState| {
+            let resp = rt
+                .block_on(with_db(state, move |_| -> anyhow::Result<()> {
+                    Err(refusal())
+                }))
+                .expect_err("refused");
+            read(resp)
+        };
+        let (status, body) = fail(&state);
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body, hidden);
+        state.auth_mode = AuthMode::Local;
+        let (status, body) = fail(&state);
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(
+            body["detail"]
+                .as_str()
+                .unwrap()
+                .contains("ollama/marker-model"),
+            "{body}"
         );
     }
 }
