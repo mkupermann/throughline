@@ -379,14 +379,14 @@ fn run_account(command: AccountCommand) -> Result<()> {
             if accounts_cli::exists(&mut client, &name)? {
                 anyhow::bail!("account `{name}` already exists");
             }
-            let password = accounts_cli::read_password(password_file.as_deref(), true)?;
-            accounts_cli::add(&mut client, &name, display_name.as_deref(), role, &password)?;
-            println!("Account created with role {}.", role.as_str());
             if access::auth_mode_from(std::env::var("THROUGHLINE_AUTH_MODE").ok().as_deref())
                 .is_ok_and(|mode| mode == access::AuthMode::Local)
             {
                 println!("With accounts in the database the server starts only with THROUGHLINE_AUTH_MODE=team.");
             }
+            let password = accounts_cli::read_password(password_file.as_deref(), true)?;
+            accounts_cli::add(&mut client, &name, display_name.as_deref(), role, &password)?;
+            println!("Account created with role {}.", role.as_str());
         }
         AccountCommand::List => {
             let mut client = connect()?;
