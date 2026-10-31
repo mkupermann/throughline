@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { ApiClient } from "../src/apiClient";
+import { ApiClient, rankFromSetting } from "../src/apiClient";
 import { ThroughlineError } from "../src/errors";
 import { FakeServer, closedPort, type Recorded } from "./fakeServer";
 
@@ -29,6 +29,24 @@ test("api_recall_builds_the_query", async () => {
   assert.equal(u.searchParams.get("rank"), "weighted");
   assert.equal(u.searchParams.get("limit"), "5");
   assert.equal(req.headers.authorization, undefined, "display reads carry no key");
+});
+
+test("api_recall_without_rank_leaves_the_default_to_the_server", async () => {
+  srv.requests.length = 0;
+  srv.respond(200, { mode: "current", hits: [], degraded: null });
+  await new ApiClient(srv.baseUrl).recall("q", { project: "p", rank: rankFromSetting("default") });
+  const u = new URL(srv.requests[0].path, "http://x");
+  assert.equal(u.searchParams.has("rank"), false);
+});
+
+test("rank_setting_maps_to_a_rank_or_the_server_default", () => {
+  assert.equal(rankFromSetting("default"), undefined);
+  assert.equal(rankFromSetting(""), undefined);
+  assert.equal(rankFromSetting(undefined), undefined);
+  assert.equal(rankFromSetting("bogus"), undefined);
+  assert.equal(rankFromSetting("cosine"), "cosine");
+  assert.equal(rankFromSetting("fulltext"), "fulltext");
+  assert.equal(rankFromSetting("weighted"), "weighted");
 });
 
 test("unreachable_server_is_reported", async () => {

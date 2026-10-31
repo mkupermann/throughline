@@ -46,11 +46,19 @@
         "throughline.rank": {
           "type": "string",
           "enum": [
+            "default",
+            "cosine",
             "fulltext",
             "weighted"
           ],
-          "default": "fulltext",
-          "description": "Ranking used for recall: full text or weighted."
+          "enumDescriptions": [
+            "The server's default (cosine, by meaning; full text when the server cannot reach Ollama).",
+            "By meaning: cosine of the embeddings.",
+            "By shared words.",
+            "Meaning and reliability, weighted."
+          ],
+          "default": "default",
+          "description": "Ranking used for recall. `default` sends none and leaves the choice to the server."
         }
       }
     },

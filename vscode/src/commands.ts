@@ -1,5 +1,5 @@
 import { detectAgents, sendToAgent as deliver, type Agent, type AgentHost } from "./agents";
-import type { ApiClient, ContextPack, RecallResult } from "./apiClient";
+import type { ApiClient, ContextPack, Rank, RecallResult } from "./apiClient";
 import { describe, ThroughlineError } from "./errors";
 import { conflictsToMarkdown, noteToMarkdown, packToMarkdown } from "./markdown";
 
@@ -36,7 +36,7 @@ export interface Settings {
   url(): string;
   project(): string | undefined;
   budget(): number;
-  rank(): "fulltext" | "weighted";
+  rank(): Rank | undefined;
 }
 
 export interface Sink {

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { resolveProject } from "./statusLogic";
 import { DEFAULT_URL, validateUrl } from "./validate";
+import { rankFromSetting, type Rank } from "./apiClient";
 
 export const KEY_NAME = "throughline.agentKey";
 
@@ -32,6 +33,7 @@ export function getBudget(): number {
   return cfg().get<number>("contextBudget", 2000);
 }
 
-export function getRank(): "fulltext" | "weighted" {
-  return cfg().get<string>("rank", "fulltext") === "weighted" ? "weighted" : "fulltext";
+/** The configured ranking; `undefined` sends none, so the server's default applies. */
+export function getRank(): Rank | undefined {
+  return rankFromSetting(cfg().get<string>("rank", "default"));
 }
