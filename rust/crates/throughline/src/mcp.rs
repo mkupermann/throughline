@@ -303,7 +303,13 @@ fn tools_list() -> Value {
                         "rank": {
                             "type": "string",
                             "enum": ["fulltext", "weighted", "cosine"],
-                            "default": crate::recall::DEFAULT_RANK.as_str()
+                            // No single `default`: a client that fills it in
+                            // would send it for every mode.
+                            "description": format!(
+                                "Left out: {} in mode current, {} in as_of, associative and grounded",
+                                crate::recall::default_rank(crate::recall::RecallMode::Current).as_str(),
+                                crate::recall::default_rank(crate::recall::RecallMode::AsOf).as_str()
+                            )
                         }
                     },
                     "required": ["query"]
@@ -1254,6 +1260,8 @@ mod tests {
             schema["properties"]["rank"]["enum"],
             json!(["fulltext", "weighted", "cosine"])
         );
+        // The default depends on the mode, so there is no single one.
+        assert!(schema["properties"]["rank"].get("default").is_none());
         for k in ["project", "valid_at", "known_at", "limit"] {
             assert!(schema["properties"].get(k).is_some(), "{k}");
         }
@@ -1469,9 +1477,21 @@ mod tests {
             .iter()
             .find(|t| t["name"] == "recall")
             .expect("recall tool");
-        assert_eq!(
-            tool["inputSchema"]["properties"]["rank"]["default"],
-            crate::recall::DEFAULT_RANK.as_str()
+        // The tool's schema names the default per mode and sets no single
+        // `default` a client could fill in for every mode.
+        let rank = &tool["inputSchema"]["properties"]["rank"];
+        assert!(rank.get("default").is_none(), "{rank}");
+        let text = rank["description"].as_str().expect("description");
+        assert!(
+            text.contains(&format!(
+                "{} in mode current",
+                crate::recall::DEFAULT_RANK.as_str()
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains("fulltext in as_of, associative and grounded"),
+            "{text}"
         );
     }
 
