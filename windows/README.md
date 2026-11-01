@@ -17,6 +17,15 @@ you remembered to open Operate and click Run yourself.
 | Throughline Extract | daily at 02:00 | Distil memory chunks from recent conversations                    |
 | Throughline Backup  | daily at 03:00 | Dump the database, verified and rotated                           |
 
+There is no embedding task yet, unlike the hourly `embed` job of
+`../systemd/` and `../launchd/`. Recall ranks by meaning by default, and a
+note without a vector is ranked by its words. Under Docker Compose the
+extract task runs the Rust binary, which gives each new note its vector right
+away when Ollama answers in time. Fill in the rest yourself, for example
+after an Ollama outage or a change of the embedding model:
+`docker exec throughline-web throughline embed --limit 10000`, or
+`throughline embed --limit 10000` with the Rust binary on a native install.
+
 ## Two setups, auto-detected
 
 Each script checks for a running `throughline-web` Docker container first

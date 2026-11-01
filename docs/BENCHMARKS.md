@@ -23,7 +23,8 @@ moved afterwards. A result that missed its bar is reported as such.
   its `--dump-parts` output offline (the grid and the random weights of part
   B). `recall-eval` runs the real recall path and counts no use, so measuring
   changed no note's strength. The extraction numbers of part C come from
-  `extract-memory`.
+  `extract-memory`, its answers from `bench-answer`, judged by a script that
+  stays outside the repository with the data.
   k = 5, seed 7. MRR counts down to rank 50.
 
 ### The test set
@@ -128,9 +129,12 @@ and no result that quotes it, is in this repository.
   the machine went to sleep).
 - **Retrieval.** `recall-eval --mode locomo` asks every question in its
   dialogue's project, with the default rank (cosine) and with full text and
-  weighted for comparison. A hit means a returned note comes from a session
-  that holds one of the question's evidence turns. That is session level:
-  notes do not record which turn they came from. Per category, with n, at
+  weighted for comparison. A hit means a returned note was extracted from a
+  session that holds one of the question's evidence turns: the note's own
+  session, not that of an earlier version it replaced. That is session level:
+  notes do not record which turn they came from. A turn id found in two
+  sessions of a dialogue stops the run, and the questions of a dialogue that
+  was extracted to no notes count as misses. Per category, with n, at
   k = 5 and k = 10: `hit`, the share of questions with a note from an evidence
   session in the top k, and `coverage`, the mean share of a question's evidence
   sessions that have a note in the top k. The adversarial category is reported
@@ -143,7 +147,90 @@ and no result that quotes it, is in this repository.
   50 answers labelled by hand; agreement below 80 % means the answer score is
   reported as unreliable.
 
-> **Placeholder.** Results: to be filled from `results-C-*`.
+#### Results, 2026-11-01: 2 of 10 dialogues
+
+A partial first measurement. Only the two smallest dialogues (19 sessions
+each) were extracted, with the `personal` profile: 422 notes. The other 8 are
+ingested but not extracted, so they are not measured. Categories by their
+number in the QA file: 1 multi-hop, 2 temporal, 3 open-domain, 4 single-hop,
+5 adversarial.
+
+**Retrieval.** n = 231 questions of categories 1 to 4 (2 of the 233 have no
+evidence id), plus 71 adversarial ones reported apart. Chance is the expected
+hit of a random top k from the dialogue's current notes. Hit in percent:
+
+| Category | n | cosine @5 | cosine @10 | fulltext @5 | fulltext @10 | weighted @5 | weighted @10 | chance @5 | chance @10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 43 | 79.1 | 88.4 | 48.8 | 62.8 | 81.4 | 88.4 | 45.2 | 68.2 |
+| 2 temporal | 63 | 96.8 | 98.4 | 90.5 | 95.2 | 96.8 | 98.4 | 24.2 | 42.4 |
+| 3 open-domain | 11 | 72.7 | 90.9 | 36.4 | 45.5 | 72.7 | 90.9 | 28.7 | 46.5 |
+| 4 single-hop | 114 | 87.7 | 93.0 | 84.2 | 88.6 | 86.8 | 92.1 | 23.8 | 41.6 |
+| **1-4** | **231** | **87.9** | **93.5** | **77.1** | **83.5** | **87.9** | **93.1** | **28.1** | **47.0** |
+| 5 adversarial (apart) | 71 | 42.3 | 60.6 | 56.3 | 66.2 | 43.7 | 60.6 | 23.6 | 41.4 |
+
+Coverage in percent, the mean share of a question's evidence sessions with a
+note in the top k:
+
+| Category | n | cosine @5 | cosine @10 | fulltext @5 | fulltext @10 | weighted @5 | weighted @10 | chance @5 | chance @10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 43 | 50.3 | 66.1 | 30.9 | 42.6 | 50.2 | 66.5 | 23.4 | 41.1 |
+| 2 temporal | 63 | 96.8 | 98.4 | 90.5 | 95.2 | 96.8 | 98.4 | 24.2 | 42.4 |
+| 3 open-domain | 11 | 60.6 | 83.3 | 27.3 | 36.4 | 60.6 | 78.8 | 21.5 | 38.1 |
+| 4 single-hop | 114 | 87.7 | 93.0 | 84.2 | 88.6 | 86.8 | 92.1 | 23.8 | 41.6 |
+| **1-4** | **231** | **82.0** | **89.0** | **73.3** | **79.4** | **81.5** | **88.4** | **23.7** | **41.6** |
+| 5 adversarial (apart) | 71 | 42.3 | 60.6 | 56.3 | 66.2 | 43.7 | 60.6 | 23.6 | 41.4 |
+
+- Session-level hits are lenient: a random top 5 already reaches 28.1 % on
+  categories 1 to 4. Read the numbers against the chance columns.
+- Category 3 has n = 11, so one question is 9.1 points there.
+- Not comparable with published LoCoMo retrieval numbers, which count turns
+  or other units.
+- The run predates the hit rules described above (own session, a turn id in
+  two sessions, dialogues without notes). On this database they give the same
+  numbers: no note had been replaced, no turn id is in two sessions, and both
+  measured dialogues have notes.
+- No result said `degraded`, and no use was counted.
+
+**Answers.** The same model, `qwen3.6:27b`, answers and judges. Unanimity is
+the share of questions on which all three verdicts agree; kappa is Fleiss'
+kappa over the three. The hand labels for the 50-answer check above are
+still pending, so the judge is unconfirmed and the scores below are
+provisional.
+
+The pre-registered run is a stratified sample (`--sample 120 --seed 7`): 30
+questions per category, all 13 of category 3, so n = 103 per path, the same
+questions on both. Correct by majority:
+
+| Category | n | memory | raw | memory unanimity | raw unanimity | memory kappa | raw kappa |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 30 | 20.0 % (6) | 43.3 % (13) | 83.3 % | 83.3 % | 0.666 | 0.772 |
+| 2 temporal | 30 | 6.7 % (2) | 10.0 % (3) | 93.3 % | 86.7 % | 0.726 | 0.586 |
+| 3 open-domain | 13 | 23.1 % (3) | 38.5 % (5) | 84.6 % | 84.6 % | 0.711 | 0.783 |
+| 4 single-hop | 30 | 30.0 % (9) | 80.0 % (24) | 93.3 % | 90.0 % | 0.898 | 0.800 |
+| **1-4** | **103** | **19.4 % (20)** | **43.7 % (45)** | **89.3 %** | **86.4 %** | **0.786** | **0.816** |
+
+- The 1-4 row weights the categories evenly, not as the dialogues do
+  (43, 63, 13 and 114 questions).
+- Paired on the same 103 questions: both correct 15, both wrong 53, raw only
+  30, memory only 5. Exact McNemar test on the 35 discordant pairs:
+  p = 2.2e-5.
+- The memory path on all 233 questions of categories 1 to 4 (retrieval has
+  n = 231 because 2 have no evidence id): 20.6 % (48), unanimity 93.6 %,
+  kappa 0.872. By category: multi-hop 18.6 % of 43, temporal 7.9 % of 63,
+  open-domain 23.1 % of 13, single-hop 28.1 % of 114. The raw path stopped
+  at 150 of 233 answers when a scheduled extraction took Ollama, so there is
+  no full-set comparison.
+- 0 unparseable verdicts, 0 answers with an error.
+
+**Why the memory path scores low.** In all 233 packs the section "Relevant to
+the task" was empty. The Decisions section comes first and has no cap: it
+holds every current note of the categories decision, preference and
+project_context, 99 in one dialogue and 78 in the other. The 2,000-token
+budget is used up after about 47 of them, so no "Relevant" line fits. The
+answer score therefore measures what the production pack shows, not the
+cosine retrieval of the table above (hit@5 87.9 % on the same dialogues).
+Giving "Relevant" its own share of the budget is a product follow-up; this
+release does not change the pack.
 
 ### Limitations
 

@@ -110,6 +110,11 @@ throughline ask "which tools do I actually use" --json
 cite. `--top-k` widens or narrows retrieval; recall@24 measured 75% against
 recall@12's 60% on this corpus, which is why 24 is the default.
 
+In the Rust runtime `throughline ask <question> [--limit 12] [--project <name>]`
+takes 12 excerpts by default. `--project` keeps it to that project: semantic
+search over its messages, word matches over its messages and notes, and no
+imported configs or instruction files.
+
 Retrieval is entirely local. Content can leave the machine when a named remote
 model is selected for embedding, answering, extraction, titles, or reflection:
 
@@ -249,7 +254,7 @@ Cosine has been the default since 2026-10-31. Before that, full text was the def
 
 `rank=cosine` (CLI `--rank cosine`) orders the notes by the cosine of the question's vector to the note's vector and by nothing else: no shared words, no recency, no reliability. The score is that cosine, also in `why.cosine`. A note without a vector yet scores its full-text rank divided by the best full-text rank among the candidates, so a fresh note that holds every word of the question still comes first; its `why.fulltext` holds the raw rank, and the answer says `"degraded": "<n> notes without a vector"` (`"1 note without a vector"` for one). If the question gets no vector, because Ollama is not reachable, the embedding model is missing or the embedding call fails, cosine ranks by full text instead: the answer is still HTTP 200, says `"degraded": "no_embeddings"`, and `why.fulltext` holds the score that ranked each hit.
 
-When a request names no rank, the default waits at most 3 seconds for the question's vector. After Ollama failed to answer or answered too late, it ranks by full text, with `degraded`, for the next 60 seconds without asking Ollama again. The process remembers that once, for questions and for the vectors of new notes alike; a refusal by the remote-model lock is not remembered. A named rank, `rank=cosine` included, waits as long as it takes (up to a minute) and has no such pause. HTTP and MCP over HTTP embed the question before they take the database, so a slow Ollama does not hold up other requests. Cosine is the default of mode `current` only, the mode that was measured; `as_of`, `associative` and `grounded` without a rank keep full text, as before. With a cloud embedding model and `THROUGHLINE_ALLOW_REMOTE_LLM` unset, the default recall and every context pack with a task now answer 403 `remote_llm_not_allowed` (over MCP error -32000), where full text answered before; name `rank=fulltext` to avoid the model.
+When a request names no rank, the default waits at most 3 seconds for the question's vector. After Ollama failed to answer or answered too late, it ranks by full text, with `degraded`, for the next 60 seconds without asking Ollama again. The process remembers that once, for questions and for the vectors of new notes alike; a refusal by the remote-model lock is not remembered. A named rank, `rank=cosine` included, waits as long as it takes (up to a minute) and has no such pause. HTTP and MCP over HTTP embed the question before they take the database, so a slow Ollama does not hold up other requests. Cosine is the default of mode `current` only, the mode that was measured; `as_of`, `associative` and `grounded` without a rank keep full text, as before. `as_of` and `grounded` without a rank still ask for the question's vector, for the cosine gate of `as_of` and the evidence of `grounded`: with the same 3-second wait and the same 60-second pause, so their fallback comes sooner, while their ranking stays full text. A vector the ranking cannot use (not the size of the model's profile, a value that is not a finite number, or all zeros) counts as a failure: without a named rank the answer ranks by full text with `degraded`, with a named rank it is 502 `bad_query_vector` (over MCP error -32000 with the reason). `serve` asks for one question vector in the background when it starts, so Ollama has the model loaded before the first default recall; startup does not wait for it, and a failure is only logged. Give every process that runs `throughline` the server's `OLLAMA_EMBED_MODEL` and `OLLAMA_HOST`: the server, MCP over stdio, and a native `extract-memory`, `ingest`, `consolidate` or `reflect` each embed the notes they write and the questions they rank with their own setting. With a cloud embedding model and `THROUGHLINE_ALLOW_REMOTE_LLM` unset, the default recall and every context pack with a task now answer 403 `remote_llm_not_allowed` (over MCP error -32000), where full text answered before; name `rank=fulltext` to avoid the model.
 
 The four modes differ in what they admit and how they rank:
 
@@ -274,7 +279,7 @@ The larger measurement (2026-10-31, 74 questions from one corpus, granite vector
 
 `--mode locomo --qa <file> --k 5,10` measures retrieval on the LoCoMo benchmark: every question is asked in its dialogue's project, and a hit is a note from a session that holds one of the question's evidence turns. It runs only with `PGDATABASE=throughline_bench` and counts no use. The `--qa` file is not the LoCoMo data file but a list you derive from its question entries, one item per question: `{"items": [{"sample_id": "...", "category": 1, "question": "...", "evidence": ["D<session>:<turn>", ...]}]}`. Optional fields are `id`, `answer` and `evidence_raw` (the ids exactly as the data file has them, read instead of `evidence` so unreadable ids are counted). The report gives, per rank and category, `hit` (questions with a note from an evidence session in the top k) and `coverage` (the share of evidence sessions reached). Ingest the data first with `PGDATABASE=throughline_bench THROUGHLINE_LOCOMO_PATH=<file> throughline ingest --source locomo`. That also refuses every other database, and `ingest --source all` leaves it out. The data is licensed CC BY-NC 4.0, so keep the file, the questions and every result that quotes them outside the repository. The method is in [BENCHMARKS.md](BENCHMARKS.md#part-c-locomo-with-local-models).
 
-Coming, not in this build yet: `throughline bench-answer --qa <file> --out <answers.jsonl> [--sample 400 --seed 7] [--raw]` will answer each question from a context pack of its project with the production answer prompt, and `--raw` from the raw turns through `ask`. It will run only against `throughline_bench` as well.
+`throughline bench-answer --qa <file> --out <answers.jsonl> [--sample N] [--seed 7] [--raw]` answers the LoCoMo questions for a judge that runs outside the repository. It takes the questions of categories 1 to 4 whose dialogue has notes, from a `--qa` file of the same form (with `answer`, the gold answer, and optionally `id`). The memory path builds the context pack for project = the dialogue and task = the question, with the default rank and the production budget, and asks `THROUGHLINE_ANSWER_MODEL` with the production answer prompt of `ask`. `--raw` answers through `ask --project <dialogue>` instead: semantic search over the dialogue's raw messages plus word matches, the baseline without notes. `--sample N` takes a sample stratified by category, N/4 questions from each of categories 1 to 4 (all of a smaller one), drawn with `--seed` (default 7); N below 4 is refused. Each question becomes one JSON line in `--out`: `question_id`, `sample_id`, `category`, `question`, `gold`, `answer`, `context_note_ids` (memory path), `context_session_ids` (raw path), `relevant_lines`, `path`, `model`, `degraded`, `error` and `seconds`. A failed question is retried once and then written with `error` and no answer; that includes a raw answer whose semantic half did not run, one without excerpts, and a failed model call. On the memory path a question that gets no vector stops the run. An existing `--out` is resumed: questions answered without an error are skipped, and a file with the other path's answers is refused. It runs only with `PGDATABASE=throughline_bench`, checks before the first question that a question vector can be had, refuses a remote model unless `THROUGHLINE_ALLOW_REMOTE_LLM` is set, counts no use, and ends with `answered=… errors=… skipped_done=… questions=…`.
 
 ## Embedding model
 
@@ -342,7 +347,7 @@ Granite reads at most 512 tokens. Longer text is cut silently by Ollama: 2 of th
 
 ## Context pack
 
-`context` builds a briefing for one project that fits a token budget: what a new session should know before it starts. Where `handoff` carries one session forward, the context pack reads the project's current notes. It needs no Ollama.
+`context` builds a briefing for one project that fits a token budget: what a new session should know before it starts. Where `handoff` carries one session forward, the context pack reads the project's current notes. It works without Ollama. With a task it asks Ollama for the task's vector, as the default recall does (see [Recall](#recall-finding-notes-by-meaning)), and ranks by full text when there is none.
 
 ```bash
 throughline context --project demo
@@ -443,7 +448,8 @@ Two routes, and they compose:
 **MCP.** The Rust server speaks the Model Context Protocol over stdio
 (`throughline mcp`) and over HTTP (`POST /mcp`), so any MCP-capable client can
 query the shared store mid-session. Both transports run the same code and offer
-the same tools. The next section covers the HTTP side and the tool list. The
+the same tools. Over stdio, `throughline mcp` embeds questions and new notes
+itself, so give it the server's `OLLAMA_EMBED_MODEL` and `OLLAMA_HOST`. The next section covers the HTTP side and the tool list. The
 older Python server, `memory_mcp`, has a different tool contract; see
 [`memory_mcp/README.md`](../memory_mcp/README.md).
 

@@ -33,3 +33,11 @@ The migrations above are those of the earlier Python application, and the audit 
 - Rolling the image back after 014 needs the verified backup restored. 014 replaces the unique key of `favorites`, and an older image sets stars with the old key, so starring fails until the backup is back.
 - Do not run the Python migrations against the database afterwards. On a database that has not recorded `013_team_access.sql`, it would create `access_audit` and its triggers again.
 - `throughline serve` refuses to start, in local and team mode, until the newest Rust migration has run. Compose runs `migrate` before `web`; on a native install run `throughline migrate` after every upgrade. Applied Python migrations the Rust list does not know, such as `015_project_assignments.sql`, do not stop it.
+
+## Recall ranks by meaning
+
+From this release `recall`, MCP `recall` and the context pack's "Relevant to the task" rank by cosine in mode `current` when no rank is named; before, they ranked by full text. Details are in [USAGE.md](USAGE.md#recall-finding-notes-by-meaning).
+
+- Run `throughline embed --limit 10000` once after the upgrade (with Compose: `docker compose exec -T web throughline embed --limit 10000`), or install the hourly embed job from `launchd/` or `systemd/`. A note without a vector of the active model is ranked by its words.
+- Give every process that runs `throughline` the server's `OLLAMA_EMBED_MODEL` and `OLLAMA_HOST`: the embed job, MCP over stdio and native CLI jobs. Vectors of another model are not read.
+- With a cloud embedding model and `THROUGHLINE_ALLOW_REMOTE_LLM` unset, the default recall and every context pack with a task answer 403 `remote_llm_not_allowed`, where full text answered before. Set the variable, or name `rank=fulltext`.
