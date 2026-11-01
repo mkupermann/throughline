@@ -101,7 +101,9 @@ export function recall(d: Deps, query?: string): Promise<void> {
     const project = d.settings.project();
     const r = await d.api.recall(q, { project, rank: d.settings.rank() });
     d.tree?.setRecall(r);
-    d.ui.info(`${r.hits.length} note(s) found. See the Throughline view.`);
+    // The server ranks by words when it cannot get the question's vector.
+    const degraded = r.degraded ? ` Not ranked fully by meaning: ${r.degraded}.` : "";
+    d.ui.info(`${r.hits.length} note(s) found. See the Throughline view.${degraded}`);
   });
 }
 

@@ -234,6 +234,8 @@ mod tests {
                     snippet: format!("s{i}"),
                 })
                 .collect(),
+            semantic_skipped: None,
+            generation_error: None,
         }
     }
 

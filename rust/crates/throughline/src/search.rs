@@ -272,13 +272,29 @@ pub fn hybrid_in<C: GenericClient>(
     limit: i32,
     project: Option<&str>,
 ) -> Result<Vec<SearchHit>> {
+    let (hits, skipped) = hybrid_in_checked(client, actor, backend, query, limit, project)?;
+    if let Some(e) = skipped {
+        eprintln!("search: semantic skipped: {e}");
+    }
+    Ok(hits)
+}
+
+/// [`hybrid_in`] that hands back why the semantic half failed (the embed or
+/// the vector query) instead of logging it. No backend is no failure.
+pub(crate) fn hybrid_in_checked<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    backend: Option<&EmbeddingBackend>,
+    query: &str,
+    limit: i32,
+    project: Option<&str>,
+) -> Result<(Vec<SearchHit>, Option<anyhow::Error>)> {
     let mut hits: Vec<SearchHit> = Vec::new();
+    let mut skipped = None;
     if let Some(backend) = backend {
         match semantic_in(client, backend, query, limit, project) {
             Ok(mut sem) => hits.append(&mut sem),
-            Err(e) => {
-                eprintln!("search: semantic skipped: {e}");
-            }
+            Err(e) => skipped = Some(e),
         }
     }
     let mut lex = search(client, actor, query, limit, project)?;
@@ -299,7 +315,7 @@ pub fn hybrid_in<C: GenericClient>(
             .then_with(|| b.created_at.cmp(&a.created_at))
     });
     hits.truncate(limit.max(1) as usize);
-    Ok(hits)
+    Ok((hits, skipped))
 }
 
 /// Lexical hits from `memory_chunks` and indexed instruction files, and

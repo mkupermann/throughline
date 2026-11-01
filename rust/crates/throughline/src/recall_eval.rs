@@ -365,10 +365,13 @@ pub struct LocomoReport {
     pub questions: usize,
     /// Questions scored: their dialogue has notes and an evidence id names a turn.
     pub measured: usize,
-    /// Dialogues with and without notes in the database.
+    /// Dialogues measured: they have notes or were extracted.
     pub samples_measured: usize,
+    /// Measured dialogues extracted to zero notes: their questions count as misses.
+    pub samples_without_notes: usize,
+    /// Dialogues neither extracted nor with notes in the database: not measured.
     pub samples_skipped: usize,
-    /// Questions of dialogues without notes.
+    /// Questions of dialogues not measured.
     pub skipped_questions: usize,
     /// Questions of measured dialogues whose evidence names no turn.
     pub without_evidence: usize,
@@ -454,19 +457,26 @@ fn locomo_ranks() -> Vec<Rank> {
     ranks
 }
 
-/// The session (conversation) of every turn of dialogue `sample`, or `None`
-/// when the dialogue has no notes, so its questions cannot be measured.
-fn dialogue_turns<C: GenericClient>(
-    client: &mut C,
-    sample: &str,
-) -> Result<Option<HashMap<String, i64>>> {
-    let has_notes: bool = client
-        .query_one(
-            "SELECT EXISTS (SELECT 1 FROM memory_chunks WHERE project_name = $1)",
-            &[&sample],
-        )?
-        .get(0);
-    if !has_notes {
+/// A measured dialogue: the session (conversation) of every turn, and
+/// whether it has notes.
+struct Dialogue {
+    turns: HashMap<String, i64>,
+    has_notes: bool,
+}
+
+/// Dialogue `sample` as measured, or `None` when it has no notes and none of
+/// its sessions was extracted, so its questions cannot be measured. A
+/// dialogue extracted to zero notes is measured: its questions are misses.
+/// A turn id in two sessions of the dialogue is an error.
+fn dialogue_turns<C: GenericClient>(client: &mut C, sample: &str) -> Result<Option<Dialogue>> {
+    let row = client.query_one(
+        "SELECT EXISTS (SELECT 1 FROM memory_chunks WHERE project_name = $1), \
+                EXISTS (SELECT 1 FROM conversations WHERE source_tool = 'locomo' \
+                        AND project_path = $1 AND memory_extracted_until IS NOT NULL)",
+        &[&sample],
+    )?;
+    let (has_notes, extracted): (bool, bool) = (row.get(0), row.get(1));
+    if !has_notes && !extracted {
         return Ok(None);
     }
     let rows = client.query(
@@ -475,13 +485,35 @@ fn dialogue_turns<C: GenericClient>(
          WHERE c.source_tool = 'locomo' AND c.project_path = $1 AND m.metadata ? 'dia_id'",
         &[&sample],
     )?;
-    Ok(Some(rows.iter().map(|r| (r.get(0), r.get(1))).collect()))
+    let mut turns = HashMap::new();
+    for r in &rows {
+        let (id, session): (String, i64) = (r.get(0), r.get(1));
+        if let Some(other) = turns.insert(id.clone(), session) {
+            if other != session {
+                bail!("turn {id} of dialogue {sample} is in two sessions ({other} and {session})");
+            }
+        }
+    }
+    Ok(Some(Dialogue { turns, has_notes }))
+}
+
+/// The session each note of `ids` was extracted from: its own source, not
+/// that of its chain's first version. A note from no conversation has none.
+fn own_sessions<C: GenericClient>(client: &mut C, ids: &[i64]) -> Result<HashMap<i64, i64>> {
+    let rows = client.query(
+        "SELECT id, source_id FROM memory_chunks \
+         WHERE id = ANY($1) AND source_type = 'conversation' AND source_id IS NOT NULL",
+        &[&ids],
+    )?;
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
 }
 
 /// LoCoMo retrieval at the session level. Each question goes through
 /// `recall` in mode `current`, project = its dialogue, once per rank; no use
-/// is counted. A hit at k: a note among the top k comes from a session that
-/// holds an evidence turn of the question. `embed` gives the question vector.
+/// is counted. A hit at k: a note among the top k was extracted from a
+/// session that holds an evidence turn of the question (the note's own
+/// session, not that of the first version it replaced). `embed` gives the
+/// question vector.
 pub fn run_locomo<C: GenericClient>(
     client: &mut C,
     items: &[QaItem],
@@ -502,7 +534,7 @@ pub fn run_locomo<C: GenericClient>(
         questions: items.len(),
         ..Default::default()
     };
-    let mut dialogues: HashMap<&str, Option<HashMap<String, i64>>> = HashMap::new();
+    let mut dialogues: HashMap<&str, Option<Dialogue>> = HashMap::new();
     let mut tallies: BTreeMap<i64, Vec<Tally>> = BTreeMap::new();
     for (index, item) in items.iter().enumerate() {
         let sample = item.sample_id.as_str();
@@ -510,10 +542,11 @@ pub fn run_locomo<C: GenericClient>(
             let turns = dialogue_turns(client, sample)?;
             dialogues.insert(sample, turns);
         }
-        let Some(turns) = &dialogues[sample] else {
+        let Some(dialogue) = &dialogues[sample] else {
             report.skipped_questions += 1;
             continue;
         };
+        let turns = &dialogue.turns;
         let mut sessions = BTreeSet::new();
         for id in item.evidence_ids() {
             let tokens: Vec<&str> = id
@@ -563,11 +596,18 @@ pub fn run_locomo<C: GenericClient>(
                     .entry(rank.as_str().to_string())
                     .or_default() += 1;
             }
-            let convs: Vec<Option<i64>> = result.hits.iter().map(|h| h.conversation_id).collect();
+            let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
+            let own = own_sessions(client, &ids)?;
+            let convs: Vec<Option<i64>> = ids.iter().map(|id| own.get(id).copied()).collect();
             tally[i].count(&convs, &sessions, &ks);
         }
     }
     report.samples_measured = dialogues.values().filter(|d| d.is_some()).count();
+    report.samples_without_notes = dialogues
+        .values()
+        .flatten()
+        .filter(|d| !d.has_notes)
+        .count();
     report.samples_skipped = dialogues.len() - report.samples_measured;
     for (i, rank) in report.ranks.iter().enumerate() {
         let mut headline = Tally::new(ks.len());
@@ -609,12 +649,14 @@ pub fn render_locomo_text(r: &LocomoReport) -> String {
     }
     s.push_str(&format!(
         "headline: categories {HEADLINE_LABEL}; any other category on its own\n\
-         questions: {}, measured: {}, dialogues measured: {}, dialogues without notes: {} \
+         questions: {}, measured: {}, dialogues measured: {} ({} without notes, \
+         their questions count as misses), dialogues not extracted: {} \
          ({} questions), without a readable evidence id: {}\n\
          unreadable evidence ids: {}\n",
         r.questions,
         r.measured,
         r.samples_measured,
+        r.samples_without_notes,
         r.samples_skipped,
         r.skipped_questions,
         r.without_evidence,
@@ -855,6 +897,184 @@ mod tests {
         let text = render_locomo_text(&report);
         assert!(text.contains("1-4"), "{text}");
         assert!(text.contains("unreadable evidence ids: 2"), "{text}");
+    }
+
+    /// A new session of dialogue `sample` with turns `turns`, extracted when
+    /// `extracted`.
+    fn add_session<C: GenericClient>(
+        client: &mut C,
+        sample: &str,
+        turns: &[&str],
+        extracted: bool,
+    ) -> i64 {
+        let conv: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, \
+                 source_tool, memory_extracted_until) \
+                 VALUES ($1, $2, now(), 'demo session', 'locomo', \
+                         CASE WHEN $3 THEN now() END) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &sample, &extracted],
+            )
+            .unwrap()
+            .get(0);
+        for t in turns {
+            client
+                .execute(
+                    "INSERT INTO messages (conversation_id, role, content, created_at, metadata) \
+                     VALUES ($1, 'user', 'Odile: a walk by the lake.', now(), \
+                             jsonb_build_object('dia_id', $2::text))",
+                    &[&conv, t],
+                )
+                .unwrap();
+        }
+        conv
+    }
+
+    /// The session that holds turn `dia_id` of dialogue `sample`.
+    fn session_of<C: GenericClient>(client: &mut C, sample: &str, dia_id: &str) -> i64 {
+        client
+            .query_one(
+                "SELECT m.conversation_id FROM messages m \
+                 JOIN conversations c ON c.id = m.conversation_id \
+                 WHERE c.project_path = $1 AND m.metadata->>'dia_id' = $2",
+                &[&sample, &dia_id],
+            )
+            .unwrap()
+            .get(0)
+    }
+
+    #[test]
+    fn locomo_hit_counts_the_notes_own_session() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping locomo_hit_counts_the_notes_own_session: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let b = bench_fixture(&mut tx);
+        let ct = crate::extract_memory::category_column_type(&mut tx).unwrap();
+        // The fixture's note (session 1) replaced a first version from
+        // session 3: the chain's root, whose session recall reports.
+        let third = add_session(&mut tx, &b.sample, &["D3:1"], false);
+        tx.execute(
+            &format!(
+                "INSERT INTO memory_chunks (source_type, source_id, content, category, \
+                 project_name, confidence, status, superseded_by) \
+                 VALUES ('conversation', $1, $2, 'insight'::text::{ct}, $3, 0.9, 'superseded', $4)"
+            ),
+            &[
+                &third,
+                &format!("Odile walked by the lake {}.", b.word),
+                &b.sample,
+                &b.note,
+            ],
+        )
+        .unwrap();
+        // A second current note, from session 2, less near the question.
+        let second = session_of(&mut tx, &b.sample, "D2:1");
+        let n2: i64 = tx
+            .query_one(
+                &format!(
+                    "INSERT INTO memory_chunks (source_type, source_id, content, category, \
+                     project_name, confidence, status) \
+                     VALUES ('conversation', $1, $2, 'insight'::text::{ct}, $3, 0.9, 'active') \
+                     RETURNING id"
+                ),
+                &[
+                    &second,
+                    &format!("Odile rests by the lake {}.", b.word),
+                    &b.sample,
+                ],
+            )
+            .unwrap()
+            .get(0);
+        let mut v = vec![0.0f32; 768];
+        v[0] = 0.6;
+        v[1] = 0.8;
+        tx.execute(
+            "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+             VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+            &[
+                &n2,
+                &b.model,
+                &crate::generate_embeddings::vector_literal(&v),
+            ],
+        )
+        .unwrap();
+        let items = vec![
+            // The note's own session: a hit.
+            b.item(1, serde_json::json!(["D1:1"])),
+            // Only the replaced version's session: a miss.
+            b.item(2, serde_json::json!(["D3:1"])),
+            // The second note's session: past k = 1 for the vector ranks.
+            b.item(4, serde_json::json!(["D2:1"])),
+        ];
+        let report = run_locomo(&mut tx, &items, &[1, 5], |_| Ok(Some(b.embedding()))).unwrap();
+        for rank in &report.ranks {
+            assert_eq!(row(&report, rank, "1").hit[1], 1.0, "{rank}");
+            assert_eq!(row(&report, rank, "2").hit, vec![0.0, 0.0], "{rank}");
+            assert_eq!(row(&report, rank, "4").hit[1], 1.0, "{rank}");
+        }
+        // Cosine and weighted put the fixture's note first: k cuts the list.
+        for rank in ["cosine", "weighted"] {
+            assert_eq!(row(&report, rank, "1").hit, vec![1.0, 1.0], "{rank}");
+            assert_eq!(row(&report, rank, "4").hit, vec![0.0, 1.0], "{rank}");
+        }
+    }
+
+    #[test]
+    fn locomo_turn_in_two_sessions_is_an_error() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping locomo_turn_in_two_sessions_is_an_error: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let b = bench_fixture(&mut tx);
+        add_session(&mut tx, &b.sample, &["D1:1"], false);
+        let items = vec![b.item(1, serde_json::json!(["D2:1"]))];
+        let err = run_locomo(&mut tx, &items, &[5], |_| Ok(Some(b.embedding())))
+            .expect_err("a turn in two sessions");
+        assert!(err.to_string().contains("D1:1"), "{err}");
+        assert!(err.to_string().contains("two sessions"), "{err}");
+    }
+
+    #[test]
+    fn locomo_dialogue_extracted_to_no_notes_counts_misses() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping locomo_dialogue_extracted_to_no_notes_counts_misses: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let b = bench_fixture(&mut tx);
+        // Extracted, and the extraction kept nothing.
+        let empty = format!("{}-empty", b.sample);
+        add_session(&mut tx, &empty, &["D1:1"], true);
+        // Imported, never extracted.
+        let pending = format!("{}-pending", b.sample);
+        add_session(&mut tx, &pending, &["D1:1"], false);
+        let on = |sample: &str| {
+            let mut item = b.item(1, serde_json::json!(["D1:1"]));
+            item.sample_id = sample.to_string();
+            item
+        };
+        let items = vec![on(&b.sample), on(&empty), on(&pending)];
+        let report = run_locomo(&mut tx, &items, &[1, 5], |_| Ok(Some(b.embedding()))).unwrap();
+        assert_eq!(report.measured, 2);
+        assert_eq!(report.samples_measured, 2);
+        assert_eq!(report.samples_without_notes, 1);
+        assert_eq!(report.samples_skipped, 1);
+        assert_eq!(report.skipped_questions, 1);
+        for rank in &report.ranks {
+            let one = row(&report, rank, "1");
+            assert_eq!((one.n, one.hit.clone()), (2, vec![0.5, 0.5]), "{rank}");
+        }
+        let text = render_locomo_text(&report);
+        assert!(
+            text.contains("dialogues measured: 2 (1 without notes"),
+            "{text}"
+        );
+        assert!(text.contains("dialogues not extracted: 1"), "{text}");
     }
 
     #[test]

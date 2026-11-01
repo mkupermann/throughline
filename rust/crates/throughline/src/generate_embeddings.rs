@@ -814,7 +814,15 @@ mod tests {
             );
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        // Every note lacks a vector of the test's own model, and the job takes
+        // the newest first. In a snapshot taken before the two notes get their
+        // ids, no note of another test can be newer, so none takes their place.
+        let mut tx = client
+            .build_transaction()
+            .isolation_level(postgres::IsolationLevel::RepeatableRead)
+            .start()
+            .expect("begin test tx");
+        tx.query_one("SELECT 1", &[]).expect("take the snapshot");
         let backend = test_backend();
         let tag = uuid::Uuid::new_v4().to_string();
         seed_note(&mut tx, &format!("note a {tag}"), "active");

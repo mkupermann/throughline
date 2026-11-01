@@ -57,6 +57,19 @@ test("display_commands_work_without_a_key", async () => {
   assert.equal(ctx.searchParams.get("budget"), "32768", "budget is clamped");
 });
 
+test("recall_says_when_the_ranking_is_degraded", async () => {
+  const { ui, log } = fakeUi();
+  const d = deps(ui, "demo");
+  srv.respond(200, { mode: "current", hits: [{ id: 1, content: "c", score: 1 }], degraded: "no_embeddings" });
+  await cmd.recall(d, "q");
+  srv.respond(200, { mode: "current", hits: [{ id: 1, content: "c", score: 1 }], degraded: null });
+  await cmd.recall(d, "q");
+  assert.deepEqual(log.infos, [
+    "1 note(s) found. See the Throughline view. Not ranked fully by meaning: no_embeddings.",
+    "1 note(s) found. See the Throughline view.",
+  ]);
+});
+
 test("no_workspace_folder_asks_for_a_project", async () => {
   srv.requests.length = 0;
   srv.respond(200, { text: "", items: [], citations: [], tokens_used: 1, budget: 64, within_budget: true, skipped: 0, estimate: "" });

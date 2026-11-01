@@ -550,6 +550,38 @@ mod tests {
     }
 
     #[test]
+    fn startup_check_on_a_fresh_database_says_to_migrate() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping startup_check_on_a_fresh_database_says_to_migrate: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        // A fresh database has no ledger; a search path with only the empty
+        // temporary schema hides this one's for the transaction.
+        tx.batch_execute("SET LOCAL search_path TO pg_temp")
+            .expect("hide the ledger");
+        for mode in [
+            crate::access::AuthMode::Local,
+            crate::access::AuthMode::Team,
+        ] {
+            let mut savepoint = tx.transaction().expect("savepoint");
+            let err = crate::access::check_startup(
+                &mut savepoint,
+                mode,
+                Some("https://memory.example.com"),
+            )
+            .expect_err("a fresh database is refused")
+            .to_string();
+            assert_eq!(
+                err, "read applied_migrations (run `throughline migrate` first)",
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
     fn valid_time_backfill_closes_chains() {
         let Some(mut client) = test_db() else {
             eprintln!("skipping valid_time_backfill_closes_chains: no PostgreSQL reachable");

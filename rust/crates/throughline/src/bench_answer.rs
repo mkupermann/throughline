@@ -159,20 +159,32 @@ fn answer_raw<C: GenericClient>(
         RAW_LIMIT,
         Some(&item.sample_id),
     )?;
-    let mut row = empty_row(item, path_name(true), &backend.label);
+    Ok(raw_row(item, &backend.label, answer))
+}
+
+/// The row of a raw answer. Without its semantic half (no question vector,
+/// or the vector query failed) `ask` is word search only, which is not the
+/// baseline; without excerpts or with a failed model call there is no
+/// answer. Each is written as `error`, like a failed memory answer, and a
+/// resume asks again.
+fn raw_row(item: &QaItem, model: &str, answer: crate::ask::AskAnswer) -> Row {
+    let mut row = empty_row(item, path_name(true), model);
     for s in &answer.sources {
         if !row.context_session_ids.contains(&s.conversation_id) {
             row.context_session_ids.push(s.conversation_id);
         }
     }
-    // `ask` falls back to a listing of the excerpts when the model fails.
-    if answer.model.ends_with("(failed)") {
-        let why = answer.answer.rsplit("(model error: ").next().unwrap_or("");
-        row.error = Some(format!("generation failed: {}", why.trim_end_matches(')')));
+    if let Some(why) = answer.semantic_skipped {
+        row.error = Some(format!("semantic search skipped: {why}"));
+    } else if answer.sources.is_empty() {
+        row.error = Some("no excerpts found".into());
+    } else if let Some(e) = answer.generation_error {
+        // `ask` falls back to a listing of the excerpts when the model fails.
+        row.error = Some(format!("generation failed: {e}"));
     } else {
         row.answer = Some(answer.answer);
     }
-    Ok(row)
+    row
 }
 
 fn answer_one<C: GenericClient>(
@@ -282,6 +294,10 @@ fn finished(out: &Path, path: &str) -> Result<HashSet<String>> {
 pub fn run(db: &DbConfig, opts: &Options) -> Result<Summary> {
     // Benchmark data never reaches a real store: refuse before anything else.
     locomo::check_database(&db.dbname)?;
+    let per_category = recall_eval::HEADLINE.count();
+    if opts.sample.is_some_and(|n| n < per_category) {
+        bail!("--sample takes at least {per_category} questions, one per category 1-4");
+    }
     let mut items = recall_eval::load_qa(&opts.qa)?;
     for (i, item) in items.iter_mut().enumerate() {
         if item.id.is_none() {
@@ -293,7 +309,7 @@ pub fn run(db: &DbConfig, opts: &Options) -> Result<Summary> {
     let mut client = db.connect().context("connect to PostgreSQL")?;
     let mut items = select(&mut client, items)?;
     if let Some(n) = opts.sample {
-        items = stratified(items, n / recall_eval::HEADLINE.count(), opts.seed);
+        items = stratified(items, n / per_category, opts.seed);
     }
     let backend = llm::resolve_backend().context("resolve generation backend")?;
     llm::ensure_local_or_allowed(&backend)?;
@@ -379,6 +395,157 @@ mod tests {
         sorted.sort_by_key(|id| id[5..].parse::<usize>().unwrap());
         assert_eq!(ids(&picked), sorted);
         assert_ne!(ids(&picked), ids(&stratified(items, 4, 8)));
+    }
+
+    #[test]
+    fn sample_below_one_per_category_is_refused() {
+        let mut db = crate::config::DbConfig::from_env();
+        db.dbname = locomo::BENCH_DATABASE.into();
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("answers.jsonl");
+        let opts = Options {
+            qa: dir.path().join("missing-qa.json"),
+            out: out.clone(),
+            sample: Some(3),
+            seed: 7,
+            raw: false,
+        };
+        let err = run(&db, &opts).unwrap_err().to_string();
+        assert!(err.contains("--sample takes at least 4"), "{err}");
+        assert!(!out.exists());
+    }
+
+    fn raw_item(sample: &str, question: &str) -> QaItem {
+        QaItem {
+            id: Some(format!("{sample}#0")),
+            sample_id: sample.to_string(),
+            category: 4,
+            question: question.to_string(),
+            answer: Some(serde_json::json!("By the lake")),
+            evidence: vec![],
+            evidence_raw: None,
+        }
+    }
+
+    fn ask_answer(sources: usize) -> crate::ask::AskAnswer {
+        crate::ask::AskAnswer {
+            question: "q".into(),
+            answer: "By the lake [1].".into(),
+            model: "fake".into(),
+            local: true,
+            cited: true,
+            sources: (0..sources)
+                .map(|i| crate::ask::SourceRef {
+                    conversation_id: 40 + i as i64,
+                    session_id: uuid::Uuid::nil(),
+                    project_name: Some("demo".into()),
+                    snippet: format!("s{i}"),
+                })
+                .collect(),
+            semantic_skipped: None,
+            generation_error: None,
+        }
+    }
+
+    #[test]
+    fn raw_answer_needs_its_semantic_half() {
+        let item = raw_item("demo", "Where does Odile walk?");
+        // The baseline as measured: an answer with its sessions.
+        let row = raw_row(&item, "fake", ask_answer(2));
+        assert_eq!(row.answer.as_deref(), Some("By the lake [1]."));
+        assert_eq!(row.error, None);
+        assert_eq!(row.context_session_ids, vec![40, 41]);
+        // Word search only, no excerpts, or a failed model call: no answer.
+        let mut skipped = ask_answer(2);
+        skipped.semantic_skipped = Some("no embedding backend: refused".into());
+        let mut failed = ask_answer(2);
+        failed.generation_error = Some("timeout".into());
+        for (answer, why) in [
+            (skipped, "semantic search skipped: no embedding backend"),
+            (ask_answer(0), "no excerpts found"),
+            (failed, "generation failed: timeout"),
+        ] {
+            let row = raw_row(&item, "fake", answer);
+            assert_eq!(row.answer, None, "{why}");
+            assert!(
+                row.error.as_deref().unwrap_or("").starts_with(why),
+                "{row:?}"
+            );
+        }
+        // With Ollama down, `ask` itself says the semantic half was skipped,
+        // although word search still finds the turn; no use is counted.
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping the database half of raw_answer_needs_its_semantic_half");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let sample = format!("demo-{tag}");
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, source_tool) \
+                 VALUES ($1, $2, now(), 'demo session', 'locomo') RETURNING id",
+                &[&uuid::Uuid::new_v4(), &sample],
+            )
+            .unwrap()
+            .get(0);
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) \
+             VALUES ($1, 'user', $2, now())",
+            &[&conv, &format!("Odile: a walk by the lake {tag}.")],
+        )
+        .unwrap();
+        let note = crate::access::team_test::note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("Odile walks by the lake {tag}."),
+            "insight",
+            Some(&sample),
+        );
+        let used =
+            |tx: &mut postgres::Transaction| -> (i64, Option<chrono::DateTime<chrono::Utc>>) {
+                let r = tx
+                    .query_one(
+                        "SELECT COALESCE(access_count, 0)::bigint, last_accessed \
+                     FROM memory_chunks WHERE id = $1",
+                        &[&note],
+                    )
+                    .unwrap();
+                (r.get(0), r.get(1))
+            };
+        let before = used(&mut tx);
+        let backend = GenerationBackend {
+            kind: llm::BackendKind::Ollama,
+            label: "fake".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            model: "fake".into(),
+            api_key: None,
+        };
+        let answer = crate::recall::test_ollama::unreachable(|| {
+            crate::ask::ask_with(
+                &mut tx,
+                &LOCAL,
+                &tag,
+                &backend,
+                RAW_LIMIT,
+                Some(&sample),
+                |_| Ok("By the lake [1].".into()),
+            )
+        })
+        .expect("ask");
+        assert!(!answer.sources.is_empty(), "word search finds the turn");
+        assert!(answer.semantic_skipped.is_some());
+        let row = raw_row(&raw_item(&sample, &tag), "fake", answer);
+        assert_eq!(row.answer, None);
+        assert!(
+            row.error
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("semantic search skipped"),
+            "{row:?}"
+        );
+        assert_eq!(used(&mut tx), before, "the raw path counts no use");
     }
 
     #[test]
