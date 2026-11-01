@@ -413,6 +413,31 @@ pub struct ExtractSummary {
     /// Notes this pass wrote and deleted again because they repeat a
     /// forgotten note of the same document.
     pub dropped: usize,
+    /// Notes kept after a forgotten check that could compare text only,
+    /// because no vector could be made.
+    pub text_only: usize,
+}
+
+impl ExtractSummary {
+    pub fn add(&mut self, other: &ExtractSummary) {
+        self.windows += other.windows;
+        self.chunks += other.chunks;
+        self.errors += other.errors;
+        self.closed += other.closed;
+        self.dropped += other.dropped;
+        self.text_only += other.text_only;
+    }
+
+    /// The summary line for documents, when there is anything to say.
+    pub fn document_line(&self) -> Option<String> {
+        (self.closed + self.dropped + self.text_only > 0).then(|| {
+            format!(
+                "documents: {} note(s) of old versions closed, \
+                 {} repeat(s) of forgotten notes dropped, {} notes checked by text only",
+                self.closed, self.dropped, self.text_only
+            )
+        })
+    }
 }
 
 /// Conversations with messages after their extraction watermark, newest first.
@@ -457,19 +482,25 @@ pub fn count_pending_conversations<C: GenericClient>(client: &mut C) -> Result<i
 /// Extract memories from one conversation's messages after its watermark,
 /// window by window. Each window's notes and the advanced watermark commit
 /// together. A failed window is reported and ends this conversation's pass,
-/// so it stays pending for the next run. `prompt` comes from
-/// [`extraction_prompt`] or [`conversation_profile`].
+/// so it stays pending for the next run. The prompt follows the
+/// conversation's source ([`conversation_profile`]); `configured` is the
+/// profile [`PROFILE_ENV`] names.
 pub fn extract_conversation<C: GenericClient>(
     client: &mut C,
     backend: &GenerationBackend,
     conv_id: i64,
     window_chars: usize,
-    prompt: &str,
+    configured: Profile,
 ) -> Result<ExtractSummary> {
     llm::ensure_local_or_allowed(backend)?;
-    extract_conversation_with(client, conv_id, window_chars, |text| {
-        extract(backend, prompt, text, true)
-    })
+    let prompt = conversation_profile(client, conv_id, configured)?.prompt();
+    extract_conversation_with(
+        client,
+        conv_id,
+        window_chars,
+        &document_lifecycle::RepeatCheck::active(),
+        |text| extract(backend, prompt, text, true),
+    )
 }
 
 /// [`extract_conversation`] with the model step passed in: a window's text
@@ -480,7 +511,8 @@ pub fn extract_conversation<C: GenericClient>(
 /// are closed first ([`document_lifecycle::reconcile`]). Its sections are cut
 /// into windows by [`document_windows`]. And a written note that repeats a
 /// forgotten note of the same document is deleted again in the same
-/// transaction ([`document_lifecycle::drop_forgotten_repeats`]).
+/// transaction ([`document_lifecycle::drop_forgotten_repeats`] with
+/// `repeat_check`).
 ///
 /// Windows that end inside a run of equal timestamps are sent first and
 /// written together with the window that ends the run, so the watermark
@@ -489,6 +521,7 @@ pub fn extract_conversation_with<C, F>(
     client: &mut C,
     conv_id: i64,
     window_chars: usize,
+    repeat_check: &document_lifecycle::RepeatCheck<'_>,
     mut model: F,
 ) -> Result<ExtractSummary>
 where
@@ -496,34 +529,39 @@ where
     F: FnMut(&str) -> Result<Vec<ExtractedMemory>>,
 {
     let document = is_document_source(source_tool(client, conv_id)?.as_deref());
-    let mut summary = ExtractSummary::default();
-    if document {
-        if let Some(new_version_at) =
-            document_lifecycle::replaced_since_extraction(client, conv_id)?
-        {
-            let mut tx = client.transaction()?;
-            summary.closed =
-                document_lifecycle::reconcile(&mut tx, conv_id, new_version_at)? as usize;
-            tx.commit()?;
-        }
-    }
     // Each line is cut at 2,000 characters. Document adapters split longer
     // sections into continuation messages, so no section text is lost.
-    let lines: Vec<(DateTime<Utc>, String)> = client
-        .query(
+    // For a document the same statement asks whether this is a new version,
+    // so a replace between the question and the read cannot slip through.
+    let new_version = if document {
+        document_lifecycle::NEW_VERSION_AT
+    } else {
+        "NULL::timestamptz"
+    };
+    let rows = client.query(
+        &format!(
             r#"
-            SELECT m.created_at, m.role::text || ': ' || left(m.content, 2000)
+            SELECT m.created_at, m.role::text || ': ' || left(m.content, 2000),
+                   {new_version}
             FROM messages m JOIN conversations c ON c.id = m.conversation_id
             WHERE m.conversation_id = $1
               AND COALESCE(m.content, '') <> ''
               AND (c.memory_extracted_until IS NULL OR m.created_at > c.memory_extracted_until)
             ORDER BY m.created_at, m.id
-            "#,
-            &[&conv_id],
-        )?
-        .iter()
-        .map(|r| (r.get(0), r.get(1)))
-        .collect();
+            "#
+        ),
+        &[&conv_id],
+    )?;
+    let lines: Vec<(DateTime<Utc>, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
+    let mut summary = ExtractSummary::default();
+    if let Some(new_version_at) = rows
+        .first()
+        .and_then(|r| r.get::<_, Option<DateTime<Utc>>>(2))
+    {
+        let mut tx = client.transaction()?;
+        summary.closed = document_lifecycle::reconcile(&mut tx, conv_id, new_version_at)? as usize;
+        tx.commit()?;
+    }
     let planned = if document {
         document_windows(&lines, window_chars, DOCUMENT_WINDOW_SECTIONS)
     } else {
@@ -536,7 +574,6 @@ where
             })
             .collect()
     };
-    let repeat_check = document.then(document_lifecycle::repeat_check_model);
 
     let mut replies: Vec<(DateTime<Utc>, Vec<ExtractedMemory>)> = Vec::new();
     for window in planned {
@@ -552,33 +589,28 @@ where
             continue;
         }
         let mut tx = client.transaction()?;
-        let (mut kept, mut dropped) = (0, 0);
+        let mut written = ExtractSummary::default();
         for (end, items) in &replies {
             let mut ids = Vec::with_capacity(items.len());
             for item in items {
                 ids.push(insert_memory(&mut tx, conv_id, item, *end)?);
             }
-            let gone = match &repeat_check {
-                Some((model_name, min_similarity)) => document_lifecycle::drop_forgotten_repeats(
-                    &mut tx,
-                    conv_id,
-                    &ids,
-                    model_name,
-                    *min_similarity,
-                )? as usize,
-                None => 0,
+            let check = if document {
+                document_lifecycle::drop_forgotten_repeats(&mut tx, conv_id, &ids, repeat_check)?
+            } else {
+                document_lifecycle::RepeatOutcome::default()
             };
-            kept += ids.len() - gone;
-            dropped += gone;
+            written.chunks += ids.len() - check.dropped as usize;
+            written.dropped += check.dropped as usize;
+            written.text_only += check.text_only as usize;
         }
         tx.execute(
             "UPDATE conversations SET memory_extracted_until = $2 WHERE id = $1",
             &[&conv_id, &window.end],
         )?;
         tx.commit()?;
-        summary.windows += replies.len();
-        summary.chunks += kept;
-        summary.dropped += dropped;
+        written.windows = replies.len();
+        summary.add(&written);
         replies.clear();
     }
     Ok(summary)
@@ -983,7 +1015,7 @@ mod tests {
         let backend = ollama_at(base);
 
         // "user: first\nuser: second" is 24 bytes, so 25 makes two windows.
-        let first = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT)
+        let first = extract_conversation(&mut tx, &backend, conv, 25, Profile::Default)
             .expect("first pass");
         assert_eq!(
             first,
@@ -1023,7 +1055,7 @@ mod tests {
         assert!(!pending_conversations(&mut tx, 1000)
             .unwrap()
             .contains(&conv));
-        let again = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT)
+        let again = extract_conversation(&mut tx, &backend, conv, 25, Profile::Default)
             .expect("second pass");
         assert_eq!(again, ExtractSummary::default());
 
@@ -1037,7 +1069,7 @@ mod tests {
             .unwrap()
             .contains(&conv));
         let (base, requests) = fake_ollama(vec!["[]"]);
-        let later = extract_conversation(&mut tx, &ollama_at(base), conv, 25, EXTRACTION_PROMPT)
+        let later = extract_conversation(&mut tx, &ollama_at(base), conv, 25, Profile::Default)
             .expect("third pass");
         assert_eq!(
             later,
@@ -1080,7 +1112,7 @@ mod tests {
         let conv = seed_conversation(&mut tx, &[(1, "first"), (2, "second"), (3, "third")]);
         // One reply only: the second window's request finds no server.
         let (base, _requests) = fake_ollama(vec![DECISION]);
-        let s = extract_conversation(&mut tx, &ollama_at(base), conv, 25, EXTRACTION_PROMPT)
+        let s = extract_conversation(&mut tx, &ollama_at(base), conv, 25, Profile::Default)
             .expect("pass");
         assert_eq!(
             s,
@@ -1164,14 +1196,13 @@ mod tests {
         let (base, requests) = fake_ollama(vec!["[]", "[]"]);
         let backend = ollama_at(base);
 
-        extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT).expect("default");
+        extract_conversation(&mut tx, &backend, conv, 25, Profile::Default).expect("default");
         tx.execute(
             "UPDATE conversations SET memory_extracted_until = NULL WHERE id = $1",
             &[&conv],
         )
         .unwrap();
-        extract_conversation(&mut tx, &backend, conv, 25, PERSONAL_EXTRACTION_PROMPT)
-            .expect("personal");
+        extract_conversation(&mut tx, &backend, conv, 25, Profile::Personal).expect("personal");
 
         let sent: Vec<String> = requests.try_iter().map(|b| sent_prompt(&b)).collect();
         assert_eq!(
@@ -1207,7 +1238,7 @@ mod tests {
         // record any request that reached it.
         let mut backend = ollama_at(base);
         backend.model = "glm-5.2:cloud".into();
-        let err = extract_conversation(&mut tx, &backend, conv, 25, EXTRACTION_PROMPT).unwrap_err();
+        let err = extract_conversation(&mut tx, &backend, conv, 25, Profile::Default).unwrap_err();
         assert!(
             err.to_string().contains("THROUGHLINE_ALLOW_REMOTE_LLM"),
             "{err}"
@@ -1407,6 +1438,45 @@ mod tests {
         id
     }
 
+    fn active() -> document_lifecycle::RepeatCheck<'static> {
+        document_lifecycle::RepeatCheck::active()
+    }
+
+    /// A breaker that has just tripped: no embedding is attempted.
+    fn tripped() -> crate::embedding::EmbedBreaker {
+        let breaker = crate::embedding::EmbedBreaker::new();
+        breaker.trip(crate::embedding::now_ms());
+        breaker
+    }
+
+    /// A 768-dimension vector with `x` and `y` on its first two axes.
+    fn plane(x: f32, y: f32) -> Vec<f32> {
+        let mut v = vec![0.0; 768];
+        v[0] = x;
+        v[1] = y;
+        v
+    }
+
+    fn axis(i: usize) -> Vec<f32> {
+        let mut v = vec![0.0; 768];
+        v[i] = 1.0;
+        v
+    }
+
+    /// Run `f` while the fake embedder gives every note holding a tag its
+    /// vector, as the active model.
+    fn with_vectors<T, F: FnOnce() -> T>(fixtures: &[(&str, Vec<f32>)], f: F) -> T {
+        match fixtures.split_first() {
+            None => f(),
+            Some(((tag, vector), rest)) => crate::generate_embeddings::write_fixture::with_vector(
+                tag,
+                &crate::embedding::configured_model(),
+                vector.clone(),
+                || with_vectors(rest, f),
+            ),
+        }
+    }
+
     fn fact(content: &str) -> ExtractedMemory {
         ExtractedMemory {
             content: content.into(),
@@ -1475,7 +1545,7 @@ mod tests {
         );
 
         let mut sent = Vec::new();
-        let first = extract_conversation_with(&mut tx, conv, 24_000, |text| {
+        let first = extract_conversation_with(&mut tx, conv, 24_000, &active(), |text| {
             sent.push(text.to_string());
             Ok(vec![fact(FRIDAYS), fact(PORT)])
         })
@@ -1519,8 +1589,16 @@ mod tests {
             document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
             Some(v2)
         );
-        let second = extract_conversation_with(&mut tx, conv, 24_000, |_| {
-            Ok(vec![fact(FRIDAYS), fact(PORT), fact(BACKUPS)])
+        // Unrelated facts get orthogonal vectors, so only the text decides.
+        let fixtures = [
+            ("run on Fridays", axis(0)),
+            ("listens on port 8080", axis(1)),
+            ("run nightly at 02:00", axis(2)),
+        ];
+        let second = with_vectors(&fixtures, || {
+            extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+                Ok(vec![fact(FRIDAYS), fact(PORT), fact(BACKUPS)])
+            })
         })
         .expect("second pass");
         assert_eq!(
@@ -1531,6 +1609,7 @@ mod tests {
                 errors: 0,
                 closed: 1,
                 dropped: 1,
+                text_only: 0,
             }
         );
 
@@ -1566,7 +1645,7 @@ mod tests {
             document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
             None
         );
-        let third = extract_conversation_with(&mut tx, conv, 24_000, |_| {
+        let third = extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
             unreachable!("nothing is pending")
         })
         .expect("third pass");
@@ -1604,7 +1683,7 @@ mod tests {
         // of one timestamp. The second fails, so nothing is written and the
         // watermark stays, although the first window got its reply.
         let mut calls = 0;
-        let failed = extract_conversation_with(&mut tx, conv, 15, |_| {
+        let failed = extract_conversation_with(&mut tx, conv, 15, &active(), |_| {
             calls += 1;
             if calls == 2 {
                 anyhow::bail!("model gone");
@@ -1623,7 +1702,7 @@ mod tests {
         assert_eq!(watermark(&mut tx), None);
 
         let mut sent = Vec::new();
-        let done = extract_conversation_with(&mut tx, conv, 15, |text| {
+        let done = extract_conversation_with(&mut tx, conv, 15, &active(), |text| {
             sent.push(text.to_string());
             Ok(vec![fact(text)])
         })
@@ -1654,7 +1733,7 @@ mod tests {
             &mut tx,
             &stored_file(session, "claude_code", "user", ts(T0), &["one", "two"]),
         );
-        extract_conversation_with(&mut tx, conv, 24_000, |_| {
+        extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
             Ok(vec![fact(FRIDAYS), fact(PORT)])
         })
         .expect("first pass");
@@ -1674,7 +1753,7 @@ mod tests {
                 &["one", "two", "three"],
             ),
         );
-        let second = extract_conversation_with(&mut tx, conv, 24_000, |_| {
+        let second = extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
             Ok(vec![fact(FRIDAYS), fact(PORT), fact(BACKUPS)])
         })
         .expect("second pass");
@@ -1717,20 +1796,14 @@ mod tests {
             )
         };
         let (conv, other) = (file(&mut tx), file(&mut tx));
-        let vector = |x: f32, y: f32| {
-            let mut v = vec![0.0f32; 768];
-            v[0] = x;
-            v[1] = y;
-            crate::generate_embeddings::vector_literal(&v)
-        };
         let note =
-            |tx: &mut postgres::Transaction<'_>, conv: i64, text: &str, v: Option<String>| {
+            |tx: &mut postgres::Transaction<'_>, conv: i64, text: &str, v: Option<Vec<f32>>| {
                 let id = insert_memory(tx, conv, &fact(text), ts(T0)).expect("insert note");
                 if let Some(v) = v {
                     tx.execute(
                         "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
-                     VALUES ('memory_chunk', $1, $2, $3::text::vector)",
-                        &[&id, &model, &v],
+                         VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+                        &[&id, &model, &crate::generate_embeddings::vector_literal(&v)],
                     )
                     .expect("insert vector");
                 }
@@ -1740,7 +1813,7 @@ mod tests {
             &mut tx,
             conv,
             "The app cache lives in /var/cache/app.",
-            Some(vector(1.0, 0.0)),
+            Some(plane(1.0, 0.0)),
         );
         let elsewhere = note(&mut tx, other, "Logs rotate weekly.", None);
         tx.execute(
@@ -1753,25 +1826,50 @@ mod tests {
             &mut tx,
             conv,
             "The app keeps its cache in /var/cache/app.",
-            Some(vector(0.99, 0.14)),
+            Some(plane(0.99, 0.14)),
         );
-        let far = note(&mut tx, conv, "Logs rotate weekly.", Some(vector(0.0, 1.0)));
+        let far = note(&mut tx, conv, "Logs rotate weekly.", Some(plane(0.0, 1.0)));
         let ids = [near, far];
+        // No embedder: the check uses only the vectors already stored.
+        let breaker = tripped();
+        let check = |model: &str, min_similarity: f64| document_lifecycle::RepeatCheck {
+            model: model.to_string(),
+            min_similarity,
+            breaker: &breaker,
+        };
+        let outcome =
+            |dropped: u64, text_only: u64| document_lifecycle::RepeatOutcome { dropped, text_only };
+        let cosine: f64 = tx
+            .query_one(
+                "SELECT 1 - (a.embedding_768 <=> b.embedding_768) FROM embeddings a, embeddings b \
+                 WHERE a.source_id = $1 AND b.source_id = $2 AND a.model = $3 AND b.model = $3",
+                &[&near, &forgotten, &model],
+            )
+            .unwrap()
+            .get(0);
+        assert!((cosine - 0.99).abs() < 0.001, "{cosine}");
 
+        let mut run =
+            |c| document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &c).unwrap();
         assert_eq!(
-            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &model, 0.999).unwrap(),
-            0,
+            run(check(&model, 0.999)),
+            outcome(0, 0),
             "below the threshold nothing goes"
         );
         assert_eq!(
-            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, "another-model", 0.92)
-                .unwrap(),
-            0,
-            "vectors of another model never count"
+            run(check("another-model", 0.92)),
+            outcome(0, 2),
+            "vectors of another model never count; without an embedder both are checked by text"
         );
         assert_eq!(
-            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &model, 0.92).unwrap(),
-            1
+            run(check(&model, cosine + 1e-9)),
+            outcome(0, 0),
+            "just above the cosine"
+        );
+        assert_eq!(
+            run(check(&model, cosine)),
+            outcome(1, 0),
+            "at the threshold it is a repeat"
         );
         let left: Vec<i64> = notes_of(&mut tx, conv).iter().map(|n| n.id).collect();
         assert_eq!(
@@ -1787,5 +1885,245 @@ mod tests {
             .unwrap()
             .get(0);
         assert_eq!(vectors, 0, "the dropped note's vector goes with it");
+    }
+
+    const CACHE_KEPT: &str = "The ops cache is kept in /srv/ops-cache.";
+    const CACHE_BELOW: &str = "Ops stores its cache below /srv/ops-cache.";
+    const LOGS_SUNDAY: &str = "Ops logs rotate every Sunday.";
+
+    #[test]
+    fn forgotten_paraphrase_is_dropped_through_the_extraction_path() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping forgotten_paraphrase_is_dropped_through_the_extraction_path: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let check = active();
+        let session = uuid::Uuid::new_v4();
+        let conv = store(
+            &mut tx,
+            &stored_file(
+                session,
+                "markdown",
+                "document",
+                ts(T0),
+                &["# Cache\nIn /srv."],
+            ),
+        );
+        extract_conversation_with(&mut tx, conv, 24_000, &check, |_| {
+            Ok(vec![fact(CACHE_KEPT)])
+        })
+        .expect("first pass");
+        let original = notes_of(&mut tx, conv)[0].id;
+        // Forgotten, and without a vector of the active model: the embed job
+        // skips forgotten notes, so after a model switch none has one.
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&original],
+        )
+        .unwrap();
+        tx.execute(
+            "DELETE FROM embeddings WHERE source_type = 'memory_chunk' AND source_id = $1",
+            &[&original],
+        )
+        .unwrap();
+
+        store(
+            &mut tx,
+            &stored_file(
+                session,
+                "markdown",
+                "document",
+                ts(T0 + 3600),
+                &["# Cache\nBelow /srv.", "# Logs\nSundays."],
+            ),
+        );
+        // The fake embedder: the paraphrase lies at cosine 0.99 to the
+        // original, the new fact at 0.
+        let fixtures = [
+            ("kept in /srv/ops-cache", plane(1.0, 0.0)),
+            ("below /srv/ops-cache", plane(0.99, 0.14)),
+            ("rotate every Sunday", plane(0.0, 1.0)),
+        ];
+        let second = with_vectors(&fixtures, || {
+            extract_conversation_with(&mut tx, conv, 24_000, &check, |_| {
+                Ok(vec![fact(CACHE_BELOW), fact(LOGS_SUNDAY)])
+            })
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 1,
+                dropped: 1,
+                ..Default::default()
+            }
+        );
+        let after: Vec<(String, String)> = notes_of(&mut tx, conv)
+            .into_iter()
+            .map(|n| (n.content, n.status))
+            .collect();
+        assert_eq!(
+            after,
+            [
+                (CACHE_KEPT.to_string(), "forgotten".to_string()),
+                (LOGS_SUNDAY.to_string(), "active".to_string()),
+            ]
+        );
+        // The forgotten note's vector was made on demand and kept for the next check.
+        let kept: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM embeddings \
+                 WHERE source_type = 'memory_chunk' AND source_id = $1 AND model = $2",
+                &[&original, &check.model],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(kept, 1);
+    }
+
+    #[test]
+    fn forgotten_check_counts_text_only_when_the_embedder_fails() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping forgotten_check_counts_text_only_when_the_embedder_fails: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let breaker = tripped();
+        let check = document_lifecycle::RepeatCheck {
+            breaker: &breaker,
+            ..active()
+        };
+        const KEY: &str = "The deploy key of the ops service sits in the team vault.";
+        const KEY_AGAIN: &str = "The team vault holds the deploy key of the ops service.";
+        let session = uuid::Uuid::new_v4();
+        let conv = store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", ts(T0), &["# Keys"]),
+        );
+        extract_conversation_with(&mut tx, conv, 24_000, &check, |_| Ok(vec![fact(KEY)]))
+            .expect("first pass");
+        let original = notes_of(&mut tx, conv)[0].id;
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&original],
+        )
+        .unwrap();
+        tx.execute(
+            "DELETE FROM embeddings WHERE source_type = 'memory_chunk' AND source_id = $1",
+            &[&original],
+        )
+        .unwrap();
+        store(
+            &mut tx,
+            &stored_file(
+                session,
+                "markdown",
+                "document",
+                ts(T0 + 3600),
+                &["# Keys", "# Vault"],
+            ),
+        );
+        // The same text is still caught; the paraphrase can only be compared
+        // by text, so it stays and is counted.
+        let second = extract_conversation_with(&mut tx, conv, 24_000, &check, |_| {
+            Ok(vec![fact(KEY), fact(KEY_AGAIN)])
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 1,
+                dropped: 1,
+                text_only: 1,
+                ..Default::default()
+            }
+        );
+        let mut total = ExtractSummary::default();
+        total.add(&second);
+        total.add(&second);
+        assert_eq!(
+            total.document_line().as_deref(),
+            Some(
+                "documents: 0 note(s) of old versions closed, \
+                 2 repeat(s) of forgotten notes dropped, 2 notes checked by text only"
+            )
+        );
+        assert_eq!(ExtractSummary::default().document_line(), None);
+    }
+
+    #[test]
+    fn an_appended_message_is_not_a_new_version() {
+        // git keeps a uuid per commit, so a new commit is appended. With a
+        // single extracted message the watermark sits exactly on it.
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping an_appended_message_is_not_a_new_version: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let session = uuid::Uuid::new_v4();
+        let mut repo = stored_file(session, "git", "document", ts(T0), &["Move the ops port"]);
+        repo.messages[0].uuid = Some(uuid::Uuid::new_v4());
+        let conv = store(&mut tx, &repo);
+        extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| Ok(vec![fact(PORT)]))
+            .expect("first pass");
+
+        let mut next = stored_file(session, "git", "document", ts(T0 + 60), &["Add backups"]);
+        next.messages[0].uuid = Some(uuid::Uuid::new_v4());
+        repo.messages.push(next.messages.remove(0));
+        store(&mut tx, &repo);
+        assert_eq!(
+            document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
+            None
+        );
+        let second = extract_conversation_with(&mut tx, conv, 24_000, &active(), |text| {
+            assert_eq!(text, "document: Add backups");
+            Ok(vec![fact(BACKUPS)])
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 1,
+                ..Default::default()
+            }
+        );
+        let statuses: Vec<String> = notes_of(&mut tx, conv)
+            .into_iter()
+            .map(|n| n.status)
+            .collect();
+        assert_eq!(statuses, ["active", "active"]);
+    }
+
+    #[test]
+    fn consolidation_threshold_follows_the_model_profile() {
+        use document_lifecycle::consolidation_threshold;
+        assert_eq!(consolidation_threshold("nomic-embed-text"), 0.92);
+        assert_eq!(consolidation_threshold("nomic-embed-text:latest"), 0.92);
+        assert_eq!(consolidation_threshold("granite-embedding:278m"), 0.93);
+        assert_eq!(
+            consolidation_threshold("granite-embedding-multilingual"),
+            0.93
+        );
+        assert_eq!(
+            consolidation_threshold("some-unknown-model"),
+            crate::lifecycle::MIN_SIMILARITY
+        );
+        // The consolidation threshold, not the as_of one of the same profile.
+        let granite = crate::embedding::model_profile("granite-embedding:278m").unwrap();
+        assert_ne!(
+            granite.as_of_min_cosine,
+            granite.consolidation_min_similarity
+        );
+        assert_eq!(
+            consolidation_threshold("granite-embedding:278m"),
+            granite.consolidation_min_similarity
+        );
+        let check = active();
+        assert_eq!(check.model, crate::embedding::configured_model());
+        assert_eq!(check.min_similarity, consolidation_threshold(&check.model));
     }
 }

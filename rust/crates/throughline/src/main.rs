@@ -820,31 +820,21 @@ fn main() -> Result<()> {
             let mut total = extract_memory::ExtractSummary::default();
             for conv_id in extract_memory::pending_conversations(&mut client, limit)? {
                 // Markdown, git and web take the document profile.
-                let profile =
-                    extract_memory::conversation_profile(&mut client, conv_id, configured)?;
                 let s = extract_memory::extract_conversation(
                     &mut client,
                     &backend,
                     conv_id,
                     window_chars,
-                    profile.prompt(),
+                    configured,
                 )?;
-                total.windows += s.windows;
-                total.chunks += s.chunks;
-                total.errors += s.errors;
-                total.closed += s.closed;
-                total.dropped += s.dropped;
+                total.add(&s);
             }
             println!(
                 "extracted {} memory chunk(s) from {} window(s), {} error(s)",
                 total.chunks, total.windows, total.errors
             );
-            if total.closed + total.dropped > 0 {
-                println!(
-                    "documents: {} note(s) of old versions closed, \
-                     {} repeat(s) of forgotten notes dropped",
-                    total.closed, total.dropped
-                );
+            if let Some(line) = total.document_line() {
+                println!("{line}");
             }
         }
         Command::Embed { limit } => {
