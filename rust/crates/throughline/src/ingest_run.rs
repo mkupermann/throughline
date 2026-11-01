@@ -154,6 +154,16 @@ pub(crate) fn record_ignore_audit<C: postgres::GenericClient>(
     adapter: &str,
     summary: &IngestSummary,
 ) {
+    let _ = try_record_ignore_audit(client, adapter, summary);
+}
+
+/// [`record_ignore_audit`] that reports a failed insert, so a caller inside
+/// a transaction can roll back.
+pub(crate) fn try_record_ignore_audit<C: postgres::GenericClient>(
+    client: &mut C,
+    adapter: &str,
+    summary: &IngestSummary,
+) -> Result<()> {
     for (kind, n) in [
         (crate::ignore::RuleKind::Path, summary.ignored_path),
         (crate::ignore::RuleKind::Project, summary.ignored_project),
@@ -162,14 +172,15 @@ pub(crate) fn record_ignore_audit<C: postgres::GenericClient>(
             continue;
         }
         let marker = format!("__throughline_ignored__:{}:{}", adapter, kind.as_str());
-        let _ = client.execute(
+        client.execute(
             "INSERT INTO ingestion_log (file_path, file_hash, record_count) \
              VALUES ($1, 'v1', $2) \
              ON CONFLICT (file_path, file_hash) DO UPDATE \
              SET record_count = EXCLUDED.record_count, ingested_at = now()",
             &[&marker, &(n as i32)],
-        );
+        )?;
     }
+    Ok(())
 }
 
 /// Run every built-in adapter. Returns one summary per adapter.
