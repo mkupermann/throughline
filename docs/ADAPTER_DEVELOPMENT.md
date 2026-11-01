@@ -74,8 +74,13 @@ class MyToolAdapter(Adapter):
   not UUIDs, derive one deterministically with `uuid.uuid5` from a stable key
   (for example the file path or the tool's own session id). Determinism is what
   keeps re-ingestion idempotent.
-- **`role`** must be one of `user`, `assistant`, `system`, `tool_result` —
-  these map to the database enum. Map tool-specific roles onto these four.
+- **`role`** must be one of `user`, `assistant`, `system`, `tool_result`,
+  `document` — these map to the database enum. Map tool-specific roles onto
+  these five. `document` is for text without a speaker, such as a section of a
+  file, a commit or part of a web page. The database needs migration
+  `016_message_role_document.sql` for it, which the Rust runtime applies. The
+  `document` extraction prompt follows the source, not the role: only the
+  `markdown`, `git` and `web` sources get it.
 - **`content`** is the rendered plain text shown in the GUI. Preserve the
   original structured payload in `content_blocks` so nothing is lost.
 - **Timestamps** should be timezone-aware `datetime` objects when the source

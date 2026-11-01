@@ -138,9 +138,12 @@ conversations between people, `THROUGHLINE_EXTRACT_PROFILE=personal` switches to
 a prompt that keeps who people are, what happened to them, what they like and
 what they plan, with times as they were said. Its notes use four of the same
 categories (`contact`, `insight`, `preference`, `decision`). Unset, empty or
-`default` keeps the coding prompt. Any other value stops `extract-memory` before
-it reads a conversation, so a typo never runs the wrong prompt. With `personal`
-the command prints `extraction profile: personal`. On a public benchmark of
+`default` keeps the coding prompt. `document` is the third profile, for text
+that is not a dialogue; the `markdown`, `git` and `web` sources always use it,
+whatever this variable says ([Documents, repositories and web
+pages](#extracting-notes-from-documents)). Any other value stops
+`extract-memory` before it reads a conversation, so a typo never runs the wrong
+prompt. With `personal` the command prints `extraction profile: personal`. On a public benchmark of
 personal dialogues the coding prompt kept no note at all, which is why the
 profile exists ([BENCHMARKS.md](BENCHMARKS.md#part-c-locomo-with-local-models)).
 
@@ -395,6 +398,160 @@ Context for Atlas-demo · 2026-10-30 · budget 400 tokens (estimated)
 - [s#12 · 2026-10-02] "Pick a deploy target"
 - [s#31 · 2026-10-28] "Fix the login redirect"
 ```
+
+## Documents, repositories and web pages
+
+Besides AI tool sessions, Throughline reads three kinds of documents: Markdown
+folders, git repositories and web pages. Each stays off until you name what to
+read. A document has no speaker, so its messages carry the role `document`:
+one message per section, commit or part of a page. "Recent sessions" in the
+context pack and the handoff leave documents out; the notes extracted from
+them count everywhere else.
+
+| Source | Setting | In `ingest --source all` | One conversation per |
+| --- | --- | --- | --- |
+| `markdown` | `THROUGHLINE_MARKDOWN_ROOTS`: folders, colon-separated | yes | file |
+| `git` | `THROUGHLINE_GIT_ROOTS`: repositories, colon-separated | yes | repository |
+| `web` | `THROUGHLINE_WEB_URLS`: a file with one URL per line | no, only `--source web` | URL |
+
+Each entry is an absolute path or starts with `~`, which stands for `$HOME`;
+relative entries are ignored. Write `~/…` where you can: in the
+container `~` is `/home/throughline`, so one value serves the native binary and
+Compose alike. Compose takes the values from `.env`, the scheduled jobs from
+their plist or `throughline.env`, a run by hand from your shell. The container
+also needs each folder mounted read-only at the place the value names
+([INSTALLATION.md](INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat)).
+
+```bash
+THROUGHLINE_MARKDOWN_ROOTS=~/notes:~/Documents/handbook
+THROUGHLINE_GIT_ROOTS=~/src/harbour-app
+THROUGHLINE_WEB_URLS=~/.config/throughline/web-urls.txt
+```
+
+`throughline doctor` shows under `sources:` how many roots and URLs it sees,
+how many Markdown roots are missing, and whether `git` is installed.
+
+The ingest exclusion list below applies to documents too: `path:` matches a
+Markdown file, a repository folder or a URL, `project:` the project.
+
+### Markdown folders
+
+- **Read:** every `.md` and `.markdown` file below each root. Skipped: the
+  folders `.git`, `node_modules`, `target` and `dist`, symbolic links, and
+  files over 1 MiB.
+- **Stored:** one conversation per file and one message per section. A section
+  starts at an H1, H2 or H3 heading; text before the first heading is a section
+  of its own, and a `#` line inside a code fence is text. Underlined (setext)
+  headings do not start a section. A section over 2,000 characters goes on in
+  further messages, each starting with the heading line again. Frontmatter
+  gives `title` (the summary; without it the first H1, else the file name),
+  `tags`, `date` and `project`.
+- **Project:** the root's folder name, or `project` from the frontmatter.
+- **Root folder names must be distinct.** A file is known by its root's folder
+  name plus its path below the root, so it stays one conversation whether it is
+  read natively or through a mount. Two roots that are both called `docs` share
+  those names, and a file in one overwrites the file with the same relative
+  path in the other.
+- **Changes:** a file with new content replaces its sections; an unchanged
+  file is skipped by its SHA-256 hash. The next `extract-memory` closes the
+  notes of the old version and drops a new note that repeats one you forgot.
+- **What stays behind:**
+  - A new version whose modification time is older than the last extraction
+    of that file, such as a restore from a backup, is stored but not extracted
+    again, and the notes of the version it replaced stay current. Edit and save
+    the file once more to have it read.
+  - A file that was emptied, grew past 1 MiB or became a symbolic link keeps
+    its last stored sections. A deleted file, and every file of a root you take
+    off the list, keeps its conversation until you delete it.
+
+### Git repositories
+
+- **Read:** the local branches of each repository, the newest 5,000 commits
+  across them; the log says how many older ones were left out. `git` has to be
+  installed. Without it `doctor` says `git missing`, the ingest prints one line
+  for the source and goes on with the others.
+- **Stored:** one conversation per repository, its project the folder name, and
+  one message per commit: subject, body, and `Files:` with up to 50 changed
+  paths. The message's time is the committer date. Merges list no files. A
+  message over 8,000 characters is cut.
+- **No names.** Throughline does not ask git for the author or the committer.
+  Lines whose key ends in `-by:` (`Signed-off-by`, `Co-authored-by` …) and `Cc:`
+  lines are removed, mail addresses become `[mail]`, and `Merge pull request #7
+  from acct/branch` loses the account. A name written into the text itself
+  stays. There is no author filter.
+- **Changes:** a repository whose branch heads have not moved is skipped
+  without reading its log. Commits are only ever added, so commits that a
+  history rewrite dropped stay stored.
+- **Folder names must be distinct** here too, because the conversation follows
+  the folder name. A second root with the same name is skipped with an error,
+  and a renamed folder starts a new conversation.
+- **What stays behind:** commits merged in with dates older than the last
+  extraction of that repository are stored but never extracted.
+- Git runs without a timeout. `safe.directory` is set for the configured roots
+  only, so a repository owned by another user, as behind a container mount, can
+  be read.
+
+### Web pages
+
+- **The list:** the file in `THROUGHLINE_WEB_URLS` holds one URL per line, and
+  a line starting with `#` is a comment. Only `http` and `https`. User name,
+  password and `#fragment` leave each URL before anything else happens to it.
+- **Fetching:** `throughline ingest --source web` fetches each new URL once:
+  one GET with `User-Agent: Throughline/<version>`, no cookies, no credentials,
+  TLS always verified. A known URL is fetched again only with `--refetch`. When
+  its text has not changed nothing is written; a changed page replaces the
+  stored one, and the next extraction closes the old notes as for Markdown.
+- **Limits:** private, loopback, link-local and other non-public addresses are
+  refused, after every redirect too, and there are at most 5 redirects.
+  `robots.txt` is honoured (the group for `Throughline`, else `*`); a server
+  error or timeout on it counts as disallowed. Only `text/html` and
+  `text/plain`, at most 2 MiB and 10 seconds per URL. A page that shows text
+  only with JavaScript is recorded as declined and stores nothing; on a
+  refetch the stored version stays. A refused or
+  failed URL is tried again on the next run.
+- **Stored:** one conversation per URL, the host as its project and the page
+  title as its summary, its text cut into sections like a Markdown file.
+- **Never on a schedule.** `ingest --source all`, the hourly job and the
+  server's Operate ingest fetch no page. The web source is the only one that
+  sends requests out, so it runs when you start it.
+- **Behind a proxy that inspects TLS** the container needs the proxy's root CA
+  ([INSTALLATION.md](INSTALLATION.md#an-extra-root-ca)); without it every HTTPS
+  fetch fails with a certificate error. With `HTTPS_PROXY` set, the proxy
+  resolves the host itself, so the address check cannot catch a name that
+  resolves to another address there.
+
+### Gemini CLI and Copilot Chat
+
+These two session adapters need no setting, only their folders. Gemini CLI
+reads `~/.gemini/tmp/*/chats/`. Copilot Chat reads `workspaceStorage/*/chatSessions/`
+and `globalStorage/emptyWindowChatSessions/` below VS Code's user folder,
+`~/Library/Application Support/Code/User` on macOS and `~/.config/Code/User` on
+Linux. `workspaceStorage` holds other extensions' state as well. The adapter
+reads only the chat folders, but a mount of `workspaceStorage` shows the rest
+to the container too, read-only. Compose does not mount either folder by
+default ([INSTALLATION.md](INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat)).
+
+### Extracting notes from documents
+
+`extract-memory` picks the prompt per conversation. `markdown`, `git` and `web`
+always use the profile `document`: it keeps facts, decisions, rules and dates
+from text that is not a dialogue, and a date becomes an `insight` note with the
+date in its text. Sessions keep `THROUGHLINE_EXTRACT_PROFILE`. A document goes
+to the model in windows of up to 20 sections. After a new version the command
+prints `documents: <n> note(s) of old versions closed, <m> repeat(s) of
+forgotten notes dropped`.
+
+The nightly job takes 20 conversations per run. After adding a root with many
+files, run the first extraction by hand with a higher limit, for example
+`throughline extract-memory --limit 500`, and keep the machine awake meanwhile.
+
+A root that holds project rules or skills (`CLAUDE.md`, `SKILL.md` and the
+like) brings them in twice, through the AI configuration import and as
+Markdown files. Search then shows both.
+
+In team mode a configured root, repository or URL is visible to every account,
+as sections and as notes. There is no visibility per document
+([TEAM_DEPLOYMENT.md](TEAM_DEPLOYMENT.md#what-stays-shared)).
 
 ## Leaving things out of the ingest
 
@@ -805,6 +962,10 @@ throughline migrate --status             # pending schema migrations
 `doctor` is the one to run when something behaves oddly: it checks Python,
 PostgreSQL and pgvector, every adapter, the embedding and answering backends,
 the schedule, and whether a recent backup exists.
+The Rust `doctor` ends with a `sources:` block: the Markdown roots it sees and
+how many of them are missing, the git roots and the `git` version (or `git
+missing`), the number of URLs, and whether the Gemini CLI and Copilot Chat
+folders are there.
 
 ## Performance
 

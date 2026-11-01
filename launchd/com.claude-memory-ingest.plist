@@ -1,13 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hourly ingest: the AI tool sessions first, then Markdown folders and git
+  repositories. The last two need the Rust runtime, the binary that the cargo
+  build in the README ("Develop and contribute") puts into rust/target/release;
+  the Python ingest does not know them. Each one is a no-op while its list
+  below is empty. Set the lists to the values of your .env: colon-separated
+  folders, ~ allowed. docs/USAGE.md has the details.
+
+  Web pages are not fetched here. The web source makes network requests, so
+  it runs only when you start it, never on a schedule.
+
+  With the Compose stack, run the container's binary instead, which reads the
+  lists from .env: docker compose exec -T web throughline ingest, once with
+  each of the two sources, from the checkout.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.claude-memory-ingest</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>REPLACE_WITH_ABSOLUTE_PATH/scripts/ingest_sessions.py</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>/usr/bin/python3 'REPLACE_WITH_ABSOLUTE_PATH/scripts/ingest_sessions.py'; for source in markdown git; do 'REPLACE_WITH_ABSOLUTE_PATH/rust/target/release/throughline' ingest --source "$source"; done</string>
     </array>
     <key>StartInterval</key>
     <integer>3600</integer>
@@ -21,6 +37,10 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>PGUSER</key>
         <string>REPLACE_WITH_YOUR_USER</string>
+        <key>THROUGHLINE_MARKDOWN_ROOTS</key>
+        <string></string>
+        <key>THROUGHLINE_GIT_ROOTS</key>
+        <string></string>
     </dict>
 </dict>
 </plist>

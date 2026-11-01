@@ -54,6 +54,28 @@ Die meisten Quelldateien haben keine UUID. Adapter leiten daher stabile UUID5
 Werte aus Tool und Quellenkennung ab. So bleibt eine Session über erneute Läufe
 und Aktualisierungen dieselbe Conversation.
 
+Drei Quellen lesen Text ohne Sprecher, ihre Messages tragen deshalb die Rolle
+`document` (Migration 016). Der Adapter `markdown` durchläuft die fünf Schritte
+oben: eine Conversation pro Datei, eine Message pro Abschnitt (H1 bis H3, ab
+2.000 Zeichen geteilt). Seine Session-ID entsteht aus dem Ordnernamen der
+Wurzel und dem Pfad darunter. Ein nativer Lauf und ein Lauf im Container über
+dieselbe Wurzel treffen sich so in derselben Zeile. `git` und `web` haben eigene
+Runner, weil ein Repository oder eine URL keine einzelne Datei zum Hashen ist.
+Git vergleicht die Branch-Köpfe (`for-each-ref`) und hängt pro Commit eine
+Message an, mit einer UUID aus dem SHA und ohne Autor. Web holt eine bekannte
+URL nur mit `--refetch` erneut und ersetzt die Seite, wenn sich der Hash ihres
+extrahierten Textes geändert hat. Markdown- und Web-Messages haben keine UUID, eine neue Fassung ersetzt
+ihre Messages deshalb als Block. `ingest --source all` liest Markdown und Git,
+aber keine Webseiten: Die Web-Quelle schickt als einzige Anfragen nach außen und
+läuft nur, wenn man sie ausdrücklich nennt.
+
+Bei der Extraktion bestimmt die Quelle den Prompt. `markdown`, `git` und `web`
+nutzen das Profil `document`, alle anderen `THROUGHLINE_EXTRACT_PROFILE`.
+Kommt eine neue Fassung eines Dokuments, schließt die Extraktion zuerst die
+Notizen der alten Fassung (superseded, mit `valid_to`). Danach verwirft sie jede
+neue Notiz, die eine vergessene Notiz desselben Dokuments wiederholt, am Text
+oder an einem Kosinus ab der Konsolidierungsschwelle.
+
 ## Datenmodell
 
 | Tabelle | Zweck |

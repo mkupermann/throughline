@@ -202,6 +202,21 @@ services:
       # Host-home prefixes for symlink resolution (Docker Desktop writes host
       # paths into symlink targets).  Semicolon-separated; empty is allowed.
       THROUGHLINE_HOST_HOME: "${THROUGHLINE_HOST_HOME:-}"
+      # Document sources, all empty by default (docs/USAGE.md, "Documents,
+      # repositories and web pages"). Markdown folders and git repositories
+      # are colon-separated, the URL file is one path. Write them as ~/… :
+      # ~ is your home natively and /home/throughline here, so one .env
+      # serves both. Each path also needs a read-only mount at that place
+      # below /home/throughline. Mounts with your own paths belong in
+      # docker-compose.override.yml (git-ignored), never in this file.
+      THROUGHLINE_MARKDOWN_ROOTS: "${THROUGHLINE_MARKDOWN_ROOTS:-}"
+      THROUGHLINE_GIT_ROOTS: "${THROUGHLINE_GIT_ROOTS:-}"
+      # Read only by `ingest --source web`, which runs by hand. `--source
+      # all` and the hourly job never fetch a page.
+      THROUGHLINE_WEB_URLS: "${THROUGHLINE_WEB_URLS:-}"
+      # Extraction prompt for sessions: empty for coding, or personal.
+      # markdown, git and web always use the document prompt.
+      THROUGHLINE_EXTRACT_PROFILE: "${THROUGHLINE_EXTRACT_PROFILE:-}"
     ports:
       # Loopback by default. Team deployments use a TLS proxy on this host;
       # never publish the backend directly to an untrusted network.

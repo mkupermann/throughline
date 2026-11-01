@@ -22,7 +22,7 @@ scheduler status is macOS only.
 | Homebrew | current | [brew.sh](https://brew.sh) |
 | PostgreSQL | 16 | installed via Homebrew |
 | Python | 3.10+ | matches package metadata |
-| Git | any | |
+| Git | any | also needed by the git source, natively; the image brings its own |
 
 Optional but recommended:
 
@@ -44,7 +44,7 @@ git clone https://github.com/mkupermann/throughline.git
 cd throughline
 python3 scripts/init_compose_env.py --check-docker
 docker compose up -d
-docker compose exec web throughline ingest --all
+docker compose exec web throughline ingest
 ```
 
 The bootstrap script creates or updates the ignored `.env`, generates a random
@@ -57,6 +57,85 @@ does not complete.
 
 Open `http://127.0.0.1:8788`. See [DEPLOYMENT.md](DEPLOYMENT.md) for profiles,
 credential rotation, backups, and Linux source-mount details.
+
+The image runs the Rust binary, whose `ingest` reads every source but web
+pages; `--source <name>` picks one.
+
+### Mounts for documents, Gemini CLI and Copilot Chat
+
+The standard mounts cover the first nine AI tools and, read-only,
+`~/Documents/GitHub` at `/home/throughline/Documents/GitHub`. While
+`THROUGHLINE_PROJECTS_DIR` is unset, a git repository or Markdown folder in
+there therefore needs no extra mount. Everything else goes into
+`docker-compose.override.yml` next to `docker-compose.yml`. Compose reads that
+file on its own, and git ignores it, because it holds your paths. Mount each
+folder read-only at the place your `.env` names, with `~` standing for
+`/home/throughline` ([USAGE.md](USAGE.md#documents-repositories-and-web-pages)
+explains the settings):
+
+```yaml
+# docker-compose.override.yml
+services:
+  web:
+    volumes:
+      # Markdown folders and git repositories.
+      - ~/notes:/home/throughline/notes:ro
+      - ~/src/harbour-app:/home/throughline/src/harbour-app:ro
+      # A folder outside your home keeps its absolute path on both sides.
+      - /path/to/handbook:/path/to/handbook:ro
+      # The URL list for THROUGHLINE_WEB_URLS.
+      - ~/.config/throughline/web-urls.txt:/home/throughline/.config/throughline/web-urls.txt:ro
+      # Gemini CLI: the session logs only, not the credentials next to them.
+      - ~/.gemini/tmp:/home/throughline/.gemini/tmp:ro
+      # Copilot Chat. These are the macOS folders; on Linux they start at
+      # ~/.config/Code/User. The target is the Linux path either way.
+      - ~/Library/Application Support/Code/User/workspaceStorage:/home/throughline/.config/Code/User/workspaceStorage:ro
+      - ~/Library/Application Support/Code/User/globalStorage/emptyWindowChatSessions:/home/throughline/.config/Code/User/globalStorage/emptyWindowChatSessions:ro
+```
+
+The matching `.env` lines for that example:
+
+```bash
+THROUGHLINE_MARKDOWN_ROOTS=~/notes:/path/to/handbook
+THROUGHLINE_GIT_ROOTS=~/src/harbour-app
+THROUGHLINE_WEB_URLS=~/.config/throughline/web-urls.txt
+```
+
+Apply it with `docker compose up -d web`; a plain restart keeps the old
+mounts and environment. If `.env` sets `COMPOSE_FILE`, Compose skips the
+override file unless the list names it, for example
+`COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml`. Afterwards
+`docker compose exec web throughline doctor` lists under `sources:` what the
+container can see; a Markdown root reported as not found is usually a missing
+mount. Roots of the same folder name collide, so give every root a distinct
+name ([USAGE.md](USAGE.md#markdown-folders)).
+
+### An extra root CA
+
+The image verifies TLS against its own certificate store. Behind a proxy that
+inspects TLS, `cargo` cannot download crates during the build, and every HTTPS
+fetch of the web source fails with a certificate error, until the image trusts
+the proxy's root CA. The build takes one from a build context named
+`extra_ca`: a folder of its own that holds the CA as PEM files named `*.crt`.
+Without that context it adds nothing. With Compose, in the same override file,
+for every service you build (`mcp` too, if you use that profile):
+
+```yaml
+services:
+  migrate:
+    build:
+      additional_contexts:
+        extra_ca: /path/to/ca-folder
+  web:
+    build:
+      additional_contexts:
+        extra_ca: /path/to/ca-folder
+```
+
+Then run `docker compose build && docker compose up -d`. A plain `docker
+build` takes `--build-context extra_ca=/path/to/ca-folder`. Adding or changing
+a certificate rebuilds what depends on it; after removing the context, build
+once with `--no-cache`, or the cached layer keeps the old CA.
 
 ## 3. Install PostgreSQL and pgvector for the native route
 
@@ -173,7 +252,11 @@ the first six user-facing surfaces; project and detail pages open from links.
 
 This loads every plist in `launchd/`. The scheduled jobs are:
 
-- `com.claude-memory-ingest` — hourly ingestion
+- `com.claude-memory-ingest` — hourly ingestion. After the tool sessions it
+  runs the Rust binary in `rust/target/release/` for `--source markdown` and
+  `--source git`; set `THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS`
+  in the installed plist (empty, both write nothing). Web pages stay manual:
+  `throughline ingest --source web` is the only step that sends requests out.
 - `com.claude-memory-extract` — daily 02:00 UTC memory extraction
 - `com.claude-memory-backup` — daily 03:00 UTC `pg_dump` with 30-day retention
 - `com.claude-memory-embed` — hourly at minute 15, `throughline embed --limit 10000`:

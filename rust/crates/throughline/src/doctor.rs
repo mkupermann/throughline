@@ -151,14 +151,52 @@ fn report<C: GenericClient>(
     })
 }
 
-/// One line per source that is not an adapter, for `throughline doctor`:
-/// `git: <n> roots configured, git <version|missing>` and
-/// `web: <n> urls configured`.
+/// The `sources:` block of `throughline doctor`, one indented line per source
+/// that needs a setting or a mount:
+///
+/// - `markdown: <n> roots configured`, plus `, <k> not found` for roots that
+///   are not a folder here (a missing mount in the container, say), because
+///   the ingest passes over those without a word;
+/// - git's and web's own lines, `git: <n> roots configured, git
+///   <version|missing>` and `web: <n> urls configured`;
+/// - `gemini_cli` and `copilot_chat`: `present`, or `not present` with the
+///   folder that was looked for.
 pub fn source_lines() -> Vec<String> {
-    vec![
+    use crate::adapters::{copilot_chat, gemini_cli, markdown, Adapter};
+    let roots = crate::sources::roots_from_env(markdown::ROOTS_ENV);
+    let missing = roots.iter().filter(|r| !r.is_dir()).count();
+    let mut markdown_line = format!(
+        "{}: {} {} configured",
+        markdown::NAME,
+        roots.len(),
+        if roots.len() == 1 { "root" } else { "roots" }
+    );
+    if missing > 0 {
+        markdown_line.push_str(&format!(", {missing} not found"));
+    }
+    let mut lines = vec![
+        markdown_line,
         crate::sources::git::doctor_line(&crate::sources::git::GitSource::from_env()),
         crate::sources::web::doctor_line(&crate::sources::web::WebSource::from_env()),
-    ]
+    ];
+    let adapters: [&dyn Adapter; 2] = [
+        &gemini_cli::GeminiCliAdapter::default(),
+        &copilot_chat::CopilotChatAdapter::default(),
+    ];
+    for adapter in adapters {
+        lines.push(if adapter.is_present() {
+            format!("{}: present", adapter.name())
+        } else {
+            format!(
+                "{}: not present, {} not found",
+                adapter.name(),
+                adapter.home().display()
+            )
+        });
+    }
+    std::iter::once("sources:".to_string())
+        .chain(lines.into_iter().map(|l| format!("  {l}")))
+        .collect()
 }
 
 /// The note of a failed check. A team-mode client gets [`hidden_note`].
