@@ -67,8 +67,9 @@ pub struct ContextPack {
     pub within_budget: bool,
     pub skipped: usize,
     pub estimate: &'static str,
-    /// Why "Relevant to the task" did not rank fully by meaning: the
-    /// `degraded` of its recall (no question vector, or notes without one).
+    /// Why the task did not rank fully by meaning, in "Relevant to the task" and in the
+    /// order of Decisions: the `degraded` of its recall (no question vector, or notes
+    /// without one).
     pub degraded: Option<String>,
 }
 
@@ -143,8 +144,7 @@ fn added_cost(sections: &[Section], tokens: &[usize], chosen: &[bool], i: usize)
 /// Takes the lines of the sections `want` admits, in order, first fit: each while this pass
 /// stays within `cap` and the pack within `budget`.
 fn fill(
-    sections: &[Section],
-    tokens: &[usize],
+    (sections, tokens): (&[Section], &[usize]),
     chosen: &mut [bool],
     used: &mut usize,
     (budget, cap): (usize, usize),
@@ -176,6 +176,23 @@ pub fn pack_with(
     budget: usize,
     task: bool,
 ) -> Result<ContextPack, PackError> {
+    pack_held(header, lines, budget, task).map(|(p, _)| p)
+}
+
+/// Whether a pack holds a line, and whether the Relevant reserve took it (pass 1 with a task).
+#[derive(Clone, Copy, Default)]
+struct Held {
+    held: bool,
+    reserved: bool,
+}
+
+/// [`pack_with`], and per line of `lines` whether the pack holds it.
+fn pack_held(
+    header: &str,
+    lines: &[Line],
+    budget: usize,
+    task: bool,
+) -> Result<(ContextPack, Vec<Held>), PackError> {
     if !(MIN_BUDGET..=MAX_BUDGET).contains(&budget) {
         return Err(PackError::BudgetOutOfRange(budget));
     }
@@ -187,51 +204,46 @@ pub fn pack_with(
     if header_cost > budget {
         return Err(PackError::HeaderTooLarge);
     }
-    let flat: Vec<(&Line, String)> = lines
+    let flat: Vec<(usize, &Line, String)> = lines
         .iter()
-        .map(|l| (l, l.text.replace(['\n', '\r'], " ")))
-        .filter(|(_, text)| !text.trim().is_empty())
+        .enumerate()
+        .map(|(i, l)| (i, l, l.text.replace(['\n', '\r'], " ")))
+        .filter(|(_, _, text)| !text.trim().is_empty())
         .collect();
-    let sections: Vec<Section> = flat.iter().map(|(l, _)| l.section).collect();
-    let tokens: Vec<usize> = flat.iter().map(|(_, t)| estimate_tokens(t)).collect();
+    let sections: Vec<Section> = flat.iter().map(|(_, l, _)| l.section).collect();
+    let tokens: Vec<usize> = flat.iter().map(|(_, _, t)| estimate_tokens(t)).collect();
+    let mut reserved = vec![false; flat.len()];
     let mut chosen = vec![false; flat.len()];
     let mut used = header_cost;
     let relevant = |s: Section| s == Section::Relevant;
     if task {
         let reserve = budget * RELEVANT_RESERVE_PERCENT / 100;
-        let mut pass = |cap: usize, want: &dyn Fn(Section) -> bool| {
-            fill(
-                &sections,
-                &tokens,
-                &mut chosen,
-                &mut used,
-                (budget, cap),
-                want,
-            )
-        };
-        pass(reserve, &relevant);
-        pass(budget, &|s| !relevant(s));
-        pass(budget, &relevant);
+        let parts = (&sections[..], &tokens[..]);
+        fill(parts, &mut chosen, &mut used, (budget, reserve), relevant);
+        reserved.clone_from(&chosen);
+        fill(parts, &mut chosen, &mut used, (budget, budget), |s| {
+            !relevant(s)
+        });
+        fill(parts, &mut chosen, &mut used, (budget, budget), relevant);
     } else {
-        fill(
-            &sections,
-            &tokens,
-            &mut chosen,
-            &mut used,
-            (budget, budget),
-            |_| true,
-        );
+        let parts = (&sections[..], &tokens[..]);
+        fill(parts, &mut chosen, &mut used, (budget, budget), |_| true);
     }
     let mut out: Vec<String> = vec![header];
     let mut items = Vec::new();
     let mut citations: Vec<Citation> = Vec::new();
     let mut skipped = 0;
     let mut current: Option<Section> = None;
-    for (((line, text), tokens), chosen) in flat.into_iter().zip(tokens).zip(chosen) {
-        if !chosen {
+    let mut held = vec![Held::default(); lines.len()];
+    for (k, ((i, line, text), tokens)) in flat.into_iter().zip(tokens).enumerate() {
+        if !chosen[k] {
             skipped += 1;
             continue;
         }
+        held[i] = Held {
+            held: true,
+            reserved: reserved[k],
+        };
         if current != Some(line.section) {
             out.extend(heading(line.section).map(String::from));
         }
@@ -249,7 +261,7 @@ pub fn pack_with(
             cite: line.cite.clone(),
         });
     }
-    Ok(ContextPack {
+    let pack = ContextPack {
         text: out.join("\n"),
         items,
         citations,
@@ -259,7 +271,93 @@ pub fn pack_with(
         skipped,
         estimate: "max(words, ceil(chars/4))",
         degraded: None,
-    })
+    };
+    Ok((pack, held))
+}
+
+/// The pack of a request with a task, with Sources. `content` is the pack of `lines` without
+/// Sources and `held` says which of them it holds. The Sources of the held lines are added;
+/// when they do not fit, held lines are dropped from the end, never one the Relevant reserve
+/// took, and the Sources are derived again, until they fit. If no number of dropped lines lets
+/// them fit, nothing is dropped and the Sources lines that fit are kept. Every Sources line
+/// cites a line that is in the pack.
+fn with_sources(
+    header: &str,
+    lines: &[Line],
+    (content, held): (&ContextPack, &[Held]),
+    budget: usize,
+    sources: impl Fn(&[Line]) -> Vec<Line>,
+) -> Result<ContextPack, PackError> {
+    let mut kept: Vec<(Line, bool)> = lines
+        .iter()
+        .zip(held)
+        .filter(|(_, h)| h.held)
+        .map(|(l, h)| (l.clone(), h.reserved))
+        .collect();
+    let mut dropped = 0;
+    let mut first_try = None;
+    loop {
+        let mut all: Vec<Line> = kept.iter().map(|(l, _)| l.clone()).collect();
+        let more = sources(&all);
+        all.extend(more);
+        // The held lines fit (they did without Sources), so only Sources lines can be skipped.
+        let mut out = pack(header, &all, budget)?;
+        if out.skipped == 0 {
+            out.skipped = content.skipped + dropped;
+            return Ok(out);
+        }
+        if dropped == 0 {
+            first_try = Some(out);
+        }
+        match kept.iter().rposition(|(_, reserved)| !reserved) {
+            Some(last) => {
+                kept.remove(last);
+                dropped += 1;
+            }
+            None => {
+                let mut out = first_try.expect("the first try comes before any drop");
+                out.skipped += content.skipped;
+                return Ok(out);
+            }
+        }
+    }
+}
+
+/// One Sources line per session behind `cites`, first appearance first: a note's session
+/// through `origins`, a session line's own.
+fn sources_for<'a>(
+    cites: impl Iterator<Item = &'a Citation>,
+    origins: &HashMap<i64, Origin>,
+) -> Vec<Line> {
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut out = Vec::new();
+    for cite in cites {
+        let origin = match cite.kind {
+            "memory" => origins.get(&cite.id).cloned(),
+            "session" => Some(Origin {
+                id: cite.id,
+                title: cite.title.clone(),
+                date: cite.date,
+            }),
+            _ => None,
+        };
+        let Some(o) = origin else { continue };
+        if !seen.insert(o.id) {
+            continue;
+        }
+        let date = o.date.map(|d| format!(" · {}", ymd(d))).unwrap_or_default();
+        out.push(Line {
+            section: Section::Sources,
+            text: format!("- [s#{}{}] \"{}\"", o.id, date, o.label()),
+            cite: Some(Citation {
+                kind: "session",
+                id: o.id,
+                date: o.date,
+                title: o.title.clone(),
+            }),
+        });
+    }
+    out
 }
 
 impl std::fmt::Display for PackError {
@@ -469,30 +567,36 @@ pub fn build_context<C: GenericClient>(
         limit: RELEVANT_LIMIT,
         rank: DEFAULT_RANK,
     };
-    let mut current: Vec<Candidate> = candidates(client, CandidateFilter::Current, &query, emb)?
-        .into_iter()
-        .filter(|c| c.status != "stale")
-        .collect();
+    let loaded = candidates(client, CandidateFilter::Current, &query, emb)?;
+    let task = req.task.map(str::trim).filter(|t| !t.is_empty());
+    // With a task, decisions are ordered by the default rank for it, the score `recall` gives:
+    // cosine to the task's vector `emb` (no floor, every decision stays listed), full text
+    // without one (the pack then says `degraded`). Scored over the candidates `recall` ranks,
+    // stale ones included, so a note without a vector gets the same score as there.
+    let scores = match task {
+        Some(task) => {
+            let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
+            let words = query_words(&text);
+            Some(rank_scores(
+                client,
+                actor,
+                DEFAULT_RANK,
+                &words,
+                &loaded,
+                emb,
+            )?)
+        }
+        None => None,
+    };
+    let mut current: Vec<Candidate> = loaded.into_iter().filter(|c| c.status != "stale").collect();
     current.sort_by(|a, b| b.valid_from.cmp(&a.valid_from).then(a.id.cmp(&b.id)));
 
     let mut decisions: Vec<&Candidate> = current
         .iter()
         .filter(|c| DECISION_CATEGORIES.contains(&c.category.as_str()))
         .collect();
-    let task = req.task.map(str::trim).filter(|t| !t.is_empty());
-    if let Some(task) = task {
-        // With a task, decisions that match it lead, by the default rank as in "Relevant to the
-        // task": cosine to the task's vector `emb`, full text without one (the pack then says
-        // `degraded`). Ties and the rest stay newest first (the sort is stable).
-        let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
-        let scores = rank_scores(
-            client,
-            actor,
-            DEFAULT_RANK,
-            &query_words(&text),
-            &current,
-            emb,
-        )?;
+    if let Some(scores) = &scores {
+        // Ties stay newest first (the sort is stable).
         let rank = |c: &Candidate| scores.get(&c.id).copied().unwrap_or(0.0).max(0.0);
         decisions.sort_by(|a, b| rank(b).total_cmp(&rank(a)));
     }
@@ -547,10 +651,8 @@ pub fn build_context<C: GenericClient>(
 
     // Sources: the sessions behind the lines that made it into the pack, first appearance first.
     // With a task, "Relevant to the task" fills its share of the budget first.
-    let first =
-        pack_with(&header, &lines, req.budget, task.is_some()).map_err(anyhow::Error::new)?;
-    let mut sources: Vec<Line> = Vec::new();
-    let mut seen: HashSet<i64> = HashSet::new();
+    let (first, held) =
+        pack_held(&header, &lines, req.budget, task.is_some()).map_err(anyhow::Error::new)?;
     // A session is dated by its start, the same date its own citation carries.
     let ids: Vec<i64> = origins.values().map(|o| o.id).collect();
     let mut started: HashMap<i64, DateTime<Utc>> = HashMap::new();
@@ -565,38 +667,21 @@ pub fn build_context<C: GenericClient>(
             o.date = Some(*d);
         }
     }
-    for item in &first.items {
-        let Some(cite) = &item.cite else { continue };
-        let origin = match cite.kind {
-            "memory" => origins.get(&cite.id).cloned(),
-            "session" => Some(Origin {
-                id: cite.id,
-                title: cite.title.clone(),
-                date: cite.date,
-            }),
-            _ => None,
-        };
-        let Some(o) = origin else { continue };
-        if !seen.insert(o.id) {
-            continue;
-        }
-        let date = o.date.map(|d| format!(" · {}", ymd(d))).unwrap_or_default();
-        sources.push(Line {
-            section: Section::Sources,
-            text: format!("- [s#{}{}] \"{}\"", o.id, date, o.label()),
-            cite: Some(Citation {
-                kind: "session",
-                id: o.id,
-                date: o.date,
-                title: o.title.clone(),
-            }),
-        });
-    }
-    let mut out = if sources.is_empty() {
-        first
+    let mut out = if task.is_some() {
+        // The packed lines keep their places; Sources may only push out lines at the end.
+        let sources =
+            |kept: &[Line]| sources_for(kept.iter().filter_map(|l| l.cite.as_ref()), &origins);
+        with_sources(&header, &lines, (&first, &held), req.budget, sources)
+            .map_err(anyhow::Error::new)?
     } else {
-        lines.extend(sources);
-        pack_with(&header, &lines, req.budget, task.is_some()).map_err(anyhow::Error::new)?
+        // Without a task the Sources come last in the one pass, as before.
+        let sources = sources_for(first.items.iter().filter_map(|i| i.cite.as_ref()), &origins);
+        if sources.is_empty() {
+            first
+        } else {
+            lines.extend(sources);
+            pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?
+        }
     };
     out.degraded = degraded;
     Ok(out)
@@ -1149,23 +1234,9 @@ mod tests {
             &mut tx,
             &seed("marsupial burrow census", Some(&p), "insight", 4),
         );
-        let vec768 = |head: [f32; 2]| {
-            let mut v = vec![0.0f32; 768];
-            v[..2].copy_from_slice(&head);
-            v
-        };
         // cos 0.70 and 1.0, both above the floor of 0.5 below
         for (id, head) in [(words, [0.7, 0.714]), (meaning, [1.0, 0.0])] {
-            tx.execute(
-                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
-                 VALUES ('memory_chunk', $1, $2, $3::text::vector)",
-                &[
-                    &id,
-                    &model,
-                    &crate::generate_embeddings::vector_literal(&vec768(head)),
-                ],
-            )
-            .unwrap();
+            embed(&mut tx, id, &model, head);
         }
         let emb = QueryEmbedding {
             model,
@@ -1204,23 +1275,9 @@ mod tests {
             &mut tx,
             &seed("quarterly invoice layout", Some(&p), "insight", 4),
         );
-        let vec768 = |head: [f32; 2]| {
-            let mut v = vec![0.0f32; 768];
-            v[..2].copy_from_slice(&head);
-            v
-        };
         // cos 0.9 and 0.6: the weak one is under the model's floor of 0.68
         for (id, head) in [(close, [0.9, 0.436]), (weak, [0.6, 0.8])] {
-            tx.execute(
-                "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
-                 VALUES ('memory_chunk', $1, $2, $3::text::vector)",
-                &[
-                    &id,
-                    &model,
-                    &crate::generate_embeddings::vector_literal(&vec768(head)),
-                ],
-            )
-            .unwrap();
+            embed(&mut tx, id, &model, head);
         }
         let emb = QueryEmbedding {
             model,
@@ -1833,8 +1890,38 @@ mod tests {
         assert!(out.within_budget);
     }
 
+    /// What a pack holds, comparable: text, tokens used, skipped, items (section, text, tokens,
+    /// cited id) and citations (kind, id).
+    type Shape = (
+        String,
+        usize,
+        usize,
+        Vec<(Section, String, usize, Option<i64>)>,
+        Vec<(&'static str, i64)>,
+    );
+
+    fn shape(p: &ContextPack) -> Shape {
+        (
+            p.text.clone(),
+            p.tokens_used,
+            p.skipped,
+            p.items
+                .iter()
+                .map(|i| {
+                    (
+                        i.section,
+                        i.text.clone(),
+                        i.tokens,
+                        i.cite.as_ref().map(|c| c.id),
+                    )
+                })
+                .collect(),
+            p.citations.iter().map(|c| (c.kind, c.id)).collect(),
+        )
+    }
+
     /// `pack` as it was before the reserve: one pass, in order, first fit.
-    fn pack_before(header: &str, lines: &[Line], budget: usize) -> (String, usize, usize) {
+    fn pack_before(header: &str, lines: &[Line], budget: usize) -> Shape {
         let mut header = header.replace(['\n', '\r'], " ");
         if header.trim().is_empty() {
             header = " ".to_string();
@@ -1842,6 +1929,7 @@ mod tests {
         let mut used = estimate_tokens(&header) + 1;
         let mut out = vec![header];
         let (mut skipped, mut current) = (0, None);
+        let (mut items, mut citations) = (Vec::new(), Vec::new());
         for line in lines {
             let text = line.text.replace(['\n', '\r'], " ");
             if text.trim().is_empty() {
@@ -1850,7 +1938,8 @@ mod tests {
             let head = (current != Some(line.section))
                 .then(|| heading(line.section))
                 .flatten();
-            let cost = estimate_tokens(&text) + 1 + head.map_or(0, |h| estimate_tokens(h) + 1);
+            let tokens = estimate_tokens(&text);
+            let cost = tokens + 1 + head.map_or(0, |h| estimate_tokens(h) + 1);
             if used + cost > budget {
                 skipped += 1;
                 continue;
@@ -1858,9 +1947,29 @@ mod tests {
             used += cost;
             out.extend(head.map(String::from));
             current = Some(line.section);
-            out.push(text);
+            out.push(text.clone());
+            if let Some(c) = &line.cite {
+                if !citations.contains(&(c.kind, c.id)) {
+                    citations.push((c.kind, c.id));
+                }
+            }
+            items.push((line.section, text, tokens, line.cite.as_ref().map(|c| c.id)));
         }
-        (out.join("\n"), used, skipped)
+        (out.join("\n"), used, skipped, items, citations)
+    }
+
+    /// Words with line breaks, "·", umlauts and spaces, and now and then a text that is blank
+    /// once flattened.
+    fn messy(rng: &mut Rng, max: usize) -> String {
+        if rng.range(0, 7) == 0 {
+            return [" ", "\n", "  \r\n ", "\t"][rng.range(0, 3)].to_string();
+        }
+        let pool = ["x", "ab", "ä", "·", "w\nv", "\r\n", "Größe", "xxxxxxxxxxx"];
+        let n = rng.range(1, max);
+        (0..n)
+            .map(|_| pool[rng.range(0, pool.len() - 1)])
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
@@ -1873,8 +1982,11 @@ mod tests {
         );
         assert_eq!((p.tokens_used, p.skipped), (190, 3));
         assert_eq!(cited(&p, Section::Decisions), vec![1, 2, 3, 4]);
-        // Random lines, sections in any order: byte for byte what the old pack gave.
+        // Random lines, sections in any order (the header section too), line breaks, blank
+        // texts, "·" and umlauts, repeated citations: byte for byte what the old pack gave,
+        // items and citations included.
         let sections = [
+            Section::Header,
             Section::Decisions,
             Section::Relevant,
             Section::Sessions,
@@ -1885,22 +1997,25 @@ mod tests {
         let mut rng = Rng(0x2545_F491_4F6C_DD1D);
         for case in 0..500 {
             let budget = rng.range(64, 4096);
-            let header = mixed(&mut rng, 40);
+            let header = messy(&mut rng, 40);
             let n = rng.range(0, 40);
             let lines: Vec<Line> = (0..n)
                 .map(|_| {
-                    let s = sections[rng.range(0, 5)];
-                    line(s, &mixed(&mut rng, 400), None)
+                    let s = sections[rng.range(0, sections.len() - 1)];
+                    let cite = (rng.range(0, 2) > 0).then(|| rng.range(1, 15) as i64);
+                    line(s, &messy(&mut rng, 400), cite.and_then(note))
                 })
                 .collect();
-            let p = pack_with(&header, &lines, budget, false).unwrap();
+            let Ok(p) = pack_with(&header, &lines, budget, false) else {
+                continue;
+            };
             assert_eq!(
-                (p.text.clone(), p.tokens_used, p.skipped),
+                shape(&p),
                 pack_before(&header, &lines, budget),
                 "case {case}"
             );
             let q = pack(&header, &lines, budget).unwrap();
-            assert_eq!(q.text, p.text, "case {case}");
+            assert_eq!(shape(&q), shape(&p), "case {case}");
         }
     }
 
@@ -1934,5 +2049,122 @@ mod tests {
         let without = pack_with("h", &no_relevant, 200, false).unwrap();
         assert_eq!(with.text, without.text);
         assert_eq!(with.tokens_used, without.tokens_used);
+    }
+
+    #[test]
+    fn sources_never_cite_a_dropped_relevant_line() {
+        // The trace of the review: header "h" = 2, D1 = 21 (+ heading 4), R1..R5 = 27 each
+        // (+ heading 7), one session per Relevant line, a Sources line = 10 (+ heading 4).
+        let mut lines = vec![line(Section::Decisions, &words(20), note(10))];
+        lines.extend((1..=5).map(|id| line(Section::Relevant, &words(26), note(id))));
+        let source_words = std::cell::Cell::new(9);
+        let sources = |kept: &[Line]| -> Vec<Line> {
+            kept.iter()
+                .filter_map(|l| l.cite.as_ref().map(|c| c.id))
+                .filter(|id| *id < 10)
+                .map(|id| {
+                    let mut s = line(Section::Sources, &words(source_words.get()), None);
+                    s.cite = Some(Citation {
+                        kind: "session",
+                        id: 100 + id,
+                        date: None,
+                        title: None,
+                    });
+                    s
+                })
+                .collect()
+        };
+        let cited_sources = |p: &ContextPack| cited(p, Section::Sources);
+        // Budget 200, reserve 60: the content is D1, R1 (reserve), R2..R5 (left over), 169.
+        // Five Sources (54) make 223: R5 goes, four Sources fit (142 + 44 = 186).
+        let (content, held) = pack_held("h", &lines, 200, true).unwrap();
+        assert_eq!(content.tokens_used, 169);
+        let p = with_sources("h", &lines, (&content, &held), 200, sources).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![1, 2, 3, 4], "{}", p.text);
+        assert_eq!(cited(&p, Section::Decisions), vec![10]);
+        assert_eq!(cited_sources(&p), vec![101, 102, 103, 104], "{}", p.text);
+        assert_eq!((p.tokens_used, p.skipped), (186, 1));
+        assert_eq!(p.tokens_used, r1_sum(&p));
+        // Budget 300: everything fits, the content stays as packed without Sources.
+        let (content, held) = pack_held("h", &lines, 300, true).unwrap();
+        let p = with_sources("h", &lines, (&content, &held), 300, sources).unwrap();
+        let without: Vec<&str> = p
+            .items
+            .iter()
+            .filter(|i| i.section != Section::Sources)
+            .map(|i| i.text.as_str())
+            .collect();
+        let before: Vec<&str> = content.items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(without, before);
+        assert_eq!(cited_sources(&p), vec![101, 102, 103, 104, 105]);
+        // Budget 120, Sources of 91: even the reserved R1 with its Source does not fit
+        // (36 + 95), so no drop helps. The content stays as packed (D1, R1..R3; R4 and R5
+        // never fit) and no Source fits.
+        source_words.set(90);
+        let (content, held) = pack_held("h", &lines, 120, true).unwrap();
+        let p = with_sources("h", &lines, (&content, &held), 120, sources).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![1, 2, 3], "{}", p.text);
+        assert_eq!(cited(&p, Section::Decisions), vec![10], "{}", p.text);
+        assert!(cited_sources(&p).is_empty(), "{}", p.text);
+        assert_eq!((p.tokens_used, p.skipped), (115, 5));
+
+        // Through build_context: two decisions and eight matching notes, each from its own
+        // session of another project, so no Recent sessions line cites those sessions. At every
+        // budget each Sources entry belongs to a line in the pack.
+        db_tx!("sources_never_cite_a_dropped_relevant_line", tx);
+        let (p, elsewhere) = (proj(), proj());
+        insert(
+            &mut tx,
+            &seed("first choice on layout", Some(&p), "decision", 1),
+        );
+        insert(
+            &mut tx,
+            &seed("second choice on naming", Some(&p), "decision", 2),
+        );
+        let mut session_of: HashMap<i64, i64> = HashMap::new();
+        for d in 3..=10 {
+            let g = conv(&mut tx, &elsewhere, Some(&format!("talk {d}")), d);
+            let content = format!("quokka sighting number {d} near the old burrow");
+            let mut s = seed(&content, Some(&p), "insight", d);
+            s.source = Some(g);
+            session_of.insert(insert(&mut tx, &s), g);
+        }
+        let mut exercised = false;
+        for budget in (100..=600).step_by(5) {
+            let req = ContextRequest {
+                project: &p,
+                task: Some("quokka"),
+                budget,
+            };
+            let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
+            assert!(out.within_budget, "budget {budget}");
+            assert_eq!(out.tokens_used, r1_sum(&out), "budget {budget}");
+            let behind: HashSet<i64> = out
+                .items
+                .iter()
+                .filter(|i| i.section != Section::Sources)
+                .filter_map(|i| i.cite.as_ref())
+                .filter_map(|c| match c.kind {
+                    "memory" => session_of.get(&c.id).copied(),
+                    _ => Some(c.id),
+                })
+                .collect();
+            for s in cited(&out, Section::Sources) {
+                assert!(behind.contains(&s), "budget {budget}: s#{s}\n{}", out.text);
+            }
+            let relevant: usize = out
+                .items
+                .iter()
+                .filter(|i| i.section == Section::Relevant)
+                .map(|i| i.tokens + 1)
+                .sum();
+            exercised |= relevant > 0
+                && relevant + 7 > budget * RELEVANT_RESERVE_PERCENT / 100
+                && !cited(&out, Section::Sources).is_empty();
+        }
+        assert!(
+            exercised,
+            "no budget used the leftover Relevant lines with Sources"
+        );
     }
 }
