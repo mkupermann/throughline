@@ -27,15 +27,28 @@
 //! When the replay leaves no `sessionId` and `projectHash`, the whole file is
 //! read as one legacy JSON object with a `messages` array. Roles: `user` →
 //! user, `gemini` → assistant; `info`, `warning` and `error` lines are
-//! notices of the CLI and are skipped, and thoughts are dropped. Subagent
-//! sessions (`kind: "subagent"`, written to `chats/<parent session id>/`) are
-//! skipped as with Claude Code.
+//! notices of the CLI and are skipped, and thoughts are dropped. A user turn
+//! takes `displayContent` (what was typed) when the recorder kept one, since
+//! `content` then holds the expanded `@file` text. Tool output comes back as
+//! user records of `functionResponse` parts; they hold no text and are
+//! skipped. Subagent sessions (`kind: "subagent"`, written to
+//! `chats/<parent session id>/`) are skipped as with Claude Code.
+//!
+//! Project folders under `tmp/` were once named by the SHA-256 hex of the
+//! project root and are now named by a slug with a `.project_root` marker.
+//! The CLI migrates by copying the old folder and keeps it (`storage.ts`,
+//! `storageMigration.ts`), so a session can exist twice. Both are discovered;
+//! the copy in the hash folder is skipped (the runner counts it as skipped)
+//! when a slug folder holds a session file of the same name with the same
+//! `sessionId`. A session left only in a hash folder takes its project root
+//! from the slug folder whose marker hashes to that name.
 
 use super::{stable_uuid_str, Adapter};
 use crate::types::{NormalisedConversation, NormalisedMessage};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -280,13 +293,85 @@ fn token(message: &Value, key: &str) -> i64 {
 /// project directory, else the directory name (a slug or the older hash).
 fn project_path(session_file: &Path) -> Option<String> {
     let dir = session_file.parent()?.parent()?;
-    if let Ok(root) = std::fs::read_to_string(dir.join(".project_root")) {
-        let root = root.trim();
-        if !root.is_empty() {
-            return Some(root.to_string());
+    if let Some(root) = marker(dir) {
+        return Some(root);
+    }
+    let name = dir.file_name()?.to_str()?;
+    if is_hash_dir(name) {
+        if let Some(root) = root_of_hash(dir.parent()?, name) {
+            return Some(root);
         }
     }
-    dir.file_name().and_then(|n| n.to_str()).map(str::to_string)
+    Some(name.to_string())
+}
+
+fn marker(project_dir: &Path) -> Option<String> {
+    let root = std::fs::read_to_string(project_dir.join(".project_root")).ok()?;
+    let root = root.trim();
+    (!root.is_empty()).then(|| root.to_string())
+}
+
+/// A project folder of the older layout: the SHA-256 hex of the root.
+fn is_hash_dir(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The root in the slug folder's marker whose SHA-256 is `hash`.
+fn root_of_hash(tmp: &Path, hash: &str) -> Option<String> {
+    std::fs::read_dir(tmp)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| marker(&e.path()))
+        .find(|root| format!("{:x}", Sha256::digest(root.as_bytes())).eq_ignore_ascii_case(hash))
+}
+
+fn session_id_of(state: &Replay) -> Option<String> {
+    state
+        .first_session_id
+        .clone()
+        .or_else(|| str_field(&state.meta, "sessionId").map(str::to_string))
+}
+
+/// Whether a session file in a hash folder was also copied into a slug
+/// folder: a file of the same name (or its `.jsonl` successor) with the same
+/// session id.
+fn has_slug_copy(path: &Path, session_id: &str) -> bool {
+    let (Some(name), Some(dir)) = (
+        path.file_name().and_then(|n| n.to_str()),
+        path.parent().and_then(Path::parent),
+    ) else {
+        return false;
+    };
+    let in_hash_dir = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(is_hash_dir);
+    let Some(entries) = dir
+        .parent()
+        .filter(|_| in_hash_dir)
+        .and_then(|tmp| std::fs::read_dir(tmp).ok())
+    else {
+        return false;
+    };
+    let names = [name.to_string(), format!("{name}l")];
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| !is_hash_dir(n))
+        })
+        .flat_map(|p| names.iter().map(move |n| p.join("chats").join(n)))
+        .filter(|candidate| candidate.is_file())
+        .any(|candidate| {
+            std::fs::read_to_string(&candidate)
+                .ok()
+                .and_then(|raw| replay(&raw))
+                .and_then(|state| session_id_of(&state))
+                .as_deref()
+                == Some(session_id)
+        })
 }
 
 impl Adapter for GeminiCliAdapter {
@@ -345,13 +430,12 @@ impl Adapter for GeminiCliAdapter {
         if str_field(&state.meta, "kind") == Some("subagent") {
             return Ok(None);
         }
-        let Some(raw_session_id) = state
-            .first_session_id
-            .clone()
-            .or_else(|| str_field(&state.meta, "sessionId").map(str::to_string))
-        else {
+        let Some(raw_session_id) = session_id_of(&state) else {
             return Ok(None);
         };
+        if has_slug_copy(path, &raw_session_id) {
+            return Ok(None);
+        }
         let session_id = stable_uuid_str(&NS, Some(&raw_session_id), "gemini_cli:session");
 
         let started_at = parse_ts(state.meta.get("startTime"))
@@ -379,7 +463,12 @@ impl Adapter for GeminiCliAdapter {
                 _ => continue,
             };
             let mut lines = Vec::new();
-            let text = part_text(m.get("content").unwrap_or(&Value::Null));
+            let typed = m
+                .get("displayContent")
+                .filter(|_| role == "user")
+                .map(part_text)
+                .filter(|t| !t.trim().is_empty());
+            let text = typed.unwrap_or_else(|| part_text(m.get("content").unwrap_or(&Value::Null)));
             if !text.trim().is_empty() {
                 lines.push(text.trim().to_string());
             }
@@ -520,7 +609,11 @@ mod tests {
             &[
                 meta(session, "main"),
                 json!({"id": "a1f0c6de-0d3e-4c55-9a43-5b8f2e7d6c01", "timestamp": "2026-01-02T10:00:05.000Z",
-                       "type": "user", "content": [{"text": "list the files"}]}),
+                       "type": "user",
+                       // The model saw the expanded @file text; the user typed less.
+                       "content": [{"text": "list the files @a.rs"},
+                                   {"text": "\n--- a.rs ---\nfn main() {}"}],
+                       "displayContent": [{"text": "list the files @a.rs"}]}),
                 json!({"id": "a1f0c6de-0d3e-4c55-9a43-5b8f2e7d6c02", "timestamp": "2026-01-02T10:00:09.000Z",
                        "type": "gemini", "content": "", "model": "gemini-test",
                        "thoughts": [{"subject": "Plan", "description": "look at the folder first",
@@ -533,7 +626,13 @@ mod tests {
                                                   "response": {"output": "a.rs\nb.rs"}}}]}],
                        "tokens": {"input": 100, "output": 20, "cached": 0, "total": 120}}),
                 json!({"$set": {"lastUpdated": "2026-01-02T10:00:09.000Z"}}),
-                json!({"id": "a1f0c6de-0d3e-4c55-9a43-5b8f2e7d6c03", "timestamp": "2026-01-02T10:00:12.000Z",
+                // Tool output comes back as a user record of functionResponse parts.
+                json!({"id": "a1f0c6de-0d3e-4c55-9a43-5b8f2e7d6c05", "timestamp": "2026-01-02T10:00:10.000Z",
+                       "type": "user",
+                       "content": [{"functionResponse": {"id": "call-1", "name": "run_shell_command",
+                                                         "response": {"output": "a.rs\nb.rs"}}}]}),
+                // An offset other than Z is converted to UTC.
+                json!({"id": "a1f0c6de-0d3e-4c55-9a43-5b8f2e7d6c03", "timestamp": "2026-01-02T12:00:12.000+02:00",
                        "type": "gemini", "model": "gemini-test",
                        "content": [{"text": "hidden reasoning", "thought": true},
                                    {"text": "Two files: a.rs and b.rs."}],
@@ -555,12 +654,13 @@ mod tests {
         assert_eq!(conv.model.as_deref(), Some("gemini-test"));
         let roles: Vec<&str> = conv.messages.iter().map(|m| m.role.as_str()).collect();
         assert_eq!(roles, ["user", "assistant", "assistant"]);
-        assert_eq!(conv.messages[0].content, "list the files");
+        assert_eq!(conv.messages[0].content, "list the files @a.rs");
         assert_eq!(conv.messages[1].content, "[Tool: run_shell_command] ls");
         assert_eq!(conv.messages[2].content, "Two files: a.rs and b.rs.");
         for m in &conv.messages {
             assert!(!m.content.contains("hidden reasoning"), "thought part kept");
             assert!(!m.content.contains("look at the folder"), "thoughts kept");
+            assert!(!m.content.contains("fn main"), "expanded file text kept");
         }
         let calls = conv.messages[1].tool_calls.as_ref().expect("tool calls");
         assert_eq!(calls[0]["tool_name"], "run_shell_command");
@@ -617,6 +717,10 @@ mod tests {
                 msg("m6", "gemini", "another answer", 7),
                 json!({"$patch": {"updates": [{"id": "m6", "content": "another answer, patched"}],
                                   "removeIds": ["m5"]}}),
+                // Within one patch `updates` come after the single `id`; this
+                // one also patches a user message.
+                json!({"$patch": {"id": "m1", "content": "from the single patch",
+                                  "updates": [{"id": "m1", "content": "first question, patched"}]}}),
                 // Listed messages move, in this order, behind the others.
                 json!({"$patch": {"orderIds": ["m6", "m1"]}}),
             ],
@@ -632,7 +736,7 @@ mod tests {
             [
                 "first answer, corrected",
                 "another answer, patched",
-                "first question, edited"
+                "first question, patched"
             ]
         );
         // No `.project_root` marker: the project directory name stands in.
@@ -736,5 +840,62 @@ mod tests {
         let contents: Vec<&str> = conv.messages.iter().map(|m| m.content.as_str()).collect();
         assert_eq!(contents, ["old format question", "old format answer"]);
         assert_eq!(conv.started_at, ts("2026-01-01T09:00:00Z"));
+    }
+
+    #[test]
+    fn gemini_migrated_duplicate_session_is_read_once_from_the_slug_folder() {
+        use sha2::{Digest, Sha256};
+        let tmp = tempfile::tempdir().unwrap();
+        let root = "/home/dev/demo-app";
+        // The CLI copies `tmp/<sha256 of the root>/` to `tmp/<slug>/` and keeps
+        // the old folder.
+        let hash = format!("{:x}", Sha256::digest(root.as_bytes()));
+        let slug = tmp.path().join("demo-app");
+        std::fs::create_dir_all(&slug).unwrap();
+        std::fs::write(slug.join(".project_root"), format!("{root}\n")).unwrap();
+        let name = "session-2026-01-02T10-00-a1b2c3d4.jsonl";
+        let session = "a1b2c3d4-aaaa-4a2b-9c3d-00000000000a";
+        let copied = [
+            meta(session, "main"),
+            json!({"id": "c1", "timestamp": "2026-01-02T10:00:01.000Z", "type": "user",
+                   "content": "asked before the migration"}),
+        ];
+        let old_copy = tmp.path().join(&hash).join("chats").join(name);
+        write_lines(&old_copy, &copied);
+        let new_copy = slug.join("chats").join(name);
+        write_lines(
+            &new_copy,
+            &[
+                copied[0].clone(),
+                copied[1].clone(),
+                json!({"id": "c2", "timestamp": "2026-01-02T10:05:00.000Z", "type": "user",
+                       "content": "asked after the migration"}),
+            ],
+        );
+        // A session left only in the old folder (its copy expired).
+        let orphan = tmp
+            .path()
+            .join(&hash)
+            .join("chats/session-2026-01-01T09-00-b2c3d4e5.jsonl");
+        write_lines(
+            &orphan,
+            &[
+                meta("b2c3d4e5-bbbb-4a2b-9c3d-00000000000b", "main"),
+                json!({"id": "o1", "timestamp": "2026-01-01T09:00:01.000Z", "type": "user",
+                       "content": "only in the old folder"}),
+            ],
+        );
+
+        let adapter = GeminiCliAdapter::new(tmp.path().to_path_buf());
+        let found = adapter.discover().unwrap();
+        assert!(found.contains(&old_copy) && found.contains(&new_copy));
+        // The old copy is skipped; the runner counts it as skipped.
+        assert!(adapter.parse(&old_copy).unwrap().is_none());
+        let conv = adapter.parse(&new_copy).unwrap().expect("slug copy");
+        assert_eq!(conv.messages.len(), 2);
+        assert_eq!(conv.project_path.as_deref(), Some(root));
+        // The orphan keeps the real root, not the hash, as its project.
+        let orphan_conv = adapter.parse(&orphan).unwrap().expect("orphan");
+        assert_eq!(orphan_conv.project_path.as_deref(), Some(root));
     }
 }

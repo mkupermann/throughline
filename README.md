@@ -42,15 +42,15 @@ Every AI coding tool keeps its own session files and forgets the rest. Decisions
 
 ### Supported session sources
 
-The Rust registry includes **13 adapters**. They read local files. They are not cloud-account sync integrations. Coverage differs a lot between them, and an external audit on 30.10.2026 checked them against real session files.
+The Rust registry includes **13 adapters**. They read local files. They are not cloud-account sync integrations. Coverage differs a lot between them, and an external audit on 30.10.2026 checked the first eleven against real session files.
 
 | Status | Adapters | What that means |
 | --- | --- | --- |
 | Verified on real files | Claude Code, Codex, Vibe | Roles, tool calls, model and timestamps import. Claude Code token totals count each streamed entry and run high, about double. |
 | Partial | Cline, Hermes, Windsurf | Cline gives every message the session start time and no model. Hermes reads only the first session from `state.db`. Windsurf imports plan files, not Cascade conversations. |
 | Not verified, likely wrong path or format | Cursor, Zed, Continue, OpenCode, Aider | Cursor and Zed look in folders those tools do not use. OpenCode found 254 real files and imported none. Aider and Continue were written against an assumed format. |
-| Unverified on real data | Gemini CLI | Built against source `6814e00d6b14` of google-gemini/gemini-cli, unverified on real data. Subagent sessions are skipped. |
-| Partly confirmed | Copilot Chat | Snapshot format confirmed on one real file, request/response fields unverified. Of a `.jsonl` log only the snapshot line is read; later lines are counted. |
+| Unverified on real data | Gemini CLI | Built against source `6814e00d6b14` of google-gemini/gemini-cli, unverified on real data. Subagent sessions are skipped. A session the CLI copied from an old hash folder is read once, from the newer folder. Sessions written under the macOS seatbelt sandbox (`~/.cache/.gemini`) are not read. |
+| Partly confirmed | Copilot Chat | Snapshot and mutation log replayed per VS Code source `1306698e328e` (snapshot format confirmed on one real file), request/response fields unverified on real data. |
 
 Standard Compose mounts the first nine tool directories read-only. OpenCode, Aider, Gemini CLI and Copilot Chat need their source directories mounted separately. The source of truth is the [adapter registry](rust/crates/throughline/src/adapters/registry.rs).
 
