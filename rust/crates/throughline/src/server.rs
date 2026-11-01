@@ -3365,6 +3365,55 @@ async fn ingest_status_handler(State(state): State<AppState>) -> Response {
         Err(resp) => resp,
     }
 }
+
+async fn backlog_handler(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Response {
+    match with_db(&state, move |client| {
+        let untitled: i64 = client
+            .query_one(
+                "SELECT count(*) FROM conversations WHERE summary IS NULL OR summary = ''",
+                &[],
+            )?
+            .get(0);
+        let extraction_pending = crate::extract_memory::count_pending_conversations(client)?;
+        let (embed_model, notes_missing, notes_total, messages_missing, messages_total) =
+            match crate::embedding::resolve() {
+                Ok(backend) => {
+                    let p = crate::generate_embeddings::embed_progress(client, &actor, &backend)?;
+                    (
+                        serde_json::json!(p.model),
+                        serde_json::json!(p.notes_missing()),
+                        serde_json::json!(p.notes_total),
+                        serde_json::json!(p.messages_missing()),
+                        serde_json::json!(p.messages_total),
+                    )
+                }
+                Err(_) => (
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                    serde_json::Value::Null,
+                ),
+            };
+        Ok(serde_json::json!({
+            "embed_model": embed_model,
+            "notes_missing": notes_missing,
+            "notes_total": notes_total,
+            "messages_missing": messages_missing,
+            "messages_total": messages_total,
+            "untitled": untitled,
+            "extraction_pending": extraction_pending,
+        }))
+    })
+    .await
+    {
+        Ok(body) => Json(body).into_response(),
+        Err(resp) => resp,
+    }
+}
 async fn costs_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, |client| crate::costs::cost_report(client, 30)).await {
         Ok(report) => Json(report).into_response(),
@@ -4637,6 +4686,7 @@ fn routes() -> Vec<Route> {
         route(M::GET, "/api/handoff", handoff_handler),
         route(M::GET, "/api/costs", costs_handler),
         route(M::GET, "/api/ingest-status", ingest_status_handler),
+        route(M::GET, "/api/backlog", backlog_handler),
         route(M::GET, "/api/audit", audit_handler),
         route(M::GET, "/api/stale-digest", stale_digest_handler),
         route(M::GET, "/api/answer-eval", answer_eval_handler),
@@ -4991,6 +5041,7 @@ mod tests {
             (Method::DELETE, "/api/favorites/{kind}/{ref}", Role::Editor),
             (Method::GET, "/api/consolidation/proposal", Role::Admin),
             (Method::POST, "/api/operate", Role::Admin),
+            (Method::GET, "/api/backlog", Role::Admin),
             (Method::POST, "/api/consolidate", Role::Admin),
             (Method::POST, "/api/writeback", Role::Admin),
             (Method::POST, "/api/agent-memory/ingest", Role::Admin),
