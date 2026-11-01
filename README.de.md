@@ -42,7 +42,7 @@ Jedes KI-Coding-Tool speichert seine eigenen Session-Dateien und vergisst den Re
 
 ### Unterstützte Session-Quellen
 
-Die Rust-Registry enthält **13 Adapter**. Sie lesen lokale Dateien. Es sind keine Cloud-Synchronisierungen. Die Abdeckung unterscheidet sich stark. Ein externes Audit hat die ersten elf am 30.10.2026 gegen echte Session-Dateien geprüft.
+Die Rust-Registry enthält **14 Adapter**. Sie lesen lokale Dateien. Es sind keine Cloud-Synchronisierungen. Die Abdeckung unterscheidet sich stark. Ein externes Audit hat die ersten elf am 30.10.2026 gegen echte Session-Dateien geprüft.
 
 | Stand | Adapter | Was das heißt |
 | --- | --- | --- |
@@ -53,6 +53,8 @@ Die Rust-Registry enthält **13 Adapter**. Sie lesen lokale Dateien. Es sind kei
 | Teilweise bestätigt | Copilot Chat | Schnappschuss und Änderungslog nach VS-Code-Quellcode `1306698e328e` nachgespielt (Schnappschuss-Format an einer echten Datei bestätigt), Anfrage- und Antwortfelder auf echten Daten ungeprüft. |
 
 Das Standard-Compose mountet die ersten neun Tool-Verzeichnisse schreibgeschützt. OpenCode, Aider, Gemini CLI und Copilot Chat brauchen ihre Quellverzeichnisse separat. Quelle der Wahrheit ist die [Adapter-Registry](rust/crates/throughline/src/adapters/registry.rs).
+
+Zwei weitere Quellen lesen Dokumente statt Sessions: Markdown-Ordner aus `THROUGHLINE_MARKDOWN_ROOTS` (der 14. Adapter) und Git-Repositories aus `THROUGHLINE_GIT_ROOTS` (Commit-Text und Dateinamen, nie Autorennamen), beide liest `ingest --source all`; Einstellungen und Grenzen stehen in [USAGE](docs/USAGE.md#documents-repositories-and-web-pages), die Container-Mounts in [INSTALLATION](docs/INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat).
 
 Webseiten werden nur auf Anfrage geholt: `throughline ingest --source web` liest die URLs aus der Datei, die `THROUGHLINE_WEB_URLS` nennt, ein GET je Seite, und `--refetch` holt bekannte Seiten erneut. Stand: gegen einen lokalen Testserver geprüft (private und Loopback-Adressen, Weiterleitungen, `robots.txt`, Größengrenze, Zugangsdaten in der URL); ein Live-Abruf einer öffentlichen Seite mit TLS-Prüfung lief am 01.11.2026 im Testcontainer durch.
 
@@ -323,7 +325,7 @@ Die Rust-Implementierung unterstützt Ollama und einen explizit konfigurierten O
 
 ```mermaid
 flowchart LR
-    Files[Lokale Session-Dateien] --> Import[11 Quell-Adapter]
+    Files[Lokale Session-Dateien] --> Import[14 Quell-Adapter]
     Import --> DB[(PostgreSQL + pgvector)]
     DB <--> Runtime[Rust-Anwendung]
     Runtime <--> Browser[Eingebettete Browser-UI]

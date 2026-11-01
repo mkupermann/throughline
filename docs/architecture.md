@@ -208,6 +208,23 @@ is written, and records a zero-row decision in `ingestion_log`. `conversations.g
 is retained for legacy rows imported before that guard; `backfill_generated_by` labels those
 rows, which listings, search, charts, and answers exclude by default.
 
+**Document sources.** Three sources read text that has no speaker, so their
+messages carry the role `document` (migration 016). The `markdown` adapter goes
+through the five steps above: one conversation per file, one message per
+section (H1 to H3, cut at 2,000 characters). Its session id comes from the
+root's folder name and the path below the root, so a native and a container
+ingest of the same root meet in one row. `git` and `web` have runners of their
+own, because a repository or a URL is not one file to hash. Git fingerprints
+the branch heads (`for-each-ref`) and appends one message per commit, with a
+uuid from the commit's SHA and without the author. Web fetches a known URL again
+only with `--refetch` and replaces the page when the hash of its extracted text
+has changed. Markdown and web
+messages have no uuid, so a new version replaces its messages as a block,
+stamped with the file's modification time or the fetch time plus one
+microsecond per message. `ingest --source all` runs markdown and git, not web:
+the web source is the only one that sends requests out, so it runs only when it
+is named.
+
 ---
 
 ## 5. Memory extraction and reflection
@@ -219,6 +236,16 @@ attribution and a confidence score. The prompt's negative filter matters as much
 positive one — greetings, mechanical tool calls and restatements of general knowledge are
 discarded. The judgement being bought is "is this worth remembering", which is not
 expressible as a rule, which is why an LLM does it.
+
+The source picks the prompt: `markdown`, `git` and `web` conversations use the
+`document` profile, all others `THROUGHLINE_EXTRACT_PROFILE` (coding by default,
+or `personal`). Documents are sent in windows of up to 20 sections, and a run of
+sections with one timestamp is committed together, so the watermark never
+passes a section that was not sent. When a new version of a document has
+arrived, the extraction first closes the notes of the old version (superseded,
+with `valid_to`), then drops each new note that repeats a note the user forgot
+in that document, by its text or by a cosine at the consolidation threshold
+(`document_lifecycle.rs`).
 
 Extraction, title generation, reflection, and answers are model operations. A
 selected hosted endpoint or the Claude CLI can receive the relevant transcript,

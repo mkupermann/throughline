@@ -7,7 +7,7 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 
 | Unit | Schedule | Purpose |
 |------|----------|---------|
-| `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres |
+| `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres; then the Rust `ingest --source markdown` and `--source git` |
 | `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
 | `throughline-embed.timer`   | hourly at :15    | Rust `throughline embed --limit 10000` — vectors for new notes first, then messages |
@@ -16,9 +16,15 @@ All four services are `Type=oneshot`: they run, finish, and exit. The timer unit
 them on schedule.
 
 The ingest unit invokes the packaged `throughline ingest --all` command through
-the shared environment. The extract and backup units retain source-checkout
-compatibility wrappers; installed and interactive use should prefer
-`throughline extract-memory` and `throughline backup`.
+the shared environment. Its two further steps read Markdown folders and git
+repositories with the Rust binary, the same one the embed unit uses; they take
+`THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS` from the shared file
+and write nothing while both are empty. Web pages are not on a timer:
+`ingest --source web` makes network requests, so you start it yourself.
+
+The extract and backup units retain source-checkout compatibility wrappers;
+installed and interactive use should prefer `throughline extract-memory` and
+`throughline backup`.
 
 The embed unit needs the Rust runtime: it runs
 `~/.local/share/throughline/rust/target/release/throughline`, which

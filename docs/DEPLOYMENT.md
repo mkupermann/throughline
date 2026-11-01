@@ -50,8 +50,11 @@ and `web` read `THROUGHLINE_MCP_READ_ONLY`.
 Running an ingest inside the stack:
 
 ```bash
-docker compose exec web throughline ingest --all
+docker compose exec web throughline ingest
 ```
+
+The container's binary has no `--all`: `ingest` alone reads every source but
+web pages, and `--source <name>` picks one.
 
 ### Private source mount compatibility
 

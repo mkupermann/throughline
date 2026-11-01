@@ -159,7 +159,7 @@ What the database does keep, and why:
 
 ## What stays shared
 
-Conversations and their messages, projects, costs and the timeline are one shared stock. Every signed-in account sees every ingested session. Only notes can be private. The imported AI configuration (the assistant files of the server host) is for admins only: its view, and its hits in search and in MCP `search`. Viewers and editors get none of these hits and no count of them, and `ask` does not draw on these files for them.
+Conversations and their messages, projects, costs and the timeline are one shared stock. Every signed-in account sees every ingested session. Documents too: a configured root is visible to every account. Every Markdown folder, git repository and web page the server ingests (`THROUGHLINE_MARKDOWN_ROOTS`, `THROUGHLINE_GIT_ROOTS`, `THROUGHLINE_WEB_URLS`) reaches every account, as sections and as notes; there is no visibility per document. Only notes can be private. The imported AI configuration (the assistant files of the server host) is for admins only: its view, and its hits in search and in MCP `search`. Viewers and editors get none of these hits and no count of them, and `ask` does not draw on these files for them.
 
 ## Known limits
 

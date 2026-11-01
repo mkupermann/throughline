@@ -1,6 +1,17 @@
 # Throughline — Rust binary (cutover image)
 # Replaces the Python/FastAPI service. Single static-ish binary + embedded SPA.
 
+# Optional extra root CA, for a network whose proxy inspects TLS: without it
+# cargo cannot download crates and the web source's HTTPS fetches fail, since
+# both verify against the image's store. Empty by default. To add one, pass a
+# folder of its own holding the CA as PEM files named *.crt as the build
+# context `extra_ca`, which replaces this empty stage:
+#   docker build --build-context extra_ca=/path/to/ca-folder -f Dockerfile.rust .
+# or `build.additional_contexts` in docker-compose.override.yml
+# (docs/INSTALLATION.md). The copy is keyed by the files' content, so adding
+# or changing a CA rebuilds what depends on it.
+FROM scratch AS extra_ca
+
 # ---------- build ----------
 FROM rust:1.90-slim AS build
 WORKDIR /src
@@ -10,6 +21,10 @@ WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# The extra root CA, if any (see the top of this file).
+COPY --from=extra_ca / /usr/local/share/ca-certificates/extra/
+RUN update-ca-certificates
 
 COPY rust/Cargo.toml rust/Cargo.lock* ./
 COPY rust/crates ./crates
@@ -25,13 +40,18 @@ FROM debian:trixie-slim
 ARG THROUGHLINE_UID=1000
 ARG THROUGHLINE_GID=1000
 
+# git: `ingest --source git` reads the configured repositories with it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl postgresql-client \
+        ca-certificates curl git postgresql-client \
     && (getent group "$THROUGHLINE_GID" || groupadd --gid "$THROUGHLINE_GID" throughline) \
     && useradd --create-home --uid "$THROUGHLINE_UID" --gid "$THROUGHLINE_GID" \
         --shell /usr/sbin/nologin throughline \
     && install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups \
     && rm -rf /var/lib/apt/lists/*
+
+# The extra root CA, if any (see the top of this file).
+COPY --from=extra_ca / /usr/local/share/ca-certificates/extra/
+RUN update-ca-certificates
 
 COPY --from=build /src/target/release/throughline /usr/local/bin/throughline
 

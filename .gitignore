@@ -13,6 +13,8 @@ config.yaml
 .env
 .env.*
 !.env.example
+# Compose loads it automatically; it holds your own mount paths.
+docker-compose.override.yml
 *.key
 *.pem
 

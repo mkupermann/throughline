@@ -42,7 +42,7 @@ Every AI coding tool keeps its own session files and forgets the rest. Decisions
 
 ### Supported session sources
 
-The Rust registry includes **13 adapters**. They read local files. They are not cloud-account sync integrations. Coverage differs a lot between them, and an external audit on 30.10.2026 checked the first eleven against real session files.
+The Rust registry includes **14 adapters**. They read local files. They are not cloud-account sync integrations. Coverage differs a lot between them, and an external audit on 30.10.2026 checked the first eleven against real session files.
 
 | Status | Adapters | What that means |
 | --- | --- | --- |
@@ -53,6 +53,8 @@ The Rust registry includes **13 adapters**. They read local files. They are not 
 | Partly confirmed | Copilot Chat | Snapshot and mutation log replayed per VS Code source `1306698e328e` (snapshot format confirmed on one real file), request/response fields unverified on real data. |
 
 Standard Compose mounts the first nine tool directories read-only. OpenCode, Aider, Gemini CLI and Copilot Chat need their source directories mounted separately. The source of truth is the [adapter registry](rust/crates/throughline/src/adapters/registry.rs).
+
+Two more sources read documents, not sessions: Markdown folders named in `THROUGHLINE_MARKDOWN_ROOTS` (the 14th adapter) and git repositories named in `THROUGHLINE_GIT_ROOTS` (commit text and file names, never author names), both read by `ingest --source all`; [USAGE](docs/USAGE.md#documents-repositories-and-web-pages) has the settings and limits, [INSTALLATION](docs/INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat) the container mounts.
 
 Web pages are fetched only on request: `throughline ingest --source web` reads the URLs listed in the file named by `THROUGHLINE_WEB_URLS`, one GET per page, and `--refetch` fetches known pages again. Status: tested against a local test server (private and loopback addresses, redirects, `robots.txt`, size cap, credentials in the URL); one live fetch of a public page with TLS verification passed in the test container on 01.11.2026.
 
@@ -323,7 +325,7 @@ The Rust implementation supports Ollama and an explicitly configured OpenAI-comp
 
 ```mermaid
 flowchart LR
-    Files[Local session files] --> Import[11 source adapters]
+    Files[Local session files] --> Import[14 source adapters]
     Import --> DB[(PostgreSQL + pgvector)]
     DB <--> Runtime[Rust application]
     Runtime <--> Browser[Embedded browser UI]

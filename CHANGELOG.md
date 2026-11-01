@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sources: Markdown folders, git repositories, web pages, Gemini CLI, Copilot Chat
+
+Setup, limits and caveats are in [docs/USAGE.md](docs/USAGE.md#documents-repositories-and-web-pages), the container side in [docs/INSTALLATION.md](docs/INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat).
+
+- **Markdown folders.** `THROUGHLINE_MARKDOWN_ROOTS` names folders, colon-separated, `~` allowed. One conversation per `.md` file, one `document` message per H1 to H3 section, long sections cut at 2,000 characters. Skips `.git`, `node_modules`, `target`, `dist`, symbolic links and files over 1 MiB. Root folder names must be distinct. Part of `ingest --source all`; the registry now holds 14 adapters.
+- **Git repositories.** `THROUGHLINE_GIT_ROOTS` names repositories. One conversation per repository, one message per commit (subject, body, up to 50 changed paths), the newest 5,000 commits of the local branches. No author or committer: trailers that name people and mail addresses are removed, and there is no author filter. Needs `git`; without it the source is skipped with one line. Part of `ingest --source all`.
+- **Web pages.** `ingest --source web` fetches the URLs in the file named by `THROUGHLINE_WEB_URLS`: one GET each, TLS verified, non-public addresses refused, `robots.txt` honoured, `text/html` and `text/plain` only, 2 MiB and 10 s per URL. `--refetch` fetches known pages again and replaces a page whose text changed. Never part of `ingest --source all`, the hourly job or the Operate ingest.
+- **Gemini CLI and Copilot Chat** adapters, built against pinned upstream sources; see the README for their status.
+- **Extraction profile `document`.** `markdown`, `git` and `web` always use it; other sources keep `THROUGHLINE_EXTRACT_PROFILE`, which now also accepts `document`. After a new version of a document, `extract-memory` closes the old version's notes and drops new notes that repeat a forgotten one, and says so in a `documents:` line.
+- **Compose.** The web service passes `THROUGHLINE_MARKDOWN_ROOTS`, `THROUGHLINE_GIT_ROOTS`, `THROUGHLINE_WEB_URLS` and `THROUGHLINE_EXTRACT_PROFILE` through, all empty by default. Mounts with your own paths go into `docker-compose.override.yml`, which git now ignores.
+- **Image.** `Dockerfile.rust` installs `git` in the runtime stage. An optional build context `extra_ca` adds a root CA to the build and runtime stages, for networks whose proxy inspects TLS; without it nothing changes.
+- **Schedule.** The hourly ingest templates (`launchd/com.claude-memory-ingest.plist`, `systemd/throughline-ingest.service`) add `ingest --source markdown` and `ingest --source git` with the Rust binary, and `systemd/throughline.env` gains the two lists. Web pages stay manual.
+- **`doctor`** ends with a `sources:` block: Markdown roots and how many are missing, git roots and the `git` version, the URL count, and whether the Gemini CLI and Copilot Chat folders exist.
+- **Fixed in the docs:** `docker compose exec web throughline ingest --all` in INSTALLATION.md and DEPLOYMENT.md; the Rust binary has no `--all`, `ingest` alone reads every source but web pages.
+
 ### Role `document`
 
 - **Migration 016.** `016_message_role_document.sql` adds the value `document` to the enum `message_role`; `sql/schema.sql` has it too. `serve` refuses to start until it has run. Compose runs `migrate` first.
