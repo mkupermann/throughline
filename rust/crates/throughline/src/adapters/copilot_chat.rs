@@ -7,12 +7,22 @@
 //! Two file shapes, told apart by the extension:
 //! - `.json`: the session as one object (`version`, `sessionId`,
 //!   `creationDate` in ms, `requests[]`).
-//! - `.jsonl`: an operation log, one `{"kind": <int>, "v": ...}` per line.
-//!   Kind 0 holds the whole session object; later kinds (1 set, 2 push,
-//!   3 delete) change it. Only the kind-0 snapshot is read. The other lines
-//!   are counted into the conversation metadata as `ignored_patch_lines`, so
-//!   requests added by them are missing until VS Code compacts the log into
-//!   a new snapshot.
+//! - `.jsonl`: an operation log, replayed top to bottom. Each line is
+//!   `{"kind": <int>, ...}` with a path `k` (keys and array indexes from the
+//!   session root) where a kind needs one:
+//!   - 0: `v` is the whole session and replaces the state;
+//!   - 1 (set): the property at `k` becomes `v`;
+//!   - 2 (push): the array at `k` (empty when missing) is first cut to
+//!     length `i` when `i` is given, then `v[]` is appended;
+//!   - 3 (delete): the property at `k` is removed.
+//!
+//!   VS Code writes a fresh kind-0 line only for a new log and when it
+//!   compacts one, so most requests arrive as push and set lines. Lines with
+//!   another kind, lines before the first snapshot and lines whose path does
+//!   not resolve are skipped; the conversation metadata counts
+//!   `log_lines_replayed` and `log_lines_ignored`. The replay rules were read
+//!   in `objectMutationLog.ts` (commit below) and written anew; no code was
+//!   copied.
 //!
 //! Status: the JSONL line shape and the snapshot fields (`version`,
 //! `creationDate`, `responderUsername`, `sessionId`, `requests`,
@@ -27,8 +37,13 @@
 //! `text`) is the user turn at `timestamp` (ms). `response[]` is the assistant
 //! turn at `responseTimestamp` (ms), else at the request's time. Markdown parts
 //! (`{"value"}` without a kind, `markdownContent`, `markdownVuln`) are kept,
-//! `toolInvocationSerialized` becomes a tool call, and `thinking` and every
-//! other kind are dropped.
+//! an `inlineReference` becomes its name in backticks (as VS Code copies it),
+//! `toolInvocationSerialized` becomes a tool call that holds the tool's
+//! display message (`invocation_message`, not its arguments, which the file
+//! does not keep), and `thinking` and every other kind are dropped. A request
+//! with `hiddenFromTranscript` is skipped; with `requestHiddenFromTranscript`
+//! or `isSystemInitiated` only its user turn is skipped, since the user did
+//! not type it.
 
 use super::{stable_uuid_str, Adapter};
 use crate::types::{NormalisedConversation, NormalisedMessage};
@@ -73,22 +88,113 @@ fn push_session_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// The kind-0 snapshot of an operation log (the last one, as VS Code reads
-/// it) and the number of other entries.
-fn read_log(raw: &str) -> (Option<Value>, u64) {
-    let mut snapshot = None;
-    let mut ignored = 0;
+/// Result of replaying an operation log.
+struct Log {
+    session: Option<Value>,
+    replayed: u64,
+    ignored: u64,
+}
+
+/// Replay an operation log: the last kind-0 snapshot plus the set, push and
+/// delete lines after it.
+fn read_log(raw: &str) -> Log {
+    let mut log = Log {
+        session: None,
+        replayed: 0,
+        ignored: 0,
+    };
     for line in raw.lines().filter(|l| !l.trim().is_empty()) {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+        let entry = serde_json::from_str::<Value>(line).unwrap_or(Value::Null);
+        let kind = entry.get("kind").and_then(Value::as_i64);
+        if kind == Some(0) {
+            log.session = entry.get("v").cloned();
             continue;
+        }
+        let applied = match (kind, log.session.as_mut()) {
+            (Some(k @ 1..=3), Some(state)) => apply_mutation(state, k, &entry),
+            _ => None,
         };
-        match entry.get("kind").and_then(Value::as_i64) {
-            Some(0) => snapshot = entry.get("v").cloned(),
-            Some(_) => ignored += 1,
-            None => {}
+        if applied.is_some() {
+            log.replayed += 1;
+        } else {
+            log.ignored += 1;
         }
     }
-    (snapshot, ignored)
+    log
+}
+
+fn key_name(key: &Value) -> Option<String> {
+    match key {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn key_index(key: &Value) -> Option<usize> {
+    match key {
+        Value::Number(n) => n.as_u64().and_then(|n| usize::try_from(n).ok()),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+/// The child of an object or array at `key`; with `create`, an array slot
+/// past the end is filled with nulls and an object key is added as null.
+fn child<'a>(node: &'a mut Value, key: &Value, create: bool) -> Option<&'a mut Value> {
+    match node {
+        Value::Object(map) => {
+            let name = key_name(key)?;
+            if create {
+                Some(map.entry(name).or_insert(Value::Null))
+            } else {
+                map.get_mut(&name)
+            }
+        }
+        Value::Array(items) => {
+            let i = key_index(key)?;
+            if create && i >= items.len() {
+                items.resize(i + 1, Value::Null);
+            }
+            items.get_mut(i)
+        }
+        _ => None,
+    }
+}
+
+/// Apply one set (1), push (2) or delete (3) line. `None` when its path does
+/// not resolve.
+fn apply_mutation(state: &mut Value, kind: i64, entry: &Value) -> Option<()> {
+    let path = entry.get("k").and_then(Value::as_array)?;
+    let (last, parents) = path.split_last()?;
+    let mut node = state;
+    for key in parents {
+        node = child(node, key, false)?;
+    }
+    match kind {
+        1 => *child(node, last, true)? = entry.get("v").cloned().unwrap_or(Value::Null),
+        2 => {
+            let slot = child(node, last, true)?;
+            if slot.is_null() {
+                *slot = Value::Array(Vec::new());
+            }
+            let items = slot.as_array_mut()?;
+            if let Some(len) = entry.get("i").and_then(key_index) {
+                items.resize(len, Value::Null);
+            }
+            if let Some(Value::Array(values)) = entry.get("v") {
+                items.extend(values.iter().cloned());
+            }
+        }
+        _ => match node {
+            Value::Object(map) => {
+                map.remove(&key_name(last)?);
+            }
+            Value::Array(items) => *items.get_mut(key_index(last)?)? = Value::Null,
+            _ => return None,
+        },
+    }
+    Some(())
 }
 
 fn ms_ts(v: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -120,6 +226,7 @@ fn response_parts(response: Option<&Value>) -> (String, Vec<Value>) {
         match part.get("kind").and_then(Value::as_str) {
             None => text.push_str(text_of(Some(part))),
             Some("markdownContent" | "markdownVuln") => text.push_str(text_of(part.get("content"))),
+            Some("inlineReference") => text.push_str(&inline_reference(part)),
             Some("toolInvocationSerialized") => {
                 let name = part.get("toolId").and_then(Value::as_str).unwrap_or("?");
                 let message = text_of(part.get("invocationMessage")).trim();
@@ -128,12 +235,42 @@ fn response_parts(response: Option<&Value>) -> (String, Vec<Value>) {
                 }
                 text.push_str(format!("[Tool: {name}] {message}").trim_end());
                 text.push('\n');
-                calls.push(json!({"tool_name": name, "input": {"message": message}}));
+                calls.push(json!({
+                    "tool_name": name,
+                    "tool_call_id": part.get("toolCallId"),
+                    "invocation_message": message,
+                }));
             }
             _ => {}
         }
     }
     (text.trim().to_string(), calls)
+}
+
+/// An inline reference as VS Code copies it: a location or URI by its file
+/// name, a symbol by its name, in backticks.
+fn inline_reference(part: &Value) -> String {
+    let Some(target) = part.get("inlineReference") else {
+        return String::new();
+    };
+    let uri = target.get("uri").unwrap_or(target);
+    let name = match (
+        target.get("uri"),
+        target.get("name").and_then(Value::as_str),
+    ) {
+        (None, Some(symbol)) => Some(symbol),
+        _ => uri
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|p| p.rsplit('/').next()),
+    };
+    name.filter(|n| !n.is_empty())
+        .map(|n| format!("`{n}`"))
+        .unwrap_or_default()
+}
+
+fn flag(request: &Value, key: &str) -> bool {
+    request.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 /// Path of a `file://` URI, percent-decoded.
@@ -214,11 +351,16 @@ impl Adapter for CopilotChatAdapter {
     fn parse(&self, path: &Path) -> Result<Option<NormalisedConversation>> {
         let raw = std::fs::read_to_string(path)?;
         let is_log = path.extension().is_some_and(|e| e == "jsonl");
-        let (session, ignored) = if is_log {
+        let log = if is_log {
             read_log(&raw)
         } else {
-            (serde_json::from_str::<Value>(&raw).ok(), 0)
+            Log {
+                session: serde_json::from_str::<Value>(&raw).ok(),
+                replayed: 0,
+                ignored: 0,
+            }
         };
+        let (session, replayed, ignored) = (log.session, log.replayed, log.ignored);
         let Some(session) = session.filter(Value::is_object) else {
             return Ok(None);
         };
@@ -249,6 +391,9 @@ impl Adapter for CopilotChatAdapter {
         let (mut tokens_in, mut tokens_out) = (0i64, 0i64);
         let mut last_ts = started_at;
         for (idx, request) in requests.iter().enumerate() {
+            if flag(request, "hiddenFromTranscript") {
+                continue;
+            }
             let key = request
                 .get("requestId")
                 .and_then(Value::as_str)
@@ -268,7 +413,9 @@ impl Adapter for CopilotChatAdapter {
                 Some(m) => m.get("text").and_then(Value::as_str).unwrap_or_default(),
                 None => "",
             };
-            if !question.trim().is_empty() {
+            let typed_by_user = !flag(request, "requestHiddenFromTranscript")
+                && !flag(request, "isSystemInitiated");
+            if typed_by_user && !question.trim().is_empty() {
                 messages.push(NormalisedMessage {
                     role: "user".into(),
                     content: question.trim().to_string(),
@@ -343,7 +490,8 @@ impl Adapter for CopilotChatAdapter {
                 "source": "copilot_chat",
                 "format": if is_log { "jsonl" } else { "json" },
                 "version": session.get("version"),
-                "ignored_patch_lines": ignored,
+                "log_lines_replayed": replayed,
+                "log_lines_ignored": ignored,
                 "pending_requests": pending,
             }),
             source_tool: Some("copilot_chat".into()),
@@ -355,9 +503,10 @@ impl Adapter for CopilotChatAdapter {
 mod tests {
     //! Invented fixtures. The JSONL line shape (`{"kind": <int>, "v": ...}`
     //! with the whole session in the first line) was checked against one real
-    //! file that held no requests; the request and response fields follow the
-    //! VS Code source at commit 1306698e328e5e531f5e632301d30020aa994eff and
-    //! are unverified on real data.
+    //! file that held no requests. The mutation lines and the request and
+    //! response fields follow the VS Code source at commit
+    //! 1306698e328e5e531f5e632301d30020aa994eff and are unverified on real
+    //! data.
 
     use super::*;
     use chrono::{DateTime, Utc};
@@ -375,6 +524,14 @@ mod tests {
     fn write(path: &Path, body: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
+    }
+
+    fn lines(entries: &[Value]) -> String {
+        entries.iter().map(|e| format!("{e}\n")).collect()
+    }
+
+    fn contents(conv: &NormalisedConversation) -> Vec<&str> {
+        conv.messages.iter().map(|m| m.content.as_str()).collect()
     }
 
     #[test]
@@ -398,7 +555,11 @@ mod tests {
                     "timestamp": ms("2026-01-03T09:00:05Z"),
                     "message": {"text": "how do I parse json", "parts": []},
                     "response": [
-                        {"value": "Use serde_json."},
+                        {"value": "Use serde_json in "},
+                        {"kind": "inlineReference",
+                         "inlineReference": {"uri": {"scheme": "file", "path": "/home/dev/demo app/src/main.rs"},
+                                             "range": {"startLineNumber": 3, "endLineNumber": 3}}},
+                        {"value": "."},
                         {"kind": "thinking", "value": "hidden reasoning"},
                         {"kind": "toolInvocationSerialized", "toolId": "copilot_readFile",
                          "toolCallId": "call_1", "invocationMessage": "Reading Cargo.toml",
@@ -415,6 +576,20 @@ mod tests {
                     "timestamp": ms("2026-01-03T09:01:00Z"),
                     "message": "an old plain-string message",
                     "response": [{"value": "ok"}]
+                },
+                {
+                    "requestId": "request_3",
+                    "timestamp": ms("2026-01-03T09:02:00Z"),
+                    "hiddenFromTranscript": true,
+                    "message": {"text": "hidden question"},
+                    "response": [{"value": "hidden answer"}]
+                },
+                {
+                    "requestId": "request_4",
+                    "timestamp": ms("2026-01-03T09:03:00Z"),
+                    "isSystemInitiated": true,
+                    "message": {"text": "prompt sent by the editor"},
+                    "response": [{"value": "answer to the editor"}]
                 }
             ]
         });
@@ -429,19 +604,24 @@ mod tests {
         assert_eq!(conv.source_tool.as_deref(), Some("copilot_chat"));
         assert_eq!(conv.project_path.as_deref(), Some("/home/dev/demo app"));
         let roles: Vec<&str> = conv.messages.iter().map(|m| m.role.as_str()).collect();
-        assert_eq!(roles, ["user", "assistant", "user", "assistant"]);
-        let contents: Vec<&str> = conv.messages.iter().map(|m| m.content.as_str()).collect();
         assert_eq!(
-            contents,
+            roles,
+            ["user", "assistant", "user", "assistant", "assistant"]
+        );
+        assert_eq!(
+            contents(&conv),
             [
                 "how do I parse json",
-                "Use serde_json.\n[Tool: copilot_readFile] Reading Cargo.toml\n Add it to Cargo.toml.",
+                "Use serde_json in `main.rs`.\n[Tool: copilot_readFile] Reading Cargo.toml\n Add it to Cargo.toml.",
                 "an old plain-string message",
-                "ok"
+                "ok",
+                "answer to the editor"
             ]
         );
         let calls = conv.messages[1].tool_calls.as_ref().expect("tool calls");
         assert_eq!(calls[0]["tool_name"], "copilot_readFile");
+        assert_eq!(calls[0]["invocation_message"], "Reading Cargo.toml");
+        assert!(calls[0].get("input").is_none(), "no arguments are stored");
         assert_eq!(
             conv.messages[1].tool_name.as_deref(),
             Some("copilot_readFile")
@@ -464,7 +644,7 @@ mod tests {
             Some(ts("2026-01-03T09:01:00Z"))
         );
         assert_eq!(conv.started_at, ts("2026-01-03T09:00:00Z"));
-        assert_eq!(conv.ended_at, Some(ts("2026-01-03T09:01:00Z")));
+        assert_eq!(conv.ended_at, Some(ts("2026-01-03T09:03:00Z")));
         assert_eq!(conv.token_count_in, Some(50));
         assert_eq!(conv.token_count_out, Some(12));
         assert!(conv.messages.iter().all(|m| m.uuid.is_some()));
@@ -488,26 +668,28 @@ mod tests {
             "pendingRequests": [],
             "inputState": {"inputText": ""}
         }});
-        let set_title = json!({"kind": 1, "k": ["customTitle"], "v": "Greeting"});
-        let push = json!({"kind": 2, "k": ["requests"], "v": [{
-            "requestId": "request_b",
-            "timestamp": ms("2026-01-04T08:05:00Z"),
-            "message": {"text": "pushed later", "parts": []},
-            "response": [{"value": "not read"}]
-        }]});
         let path = tmp.path().join(format!(
             "globalStorage/emptyWindowChatSessions/{session}.jsonl"
         ));
-        write(&path, &format!("{snapshot}\n{set_title}\n{push}\n"));
+        write(
+            &path,
+            &lines(&[
+                snapshot.clone(),
+                json!({"kind": 1, "k": ["customTitle"], "v": "Greeting"}),
+                json!({"kind": 7, "k": ["requests"], "v": []}),
+            ]),
+        );
 
         let adapter = CopilotChatAdapter::new(tmp.path().to_path_buf());
         assert_eq!(adapter.discover().unwrap(), vec![path.clone()]);
         let conv = adapter.parse(&path).unwrap().expect("parsed");
 
         assert_eq!(conv.session_id, Uuid::parse_str(session).unwrap());
-        let contents: Vec<&str> = conv.messages.iter().map(|m| m.content.as_str()).collect();
-        assert_eq!(contents, ["hello there", "Hi."]);
-        assert_eq!(conv.metadata["ignored_patch_lines"], json!(2));
+        assert_eq!(contents(&conv), ["hello there", "Hi."]);
+        assert_eq!(conv.summary.as_deref(), Some("Greeting"));
+        assert_eq!(conv.metadata["log_lines_replayed"], json!(1));
+        // An unknown kind is counted, not applied.
+        assert_eq!(conv.metadata["log_lines_ignored"], json!(1));
         assert_eq!(conv.started_at, ts("2026-01-04T08:00:00Z"));
         // An empty window has no folder; the synthetic project stands in.
         assert_eq!(conv.project_path.as_deref(), Some("copilot_chat"));
@@ -520,5 +702,69 @@ mod tests {
         v["v"]["requests"] = json!([]);
         write(&empty, &format!("{v}\n"));
         assert!(adapter.parse(&empty).unwrap().is_none());
+    }
+
+    #[test]
+    fn copilot_jsonl_mutations_are_replayed_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = "3f405162-9999-4a2b-9c3d-000000000009";
+        let request = |id: &str, text: &str, at: &str, answer: &[&str]| {
+            let parts: Vec<Value> = answer.iter().map(|a| json!({"value": a})).collect();
+            json!({"requestId": id, "timestamp": ms(at), "modelId": "copilot/test-model",
+                   "message": {"text": text, "parts": []}, "response": parts})
+        };
+        let path = tmp.path().join(format!(
+            "globalStorage/emptyWindowChatSessions/{session}.jsonl"
+        ));
+        write(
+            &path,
+            &lines(&[
+                // Before any snapshot: nothing to apply to.
+                json!({"kind": 2, "k": ["requests"], "v": [request("early", "lost", "2026-01-05T07:00:00Z", &[])]}),
+                // The snapshot as VS Code starts a session: no requests yet.
+                json!({"kind": 0, "v": {"version": 3, "sessionId": session,
+                       "creationDate": ms("2026-01-05T08:00:00Z"), "requests": [],
+                       "pendingRequests": [], "inputState": {}}}),
+                json!({"kind": 2, "k": ["requests"],
+                       "v": [request("r1", "first question", "2026-01-05T08:00:05Z", &[])]}),
+                json!({"kind": 1, "k": ["requests", 0, "response"], "v": [{"value": "first answer draft"}]}),
+                json!({"kind": 2, "k": ["requests", 0, "response"], "v": [{"value": " and more"}]}),
+                json!({"kind": 3, "k": ["requests", 0, "modelId"]}),
+                json!({"kind": 2, "k": ["requests"],
+                       "v": [request("r2", "second question", "2026-01-05T08:01:00Z", &["second answer"])]}),
+                // `i` cuts the array to one entry before the push.
+                json!({"kind": 2, "k": ["requests"], "i": 1,
+                       "v": [request("r3", "third question", "2026-01-05T08:02:00Z", &["third answer"])]}),
+                json!({"kind": 1, "k": ["requests", 1, "responseTimestamp"],
+                       "v": ms("2026-01-05T08:02:30Z")}),
+                // A path that does not resolve is skipped.
+                json!({"kind": 1, "k": ["requests", 5, "message"], "v": "nowhere"}),
+            ]),
+        );
+
+        let conv = CopilotChatAdapter::new(tmp.path().to_path_buf())
+            .parse(&path)
+            .unwrap()
+            .expect("parsed");
+        assert_eq!(
+            contents(&conv),
+            [
+                "first question",
+                "first answer draft and more",
+                "third question",
+                "third answer"
+            ]
+        );
+        assert_eq!(conv.messages[1].model, None, "deleted by the kind-3 line");
+        assert_eq!(
+            conv.messages[3].model.as_deref(),
+            Some("copilot/test-model")
+        );
+        assert_eq!(
+            conv.messages[3].created_at,
+            Some(ts("2026-01-05T08:02:30Z"))
+        );
+        assert_eq!(conv.metadata["log_lines_replayed"], json!(7));
+        assert_eq!(conv.metadata["log_lines_ignored"], json!(2));
     }
 }
