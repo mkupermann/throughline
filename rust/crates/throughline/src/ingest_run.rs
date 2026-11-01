@@ -149,7 +149,11 @@ pub fn run_adapter_with_rules(
 }
 
 /// Counters and rule kinds only — never a path or content of an excluded file.
-fn record_ignore_audit(client: &mut postgres::Client, adapter: &str, summary: &IngestSummary) {
+pub(crate) fn record_ignore_audit<C: postgres::GenericClient>(
+    client: &mut C,
+    adapter: &str,
+    summary: &IngestSummary,
+) {
     for (kind, n) in [
         (crate::ignore::RuleKind::Path, summary.ignored_path),
         (crate::ignore::RuleKind::Project, summary.ignored_project),
@@ -188,6 +192,13 @@ pub fn run_all_with_rules(
             verbose,
             rules,
         )?);
+    }
+    // Git repositories: their own runner (a folder has no file hash). No
+    // roots or no git binary: an empty summary, and the rest goes on.
+    let git = crate::sources::git::GitSource::from_env();
+    match crate::sources::git::run(client, &git, verbose, rules) {
+        Ok(summary) => out.push(summary),
+        Err(e) => eprintln!("[{}] ingest failed: {e:#}", crate::sources::git::NAME),
     }
     // MiMo/agent memory lives outside tool session dirs — refresh it with ingest.
     match crate::agent_memory::ingest_agent_memory(client) {

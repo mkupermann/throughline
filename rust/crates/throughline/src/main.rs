@@ -33,7 +33,7 @@ enum Command {
     },
     /// Ingest session transcripts.
     Ingest {
-        /// Adapter name, or `all`.
+        /// Adapter name, `git`, or `all`.
         #[arg(long, default_value = "all")]
         source: String,
         /// Print one line per file.
@@ -566,8 +566,10 @@ fn main() -> Result<()> {
             ignore,
         } => {
             let db = config::DbConfig::from_env();
+            let git = source == throughline::sources::git::NAME;
             let adapter = match source.as_str() {
-                "all" => None,
+                // Git has its own runner, not an adapter.
+                "all" | throughline::sources::git::NAME => None,
                 name => Some(
                     adapters::registry::by_name(name)
                         .ok_or_else(|| anyhow::anyhow!("unknown source {source:?}"))?,
@@ -583,6 +585,12 @@ fn main() -> Result<()> {
             let mut client = db.connect().context("connect to PostgreSQL")?;
             let rules = throughline::ignore::IgnoreRules::load(&ignore);
             match adapter {
+                None if git => {
+                    let source = throughline::sources::git::GitSource::from_env();
+                    let summary =
+                        throughline::sources::git::run(&mut client, &source, verbose, &rules)?;
+                    print_summary(&summary);
+                }
                 None => {
                     for summary in ingest_run::run_all_with_rules(&mut client, verbose, &rules)? {
                         print_summary(&summary);
@@ -1317,6 +1325,9 @@ fn main() -> Result<()> {
             println!("embedding missing: {}", report.embedding_missing);
             println!("agent access: {}", report.agent_access);
             println!("auth mode: {}", report.auth_mode);
+            for line in doctor::source_lines() {
+                println!("{line}");
+            }
             for n in report.notes {
                 println!("note: {n}");
             }
