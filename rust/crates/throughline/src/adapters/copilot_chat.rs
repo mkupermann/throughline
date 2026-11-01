@@ -16,6 +16,11 @@
 //!     length `i` when `i` is given, then `v[]` is appended;
 //!   - 3 (delete): the property at `k` is removed.
 //!
+//!   An array index in `k` may name an element or the slot right after the
+//!   last one, and `i` may not exceed the array's length. A larger or
+//!   malformed index makes the line unresolvable, so a stray value never
+//!   allocates (VS Code itself writes only indexes in range).
+//!
 //!   VS Code writes a fresh kind-0 line only for a new log and when it
 //!   compacts one, so most requests arrive as push and set lines. Lines with
 //!   another kind, lines before the first snapshot and lines whose path does
@@ -139,8 +144,10 @@ fn key_index(key: &Value) -> Option<usize> {
     }
 }
 
-/// The child of an object or array at `key`; with `create`, an array slot
-/// past the end is filled with nulls and an object key is added as null.
+/// The child of an object or array at `key`; with `create`, a missing object
+/// key is added as null and an array grows by one null when `key` is its
+/// length. Any index past that does not resolve: VS Code writes only indexes
+/// in range, and a stray huge one must not allocate.
 fn child<'a>(node: &'a mut Value, key: &Value, create: bool) -> Option<&'a mut Value> {
     match node {
         Value::Object(map) => {
@@ -153,8 +160,8 @@ fn child<'a>(node: &'a mut Value, key: &Value, create: bool) -> Option<&'a mut V
         }
         Value::Array(items) => {
             let i = key_index(key)?;
-            if create && i >= items.len() {
-                items.resize(i + 1, Value::Null);
+            if create && i == items.len() {
+                items.push(Value::Null);
             }
             items.get_mut(i)
         }
@@ -174,13 +181,22 @@ fn apply_mutation(state: &mut Value, kind: i64, entry: &Value) -> Option<()> {
     match kind {
         1 => *child(node, last, true)? = entry.get("v").cloned().unwrap_or(Value::Null),
         2 => {
+            // An `i` that is not an index rejects the line before any change.
+            let cut = match entry.get("i") {
+                None | Some(Value::Null) => None,
+                Some(i) => Some(key_index(i)?),
+            };
             let slot = child(node, last, true)?;
             if slot.is_null() {
                 *slot = Value::Array(Vec::new());
             }
             let items = slot.as_array_mut()?;
-            if let Some(len) = entry.get("i").and_then(key_index) {
-                items.resize(len, Value::Null);
+            if let Some(cut) = cut {
+                // Only ever shorten; a cut past the end does not resolve.
+                if cut > items.len() {
+                    return None;
+                }
+                items.truncate(cut);
             }
             if let Some(Value::Array(values)) = entry.get("v") {
                 items.extend(values.iter().cloned());
@@ -766,5 +782,45 @@ mod tests {
         );
         assert_eq!(conv.metadata["log_lines_replayed"], json!(7));
         assert_eq!(conv.metadata["log_lines_ignored"], json!(2));
+    }
+
+    #[test]
+    fn copilot_replay_rejects_out_of_range_indexes() {
+        let request = |id: &str, text: &str| {
+            json!({"requestId": id, "timestamp": ms("2026-01-06T08:00:05Z"),
+                   "message": {"text": text}, "response": [{"value": "answer"}]})
+        };
+        let snapshot = json!({"kind": 0, "v": {"version": 3, "sessionId": "s",
+                              "creationDate": ms("2026-01-06T08:00:00Z"),
+                              "requests": [request("r1", "kept")]}});
+        // Each line names an index the array does not have, or no index at all.
+        // None may grow the array, panic, or change it.
+        let bad = [
+            json!({"kind": 1, "k": ["requests", u64::MAX], "v": 1}),
+            json!({"kind": 1, "k": ["requests", "18446744073709551615"], "v": 1}),
+            json!({"kind": 1, "k": ["requests", 20_000_000], "v": 1}),
+            json!({"kind": 1, "k": ["requests", -1], "v": 1}),
+            json!({"kind": 1, "k": ["requests", 1.5], "v": 1}),
+            json!({"kind": 2, "k": ["requests", 20_000_000], "v": [1]}),
+            json!({"kind": 2, "k": ["requests"], "i": u64::MAX, "v": []}),
+            json!({"kind": 2, "k": ["requests"], "i": 20_000_000, "v": []}),
+            json!({"kind": 2, "k": ["requests"], "i": -1, "v": []}),
+            json!({"kind": 2, "k": ["requests"], "i": 0.5, "v": []}),
+            json!({"kind": 3, "k": ["requests", u64::MAX]}),
+        ];
+        let mut entries = vec![snapshot];
+        entries.extend(bad.iter().cloned());
+        // In range: index == len appends one element; `i` == len cuts nothing.
+        entries.push(json!({"kind": 1, "k": ["requests", 1], "v": request("r2", "appended")}));
+        entries.push(json!({"kind": 2, "k": ["requests"], "i": 2, "v": []}));
+
+        let log = read_log(&lines(&entries));
+        let session = log.session.expect("snapshot");
+        let requests = session["requests"].as_array().expect("requests");
+        assert_eq!(requests.len(), 2, "no element beyond len + 1");
+        assert_eq!(requests[0]["message"]["text"], "kept");
+        assert_eq!(requests[1]["message"]["text"], "appended");
+        assert_eq!(log.ignored, bad.len() as u64);
+        assert_eq!(log.replayed, 2);
     }
 }
