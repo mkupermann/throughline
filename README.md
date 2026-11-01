@@ -54,6 +54,8 @@ The Rust registry includes **13 adapters**. They read local files. They are not 
 
 Standard Compose mounts the first nine tool directories read-only. OpenCode, Aider, Gemini CLI and Copilot Chat need their source directories mounted separately. The source of truth is the [adapter registry](rust/crates/throughline/src/adapters/registry.rs).
 
+Web pages are fetched only on request: `throughline ingest --source web` reads the URLs listed in the file named by `THROUGHLINE_WEB_URLS`, one GET per page, and `--refetch` fetches known pages again. Status: tested against a local test server (private and loopback addresses, redirects, `robots.txt`, size cap, credentials in the URL); one live fetch of a public page with TLS verification passed in the test container on 01.11.2026.
+
 ## Try it with fictional data
 
 Three commands. No model download, no API key. You need Git and Docker with Compose.

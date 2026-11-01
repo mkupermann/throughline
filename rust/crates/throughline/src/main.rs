@@ -33,7 +33,7 @@ enum Command {
     },
     /// Ingest session transcripts.
     Ingest {
-        /// Adapter name, `git`, or `all`.
+        /// Adapter name, `git`, `web`, or `all` (`all` fetches no web pages).
         #[arg(long, default_value = "all")]
         source: String,
         /// Print one line per file.
@@ -42,6 +42,10 @@ enum Command {
         /// Exclude a rule (repeatable): `path:<glob>`, `project:<name>`, or a bare glob.
         #[arg(long = "ignore")]
         ignore: Vec<String>,
+        /// With `--source web`: fetch known pages again; a changed page
+        /// replaces the stored one.
+        #[arg(long)]
+        refetch: bool,
     },
     /// Search ingested messages.
     Search {
@@ -564,12 +568,17 @@ fn main() -> Result<()> {
             source,
             verbose,
             ignore,
+            refetch,
         } => {
             let db = config::DbConfig::from_env();
             let git = source == throughline::sources::git::NAME;
+            let web = source == throughline::sources::web::NAME;
+            if refetch && !web {
+                anyhow::bail!("--refetch applies to --source web only");
+            }
             let adapter = match source.as_str() {
-                // Git has its own runner, not an adapter.
-                "all" | throughline::sources::git::NAME => None,
+                // Git and web have their own runners, not adapters.
+                "all" | throughline::sources::git::NAME | throughline::sources::web::NAME => None,
                 name => Some(
                     adapters::registry::by_name(name)
                         .ok_or_else(|| anyhow::anyhow!("unknown source {source:?}"))?,
@@ -589,6 +598,17 @@ fn main() -> Result<()> {
                     let source = throughline::sources::git::GitSource::from_env();
                     let summary =
                         throughline::sources::git::run(&mut client, &source, verbose, &rules)?;
+                    print_summary(&summary);
+                }
+                None if web => {
+                    let source = throughline::sources::web::WebSource::from_env();
+                    let summary = throughline::sources::web::run(
+                        &mut client,
+                        &source,
+                        refetch,
+                        verbose,
+                        &rules,
+                    )?;
                     print_summary(&summary);
                 }
                 None => {
