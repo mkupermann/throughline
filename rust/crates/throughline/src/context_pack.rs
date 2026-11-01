@@ -104,6 +104,12 @@ fn heading(section: Section) -> Option<&'static str> {
 /// before the other sections when the request has a task.
 pub const RELEVANT_RESERVE_PERCENT: usize = 30;
 
+/// Under cosine, the lowest score at which a note enters "Relevant to the task", for every
+/// model. It sits below a model's `as_of` threshold (0.68 for granite), which `as_of` keeps:
+/// the reserve above caps the section's share of the budget, so a weaker match can no longer
+/// crowd out the decisions.
+pub const RELEVANT_MIN_COSINE: f64 = 0.5;
+
 /// Packs the header and then the lines, in order, into at most `budget` tokens.
 /// The header is flattened like any line; a header that is blank after flattening is emitted as a
 /// single space (one line, estimate 1), so that the accounting below holds for every `Ok` result.
@@ -614,11 +620,10 @@ pub fn build_context<C: GenericClient>(
         };
         let result = recall(client, &q, emb)?;
         degraded = result.degraded;
-        // Under cosine a note counts as relevant from the model's own "matches
-        // the question" threshold on (the one `as_of` uses), so a weak match
-        // never fills the budget. Under full text any shared word does.
+        // Under cosine a note counts as relevant from `RELEVANT_MIN_COSINE` on, not from
+        // the model's `as_of` threshold. Under full text any shared word does.
         let floor = match (DEFAULT_RANK, emb) {
-            (Rank::Cosine, Some(e)) => e.min_cosine,
+            (Rank::Cosine, Some(_)) => RELEVANT_MIN_COSINE,
             _ => 0.0,
         };
         for h in result.hits {
@@ -1263,20 +1268,29 @@ mod tests {
     }
 
     #[test]
-    fn context_pack_relevant_section_stops_at_min_cosine() {
-        db_tx!("context_pack_relevant_section_stops_at_min_cosine", tx);
+    fn relevant_section_admits_notes_above_half_cosine() {
+        db_tx!("relevant_section_admits_notes_above_half_cosine", tx);
         let p = proj();
         let model = format!("test-embed-{}", uuid::Uuid::new_v4());
         let close = insert(
             &mut tx,
             &seed("marsupial burrow census", Some(&p), "insight", 3),
         );
+        let mid = insert(
+            &mut tx,
+            &seed("wombat tunnel mapping", Some(&p), "insight", 4),
+        );
         let weak = insert(
             &mut tx,
-            &seed("quarterly invoice layout", Some(&p), "insight", 4),
+            &seed("quarterly invoice layout", Some(&p), "insight", 5),
         );
-        // cos 0.9 and 0.6: the weak one is under the model's floor of 0.68
-        for (id, head) in [(close, [0.9, 0.436]), (weak, [0.6, 0.8])] {
+        // cos 0.9, 0.6 and 0.45. The model's own threshold (0.68, granite's `as_of`) would
+        // keep 0.6 out; the Relevant floor of 0.5 lets it in and still keeps 0.45 out.
+        for (id, head) in [
+            (close, [0.9, 0.436]),
+            (mid, [0.6, 0.8]),
+            (weak, [0.45, 0.893]),
+        ] {
             embed(&mut tx, id, &model, head);
         }
         let emb = QueryEmbedding {
@@ -1292,8 +1306,9 @@ mod tests {
         };
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
         let r = relevant_lines(&out);
-        assert_eq!(r.len(), 1, "{}", out.text);
+        assert_eq!(r.len(), 2, "{}", out.text);
         assert!(r[0].contains("marsupial burrow census"), "{r:#?}");
+        assert!(r[1].contains("wombat tunnel mapping"), "{r:#?}");
         assert!(
             !out.text.contains("quarterly invoice layout"),
             "{}",
