@@ -3,7 +3,7 @@
 use crate::access::{push_visibility, Actor};
 use crate::embedding::EmbedBreaker;
 use crate::recall::{
-    candidates, fulltext_ranks, query_words, question_vector, recall, Candidate, CandidateFilter,
+    candidates, query_words, question_vector, rank_scores, recall, Candidate, CandidateFilter,
     QueryEmbedding, Rank, RecallHit, RecallMode, RecallQuery, DEFAULT_RANK, MAX_QUERY_CHARS,
 };
 use chrono::{DateTime, Utc};
@@ -481,12 +481,19 @@ pub fn build_context<C: GenericClient>(
         .collect();
     let task = req.task.map(str::trim).filter(|t| !t.is_empty());
     if let Some(task) = task {
-        // With a task, decisions that match it lead: full-text rank descending, ties and the
-        // rest newest first. The stable sort keeps the newest-first order inside each group.
+        // With a task, decisions that match it lead, by the default rank as in "Relevant to the
+        // task": cosine to the task's vector `emb`, full text without one (the pack then says
+        // `degraded`). Ties and the rest stay newest first (the sort is stable).
         let text: String = task.chars().take(MAX_QUERY_CHARS).collect();
-        let ids: Vec<i64> = decisions.iter().map(|c| c.id).collect();
-        let ranks = fulltext_ranks(client, actor, &query_words(&text), &ids)?;
-        let rank = |c: &Candidate| ranks.get(&c.id).copied().unwrap_or(0.0).max(0.0);
+        let scores = rank_scores(
+            client,
+            actor,
+            DEFAULT_RANK,
+            &query_words(&text),
+            &current,
+            emb,
+        )?;
+        let rank = |c: &Candidate| scores.get(&c.id).copied().unwrap_or(0.0).max(0.0);
         decisions.sort_by(|a, b| rank(b).total_cmp(&rank(a)));
     }
     for c in decisions {
@@ -1348,6 +1355,136 @@ mod tests {
         assert_eq!(d.len(), 2, "{}", out.text);
         assert!(d[0].contains("quokka habitat"), "{d:#?}");
         assert!(d[1].contains("quokka only"), "{d:#?}");
+    }
+
+    /// A 768-wide vector whose first two values are `head`, for the embedding fixtures.
+    fn vec768(head: [f32; 2]) -> Vec<f32> {
+        let mut v = vec![0.0f32; 768];
+        v[..2].copy_from_slice(&head);
+        v
+    }
+
+    fn embed<C: GenericClient>(tx: &mut C, id: i64, model: &str, head: [f32; 2]) {
+        tx.execute(
+            "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+             VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+            &[
+                &id,
+                &model,
+                &crate::generate_embeddings::vector_literal(&vec768(head)),
+            ],
+        )
+        .unwrap();
+    }
+
+    fn task_embedding_fixture(model: String) -> QueryEmbedding {
+        QueryEmbedding {
+            model,
+            column: "embedding_768",
+            vector: vec768([1.0, 0.0]),
+            min_cosine: 0.5,
+        }
+    }
+
+    /// Four decisions for the task "quokka habitat": by full text the day-3 one (both words)
+    /// leads, then the day-4 one (one word), then the two without a match newest first.
+    fn seed_rank_fixture<C: GenericClient>(tx: &mut C, p: &str) -> [i64; 4] {
+        [
+            insert(
+                tx,
+                &seed("quokka habitat matches both words", Some(p), "decision", 3),
+            ),
+            insert(
+                tx,
+                &seed("quokka only matches one word", Some(p), "decision", 4),
+            ),
+            insert(tx, &seed("marsupial burrow census", Some(p), "decision", 5)),
+            insert(
+                tx,
+                &seed("unrelated choice about logging", Some(p), "decision", 6),
+            ),
+        ]
+    }
+
+    #[test]
+    fn decisions_task_first_uses_the_default_rank() {
+        db_tx!("decisions_task_first_uses_the_default_rank", tx);
+        let p = proj();
+        let model = format!("test-embed-{}", uuid::Uuid::new_v4());
+        let [both, one, census, logging] = seed_rank_fixture(&mut tx, &p);
+        // Cosine to the task: census 1.0, logging 0.8, one 0.6, both 0.3. Full text would
+        // put "both" first; the default rank puts the closest vector first.
+        for (id, head) in [
+            (census, [1.0, 0.0]),
+            (logging, [0.8, 0.6]),
+            (one, [0.6, 0.8]),
+            (both, [0.3, 0.954]),
+        ] {
+            embed(&mut tx, id, &model, head);
+        }
+        let emb = task_embedding_fixture(model);
+        let req = ContextRequest {
+            project: &p,
+            task: Some("quokka habitat"),
+            budget: 8_000,
+        };
+        let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
+        let d = decision_lines(&out);
+        let want = [
+            "marsupial burrow census",
+            "unrelated choice about logging",
+            "quokka only matches one word",
+            "quokka habitat matches both words",
+        ];
+        assert_eq!(d.len(), 4, "{}", out.text);
+        for (line, w) in d.iter().zip(want) {
+            assert!(line.contains(w), "{w}: {d:#?}");
+        }
+        assert_eq!(out.degraded, None);
+        // Without a task the order stays newest first, vectors or not.
+        let req = ContextRequest { task: None, ..req };
+        let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
+        let d = decision_lines(&out);
+        assert!(d[0].contains("unrelated choice about logging"), "{d:#?}");
+        assert!(d[3].contains("quokka habitat matches both words"), "{d:#?}");
+    }
+
+    #[test]
+    fn decisions_task_first_falls_back_to_fulltext_without_vectors() {
+        db_tx!(
+            "decisions_task_first_falls_back_to_fulltext_without_vectors",
+            tx
+        );
+        let p = proj();
+        seed_rank_fixture(&mut tx, &p);
+        let want = [
+            "quokka habitat matches both words",
+            "quokka only matches one word",
+            "unrelated choice about logging",
+            "marsupial burrow census",
+        ];
+        let req = ContextRequest {
+            project: &p,
+            task: Some("quokka habitat"),
+            budget: 8_000,
+        };
+        // No vector for the task: full text, and the pack says so.
+        let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
+        let d = decision_lines(&out);
+        assert_eq!(d.len(), 4, "{}", out.text);
+        for (line, w) in d.iter().zip(want) {
+            assert!(line.contains(w), "{w}: {d:#?}");
+        }
+        assert_eq!(out.degraded.as_deref(), Some("no_embeddings"));
+        // A vector for the task, none for the notes: their words decide, as in recall.
+        let emb = task_embedding_fixture(format!("test-embed-{}", uuid::Uuid::new_v4()));
+        let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
+        let d = decision_lines(&out);
+        assert_eq!(d.len(), 4, "{}", out.text);
+        for (line, w) in d.iter().zip(want) {
+            assert!(line.contains(w), "{w}: {d:#?}");
+        }
+        assert_eq!(out.degraded.as_deref(), Some("4 notes without a vector"));
     }
 
     #[test]
