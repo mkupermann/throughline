@@ -17,6 +17,13 @@ pub struct AskAnswer {
     pub local: bool,
     pub cited: bool,
     pub sources: Vec<SourceRef>,
+    /// Why the semantic half of the retrieval did not run: no embedding
+    /// backend, or the embed or the vector query failed. Not sent.
+    #[serde(skip)]
+    pub semantic_skipped: Option<String>,
+    /// The model error when `answer` is the fail-soft listing. Not sent.
+    #[serde(skip)]
+    pub generation_error: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -71,6 +78,8 @@ fn fail_soft_listing(sources: &[SourceRef], model_label: &str, err: Option<&str>
         local: false,
         cited: false,
         sources: sources.to_vec(),
+        semantic_skipped: None,
+        generation_error: Some(err.unwrap_or("no answer").to_string()),
     }
 }
 
@@ -102,7 +111,7 @@ pub fn ask<C: GenericClient>(
 
 /// [`ask`] with the model call passed in: the prompt holds only excerpts
 /// of what `actor` may see.
-fn ask_with<C: GenericClient>(
+pub(crate) fn ask_with<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     question: &str,
@@ -113,9 +122,16 @@ fn ask_with<C: GenericClient>(
 ) -> Result<AskAnswer> {
     // Hybrid retrieval: semantic (when embeddings exist) + lexical + memory/instructions.
     // Pure lexical `search_from` misses natural-language questions (whole-string ILIKE).
-    let embed = crate::embedding::resolve().ok();
-    let hits: Vec<SearchHit> =
-        search::hybrid_in(client, actor, embed.as_ref(), question, limit, project)?;
+    let (embed, mut semantic_skipped) = match crate::embedding::resolve() {
+        Ok(b) => (Some(b), None),
+        Err(e) => (None, Some(format!("no embedding backend: {e:#}"))),
+    };
+    let (hits, failed) =
+        search::hybrid_in_checked(client, actor, embed.as_ref(), question, limit, project)?;
+    if let Some(e) = failed {
+        eprintln!("search: semantic skipped: {e}");
+        semantic_skipped = Some(format!("{e:#}"));
+    }
     let (excerpts, sources) = build_excerpts(&hits);
 
     if sources.is_empty() {
@@ -126,6 +142,8 @@ fn ask_with<C: GenericClient>(
             local: llm::is_local(backend),
             cited: false,
             sources: vec![],
+            semantic_skipped,
+            generation_error: None,
         });
     }
 
@@ -142,6 +160,8 @@ fn ask_with<C: GenericClient>(
                 local: llm::is_local(backend),
                 cited: has_citation,
                 sources,
+                semantic_skipped,
+                generation_error: None,
             })
         }
         Err(e) => {
@@ -150,6 +170,7 @@ fn ask_with<C: GenericClient>(
             let mut fallback = fail_soft_listing(&sources, &backend.label, Some(&e.to_string()));
             fallback.question = question.to_string();
             fallback.local = llm::is_local(backend);
+            fallback.semantic_skipped = semantic_skipped;
             Ok(fallback)
         }
     }

@@ -77,11 +77,18 @@ pub type Prepared = Option<Option<crate::recall::QueryEmbedding>>;
 pub fn prepare_query_vector(msg: &Value, breaker: &crate::embedding::EmbedBreaker) -> Prepared {
     let params = msg.get("params")?;
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    // Read as the tools read them: `query` as given; `task`, `mode` and
+    // `rank` trimmed.
     let text = |key: &str| -> Option<Option<String>> {
         match args.get(key) {
             None | Some(Value::Null) => Some(None),
             Some(Value::String(t)) if t.trim().is_empty() => Some(None),
-            Some(Value::String(t)) => crate::recall::check_query(t).ok().map(|_| Some(t.clone())),
+            Some(Value::String(t)) => {
+                let t = if key == "query" { t.as_str() } else { t.trim() };
+                crate::recall::check_query(t)
+                    .ok()
+                    .map(|_| Some(t.to_string()))
+            }
             Some(_) => None,
         }
     };
@@ -90,11 +97,11 @@ pub fn prepare_query_vector(msg: &Value, breaker: &crate::embedding::EmbedBreake
     match (method, name) {
         (Some("tools/call"), Some("recall")) => {
             let query = text("query")??;
-            let mode = match args.get("mode").and_then(|m| m.as_str()) {
+            let mode = match args.get("mode").and_then(|m| m.as_str()).map(str::trim) {
                 None | Some("") => crate::recall::RecallMode::Current,
                 Some(m) => m.parse().ok()?,
             };
-            let rank = match args.get("rank").and_then(|r| r.as_str()) {
+            let rank = match args.get("rank").and_then(|r| r.as_str()).map(str::trim) {
                 None | Some("") => None,
                 Some(r) => Some(r.parse().ok()?),
             };
@@ -228,6 +235,11 @@ fn tool_role(name: &str) -> Role {
 fn internal(actor: &Actor, e: impl Into<anyhow::Error>) -> Value {
     let e = e.into();
     if actor.via == Via::Local {
+        return json!({ "code": -32000, "message": e.to_string() });
+    }
+    // An explicit rank with a question vector it cannot use: the reason
+    // names the model and the vector's fault, no row.
+    if e.downcast_ref::<crate::recall::BadQueryVector>().is_some() {
         return json!({ "code": -32000, "message": e.to_string() });
     }
     if e.downcast_ref::<crate::llm::RemoteLlmNotAllowed>()
@@ -1028,6 +1040,65 @@ mod tests {
             transport: Transport::Http,
             read_only: false,
         }
+    }
+
+    #[test]
+    fn bad_question_vector_names_its_fault_over_mcp() {
+        let bad = || {
+            anyhow::Error::new(crate::recall::BadQueryVector {
+                model: "granite-embedding-multilingual:278m".into(),
+                reason: "value 7 is NaN".into(),
+            })
+        };
+        let team = Actor {
+            user_id: Some(1),
+            username: Some("ana".into()),
+            role: crate::access::Role::Viewer,
+            via: Via::AgentKey,
+        };
+        for actor in [Actor::local(), team] {
+            let e = internal(&actor, bad());
+            assert_eq!(e["code"], -32000);
+            let message = e["message"].as_str().unwrap();
+            assert!(message.contains("unusable question vector"), "{message}");
+            assert!(message.contains("value 7 is NaN"), "{message}");
+        }
+    }
+
+    #[test]
+    fn prepare_reads_arguments_as_the_tools_do() {
+        // An open breaker: the default path answers without asking Ollama.
+        let breaker = crate::embedding::EmbedBreaker::new();
+        breaker.trip(crate::embedding::now_ms());
+        let call = |name: &str, args: Value| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": args } })
+        };
+        // Padded mode and rank parse as the tool parses them: full text in
+        // `current` needs no vector, so the tool gets "nothing to embed".
+        let p = prepare_query_vector(
+            &call(
+                "recall",
+                json!({ "query": "q", "mode": " current ", "rank": " fulltext " }),
+            ),
+            &breaker,
+        );
+        assert!(matches!(p, Some(None)));
+        // A task at the length limit once trimmed is embedded ahead, as the
+        // tool accepts it.
+        let task = format!("  {}  ", "t".repeat(crate::recall::MAX_QUERY_CHARS));
+        let p = prepare_query_vector(
+            &call("project_context", json!({ "project": "p", "task": task })),
+            &breaker,
+        );
+        assert!(matches!(p, Some(None)));
+        // Too long even trimmed: the tool refuses it, so nothing is prepared.
+        let task = "t".repeat(crate::recall::MAX_QUERY_CHARS + 1);
+        let p = prepare_query_vector(
+            &call("project_context", json!({ "project": "p", "task": task })),
+            &breaker,
+        );
+        assert!(p.is_none());
     }
 
     #[test]

@@ -499,10 +499,14 @@ mod tests {
             "params": { "name": "recall", "arguments": { "query": format!("wombat {tag}") } }
         })
         .to_string();
-        // (path, MCP body) of each entry point; the default rank on both.
+        // (path, MCP body) of each entry point; the default rank on all.
         let calls = [
             (format!("/api/recall?q=wombat%20{tag}"), None),
             ("/mcp".to_string(), Some(recall)),
+            (
+                format!("/api/context?project=p-{tag}&task=wombat%20{tag}"),
+                None,
+            ),
         ];
         crate::recall::test_ollama::hanging(|| {
             for (path, body) in calls {

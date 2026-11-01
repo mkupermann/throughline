@@ -155,8 +155,9 @@ pub struct QueryEmbedding {
 }
 
 /// Embed the question with the configured backend. A refusal by the
-/// remote-model lock is an error; any other failure (no Ollama, model missing,
-/// empty vector) is `None`, which the ranking reports as degraded.
+/// remote-model lock is an error, and so is a vector the ranking cannot use
+/// ([`BadQueryVector`]); any other failure (no Ollama, model missing, empty
+/// vector) is `None`, which the ranking reports as degraded.
 pub fn query_embedding(text: &str) -> anyhow::Result<Option<QueryEmbedding>> {
     query_embedding_with(
         crate::embedding::resolve,
@@ -227,12 +228,46 @@ pub(crate) fn default_query_embedding_with(
         {
             Err(e)
         }
-        // No Ollama, no model, an empty vector or no answer in time.
+        // No Ollama, no model, an empty or unusable vector, or no answer in time.
         Ok(None) | Err(_) => {
             breaker.trip(now_ms);
             Ok(None)
         }
     }
+}
+
+/// A question vector the ranking cannot use: not the size the model's
+/// profile gives, a value that is not finite, or a norm of zero. pgvector
+/// refuses the first two in the query (a 500 for every request), and a zero
+/// norm gives every note cosine 1.0, a ranking by id. The default rank falls
+/// back to full text; an explicit rank reports this error.
+#[derive(Debug)]
+pub struct BadQueryVector {
+    pub model: String,
+    pub reason: String,
+}
+
+impl std::fmt::Display for BadQueryVector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the embedding model {} gave an unusable question vector: {}",
+            self.model, self.reason
+        )
+    }
+}
+
+impl std::error::Error for BadQueryVector {}
+
+/// The checks of a note's vector ([`crate::generate_embeddings::check_note_vector`]:
+/// `dim` values, all finite) and a finite norm above zero.
+fn check_query_vector(vector: &[f32], dim: usize) -> Result<(), String> {
+    crate::generate_embeddings::check_note_vector(vector, dim).map_err(|e| e.to_string())?;
+    let norm: f32 = vector.iter().map(|x| x * x).sum();
+    if norm == 0.0 || !norm.is_finite() {
+        return Err(format!("its squared norm is {norm}"));
+    }
+    Ok(())
 }
 
 /// [`query_embedding`] with resolve and embed passed in, so tests need no Ollama.
@@ -255,6 +290,12 @@ pub fn query_embedding_with(
         Err(e) if refused(&e) => return Err(e),
         Err(_) => return Ok(None),
     };
+    if let Err(reason) = check_query_vector(&vector, backend.dim) {
+        return Err(anyhow::Error::new(BadQueryVector {
+            model: backend.model,
+            reason,
+        }));
+    }
     Ok(Some(QueryEmbedding {
         model: backend.model,
         column: backend.column,
@@ -1168,7 +1209,7 @@ mod tests {
         };
         let granite = query_embedding_with(
             || Ok(backend("granite-embedding-multilingual:278m")),
-            |_, _| Ok(vec![1.0]),
+            |b, _| Ok(vec![1.0; b.dim]),
             "q",
         )
         .unwrap()
@@ -1176,7 +1217,7 @@ mod tests {
         assert_eq!(as_of_min_cosine(Some(&granite)), 0.68);
         let base = query_embedding_with(
             || Ok(backend("nomic-embed-text")),
-            |_, _| Ok(vec![1.0]),
+            |b, _| Ok(vec![1.0; b.dim]),
             "q",
         )
         .unwrap()
@@ -1193,6 +1234,78 @@ mod tests {
         };
         let r = query_embedding_with(refused, |_, _| Ok(vec![1.0]), "q");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn bad_query_vector_falls_back_to_fulltext() {
+        use crate::embedding::EmbedBreaker;
+        let model = "granite-embedding-multilingual:278m";
+        let backend = || -> anyhow::Result<crate::embedding::EmbeddingBackend> {
+            let profile = crate::embedding::profile_for(model, 768).unwrap();
+            Ok(crate::embedding::EmbeddingBackend {
+                name: "ollama".into(),
+                model: model.into(),
+                base_url: "http://127.0.0.1:11434".into(),
+                column: profile.column,
+                dim: profile.dim,
+                profile,
+            })
+        };
+        let mut nan = vec![0.5f32; 768];
+        nan[7] = f32::NAN;
+        let bad = [
+            ("wrong size", vec![0.5f32; 3]),
+            ("NaN", nan),
+            ("all zero", vec![0.0f32; 768]),
+        ];
+        let t0 = 1_000_000_000;
+        for (what, vector) in bad {
+            let embed = || query_embedding_with(backend, |_, _| Ok(vector.clone()), "q");
+            // The vector itself is an error that names the model.
+            let err = embed().err().unwrap_or_else(|| panic!("{what}: no error"));
+            assert!(err.downcast_ref::<BadQueryVector>().is_some(), "{what}");
+            assert!(err.to_string().contains(model), "{what}: {err}");
+            // The default rank gets no vector, so it ranks by full text, and
+            // the breaker spares Ollama for the next minute.
+            let breaker = EmbedBreaker::new();
+            let r = question_vector_with(RecallMode::Current, None, &breaker, t0, embed, || {
+                panic!("the default rank never takes the long path")
+            });
+            assert!(matches!(r, Ok(None)), "{what}");
+            assert!(breaker.is_open(t0 + 1), "{what}");
+            // An explicit rank says why instead.
+            let r = question_vector_with(
+                RecallMode::Current,
+                Some(Rank::Cosine),
+                &EmbedBreaker::new(),
+                t0,
+                || panic!("an explicit rank never takes the quick path"),
+                embed,
+            );
+            let err = r.err().unwrap_or_else(|| panic!("{what}: no error"));
+            assert!(err.downcast_ref::<BadQueryVector>().is_some(), "{what}");
+        }
+        // A usable vector passes.
+        let good = query_embedding_with(backend, |_, _| Ok(vec![0.5f32; 768]), "q");
+        assert!(matches!(good, Ok(Some(_))));
+        // Without the vector the default rank ranks by full text and says so.
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping the database half of bad_query_vector_falls_back_to_fulltext");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let content = format!("deploy checklist {tag}");
+        let mut s = Seed::new(&content, long_ago());
+        s.project = Some(&project);
+        let id = seed(&mut tx, &s);
+        let mut q = query("deploy checklist", Some(&project));
+        q.rank = default_rank(RecallMode::Current);
+        let r = recall(&mut tx, &q, None).unwrap();
+        assert_eq!(r.degraded.as_deref(), Some("no_embeddings"));
+        let h = &r.hits[position(&r, id).unwrap()];
+        assert_eq!(h.why.fulltext, Some(h.score));
     }
 
     #[test]
@@ -3239,6 +3352,39 @@ mod tests {
         assert!(cands
             .iter()
             .all(|c| c.id != private && !c.merged_from.contains(&private)));
+
+        // Ranked by meaning, with the private note nearest to the question:
+        // A gets it, B neither gets it nor learns of it.
+        let model = format!("test-embed-{tag}");
+        embed(&mut tx, private, &model, &vec768(&[1.0]));
+        embed(&mut tx, old, &model, &vec768(&[0.6, 0.8]));
+        let emb = query_embedding(&model);
+        let text = format!("plan{tag}");
+        let mut by_meaning = query(&text, p);
+        by_meaning.rank = Rank::Cosine;
+        let r = recall(
+            &mut tx,
+            &RecallQuery {
+                actor: &a,
+                ..by_meaning
+            },
+            Some(&emb),
+        )
+        .unwrap();
+        assert!(position(&r, private).is_some(), "A, by meaning");
+        let mut by_meaning = query(&text, p);
+        by_meaning.rank = Rank::Cosine;
+        let r = recall(
+            &mut tx,
+            &RecallQuery {
+                actor: &b,
+                ..by_meaning
+            },
+            Some(&emb),
+        )
+        .unwrap();
+        assert!(!ids(&r).contains(&private), "B, by meaning: {:?}", ids(&r));
+        assert_hidden(&serde_json::to_string(&r).unwrap(), &secret, "cosine");
 
         // The other direction: a shared note that replaced a private note of
         // A's, which came from a session. B sees the shared successor, but

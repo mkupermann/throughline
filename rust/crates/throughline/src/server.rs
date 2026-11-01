@@ -331,6 +331,16 @@ fn remote_llm_refused(team: bool, e: &anyhow::Error) -> Response {
     api_error(StatusCode::FORBIDDEN, "remote_llm_not_allowed", detail)
 }
 
+/// The answer to a question vector that failed with an error: a vector the
+/// ranking cannot use is 502 with the reason (it names the model, no row),
+/// else the error is the remote-model refusal.
+fn embed_failed(team: bool, e: &anyhow::Error) -> Response {
+    if e.downcast_ref::<crate::recall::BadQueryVector>().is_some() {
+        return api_error(StatusCode::BAD_GATEWAY, "bad_query_vector", e.to_string());
+    }
+    remote_llm_refused(team, e)
+}
+
 /// Team mode's answer to a failed query: `query_failed` without the text,
 /// which goes to the log without row values.
 fn hidden_failure(e: &anyhow::Error) -> Response {
@@ -1539,7 +1549,7 @@ async fn recall_handler(
         {
             Ok(Ok(emb)) => emb,
             Ok(Err(e)) => {
-                return remote_llm_refused(state.auth_mode == crate::access::AuthMode::Team, &e)
+                return embed_failed(state.auth_mode == crate::access::AuthMode::Team, &e)
             }
             Err(_) => None,
         }
@@ -4712,6 +4722,19 @@ fn startup_check(
     Ok(())
 }
 
+/// One question embedding on a thread of its own, so Ollama loads the model
+/// before the first default recall: that one waits at most 3 s, and a cold
+/// load past that would rank every default request by full text for a
+/// minute. The long timeouts apply and the breaker stays out of it. Startup
+/// does not wait for it, and a failure is only logged.
+fn warm_up_embedding() -> std::thread::JoinHandle<()> {
+    std::thread::spawn(|| match crate::recall::query_embedding("warm-up") {
+        Ok(Some(_)) => {}
+        Ok(None) => eprintln!("embedding warm-up: no vector (is Ollama reachable?)"),
+        Err(e) => eprintln!("embedding warm-up: {e:#}"),
+    })
+}
+
 pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()> {
     // Before binding. Everything that can fail runs on the blocking pool:
     // the sync client blocks even when an early return drops it (see `with_db`).
@@ -4750,6 +4773,7 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("bind {addr}"))?;
+    warm_up_embedding();
     eprintln!("Throughline GUI on http://{addr}");
     axum::serve(listener, app(state)).await.context("serve")?;
     Ok(())
@@ -4758,6 +4782,39 @@ pub async fn serve(host: &str, port: u16, client: postgres::Client) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_rank_with_a_bad_question_vector_says_why() {
+        let bad = anyhow::Error::new(crate::recall::BadQueryVector {
+            model: "granite-embedding-multilingual:278m".into(),
+            reason: "3 values, the column takes 768".into(),
+        });
+        for team in [false, true] {
+            let resp = embed_failed(team, &bad);
+            assert_eq!(resp.status(), StatusCode::BAD_GATEWAY, "team {team}");
+        }
+        let refused = anyhow::Error::new(crate::llm::RemoteLlmNotAllowed {
+            label: "ollama/x".into(),
+        });
+        assert_eq!(embed_failed(true, &refused).status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn embedding_warm_up_does_not_hold_up_startup() {
+        crate::recall::test_ollama::hanging(|| {
+            let started = std::time::Instant::now();
+            let warm_up = warm_up_embedding();
+            assert!(
+                started.elapsed() < std::time::Duration::from_millis(500),
+                "the warm-up returned at once"
+            );
+            // It still waits for Ollama, on its own thread.
+            assert!(!warm_up.is_finished());
+            // Ollama never answers: the warm-up gives up after the model
+            // list's timeout, logs, and does not panic.
+            warm_up.join().expect("the warm-up ends without a panic");
+        });
+    }
 
     #[test]
     fn recovery_hint_pulls_the_configured_embedding_model() {

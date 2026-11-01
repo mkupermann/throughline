@@ -1389,11 +1389,19 @@ mod tests {
             "https://memory.example.com:443/",
             "http://localhost:8787",
             "http://[::1]:8787",
+            // Without a port: the scheme's default.
+            "https://memory.example.com",
+            "http://localhost/",
+            "http://[::1]",
         ] {
             check_startup(&mut tx, AuthMode::Team, Some(url))
                 .unwrap_or_else(|e| panic!("{url}: {e}"));
             assert!(crate::server::url_origin(url).is_some(), "{url}");
         }
+        let port = |url: &str| crate::server::url_origin(url).map(|o| o.2);
+        assert_eq!(port("https://memory.example.com"), Some(443));
+        assert_eq!(port("http://localhost/"), Some(80));
+        assert_eq!(port("http://[::1]"), Some(80));
         for url in [
             "https://memory.example.com:",
             "https://memory.example.com:/base",
