@@ -10,6 +10,7 @@ pub mod cursor;
 pub mod gemini_cli;
 pub mod hermes;
 pub mod locomo;
+pub mod markdown;
 pub mod opencode;
 pub mod registry;
 pub mod vibe;
