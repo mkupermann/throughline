@@ -19,6 +19,8 @@ pub fn built_ins() -> Vec<Box<dyn Adapter>> {
         Box::new(super::aider::AiderAdapter::default()),
         Box::new(super::gemini_cli::GeminiCliAdapter::default()),
         Box::new(super::copilot_chat::CopilotChatAdapter::default()),
+        // Reads only the folders in THROUGHLINE_MARKDOWN_ROOTS; none set, no-op.
+        Box::new(super::markdown::MarkdownAdapter::from_env()),
     ];
     list.extend(registry_hook());
     list
