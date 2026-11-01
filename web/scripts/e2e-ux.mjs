@@ -1391,11 +1391,14 @@ try {
   // ── (au) Memory cards show source time; extracted chip only if >60 s ──
   // Zeitgrundsatz: the displayed date is source_at (fallback created_at); the
   // extraction time shows as an extra "extracted" chip only when source_at and
-  // created_at differ by more than 60 s. Fixture rows carry source_at (session
-  // end for the conversation notes, created_at − 2 days for the notes without
-  // a conversation), so this proves the displayed date equals source_at, the
-  // extracted chip rule over the list (at least one card shows the chip), the
-  // EN/DE chip wording and the mem.extracted dictionary entries.
+  // created_at differ by more than 60 s. The notes with such a gap are taken
+  // from the API (limit 200, every status) by that gap alone — no fixed
+  // dates, so the check stays green on any clock. The reflect dedup in (e)
+  // supersedes the fixture rows first, so those cards no longer sit in the
+  // default active list: each target card is made visible through the memory
+  // view's own status filter, search and pager before its chips are asserted
+  // (EN + DE). The gap rule is re-checked over every visible card and the
+  // mem.extracted dictionary entries close the check.
   {
     await page.goto(base);
     await page.waitForLoadState('networkidle');
@@ -1403,39 +1406,86 @@ try {
     await page.waitForTimeout(200);
     await view('memory');
     await page.locator('#memory-list .mem-card').first().waitFor({ state: 'visible', timeout: 10000 });
-    const api1 = await json('/api/memory?limit=1');
-    const ch = (api1.chunks || [])[0];
-    if (!ch) fail('au-memory-source-date', '/api/memory?limit=1 returned no chunks');
-    const apiSrc = ch.source_at || ch.created_at;
-    const diffMs = ch.source_at ? Math.abs(new Date(ch.source_at) - new Date(ch.created_at)) : 0;
-    const expectExtracted = diffMs > 60000;
-    const card = page.locator('#memory-list .mem-card').first();
-    const ds = await card.getAttribute('data-source-at');
-    const dc = await card.getAttribute('data-created-at');
-    if (ds !== apiSrc) fail('au-memory-source-date', `data-source-at "${ds}" != API source_at "${ch.source_at}" (srcIso "${apiSrc}")`);
-    if (dc !== ch.created_at) fail('au-memory-source-date', `data-created-at "${dc}" != API created_at "${ch.created_at}"`);
-    const fmtSrc = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), apiSrc);
-    const fmtCreated = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), ch.created_at);
-    const enLabel = ch.source_at ? 'source from ' : 'recorded ';
-    const deLabel = ch.source_at ? 'Quelle vom ' : 'erfasst ';
-    const enChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
-    if (!enChips.includes(enLabel + fmtSrc)) fail('au-memory-source-date', `EN chips ${JSON.stringify(enChips)} lack "${enLabel}${fmtSrc}"`);
-    const enExt = enChips.find((x) => x.startsWith('extracted ')) || null;
-    if (expectExtracted !== !!enExt) fail('au-memory-source-date', `EN extracted chip ${enExt ? 'shown' : 'absent'} but source_at/created_at diff ${diffMs}ms`);
-    if (expectExtracted && enExt !== 'extracted ' + fmtCreated) fail('au-memory-source-date', `EN extracted chip "${enExt}" != "extracted ${fmtCreated}"`);
+    // Date-agnostic targets: every note whose source_at and created_at differ
+    // by more than 60 s, wherever the memory view currently hides it.
+    const apiAll = await json('/api/memory?limit=200&status=all');
+    const chunks = apiAll.chunks || [];
+    const gapMs = (c) => (c.source_at && c.created_at ? Math.abs(new Date(c.source_at) - new Date(c.created_at)) : 0);
+    const targets = chunks.filter((c) => gapMs(c) > 60000);
+    if (!targets.length) {
+      fail('au-memory-source-date', `no note with a source_at/created_at gap above 60 s among ${chunks.length} chunk(s) (/api/memory?limit=200&status=all, total ${apiAll.total})`);
+    }
+    const cardSel = (id) => '#memory-list .mem-card[data-mem-id="' + id + '"]';
+    const memSettled = () => page.waitForFunction(() => !document.querySelector('#memory-list .skeleton'), null, { timeout: 10000 });
+    // Bring a target card into #memory-list the way the UI offers: the status
+    // filter, then the search on a distinctive word, then the pager.
+    const ensureVisible = async (ch) => {
+      const loc = page.locator(cardSel(ch.id));
+      if (await loc.count()) return;
+      await page.locator('#memory-status').selectOption('all');
+      await memSettled();
+      if (await loc.count()) return;
+      const words = (ch.content || '').split(/[^A-Za-z0-9À-ÿ-]+/).filter(Boolean).sort((a, b) => b.length - a.length);
+      if (words.length) {
+        await page.locator('#memory-q').fill(words[0]);
+        await page.locator('#memory-go').click();
+        await memSettled();
+        if (await loc.count()) return;
+      }
+      await page.locator('#memory-q').fill('');
+      await page.locator('#memory-go').click();
+      await memSettled();
+      for (let i = 0; i < 20 && !(await loc.count()); i++) {
+        const next = page.locator('#memory-next');
+        if (await next.isDisabled()) break;
+        await next.click();
+        await memSettled();
+      }
+    };
+    await page.locator('#memory-status').selectOption('all');
+    await memSettled();
+    for (const ch of targets) {
+      await ensureVisible(ch);
+      const card = page.locator(cardSel(ch.id));
+      await card.waitFor({ state: 'visible', timeout: 10000 });
+      const diffMs = gapMs(ch);
+      const expectExtracted = diffMs > 60000;
+      const apiSrc = ch.source_at || ch.created_at;
+      const ds = await card.getAttribute('data-source-at');
+      const dc = await card.getAttribute('data-created-at');
+      if (ds !== apiSrc) fail('au-memory-source-date', `#${ch.id} data-source-at "${ds}" != API source_at "${ch.source_at}" (srcIso "${apiSrc}")`);
+      if (dc !== ch.created_at) fail('au-memory-source-date', `#${ch.id} data-created-at "${dc}" != API created_at "${ch.created_at}"`);
+      const fmtSrc = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), apiSrc);
+      const fmtCreated = await page.evaluate((iso) => new Date(iso).toLocaleString('en-GB'), ch.created_at);
+      const enLabel = ch.source_at ? 'source from ' : 'recorded ';
+      const enChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
+      if (!enChips.includes(enLabel + fmtSrc)) fail('au-memory-source-date', `#${ch.id} EN chips ${JSON.stringify(enChips)} lack "${enLabel}${fmtSrc}"`);
+      const enExt = enChips.find((x) => x.startsWith('extracted ')) || null;
+      if (expectExtracted !== !!enExt) fail('au-memory-source-date', `#${ch.id} EN extracted chip ${enExt ? 'shown' : 'absent'} but source_at/created_at diff ${diffMs}ms`);
+      if (expectExtracted && enExt !== 'extracted ' + fmtCreated) fail('au-memory-source-date', `#${ch.id} EN extracted chip "${enExt}" != "extracted ${fmtCreated}"`);
+    }
     const extractedCards = await page.locator('#memory-list .mem-card').evaluateAll((els) => els.filter((e) =>
       Array.from(e.querySelectorAll('.chip')).some((x) => /^extracted /.test(x.textContent || ''))).length);
-    if (extractedCards < 1) fail('au-memory-source-date', 'no visible card shows the "extracted" chip although the fixture carries notes with source_at = created_at − 2 days');
+    if (extractedCards < 1) fail('au-memory-source-date', `no visible card shows the "extracted" chip although ${targets.length} note(s) carry a source_at/created_at gap above 60 s`);
     await page.locator('#lang-select').selectOption('de');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('#memory-list .mem-card .chip'))
       .some((x) => /^(erfasst|Quelle vom) /.test((x.textContent || '').trim())), null, { timeout: 10000 });
-    const fmtSrcDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), apiSrc);
-    const fmtCreatedDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), ch.created_at);
-    const deChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
-    if (!deChips.includes(deLabel + fmtSrcDe)) fail('au-memory-source-date', `DE chips ${JSON.stringify(deChips)} lack "${deLabel}${fmtSrcDe}"`);
-    const deExt = deChips.find((x) => x.startsWith('extrahiert ')) || null;
-    if (expectExtracted !== !!deExt) fail('au-memory-source-date', `DE extracted chip ${deExt ? 'shown' : 'absent'} but diff ${diffMs}ms`);
-    if (expectExtracted && deExt !== 'extrahiert ' + fmtCreatedDe) fail('au-memory-source-date', `DE extracted chip "${deExt}" != "extrahiert ${fmtCreatedDe}"`);
+    for (const ch of targets) {
+      await ensureVisible(ch);
+      const card = page.locator(cardSel(ch.id));
+      await card.waitFor({ state: 'visible', timeout: 10000 });
+      const diffMs = gapMs(ch);
+      const expectExtracted = diffMs > 60000;
+      const apiSrc = ch.source_at || ch.created_at;
+      const fmtSrcDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), apiSrc);
+      const fmtCreatedDe = await page.evaluate((iso) => new Date(iso).toLocaleString('de-DE'), ch.created_at);
+      const deLabel = ch.source_at ? 'Quelle vom ' : 'erfasst ';
+      const deChips = (await card.locator('.chip').allTextContents()).map((s) => s.trim());
+      if (!deChips.includes(deLabel + fmtSrcDe)) fail('au-memory-source-date', `#${ch.id} DE chips ${JSON.stringify(deChips)} lack "${deLabel}${fmtSrcDe}"`);
+      const deExt = deChips.find((x) => x.startsWith('extrahiert ')) || null;
+      if (expectExtracted !== !!deExt) fail('au-memory-source-date', `#${ch.id} DE extracted chip ${deExt ? 'shown' : 'absent'} but diff ${diffMs}ms`);
+      if (expectExtracted && deExt !== 'extrahiert ' + fmtCreatedDe) fail('au-memory-source-date', `#${ch.id} DE extracted chip "${deExt}" != "extrahiert ${fmtCreatedDe}"`);
+    }
     const cardRule = await page.locator('#memory-list .mem-card').evaluateAll((els) => els.map((e) => {
       const src = e.getAttribute('data-source-at');
       const created = e.getAttribute('data-created-at');
@@ -1449,7 +1499,12 @@ try {
       fail('au-memory-source-date', `mem.extracted EN/DE dictionary: ${JSON.stringify(dictVals)}`);
     }
     if (dictVals.some((v) => /[–—;]/.test(v))) fail('au-memory-source-date', `mem.extracted value contains –, — or ;: ${JSON.stringify(dictVals)}`);
-    pass('au-memory-source-date', `first #${ch.id} data-source-at=${ds} (API source_at ${ch.source_at || 'null'}), recorded chip "${fmtSrc}", extracted ${expectExtracted ? 'shown' : 'absent'} (diff ${diffMs}ms), ${extractedCards} card(s) show the extracted chip; DE "erfasst"/"extrahiert" + mem.extracted dictionary ok`);
+    // Leave the memory view on its default filter for the checks that follow.
+    await page.locator('#memory-q').fill('');
+    await page.locator('#memory-status').selectOption('active');
+    await page.locator('#memory-go').click();
+    await memSettled();
+    pass('au-memory-source-date', `${targets.length} note(s) with a source_at/created_at gap above 60 s (ids ${targets.map((c) => c.id).join(', ')}) each show the source date and the "extracted"/"extrahiert" chip, ${extractedCards} visible card(s) carry the chip; EN/DE chip wording + mem.extracted dictionary ok`);
   }
 
   // ── (av) Favorites in session list ─────────────────────────────────────
@@ -1842,6 +1897,99 @@ try {
     await cancelBtn.click();
     await page.waitForTimeout(300);
     pass('bj-palette-confirm', 'palette Embed action shows the same confirmation, no request before Run');
+  }
+
+  // ── (bk) Backlog panel shows four rows with data-backlog ────────────────
+  {
+    await view('operate');
+    const panel = page.locator('#backlog');
+    if (await panel.count() !== 1) fail('bk-backlog-panel', 'panel #backlog not found');
+    if (!await panel.isVisible()) fail('bk-backlog-panel', 'panel #backlog not visible');
+    for (const key of ['notes', 'messages', 'untitled', 'extraction']) {
+      const row = panel.locator(`[data-backlog="${key}"]`);
+      if (await row.count() !== 1) fail('bk-backlog-panel', `row data-backlog="${key}" not found`);
+      const text = (await row.textContent()) || '';
+      const hasNumber = /\d/.test(text);
+      const hasNoModel = /no embedding model|kein Einbettungsmodell/i.test(text);
+      if (!hasNumber && !hasNoModel) fail('bk-backlog-panel', `row "${key}" has neither number nor model text: "${text}"`);
+    }
+    pass('bk-backlog-panel', 'backlog panel visible with 4 data-backlog rows, each with number or model text');
+  }
+
+  // ── (bl) Embed loop: 3 POSTs then finished ─────────────────────────────
+  {
+    await view('operate');
+    let postCount = 0;
+    await page.route('**/api/operate?job=embed', route => {
+      postCount++;
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job: 'embed', message: 'embed: embedded=200 errors=0' }) });
+    });
+    // Each package makes the loop read /api/backlog (and the panel refresh
+    // reads it again): drive the remaining count from the packages already
+    // sent, so the loop stops at 3 POSTs (= 600 embedded) however often the
+    // panel refresh runs.
+    await page.route('**/api/backlog', route => {
+      const messagesMissing = Math.max(0, 600 - 200 * postCount);
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ embed_model: 'nomic-embed-text', notes_missing: 0, notes_total: 10, messages_missing: messagesMissing, messages_total: 500, untitled: 0, extraction_pending: 0 }) });
+    });
+    await page.locator('[data-job="embed"]').click();
+    const confirmRun = page.locator('#operate-out [data-confirm-run]');
+    await confirmRun.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmRun.click();
+    // Wait for the final result block. The running block and the progress
+    // block (with the stop button) carry role="status"; the final one does
+    // not — waiting only for "no stop button" would stop at the running
+    // block and count a single POST.
+    await page.waitForFunction(() => {
+      const blocks = document.querySelectorAll('#operate-out .result-block');
+      if (blocks.length === 0) return false;
+      const last = blocks[blocks.length - 1];
+      return !last.getAttribute('role') && !last.querySelector('[data-embed-stop]');
+    }, null, { timeout: 30000 });
+    const outText = (await page.locator('#operate-out').textContent()) || '';
+    if (postCount !== 3) fail('bl-embed-loop', `expected 3 POSTs, got ${postCount}; final text "${outText.trim()}"`);
+    if (!outText.includes('600')) fail('bl-embed-loop', `final message missing "600": "${outText}"`);
+    if (!/(0|zero|0 )/.test(outText)) fail('bl-embed-loop', `final message missing 0 missing: "${outText}"`);
+    await page.unrouteAll();
+    pass('bl-embed-loop', `3 POSTs, final message names 600 embedded and 0 missing: "${outText.trim()}"`);
+  }
+
+  // ── (bm) Embed stop: stops after first package ─────────────────────────
+  {
+    await view('operate');
+    let postCount = 0;
+    // Slow mock responses: the packages run back to back, so the stop click
+    // has to land inside the second package for "at most 2 POSTs" to hold.
+    await page.route('**/api/operate?job=embed', async route => {
+      postCount++;
+      await new Promise(r => setTimeout(r, 500));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job: 'embed', message: 'embed: embedded=200 errors=0' }) });
+    });
+    await page.route('**/api/backlog', async route => {
+      await new Promise(r => setTimeout(r, 500));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ embed_model: 'nomic-embed-text', notes_missing: 0, notes_total: 10, messages_missing: 400, messages_total: 500, untitled: 0, extraction_pending: 0 }) });
+    });
+    await page.locator('[data-job="embed"]').click();
+    const confirmRun = page.locator('#operate-out [data-confirm-run]');
+    await confirmRun.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmRun.click();
+    // Wait for the stop button to appear (first package done)
+    const stopBtn = page.locator('[data-embed-stop]');
+    await stopBtn.waitFor({ state: 'visible', timeout: 15000 });
+    await stopBtn.click();
+    // Wait for the final message (running/progress blocks carry role="status")
+    await page.waitForFunction(() => {
+      const blocks = document.querySelectorAll('#operate-out .result-block');
+      if (blocks.length === 0) return false;
+      const last = blocks[blocks.length - 1];
+      return !last.getAttribute('role') && !last.querySelector('[data-embed-stop]');
+    }, null, { timeout: 30000 });
+    const outText = (await page.locator('#operate-out').textContent()) || '';
+    if (postCount > 2) fail('bm-embed-stop', `expected at most 2 POSTs after stop, got ${postCount}; final text "${outText.trim()}"`);
+    const hasStopped = /stopped|angehalten/i.test(outText);
+    if (!hasStopped) fail('bm-embed-stop', `message missing "stopped"/"angehalten": "${outText}"`);
+    await page.unrouteAll();
+    pass('bm-embed-stop', `stopped after first package, ${postCount} POSTs total, message: "${outText.trim()}"`);
   }
 } finally {
   await browser.close();

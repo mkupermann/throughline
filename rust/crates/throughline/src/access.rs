@@ -106,6 +106,7 @@ pub(crate) const ROUTE_ROLES: &[(&str, &str, Role)] = &[
     ("GET", "/api/consolidation/proposal", Role::Admin),
     ("POST", "/api/consolidate", Role::Admin),
     ("POST", "/api/operate", Role::Admin),
+    ("GET", "/api/backlog", Role::Admin),
     ("POST", "/api/writeback", Role::Admin),
     ("POST", "/api/agent-memory/ingest", Role::Admin),
     ("POST", "/api/mimo-memory/ingest", Role::Admin),
@@ -528,7 +529,7 @@ fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
         return None;
     }
     let mut out = [0u8; N];
-    for (byte, pair) in out.iter_mut().zip(text.chunks_exact(2)) {
+    for (byte, pair) in out.iter_mut().zip(text.as_chunks::<2>().0.iter()) {
         let high = char::from(pair[0]).to_digit(16)?;
         let low = char::from(pair[1]).to_digit(16)?;
         *byte = (high * 16 + low) as u8;

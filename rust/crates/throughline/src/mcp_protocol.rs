@@ -107,7 +107,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
     }
     let quads = bytes.len() / 4;
     let mut out = Vec::with_capacity(quads * 3);
-    for (i, quad) in bytes.chunks_exact(4).enumerate() {
+    for (i, quad) in bytes.as_chunks::<4>().0.iter().enumerate() {
         let pad = quad.iter().rev().take_while(|&&c| c == b'=').count();
         if pad > 2 || (pad > 0 && i + 1 < quads) {
             return None;

@@ -2490,6 +2490,15 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           <button class="job" data-job="backup" data-mutating="true" data-min-role="admin"><strong data-i18n="op.backup">Backup</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.backup.sub">pg_dump snapshot</span></span></button>
           <button class="job" data-job="writeback" data-mutating="true" data-min-role="admin"><strong data-i18n="op.writeback">Write to AGENTS.md</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.writeback.sub">Distilled decisions into the project file</span></span></button>
         </div>
+        <div class="panel" id="backlog" style="margin-top:16px">
+          <div class="panel-title"><h2 data-i18n="op.backlog.title">Not processed yet</h2></div>
+          <div id="backlog-body" class="history list-anim">
+            <div class="row" data-backlog="notes"><span data-i18n="op.backlog.notes">Notes without a vector</span> <span class="backlog-val"></span></div>
+            <div class="row" data-backlog="messages"><span data-i18n="op.backlog.messages">Messages without a vector</span> <span class="backlog-val"></span></div>
+            <div class="row" data-backlog="untitled"><span data-i18n="op.backlog.untitled">Sessions without a title</span> <span class="backlog-val"></span></div>
+            <div class="row" data-backlog="extraction"><span data-i18n="op.backlog.extraction">Sessions not yet extracted to memory</span> <span class="backlog-val"></span></div>
+          </div>
+        </div>
         <div class="panel" id="ingest-status" style="margin-top:16px">
           <div class="panel-title"><h2 data-i18n="op.ingestStatus">Ingestion status</h2><div class="meta" data-i18n="op.perProvider">per assistant</div></div>
           <div id="ingest-status-body" class="history list-anim" data-i18n="op.loading">Loading…</div>
@@ -3154,10 +3163,21 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.confirmCancel": "Cancel",
       "op.confirm.ingest": "Imports sessions from every adapter into the database.",
       "op.confirm.import-config": "Imports instructions, skills and settings, secrets masked.",
-      "op.confirm.embed": "Computes vectors for up to 200 pending messages.",
+      "op.confirm.embed": "Computes vectors in batches of 200 until nothing is missing. You can stop at any time.",
       "op.confirm.reflect": "Merges notes with the same opening. This changes memory and has no dry run.",
       "op.confirm.backup": "Writes a database dump and deletes dumps beyond the newest 14.",
       "op.confirm.writeback": "Writes distilled notes into AGENTS.md in the server's folder.",
+      "op.backlog.title": "Not processed yet",
+      "op.backlog.notes": "Notes without a vector",
+      "op.backlog.messages": "Messages without a vector",
+      "op.backlog.untitled": "Sessions without a title",
+      "op.backlog.extraction": "Sessions not yet extracted to memory",
+      "op.backlog.noModel": "no embedding model",
+      "op.backlog.of": "of",
+      "op.embedStop": "Stop",
+      "op.embedProgress": "Embedded {n} so far, {m} still missing",
+      "op.embedFinished": "Embedding finished: {n} embedded, {m} still missing",
+      "op.embedStopped": "Embedding stopped",
       // detail
       "detail.back": "← Back",
       "detail.title": "Session",
@@ -3877,10 +3897,21 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.confirmCancel": "Abbrechen",
       "op.confirm.ingest": "Importiert Sitzungen aus allen Adaptern in die Datenbank.",
       "op.confirm.import-config": "Importiert Anweisungen, Skills und Einstellungen, Secrets maskiert.",
-      "op.confirm.embed": "Berechnet Vektoren für bis zu 200 ausstehende Nachrichten.",
+      "op.confirm.embed": "Berechnet Vektoren in Paketen zu 200, bis nichts mehr fehlt. Du kannst jederzeit anhalten.",
       "op.confirm.reflect": "Führt Notizen mit gleichem Anfang zusammen. Das verändert das Gedächtnis und hat keinen Probelauf.",
       "op.confirm.backup": "Schreibt einen Datenbank-Dump und löscht Dumps jenseits der neuesten 14.",
       "op.confirm.writeback": "Schreibt verdichtete Notizen in AGENTS.md im Ordner des Servers.",
+      "op.backlog.title": "Noch nicht verarbeitet",
+      "op.backlog.notes": "Notizen ohne Vektor",
+      "op.backlog.messages": "Nachrichten ohne Vektor",
+      "op.backlog.untitled": "Sitzungen ohne Titel",
+      "op.backlog.extraction": "Sitzungen ohne Notizen-Extraktion",
+      "op.backlog.noModel": "kein Einbettungsmodell",
+      "op.backlog.of": "von",
+      "op.embedStop": "Anhalten",
+      "op.embedProgress": "Bisher {n} eingebettet, noch {m} offen",
+      "op.embedFinished": "Einbetten beendet: {n} eingebettet, noch {m} offen",
+      "op.embedStopped": "Einbetten angehalten",
       "detail.back": "← Zurück",
       "detail.title": "Sitzung",
       "detail.copy": "Zusammenfassung kopieren",
@@ -4257,7 +4288,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           else if (current === "find") { /* keep results; labels already updated */ }
           else if (current === "projects") loadProjects();
           else if (current === "timeline") loadTimeline();
-          else if (current === "operate") loadIngestStatus();
+          else if (current === "operate") { loadIngestStatus(); loadBacklog(); }
         } catch {}
       });
     }
@@ -4650,6 +4681,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     } else if (drill === "operate") {
       showView("operate");
       loadIngestStatus();
+      loadBacklog();
     }
   });
 
@@ -5903,6 +5935,46 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         announce(t("op.auditFinished"));
         return;
       }
+      if (job === "embed") {
+        let totalEmbedded = 0;
+        let stopped = false;
+        const renderProgress = (missing) => {
+          const n = totalEmbedded.toLocaleString(uiLocale());
+          const m = missing.toLocaleString(uiLocale());
+          const msg = t("op.embedProgress").replace("{n}", n).replace("{m}", m);
+          el.innerHTML =
+            '<div class="result-block" role="status"><strong>' + escapeHtml(msg) + "</strong>" +
+            '<div style="margin-top:8px"><button type="button" class="btn" data-embed-stop>' + escapeHtml(t("op.embedStop")) + "</button></div></div>";
+          const stopBtn = el.querySelector("[data-embed-stop]");
+          if (stopBtn) stopBtn.addEventListener("click", () => { stopped = true; stopBtn.disabled = true; });
+        };
+        for (;;) {
+          const r = await postJson("/api/operate?job=embed");
+          const embeddedMatch = /embedded=(\d+)/.exec(r.message || "");
+          const embedded = embeddedMatch ? parseInt(embeddedMatch[1], 10) : 0;
+          totalEmbedded += embedded;
+          const d = await fetchJson("/api/backlog");
+          const missing = (d.notes_missing || 0) + (d.messages_missing || 0);
+          renderProgress(missing);
+          loadBacklog();
+          if (stopped) break;
+          if (missing <= 0) break;
+          if (embedded <= 0) break;
+        }
+        const d = await fetchJson("/api/backlog");
+        const missing = (d.notes_missing || 0) + (d.messages_missing || 0);
+        const n = totalEmbedded.toLocaleString(uiLocale());
+        const m = missing.toLocaleString(uiLocale());
+        const msg = stopped
+          ? t("op.embedStopped") + ": " + t("op.embedProgress").replace("{n}", n).replace("{m}", m)
+          : t("op.embedFinished").replace("{n}", n).replace("{m}", m);
+        el.innerHTML = '<div class="result-block"><strong>' + escapeHtml(msg) + "</strong></div>";
+        loadBacklog();
+        loadStatus();
+        toast(t("op.embedFinished"));
+        announce(t("op.embedFinished"));
+        return;
+      }
       const r = await postJson("/api/operate?job=" + encodeURIComponent(job));
       el.innerHTML =
         '<div class="result-block"><strong>' + escapeHtml(label) + t("op.finished") + '</strong>' +
@@ -5945,6 +6017,29 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       el.innerHTML = html || '<div class="empty">' + t("op.noProviders") + '</div>';
     } catch (e) {
       el.innerHTML = emptyBox(t("op.couldNotLoadStatus"), e.message);
+    }
+  }
+  async function loadBacklog() {
+    const body = document.getElementById("backlog-body");
+    if (!body) return;
+    try {
+      const d = await fetchJson("/api/backlog");
+      const fmt = (v) => (v == null ? t("op.backlog.noModel") : Number(v).toLocaleString(uiLocale()));
+      const set = (key, text) => {
+        const row = body.querySelector('[data-backlog="' + key + '"] .backlog-val');
+        if (row) row.textContent = text;
+      };
+      if (d.embed_model == null) {
+        set("notes", t("op.backlog.noModel"));
+        set("messages", t("op.backlog.noModel"));
+      } else {
+        set("notes", fmt(d.notes_missing) + " " + t("op.backlog.of") + " " + fmt(d.notes_total));
+        set("messages", fmt(d.messages_missing) + " " + t("op.backlog.of") + " " + fmt(d.messages_total));
+      }
+      set("untitled", fmt(d.untitled));
+      set("extraction", fmt(d.extraction_pending));
+    } catch {
+      /* leave previous values */
     }
   }
 
@@ -8258,6 +8353,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       ).join("") || '<div class="empty">' + t("health.allOk") + '</div>';
     }).catch(() => {});
     loadIngestStatus();
+    loadBacklog();
     loadProjectsFilter();
     $("btn-hide-empty").textContent = t("topbar.hideEmpty");
     // Deep-links: open the main view named in the URL hash (boot + later hash changes).

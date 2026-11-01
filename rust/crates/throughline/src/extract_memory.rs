@@ -267,6 +267,25 @@ pub fn pending_conversations<C: GenericClient>(client: &mut C, limit: usize) -> 
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
+/// Count of conversations with messages after their extraction watermark.
+/// Same WHERE condition as [`pending_conversations`], without LIMIT.
+pub fn count_pending_conversations<C: GenericClient>(client: &mut C) -> Result<i64> {
+    let row = client.query_one(
+        r#"
+        SELECT count(*) FROM conversations c
+        WHERE c.generated_by IS NULL
+          AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.conversation_id = c.id
+              AND COALESCE(m.content, '') <> ''
+              AND (c.memory_extracted_until IS NULL OR m.created_at > c.memory_extracted_until)
+          )
+        "#,
+        &[],
+    )?;
+    Ok(row.get(0))
+}
+
 /// Extract memories from one conversation's messages after its watermark,
 /// window by window. Each window's notes and the advanced watermark commit
 /// together. A failed window is reported and ends this conversation's pass,
@@ -785,6 +804,24 @@ mod tests {
         );
         let sent: Vec<String> = requests.try_iter().collect();
         assert!(sent.len() == 1 && sent[0].contains("user: fourth") && !sent[0].contains("third"));
+    }
+
+    #[test]
+    fn count_pending_conversations_matches_pending_conversations() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping count_pending_conversations_matches_pending_conversations: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv_a = seed_conversation(&mut tx, &[(1, "hello"), (2, "world")]);
+        let conv_b = seed_conversation(&mut tx, &[(1, "another")]);
+        // Both are pending before extraction.
+        let list = pending_conversations(&mut tx, 1_000_000).unwrap();
+        let count = count_pending_conversations(&mut tx).unwrap();
+        assert_eq!(count, list.len() as i64);
+        assert!(list.contains(&conv_a));
+        assert!(list.contains(&conv_b));
+        // Drop tx → rollback, nothing left behind.
     }
 
     #[test]
