@@ -597,6 +597,21 @@ mod tests {
         }
     }
 
+    /// A test transaction whose snapshot is taken before the test inserts anything. Every
+    /// note lacks a vector of the test's own model and the jobs take the newest first. A note
+    /// another test commits later is not in this snapshot, and one committed earlier got a
+    /// lower id, so none takes the place of the test's own notes, and counts taken before and
+    /// after the test's inserts see the same other notes.
+    fn snapshot_tx(client: &mut postgres::Client) -> postgres::Transaction<'_> {
+        let mut tx = client
+            .build_transaction()
+            .isolation_level(postgres::IsolationLevel::RepeatableRead)
+            .start()
+            .expect("begin test tx");
+        tx.query_one("SELECT 1", &[]).expect("take the snapshot");
+        tx
+    }
+
     fn seed_note<C: GenericClient>(client: &mut C, content: &str, status: &str) -> i64 {
         let category_type = crate::extract_memory::category_column_type(client).unwrap();
         client
@@ -773,7 +788,7 @@ mod tests {
             eprintln!("skipping embed_pending_embeds_memory_notes_first: no PostgreSQL reachable");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let tag = uuid::Uuid::new_v4();
         let a = seed_note(&mut tx, &format!("note a {tag}"), "active");
@@ -814,15 +829,7 @@ mod tests {
             );
             return;
         };
-        // Every note lacks a vector of the test's own model, and the job takes
-        // the newest first. In a snapshot taken before the two notes get their
-        // ids, no note of another test can be newer, so none takes their place.
-        let mut tx = client
-            .build_transaction()
-            .isolation_level(postgres::IsolationLevel::RepeatableRead)
-            .start()
-            .expect("begin test tx");
-        tx.query_one("SELECT 1", &[]).expect("take the snapshot");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let tag = uuid::Uuid::new_v4().to_string();
         seed_note(&mut tx, &format!("note a {tag}"), "active");
@@ -865,7 +872,7 @@ mod tests {
             eprintln!("skipping missing_target_does_not_stop_active_embedding: no PostgreSQL");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let active = test_backend();
         let note = seed_note(&mut tx, "note for the active model", "active");
         // What resolve_target returns for a model Ollama does not have.
@@ -887,7 +894,7 @@ mod tests {
             eprintln!("skipping embed_job_fills_both_models: no PostgreSQL reachable");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let active = test_backend();
         let target = test_backend();
         let note = seed_note(&mut tx, "note for both models", "active");
@@ -909,7 +916,7 @@ mod tests {
             eprintln!("skipping progress_counts_notes_and_messages: no PostgreSQL reachable");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let before = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         assert_eq!((before.notes_done, before.messages_done), (0, 0));
@@ -936,7 +943,7 @@ mod tests {
             eprintln!("skipping superseded_note_is_pending_and_counted: no PostgreSQL");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let before = embed_progress(&mut tx, &crate::access::Actor::local(), &backend).unwrap();
         let id = seed_note(&mut tx, "old note", "superseded");
@@ -964,7 +971,7 @@ mod tests {
             eprintln!("skipping null_status_note_is_embedded: no PostgreSQL");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let id = seed_note(&mut tx, "no status", "active");
         if tx
@@ -995,7 +1002,7 @@ mod tests {
             eprintln!("skipping null_vector_row_is_filled: no PostgreSQL");
             return;
         };
-        let mut tx = client.transaction().expect("begin test tx");
+        let mut tx = snapshot_tx(&mut client);
         let backend = test_backend();
         let id = seed_note(&mut tx, "half embedded", "active");
         if tx
