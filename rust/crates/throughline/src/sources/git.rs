@@ -3,26 +3,35 @@
 //! Reads the local branches of every repository in `THROUGHLINE_GIT_ROOTS`
 //! (colon-separated, `~` expanded against `$HOME`) with the `git` binary,
 //! started without a shell. `safe.directory` is set for the configured
-//! roots only, and git never looks above a root for a repository. Without
-//! roots the source does nothing; without a `git` binary it is not present
-//! (`doctor` says so) and `ingest --source all` goes on with the rest.
+//! roots only, and git never looks above a root (or above the folder a
+//! symlinked root points to) for a repository. A relative entry is dropped
+//! with one warning line per process. Without roots the source does
+//! nothing; without a `git` binary it is not present (`doctor` says so) and
+//! `ingest --source all` goes on with the rest. git runs without a timeout,
+//! so a root on a hanging network mount blocks the ingest.
 //!
 //! One repository is one conversation:
 //! - `session_id` is a stable UUID of `git/<folder name>`, `project_path` is
 //!   the root, so the project is the folder name; `source_tool` is `git`;
-//! - each commit is a message, role `document`: subject, a blank line, the
-//!   body, and `Files:` with up to 50 changed paths (`and N more` after
-//!   that; a merge lists none). `created_at` is the committer date, the
-//!   metadata hold the SHA, the number of parents and of changed files;
+//! - each commit is a message, role `document`: the first line of the
+//!   message, a blank line, the rest (cut after 8,000 characters), and
+//!   `Files:` with up to 50 changed paths (`and N more` after that; a merge
+//!   lists none). `created_at` is the committer date, the metadata hold the
+//!   SHA, the number of parents and of changed files;
 //! - a message's uuid is a stable UUID of its SHA, so a rerun inserts only
 //!   the commits it has not stored and never rewrites one. Commits that a
 //!   history rewrite drops stay in the store.
 //!
 //! No author: the log format asks git for no author or committer name or
-//! mail, and the text loses trailer lines that name people (`Signed-off-by:`,
-//! `Co-authored-by:`, `Cc:` …), mail addresses and the account in a GitHub
-//! merge subject. There is nothing to filter commits by person (organisation
-//! rule: no employee monitoring). A name written into the text itself stays.
+//! mail. The raw message loses every line that names people
+//! (`Signed-off-by:`, `Co-authored-by:`, `Cc:` …) before it is split into
+//! subject and body, so a trailer typed right under the subject goes too.
+//! Mail addresses become `[mail]`. Three merge subjects lose the account or
+//! remote: `Merge pull request #N from <account>/<branch>`, `Merge … of
+//! <url>` (only the repository name stays) and `Merge remote-tracking
+//! branch '<remote>/<branch>'`. There is nothing to filter commits by person
+//! (organisation rule: no employee monitoring). A name written into the text
+//! itself stays.
 //!
 //! A run hashes `git for-each-ref refs/heads` first and skips a repository
 //! whose hash is in the ingestion log. Otherwise it reads the newest 5,000
@@ -54,13 +63,15 @@ pub const ROOTS_ENV: &str = "THROUGHLINE_GIT_ROOTS";
 pub const MAX_COMMITS: usize = 5_000;
 /// Changed paths listed per commit.
 pub const MAX_FILES: usize = 50;
+/// Characters of commit message stored per commit; the rest is counted.
+pub const MAX_TEXT_CHARS: usize = 8_000;
 
 const NS: Uuid = Uuid::from_u128(0x5b0e_2c47_8d1a_4f63_b9e2_71c4_d08a_6f35);
 
-/// SHA, parents, committer date (Unix seconds), subject, body. Nothing
+/// SHA, parents, committer date (Unix seconds), the raw message. Nothing
 /// about a person. Records start with 0x1E, fields end with NUL, then `-z
 /// --name-only` adds the changed paths, each ending with NUL.
-const LOG_FORMAT: &str = "%x1e%H%x00%P%x00%ct%x00%s%x00%b%x00";
+const LOG_FORMAT: &str = "%x1e%H%x00%P%x00%ct%x00%B%x00";
 
 /// Variables that would point git at another repository than the root.
 const REPO_ENV: [&str; 6] = [
@@ -77,18 +88,31 @@ const REPO_ENV: [&str; 6] = [
 pub struct GitSource {
     roots: Vec<PathBuf>,
     search_path: Option<OsString>,
+    max_commits: usize,
 }
 
 impl GitSource {
     /// The roots in [`ROOTS_ENV`]. Unset or empty: no roots, a no-op.
+    /// Relative entries are dropped with one warning line per process.
     pub fn from_env() -> Self {
-        Self::new(super::roots_from_env(ROOTS_ENV))
+        let (roots, dropped) = super::read_roots_env(ROOTS_ENV);
+        if !dropped.is_empty() {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                eprintln!(
+                    "[{NAME}] {ROOTS_ENV}: not an absolute path, ignored: {}",
+                    dropped.join(", ")
+                );
+            });
+        }
+        Self::new(roots)
     }
 
     pub fn new(roots: Vec<PathBuf>) -> Self {
         Self {
             roots,
             search_path: None,
+            max_commits: MAX_COMMITS,
         }
     }
 
@@ -100,6 +124,13 @@ impl GitSource {
 
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    /// Read at most `n` commits per repository and run instead of
+    /// [`MAX_COMMITS`].
+    pub fn with_max_commits(mut self, n: usize) -> Self {
+        self.max_commits = n.max(1);
+        self
     }
 
     fn command(&self) -> Command {
@@ -134,19 +165,19 @@ impl GitSource {
         !self.roots.is_empty() && self.version().is_some()
     }
 
-    /// git inside `root`: no search for a repository above it, and
-    /// `safe.directory` for this root alone (as given and resolved), so a
-    /// repository owned by another user, as in the container, can be read.
+    /// git inside `root`: no search for a repository above it (above the
+    /// resolved folder when the root is a symlink), and `safe.directory` for
+    /// this root alone (as given and resolved), so a repository owned by
+    /// another user, as in the container, can be read.
     fn git_in(&self, root: &Path, args: &[&str]) -> Result<Vec<u8>> {
         let mut cmd = self.command();
-        if let Some(parent) = root.parent() {
+        let real = root.canonicalize().ok();
+        if let Some(parent) = real.as_deref().unwrap_or(root).parent() {
             cmd.env("GIT_CEILING_DIRECTORIES", parent);
         }
         let mut safe = vec![root.to_path_buf()];
-        if let Ok(real) = root.canonicalize() {
-            if real != root {
-                safe.push(real);
-            }
+        if let Some(real) = real.filter(|r| r != root) {
+            safe.push(real);
         }
         for dir in safe {
             let mut value = OsString::from("safe.directory=");
@@ -185,7 +216,7 @@ impl GitSource {
     /// The newest [`MAX_COMMITS`] commits of the local branches, newest
     /// first, and how many the branches hold in all.
     fn read(&self, root: &Path) -> Result<(Vec<Commit>, usize)> {
-        let max = format!("--max-count={MAX_COMMITS}");
+        let max = format!("--max-count={}", self.max_commits);
         let format = format!("--format={LOG_FORMAT}");
         let raw = self.git_in(
             root,
@@ -202,7 +233,7 @@ impl GitSource {
             ],
         )?;
         let commits = parse_log(&raw);
-        let total = if commits.len() < MAX_COMMITS {
+        let total = if commits.len() < self.max_commits {
             commits.len()
         } else {
             let count = self.git_in(root, &["rev-list", "--count", "--branches"])?;
@@ -234,14 +265,13 @@ pub fn run<C: GenericClient>(
     rules: &IgnoreRules,
 ) -> Result<IngestSummary> {
     let mut summary = IngestSummary::new(NAME);
-    if source.roots.is_empty() {
-        return Ok(summary);
-    }
-    if source.version().is_none() {
-        eprintln!(
-            "[{NAME}] not present: no git binary found, {} configured root(s) not read",
-            source.roots.len()
-        );
+    if !source.is_present() {
+        if !source.roots.is_empty() {
+            eprintln!(
+                "[{NAME}] not present: no git binary found, {} configured root(s) not read",
+                source.roots.len()
+            );
+        }
         return Ok(summary);
     }
     let mut names = HashSet::new();
@@ -291,17 +321,17 @@ pub fn run<C: GenericClient>(
         best_effort(client, |tx| w::backfill_projects(tx).map(drop));
     }
     best_effort(client, |tx| {
-        crate::ingest_run::record_ignore_audit(tx, NAME, &summary);
-        Ok(())
+        crate::ingest_run::try_record_ignore_audit(tx, NAME, &summary)
     });
     Ok(summary)
 }
 
 /// Best effort, as in the adapter runner, but in a transaction of its own
-/// (a savepoint when the caller holds one): a failed statement, such as the
-/// projects backfill on a schema with an enum `status`, cannot abort the
-/// caller's transaction.
-fn best_effort<C: GenericClient>(
+/// (a savepoint when the caller holds one). `work` reports every failed
+/// statement, and a failure rolls that transaction back, so it cannot
+/// leave the caller's transaction aborted. Example: the projects backfill
+/// on a schema with an enum `status`.
+pub(super) fn best_effort<C: GenericClient>(
     client: &mut C,
     work: impl FnOnce(&mut postgres::Transaction<'_>) -> Result<()>,
 ) {
@@ -375,7 +405,7 @@ fn conversation(
         .rev()
         .map(|c| NormalisedMessage {
             role: Role::Document.as_str().into(),
-            content: commit_content(&c.subject, &c.body, &c.files),
+            content: commit_content(&c.message, &c.files),
             created_at: Some(c.committed),
             uuid: Some(stable_uuid(&NS, None, &c.sha)),
             metadata: json!({
@@ -405,13 +435,19 @@ fn conversation(
 }
 
 /// Subject, blank line, body, blank line, `Files:` with at most
-/// [`MAX_FILES`] paths. People are taken out first.
-fn commit_content(subject: &str, body: &str, files: &[String]) -> String {
-    let mut parts = vec![without_mail(&without_merge_account(subject.trim()))];
-    let body = without_mail(&without_people_lines(body));
+/// [`MAX_FILES`] paths. The lines that name people leave the raw message
+/// before the first line is taken as the subject: a trailer right under
+/// the subject must not become part of it.
+fn commit_content(message: &str, files: &[String]) -> String {
+    let kept = without_people_lines(message);
+    let (subject, body) = kept.split_once('\n').unwrap_or((&kept, ""));
+    let mut text = without_mail(&without_merge_account(subject.trim()));
+    let body = without_mail(body.trim());
     if !body.is_empty() {
-        parts.push(body);
+        text.push_str("\n\n");
+        text.push_str(&body);
     }
+    let mut parts = vec![capped(text)];
     if !files.is_empty() {
         let shown = files[..files.len().min(MAX_FILES)].join(", ");
         parts.push(match files.len().saturating_sub(MAX_FILES) {
@@ -422,7 +458,21 @@ fn commit_content(subject: &str, body: &str, files: &[String]) -> String {
     parts.join("\n\n")
 }
 
-/// Drop trailer lines that name people: `<Something>-by:` and `Cc:`.
+/// At most [`MAX_TEXT_CHARS`] characters, and how many were cut.
+fn capped(text: String) -> String {
+    let total = text.chars().count();
+    if total <= MAX_TEXT_CHARS {
+        return text;
+    }
+    let kept: String = text.chars().take(MAX_TEXT_CHARS).collect();
+    format!(
+        "{}\n[{} more characters not stored]",
+        kept.trim_end(),
+        total - MAX_TEXT_CHARS
+    )
+}
+
+/// Drop lines that name people: `<Something>-by:` and `Cc:` trailers.
 fn without_people_lines(body: &str) -> String {
     let names_people = |line: &str| {
         line.split_once(':').is_some_and(|(key, _)| {
@@ -436,14 +486,25 @@ fn without_people_lines(body: &str) -> String {
     kept.join("\n").trim().to_string()
 }
 
-/// `Merge pull request #7 from account/branch` → `… from branch`.
+/// Merge subjects without the account or remote:
+/// - `Merge pull request #7 from account/branch` → `… from branch`;
+/// - `Merge branch 'x' of host:account/repo` → `… of repo` (any URL);
+/// - `Merge remote-tracking branch 'remote/x'` → `… 'x'`.
 fn without_merge_account(subject: &str) -> String {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^(Merge pull request #\d+ from )[^/\s]+/(\S+)").expect("valid merge regex")
-    })
-    .replace(subject, "$1$2")
-    .into_owned()
+    static RES: OnceLock<[Regex; 3]> = OnceLock::new();
+    let res = RES.get_or_init(|| {
+        [
+            r"^(Merge pull request #\d+ from )[^/\s]+/(\S+)",
+            r"^(Merge .*? of )\S*/([^/\s]+)",
+            r"^(Merge remote-tracking branch ')[^'/\s]+/([^']+')",
+        ]
+        .map(|re| Regex::new(re).expect("valid merge regex"))
+    });
+    let mut out = subject.to_string();
+    for re in res {
+        out = re.replace(&out, "${1}${2}").into_owned();
+    }
+    out
 }
 
 /// Mail addresses become `[mail]`.
@@ -459,19 +520,34 @@ struct Commit {
     sha: String,
     parents: usize,
     committed: DateTime<Utc>,
-    subject: String,
-    body: String,
+    message: String,
     files: Vec<String>,
 }
 
+fn is_sha(field: &[u8]) -> bool {
+    (field.len() == 40 || field.len() == 64) && field.iter().all(u8::is_ascii_hexdigit)
+}
+
 /// The commits in `git log` output written with [`LOG_FORMAT`]. A 0x1E
-/// inside a body does not start a record: a record starts with a SHA and
-/// a NUL. Malformed records are dropped.
+/// inside a message does not start a record: a record starts with a SHA,
+/// SHAs or nothing for the parents, and the date in digits, each ending
+/// with NUL. A message can only put text before its own closing NUL, and
+/// the file list after it starts with a newline, so no message passes for a
+/// record start. Malformed records are dropped.
 fn parse_log(raw: &[u8]) -> Vec<Commit> {
     let starts_record = |part: &[u8]| {
-        part.iter()
-            .position(|b| *b == 0)
-            .is_some_and(|n| (n == 40 || n == 64) && part[..n].iter().all(u8::is_ascii_hexdigit))
+        let mut fields = part.splitn(4, |b| *b == 0);
+        let (Some(sha), Some(parents), Some(date), Some(_)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        is_sha(sha)
+            && parents
+                .split(|b| *b == b' ')
+                .all(|p| p.is_empty() || is_sha(p))
+            && !date.is_empty()
+            && date.iter().all(u8::is_ascii_digit)
     };
     let mut records: Vec<Vec<u8>> = Vec::new();
     for part in raw.split(|b| *b == 0x1e).skip(1) {
@@ -490,7 +566,7 @@ fn parse_log(raw: &[u8]) -> Vec<Commit> {
                 .split(|b| *b == 0)
                 .map(|f| String::from_utf8_lossy(f).into_owned())
                 .collect();
-            if fields.len() < 5 {
+            if fields.len() < 4 {
                 return None;
             }
             let seconds: i64 = fields[2].trim().parse().ok()?;
@@ -498,9 +574,8 @@ fn parse_log(raw: &[u8]) -> Vec<Commit> {
                 sha: fields[0].clone(),
                 parents: fields[1].split_whitespace().count(),
                 committed: DateTime::from_timestamp(seconds, 0)?,
-                subject: fields[3].clone(),
-                body: fields[4].clone(),
-                files: fields[5..]
+                message: fields[3].clone(),
+                files: fields[4..]
                     .iter()
                     .map(|f| f.trim_start_matches('\n'))
                     .filter(|f| !f.is_empty())
@@ -560,20 +635,30 @@ mod tests {
         Gauge read twice at dawn; ask erika.mustermann@example.invalid for the log.\n\n\
         Signed-off-by: Erika Mustermann <erika.mustermann@example.invalid>\n\
         Co-authored-by: Jonas Probe <jonas.probe@example.invalid>";
+    /// Commit 7: a trailer right under the subject. `%s` folds it into the
+    /// subject.
+    const TRAILER_UNDER_SUBJECT: &str =
+        "Check the harbor gauge\nCo-authored-by: Jonas Probe <jonas.probe@example.invalid>";
+    /// Commit 9: a mail address in the subject, a sign-off right under it.
+    const MAIL_IN_SUBJECT: &str = "Ask erika.mustermann@example.invalid about the buoys\n\
+        Signed-off-by: Erika Mustermann <erika.mustermann@example.invalid>";
+    /// Commits 22 and 23: merge subjects that name a remote account.
+    const MERGE_OF: &str = "Merge branch 'main' of github.com:erikam/harbor-ledger";
+    const MERGE_REMOTE: &str = "Merge remote-tracking branch 'erikam/tide-fix'";
     /// Commit 25: a GitHub merge subject names the account of the branch.
     const MERGE: &str = "Merge pull request #7 from erikam/tide-fix";
 
     fn git_missing(test: &str) -> bool {
         let missing = GitSource::new(Vec::new()).version().is_none();
         if missing {
-            eprintln!("skipping {test}: no `git` binary on PATH (the tl-rust-dev image has none; CI has one)");
+            eprintln!("skipping {test}: no git binary on PATH");
         }
         missing
     }
 
     /// A repository built with the `git` binary from invented content. Every
-    /// commit is one minute after the one before, author and committer date
-    /// alike.
+    /// commit is one minute after the one before; the author date is a day
+    /// earlier than the committer date, so the two cannot be mixed up.
     struct Repo {
         tmp: tempfile::TempDir,
         root: PathBuf,
@@ -600,7 +685,8 @@ mod tests {
         }
 
         fn git(&self, args: &[&str]) -> String {
-            let date = format!("{} +0000", self.clock);
+            let committed = format!("{} +0000", self.clock);
+            let authored = format!("{} +0000", self.clock - 86_400);
             let out = Command::new("git")
                 .current_dir(&self.root)
                 .args(args)
@@ -611,8 +697,8 @@ mod tests {
                 .env("GIT_AUTHOR_EMAIL", AUTHOR.1)
                 .env("GIT_COMMITTER_NAME", COMMITTER.0)
                 .env("GIT_COMMITTER_EMAIL", COMMITTER.1)
-                .env("GIT_AUTHOR_DATE", &date)
-                .env("GIT_COMMITTER_DATE", &date)
+                .env("GIT_AUTHOR_DATE", &authored)
+                .env("GIT_COMMITTER_DATE", &committed)
                 .output()
                 .unwrap();
             assert!(
@@ -632,23 +718,40 @@ mod tests {
             }
             self.git(&["add", "-A"]);
             self.git(&["commit", "-q", "--allow-empty", "-m", message]);
+            self.record();
+        }
+
+        /// A real merge commit of `branch`: two parents, no file list.
+        fn merge(&mut self, branch: &str) {
+            self.clock += 60;
+            let message = format!("Merge branch '{branch}'");
+            self.git(&["merge", "-q", "--no-ff", "-m", &message, branch]);
+            self.record();
+        }
+
+        fn record(&mut self) {
             self.shas.push(self.git(&["rev-parse", "HEAD"]));
             self.dates
                 .push(DateTime::from_timestamp(self.clock, 0).unwrap());
         }
 
-        /// Ledger entry `n`: commit 3 is [`SPRING`], commit 25 is [`MERGE`].
+        /// Ledger entry `n`, with the special messages above.
         fn entry(&mut self, n: usize) {
             let file = format!("ledger/{n:02}.txt");
             match n {
                 3 => self.commit(SPRING, &["tides/spring.txt", "tides/neap.txt", "gauge.txt"]),
+                7 => self.commit(TRAILER_UNDER_SUBJECT, &[&file]),
+                9 => self.commit(MAIL_IN_SUBJECT, &[&file]),
+                22 => self.commit(MERGE_OF, &[&file]),
+                23 => self.commit(MERGE_REMOTE, &[&file]),
                 25 => self.commit(MERGE, &[&file]),
                 _ => self.commit(&format!("Ledger entry {n:02}"), &[&file]),
             }
         }
 
         /// 30 commits on two branches: 1-10 on `main`, 11-20 on `soundings`
-        /// (forked after 10), 21-30 on `main` again.
+        /// (forked after 10), 21-29 on `main` again, and 30 merges
+        /// `soundings` into `main`.
         fn thirty(name: &str) -> Self {
             let mut repo = Repo::new(name);
             for n in 1..=10 {
@@ -659,9 +762,10 @@ mod tests {
                 repo.entry(n);
             }
             repo.git(&["checkout", "-q", "main"]);
-            for n in 21..=30 {
+            for n in 21..=29 {
                 repo.entry(n);
             }
+            repo.merge("soundings");
             repo
         }
     }
@@ -745,7 +849,12 @@ mod tests {
         for (n, row) in rows.iter().enumerate() {
             assert_eq!(row.1, "document");
             assert_eq!(row.3, Some(stable_uuid(&NS, None, &repo.shas[n])));
-            assert_eq!(row.5["parents"], if n == 0 { 0 } else { 1 });
+            let parents = match n {
+                0 => 0,
+                29 => 2,
+                _ => 1,
+            };
+            assert_eq!(row.5["parents"], parents);
         }
         assert_eq!(
             rows[2].2,
@@ -755,10 +864,26 @@ mod tests {
         );
         assert_eq!(rows[2].5["files_changed"], 3);
         assert_eq!(rows[11].2, "Ledger entry 12\n\nFiles: ledger/12.txt");
+        assert_eq!(rows[6].2, "Check the harbor gauge\n\nFiles: ledger/07.txt");
+        assert_eq!(
+            rows[8].2,
+            "Ask [mail] about the buoys\n\nFiles: ledger/09.txt"
+        );
+        assert_eq!(
+            rows[21].2,
+            "Merge branch 'main' of harbor-ledger\n\nFiles: ledger/22.txt"
+        );
+        assert_eq!(
+            rows[22].2,
+            "Merge remote-tracking branch 'tide-fix'\n\nFiles: ledger/23.txt"
+        );
         assert_eq!(
             rows[24].2,
             "Merge pull request #7 from tide-fix\n\nFiles: ledger/25.txt"
         );
+        // A merge lists no files.
+        assert_eq!(rows[29].2, "Merge branch 'soundings'");
+        assert_eq!(rows[29].5["files_changed"], 0);
     }
 
     #[test]
@@ -847,11 +972,18 @@ mod tests {
             return;
         };
         let repo = Repo::thirty("harbor-ledger-people");
-        // Negative control: the fixture does carry every person.
+        // Negative control: the fixture does carry every person, and `%s`
+        // does fold a trailer right under the subject into the subject.
         let raw = repo.git(&["log", "--branches", "--format=%an %ae %cn %ce%n%B"]);
         for person in PEOPLE {
             assert!(raw.contains(person), "the fixture lacks {person:?}");
         }
+        let subjects = repo.git(&["log", "--branches", "--format=%s"]);
+        assert!(
+            subjects.contains("Check the harbor gauge Co-authored-by: Jonas Probe"),
+            "{subjects}"
+        );
+        assert!(subjects.contains("Ask erika.mustermann@example.invalid about the buoys Signed-off-by: Erika Mustermann"), "{subjects}");
 
         let mut tx = client.transaction().expect("begin test tx");
         let source = GitSource::new(vec![repo.root.clone()]);
@@ -943,32 +1075,106 @@ mod tests {
     }
 
     #[test]
+    fn git_cap_keeps_the_newest_commits() {
+        let test = "git_cap_keeps_the_newest_commits";
+        if git_missing(test) {
+            return;
+        }
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping {test}: no PostgreSQL reachable");
+            return;
+        };
+        let repo = Repo::thirty("harbor-ledger-cap");
+        let mut tx = client.transaction().expect("begin test tx");
+        let source = GitSource::new(vec![repo.root.clone()]).with_max_commits(5);
+        let s = run(&mut tx, &source, false, &IgnoreRules::default()).unwrap();
+        assert_eq!((s.ingested, s.errors, s.messages_written), (1, 0, 5));
+        let id = conversation_id(&mut tx, "harbor-ledger-cap").unwrap();
+        let rows = messages(&mut tx, id);
+        let shas: Vec<&str> = rows.iter().map(|r| r.5["sha"].as_str().unwrap()).collect();
+        assert_eq!(shas, repo.shas[25..], "the newest five");
+        let meta: Value = tx
+            .query_one("SELECT metadata FROM conversations WHERE id = $1", &[&id])
+            .unwrap()
+            .get(0);
+        assert_eq!(
+            (
+                meta["commits_read"].as_u64(),
+                meta["commits_total"].as_u64()
+            ),
+            (Some(5), Some(30))
+        );
+    }
+
+    /// A root that is a symlink to a plain folder inside another repository
+    /// must not reach that repository.
+    #[cfg(unix)]
+    #[test]
+    fn git_root_behind_a_symlink_stops_at_its_folder() {
+        if git_missing("git_root_behind_a_symlink_stops_at_its_folder") {
+            return;
+        }
+        let mut outer = Repo::new("harbor-outer");
+        outer.commit("Outer entry", &["outer.txt"]);
+        let inner = outer.root.join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        let links = tempfile::tempdir().unwrap();
+        let link = links.path().join("harbor-link");
+        std::os::unix::fs::symlink(&inner, &link).unwrap();
+        let source = GitSource::new(vec![link.clone()]);
+        let err = source
+            .fingerprint(&link)
+            .expect_err("the enclosing repository is out of reach");
+        assert!(
+            format!("{err:#}").contains("not a git repository"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
     fn git_commit_text_caps_files_and_drops_people() {
         let files: Vec<String> = (1..=53).map(|n| format!("chart/{n:02}.txt")).collect();
-        let text = commit_content("Chart the bay", "", &files);
-        let expected_list: Vec<String> = files[..MAX_FILES].to_vec();
+        let listed = files[..MAX_FILES].join(", ");
         assert_eq!(
-            text,
-            format!(
-                "Chart the bay\n\nFiles: {} and 3 more",
-                expected_list.join(", ")
-            )
+            commit_content("Chart the bay\n", &files),
+            format!("Chart the bay\n\nFiles: {listed} and 3 more")
         );
         assert_eq!(
-            commit_content("Chart the bay", "", &files[..MAX_FILES]),
-            format!("Chart the bay\n\nFiles: {}", expected_list.join(", "))
+            commit_content("Chart the bay", &files[..MAX_FILES]),
+            format!("Chart the bay\n\nFiles: {listed}")
         );
         assert_eq!(
-            commit_content("Merge branch 'soundings'", "", &[]),
+            commit_content("Merge branch 'soundings'\n", &[]),
             "Merge branch 'soundings'"
+        );
+        let reviewed = format!(
+            "{MERGE}\n\nFix the tide table\n\n\
+             Reviewed-by: Jonas Probe <jonas.probe@example.invalid>\nCC: Max Beispiel\nRefs: chart 7\n"
+        );
+        assert_eq!(
+            commit_content(&reviewed, &[]),
+            "Merge pull request #7 from tide-fix\n\nFix the tide table\n\nRefs: chart 7"
+        );
+        // A trailer right under the subject never joins it.
+        assert_eq!(
+            commit_content(TRAILER_UNDER_SUBJECT, &[]),
+            "Check the harbor gauge"
         );
         assert_eq!(
             commit_content(
-                MERGE,
-                "Fix the tide table\n\nReviewed-by: Jonas Probe <jonas.probe@example.invalid>\nCC: Max Beispiel\nRefs: chart 7",
+                "Merge branch 'main' of https://example.invalid/erikam/harbor-ledger into soundings",
                 &[]
             ),
-            "Merge pull request #7 from tide-fix\n\nFix the tide table\n\nRefs: chart 7"
+            "Merge branch 'main' of harbor-ledger into soundings"
+        );
+        // The message text is cut, the file list is not.
+        let long = format!("Chart the bay\n\n{}", "a".repeat(9_000));
+        assert_eq!(
+            commit_content(&long, &files[..1]),
+            format!(
+                "Chart the bay\n\n{}\n[1015 more characters not stored]\n\nFiles: chart/01.txt",
+                "a".repeat(MAX_TEXT_CHARS - 15)
+            )
         );
     }
 
@@ -977,14 +1183,14 @@ mod tests {
         let sha = "a".repeat(40);
         let parent = "b".repeat(40);
         let raw = format!(
-            "\x1e{sha}\0{parent}\x001900000060\0Odd body\0line with \x1e marker\n\0\0\nx.txt\0y z.txt\0\
-             \x1e{parent}\0\x001900000000\0Root\0\0\0"
+            "\x1e{sha}\0{parent}\x001900000060\0Odd subject\n\nline with \x1e marker\n\0\0\nx.txt\0y z.txt\0\
+             \x1e{parent}\0\x001900000000\0Root\n\0\0"
         );
         let commits = parse_log(raw.as_bytes());
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].sha, sha);
         assert_eq!(commits[0].parents, 1);
-        assert_eq!(commits[0].body, "line with \x1e marker\n");
+        assert_eq!(commits[0].message, "Odd subject\n\nline with \x1e marker\n");
         assert_eq!(commits[0].files, ["x.txt", "y z.txt"]);
         assert_eq!(
             commits[0].committed,
@@ -992,5 +1198,16 @@ mod tests {
         );
         assert_eq!(commits[1].parents, 0);
         assert!(commits[1].files.is_empty());
+
+        // A message that ends in 0x1E and a SHA hides no commit.
+        let crafted = format!(
+            "\x1e{sha}\0{parent}\x001900000060\0Odd\x1e{parent}\0\0\nx.txt\0\
+             \x1e{parent}\0\x001900000000\0Root\n\0\0"
+        );
+        let commits = parse_log(crafted.as_bytes());
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].message, format!("Odd\x1e{parent}"));
+        assert_eq!(commits[0].files, ["x.txt"]);
+        assert_eq!(commits[1].sha, parent);
     }
 }
