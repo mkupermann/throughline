@@ -42,15 +42,17 @@ Jedes KI-Coding-Tool speichert seine eigenen Session-Dateien und vergisst den Re
 
 ### Unterstützte Session-Quellen
 
-Die Rust-Registry enthält **11 Adapter**. Sie lesen lokale Dateien. Es sind keine Cloud-Synchronisierungen. Die Abdeckung unterscheidet sich stark. Ein externes Audit hat sie am 30.10.2026 gegen echte Session-Dateien geprüft.
+Die Rust-Registry enthält **13 Adapter**. Sie lesen lokale Dateien. Es sind keine Cloud-Synchronisierungen. Die Abdeckung unterscheidet sich stark. Ein externes Audit hat sie am 30.10.2026 gegen echte Session-Dateien geprüft.
 
 | Stand | Adapter | Was das heißt |
 | --- | --- | --- |
 | Mit echten Dateien geprüft | Claude Code, Codex, Vibe | Rollen, Tool-Aufrufe, Modell und Zeitstempel kommen an. Die Token-Summen von Claude Code zählen jeden gestreamten Eintrag und liegen etwa doppelt zu hoch. |
 | Teilweise | Cline, Hermes, Windsurf | Cline gibt jeder Nachricht die Startzeit der Session und kein Modell. Hermes liest aus `state.db` nur die erste Session. Windsurf importiert Plandateien, keine Cascade-Gespräche. |
 | Nicht geprüft, Pfad oder Format vermutlich falsch | Cursor, Zed, Continue, OpenCode, Aider | Cursor und Zed suchen in Ordnern, die diese Tools nicht nutzen. OpenCode fand 254 echte Dateien und importierte keine. Aider und Continue beruhen auf einem angenommenen Format. |
+| Auf echten Daten ungeprüft | Gemini CLI | Gegen Quellcode `6814e00d6b14` von google-gemini/gemini-cli gebaut, auf echten Daten ungeprüft. Subagent-Sessions werden übersprungen. |
+| Teilweise bestätigt | Copilot Chat | Schnappschuss-Format an einer echten Datei bestätigt, Anfrage- und Antwortfelder ungeprüft. Aus einem `.jsonl`-Log wird nur die Schnappschuss-Zeile gelesen, spätere Zeilen werden gezählt. |
 
-Das Standard-Compose mountet die ersten neun Tool-Verzeichnisse schreibgeschützt. OpenCode und Aider brauchen ihre Quellverzeichnisse separat. Quelle der Wahrheit ist die [Adapter-Registry](rust/crates/throughline/src/adapters/registry.rs).
+Das Standard-Compose mountet die ersten neun Tool-Verzeichnisse schreibgeschützt. OpenCode, Aider, Gemini CLI und Copilot Chat brauchen ihre Quellverzeichnisse separat. Quelle der Wahrheit ist die [Adapter-Registry](rust/crates/throughline/src/adapters/registry.rs).
 
 ## Die Demo mit fiktiven Daten
 

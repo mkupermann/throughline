@@ -17,6 +17,8 @@ pub fn built_ins() -> Vec<Box<dyn Adapter>> {
         Box::new(super::hermes::HermesAdapter::default()),
         Box::new(super::opencode::OpenCodeAdapter::default()),
         Box::new(super::aider::AiderAdapter::default()),
+        Box::new(super::gemini_cli::GeminiCliAdapter::default()),
+        Box::new(super::copilot_chat::CopilotChatAdapter::default()),
     ];
     list.extend(registry_hook());
     list
