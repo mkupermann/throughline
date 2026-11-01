@@ -120,7 +120,8 @@ file in `public.applied_migrations`. `sql/schema.sql` remains a schema snapshot
 for inspection and CI validation, not the new-installation path. Three enum
 types constrain the vocabulary:
 `memory_category` (decision, pattern, insight, preference, contact, error_solution,
-project_context, workflow), `message_role` (user, assistant, system, tool_result) and
+project_context, workflow), `message_role` (user, assistant, system, tool_result,
+document) and
 `project_status`.
 
 | Table | Purpose |
@@ -148,7 +149,7 @@ and baselined before later migrations apply; migration history is never rewritte
 
 The Rust runtime keeps its own list, `MIGRATIONS` in
 `rust/crates/throughline/src/migrate.rs`, from `001_rust_core.sql` to
-`015_account_stars_untimed.sql`. The next Rust migration is 016. Both runtimes
+`016_message_role_document.sql`. The next Rust migration is 017. Both runtimes
 record into the same `applied_migrations` table, keyed by file name only, so a
 Rust name must not repeat a name from `throughline/migrations/`, which already
 holds `016_pm_templates.sql` to `018_processing_checkpoints.sql`; the ledger

@@ -1041,6 +1041,17 @@ td.td-id, td.td-num, td.td-date {
 .role-assistant { background: var(--bg-hover); color: var(--text); }
 .role-tool, .role-tool-result { background: transparent; border-color: var(--border); color: var(--text-2); }
 .role-system { background: transparent; border-color: var(--border-subtle); color: var(--text-3); }
+.msg-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 600;
+  color: var(--text);
+}
+.msg-doc-icon { flex: none; color: var(--text-2); }
+.msg-doc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Command palette */
 .palette-backdrop {
@@ -2175,6 +2186,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
               <option value="assistant" data-i18n="role.assistant">assistant</option>
               <option value="tool_result" data-i18n="role.tool_result">tool_result</option>
               <option value="system" data-i18n="role.system">system</option>
+              <option value="document" data-i18n="role.document">document</option>
             </select>
           </label>
           <label class="field">
@@ -2697,7 +2709,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       offset: 0, limit: 50, total: 0, q: "", role: "", tool: "",
       conversation_id: null, tool_only: false,
     },
-    detailRoles: new Set(["user", "assistant", "tool", "tool_result", "system"]),
+    detailRoles: new Set(["user", "assistant", "tool", "tool_result", "system", "document"]),
     detailOpen: new Set(),
     detail: null,
     msg: null,
@@ -3349,6 +3361,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "role.tool": "Tool",
       "role.tool_result": "Tool result",
       "role.system": "System",
+      "role.document": "Document",
       // category filter options
       "cat.decision": "decision",
       "cat.preference": "preference",
@@ -4073,6 +4086,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "role.tool": "Werkzeug",
       "role.tool_result": "Werkzeugergebnis",
       "role.system": "System",
+      "role.document": "Dokument",
       "cat.decision": "Entscheidung",
       "cat.preference": "Präferenz",
       "cat.pattern": "Muster",
@@ -5276,6 +5290,22 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     const v = t(key);
     return v && v !== key ? v : role;
   }
+  function fileIcon(label) {
+    return '<svg class="msg-doc-icon" width="14" height="14" viewBox="0 0 16 16" role="img" aria-label="' +
+      escapeHtml(label) + '"><path d="M4 1.5h5l3.5 3.5v9.5h-8.5z M9 1.5V5h3.5" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linejoin="round"/></svg>';
+  }
+  // The label of a document section: its first line, without Markdown heading marks.
+  function docLabel(text) {
+    const first = String(text || "").split("\n").map((l) => l.trim()).find((l) => l) || "";
+    return first.replace(/^#{1,6}\s+/, "");
+  }
+  // A document section has no speaker: a file icon and its first line stand where the role is.
+  function docHead(m) {
+    const label = docLabel(m.content) || t("role.document");
+    return '<span class="msg-doc" title="' + escapeHtml(label) + '">' + fileIcon(t("role.document")) +
+      '<span class="msg-doc-label">' + escapeHtml(label) + "</span></span>";
+  }
   function visibleDetailMessages() {
     const c = state.detail;
     return c ? (c.messages || []).filter((m) => state.detailRoles.has(m.role)) : [];
@@ -5306,8 +5336,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         '<article class="msg' + (isTool ? " msg-tool" : "") + (open ? " open" : "") + '" data-msg-id="' + Number(m.id) +
         '" data-role="' + escapeHtml(m.role) + '" data-created-at="' + escapeHtml(m.created_at || "") + '">' +
         '<div class="msg-head">' + favStar("message", m.id, m.favorite) +
-        '<span class="role-pill role-' + escapeHtml(m.role.replace(/_/g, "-")) + '">' +
-        escapeHtml(roleLabel(m.role)) + "</span>" +
+        (m.role === "document" ? docHead(m) : '<span class="role-pill role-' + escapeHtml(m.role.replace(/_/g, "-")) + '">' +
+          escapeHtml(roleLabel(m.role)) + "</span>") +
         (m.model ? escapeHtml(m.model) + " · " : "") +
         fmtDateTime(m.created_at) + toggle +
         "</div><pre>" + escapeHtml(shown) + "</pre></article>"

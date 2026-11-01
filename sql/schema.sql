@@ -68,7 +68,8 @@ CREATE TYPE public.message_role AS ENUM (
     'user',
     'assistant',
     'system',
-    'tool_result'
+    'tool_result',
+    'document'
 );
 
 

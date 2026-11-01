@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Role `document`
+
+- **Migration 016.** `016_message_role_document.sql` adds the value `document` to the enum `message_role`; `sql/schema.sql` has it too. `serve` refuses to start until it has run. Compose runs `migrate` first.
+- **No speaker.** A message with role `document` is a section of a file, a commit or a page. The transcript shows a file icon and the section's first line where the role would be, in German and English. The role filter of the message list offers it.
+- **Documents are not sessions.** "Recent sessions" in the context pack and the handoff leave out conversations whose `source_tool` is `markdown`, `git` or `web`. Their notes still count.
+- **Stable preview.** When messages share a timestamp, the preview in the conversation list takes the first by id.
+- **Titles.** `generate-titles` replaces no summary an adapter set.
+
 ### Recall ranks by meaning by default
 
 Measured on 74 questions from one installation with `granite-embedding-multilingual:278m`. Method, numbers and limits are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md#recall-and-public-benchmarks). Entries further down that call full text the default describe the state before this change.

@@ -862,21 +862,12 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let rows = client.query(
-                r#"
-                SELECT id, summary FROM conversations
-                WHERE summary IS NULL OR summary = ''
-                ORDER BY started_at DESC
-                LIMIT $1::bigint
-                "#,
-                &[&(limit as i64)],
-            )?;
+            let ids = generate_titles::untitled_conversations(&mut client, limit)?;
             if let Ok(backend) = llm::resolve_backend() {
                 llm::ensure_local_or_allowed(&backend)?;
             }
             let mut titled = 0usize;
-            for row in rows {
-                let id: i64 = row.get(0);
+            for id in ids {
                 let msgs = client.query(
                     r#"
                     SELECT role::text, COALESCE(content,'') FROM messages
