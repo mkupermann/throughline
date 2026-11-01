@@ -99,12 +99,83 @@ fn heading(section: Section) -> Option<&'static str> {
     }
 }
 
+/// The share of the budget, in percent and rounded down, that "Relevant to the task" fills
+/// before the other sections when the request has a task.
+pub const RELEVANT_RESERVE_PERCENT: usize = 30;
+
 /// Packs the header and then the lines, in order, into at most `budget` tokens.
 /// The header is flattened like any line; a header that is blank after flattening is emitted as a
 /// single space (one line, estimate 1), so that the accounting below holds for every `Ok` result.
 /// Every emitted text line costs `estimate_tokens(line) + 1` (the newline).
 /// Lines that do not fit are skipped; lines that are blank after flattening are dropped silently.
 pub fn pack(header: &str, lines: &[Line], budget: usize) -> Result<ContextPack, PackError> {
+    pack_with(header, lines, budget, false)
+}
+
+fn heading_cost(section: Section) -> usize {
+    heading(section).map_or(0, |h| estimate_tokens(h) + 1)
+}
+
+/// What taking line `i` adds to the lines already `chosen`: the line, its heading unless the
+/// chosen line before it has the same section, and the heading the next chosen line gains or
+/// loses. The text keeps the order of the lines, so a heading depends on the neighbours.
+fn added_cost(sections: &[Section], tokens: &[usize], chosen: &[bool], i: usize) -> usize {
+    let prev = (0..i).rev().find(|&j| chosen[j]).map(|j| sections[j]);
+    let next = (i + 1..chosen.len())
+        .find(|&j| chosen[j])
+        .map(|j| sections[j]);
+    let s = sections[i];
+    let mut cost = tokens[i] + 1;
+    if prev != Some(s) {
+        cost += heading_cost(s);
+    }
+    if let Some(n) = next {
+        if n != s {
+            cost += heading_cost(n);
+        }
+        if prev != Some(n) {
+            cost -= heading_cost(n);
+        }
+    }
+    cost
+}
+
+/// Takes the lines of the sections `want` admits, in order, first fit: each while this pass
+/// stays within `cap` and the pack within `budget`.
+fn fill(
+    sections: &[Section],
+    tokens: &[usize],
+    chosen: &mut [bool],
+    used: &mut usize,
+    (budget, cap): (usize, usize),
+    want: impl Fn(Section) -> bool,
+) {
+    let mut added = 0;
+    for i in 0..chosen.len() {
+        if chosen[i] || !want(sections[i]) {
+            continue;
+        }
+        let cost = added_cost(sections, tokens, chosen, i);
+        if added + cost > cap || *used + cost > budget {
+            continue;
+        }
+        chosen[i] = true;
+        added += cost;
+        *used += cost;
+    }
+}
+
+/// [`pack`], for a request with or without a task. With `task`, the lines of
+/// [`Section::Relevant`] are taken first, up to [`RELEVANT_RESERVE_PERCENT`] % of the budget
+/// (rounded down, heading included); then the other lines in order; then the Relevant lines
+/// left over while the budget lasts. What Relevant leaves of its share goes to the others. The
+/// text keeps the order of `lines`. Without `task` it is the one pass in order.
+pub fn pack_with(
+    header: &str,
+    lines: &[Line],
+    budget: usize,
+    task: bool,
+) -> Result<ContextPack, PackError> {
     if !(MIN_BUDGET..=MAX_BUDGET).contains(&budget) {
         return Err(PackError::BudgetOutOfRange(budget));
     }
@@ -116,31 +187,53 @@ pub fn pack(header: &str, lines: &[Line], budget: usize) -> Result<ContextPack, 
     if header_cost > budget {
         return Err(PackError::HeaderTooLarge);
     }
+    let flat: Vec<(&Line, String)> = lines
+        .iter()
+        .map(|l| (l, l.text.replace(['\n', '\r'], " ")))
+        .filter(|(_, text)| !text.trim().is_empty())
+        .collect();
+    let sections: Vec<Section> = flat.iter().map(|(l, _)| l.section).collect();
+    let tokens: Vec<usize> = flat.iter().map(|(_, t)| estimate_tokens(t)).collect();
+    let mut chosen = vec![false; flat.len()];
     let mut used = header_cost;
+    let relevant = |s: Section| s == Section::Relevant;
+    if task {
+        let reserve = budget * RELEVANT_RESERVE_PERCENT / 100;
+        let mut pass = |cap: usize, want: &dyn Fn(Section) -> bool| {
+            fill(
+                &sections,
+                &tokens,
+                &mut chosen,
+                &mut used,
+                (budget, cap),
+                want,
+            )
+        };
+        pass(reserve, &relevant);
+        pass(budget, &|s| !relevant(s));
+        pass(budget, &relevant);
+    } else {
+        fill(
+            &sections,
+            &tokens,
+            &mut chosen,
+            &mut used,
+            (budget, budget),
+            |_| true,
+        );
+    }
     let mut out: Vec<String> = vec![header];
     let mut items = Vec::new();
     let mut citations: Vec<Citation> = Vec::new();
     let mut skipped = 0;
     let mut current: Option<Section> = None;
-    for line in lines {
-        let text = line.text.replace(['\n', '\r'], " ");
-        if text.trim().is_empty() {
-            continue;
-        }
-        let tokens = estimate_tokens(&text);
-        let head = if current == Some(line.section) {
-            None
-        } else {
-            heading(line.section)
-        };
-        let cost = tokens + 1 + head.map_or(0, |h| estimate_tokens(h) + 1);
-        if used + cost > budget {
+    for (((line, text), tokens), chosen) in flat.into_iter().zip(tokens).zip(chosen) {
+        if !chosen {
             skipped += 1;
             continue;
         }
-        used += cost;
-        if let Some(h) = head {
-            out.push(h.to_string());
+        if current != Some(line.section) {
+            out.extend(heading(line.section).map(String::from));
         }
         current = Some(line.section);
         out.push(text.clone());
@@ -446,7 +539,9 @@ pub fn build_context<C: GenericClient>(
     review(client, actor, req.project, &shown, &mut lines)?;
 
     // Sources: the sessions behind the lines that made it into the pack, first appearance first.
-    let first = pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?;
+    // With a task, "Relevant to the task" fills its share of the budget first.
+    let first =
+        pack_with(&header, &lines, req.budget, task.is_some()).map_err(anyhow::Error::new)?;
     let mut sources: Vec<Line> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
     // A session is dated by its start, the same date its own citation carries.
@@ -494,7 +589,7 @@ pub fn build_context<C: GenericClient>(
         first
     } else {
         lines.extend(sources);
-        pack(&header, &lines, req.budget).map_err(anyhow::Error::new)?
+        pack_with(&header, &lines, req.budget, task.is_some()).map_err(anyhow::Error::new)?
     };
     out.degraded = degraded;
     Ok(out)
@@ -791,6 +886,21 @@ mod tests {
                 Err(e) => {
                     assert_eq!(e, PackError::HeaderTooLarge, "case {case}");
                     assert!(!header_fits, "case {case}");
+                }
+            }
+            // With a task, in the given order and with the sections interleaved.
+            let interleaved: Vec<Line> = lines
+                .iter()
+                .step_by(2)
+                .chain(lines.iter().skip(1).step_by(2))
+                .cloned()
+                .collect();
+            for order in [&lines, &interleaved] {
+                if let Ok(p) = pack_with(&header, order, budget, true) {
+                    assert!(p.tokens_used <= budget, "case {case}");
+                    let sum: usize = p.text.lines().map(|l| estimate_tokens(l) + 1).sum();
+                    assert_eq!(p.tokens_used, sum, "case {case}");
+                    assert_eq!(p.items.len() + p.skipped, order.len(), "case {case}");
                 }
             }
         }
@@ -1492,5 +1602,200 @@ mod tests {
             "the pack JSON",
         );
         assert!(cited_note_ids(&theirs).contains(&shared), "{}", theirs.text);
+    }
+
+    // ---- the reserve for "Relevant to the task" ----
+
+    fn cited(p: &ContextPack, section: Section) -> Vec<i64> {
+        p.items
+            .iter()
+            .filter(|i| i.section == section)
+            .filter_map(|i| i.cite.as_ref().map(|c| c.id))
+            .collect()
+    }
+
+    /// Four decisions of cost 46 (`words(45)` + newline), two Relevant lines of cost 27 and a
+    /// session line of cost 11. Header "h" costs 2; the headings cost 4 (Decisions), 7
+    /// (Relevant) and 6 (Recent sessions).
+    fn crowded() -> Vec<Line> {
+        let mut lines: Vec<Line> = (1..=4)
+            .map(|id| line(Section::Decisions, &words(45), note(id)))
+            .collect();
+        lines.push(line(Section::Relevant, &words(26), note(5)));
+        lines.push(line(Section::Relevant, &words(26), note(6)));
+        lines.push(line(Section::Sessions, &words(10), note(7)));
+        lines
+    }
+
+    #[test]
+    fn pack_reserves_thirty_percent_for_relevant_when_a_task_is_given() {
+        // Budget 203: 30 % is 60.9, rounded down 60. Heading + one Relevant line = 34 fits,
+        // a second line would make 61. Then three decisions (2 + 34 + 50 + 46 + 46 = 178), the
+        // fourth does not fit, the session line does (195); the second Relevant line does not.
+        let p = pack_with("h", &crowded(), 203, true).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![5], "{}", p.text);
+        assert_eq!(cited(&p, Section::Decisions), vec![1, 2, 3], "{}", p.text);
+        assert_eq!(cited(&p, Section::Sessions), vec![7], "{}", p.text);
+        assert_eq!(p.tokens_used, 195);
+        assert_eq!(p.tokens_used, r1_sum(&p));
+        assert_eq!(p.skipped, 2);
+        // The text keeps the section order: Decisions, Relevant, Recent sessions.
+        let d = pos(&p, "## Decisions");
+        assert!(d < pos(&p, "## Relevant to the task"));
+        assert!(pos(&p, "## Relevant to the task") < pos(&p, "## Recent sessions"));
+        // Budget 206: 30 % is 61.8, rounded down 61, so both Relevant lines fit the reserve.
+        let p = pack_with("h", &crowded(), 206, true).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![5, 6], "{}", p.text);
+        assert_eq!(cited(&p, Section::Decisions), vec![1, 2, 3], "{}", p.text);
+        // Without a task the decisions crowd Relevant out, as before.
+        let p = pack_with("h", &crowded(), 203, false).unwrap();
+        assert!(cited(&p, Section::Relevant).is_empty(), "{}", p.text);
+        // Budget left after the others goes back to Relevant: one decision, then the two
+        // Relevant lines beyond the reserve (2 + 34 + 50 + 27 + 27 = 140).
+        let mut few = vec![line(Section::Decisions, &words(45), note(1))];
+        few.extend((5..=7).map(|id| line(Section::Relevant, &words(26), note(id))));
+        let p = pack_with("h", &few, 203, true).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![5, 6, 7], "{}", p.text);
+        assert_eq!(cited(&p, Section::Decisions), vec![1], "{}", p.text);
+        assert_eq!(p.tokens_used, 140);
+
+        // Through build_context: decisions alone overflow the budget, two notes match the task.
+        db_tx!(
+            "pack_reserves_thirty_percent_for_relevant_when_a_task_is_given",
+            tx
+        );
+        let p = proj();
+        for d in 1..=20 {
+            let content = format!(
+                "decision {d} about the logging layout and the retry policy of the export job"
+            );
+            insert(&mut tx, &seed(&content, Some(&p), "decision", d));
+        }
+        insert(
+            &mut tx,
+            &seed("quokka habitat survey", Some(&p), "insight", 21),
+        );
+        insert(
+            &mut tx,
+            &seed("quokka burrow count", Some(&p), "insight", 22),
+        );
+        let req = ContextRequest {
+            project: &p,
+            task: Some("quokka"),
+            budget: 300,
+        };
+        let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
+        let r = relevant_lines(&out);
+        assert_eq!(r.len(), 2, "{}", out.text);
+        assert!(r.iter().all(|l| l.contains("quokka")), "{r:#?}");
+        let relevant_cost: usize = estimate_tokens("## Relevant to the task")
+            + 1
+            + r.iter().map(|l| estimate_tokens(l) + 1).sum::<usize>();
+        assert!(relevant_cost <= 300 * 30 / 100, "{relevant_cost}");
+        assert!(!decision_lines(&out).is_empty(), "{}", out.text);
+        assert!(out.within_budget);
+    }
+
+    /// `pack` as it was before the reserve: one pass, in order, first fit.
+    fn pack_before(header: &str, lines: &[Line], budget: usize) -> (String, usize, usize) {
+        let mut header = header.replace(['\n', '\r'], " ");
+        if header.trim().is_empty() {
+            header = " ".to_string();
+        }
+        let mut used = estimate_tokens(&header) + 1;
+        let mut out = vec![header];
+        let (mut skipped, mut current) = (0, None);
+        for line in lines {
+            let text = line.text.replace(['\n', '\r'], " ");
+            if text.trim().is_empty() {
+                continue;
+            }
+            let head = (current != Some(line.section))
+                .then(|| heading(line.section))
+                .flatten();
+            let cost = estimate_tokens(&text) + 1 + head.map_or(0, |h| estimate_tokens(h) + 1);
+            if used + cost > budget {
+                skipped += 1;
+                continue;
+            }
+            used += cost;
+            out.extend(head.map(String::from));
+            current = Some(line.section);
+            out.push(text);
+        }
+        (out.join("\n"), used, skipped)
+    }
+
+    #[test]
+    fn pack_without_task_is_unchanged() {
+        let p = pack_with("h", &crowded(), 203, false).unwrap();
+        let w45 = words(45);
+        assert_eq!(
+            p.text,
+            format!("h\n## Decisions\n{w45}\n{w45}\n{w45}\n{w45}")
+        );
+        assert_eq!((p.tokens_used, p.skipped), (190, 3));
+        assert_eq!(cited(&p, Section::Decisions), vec![1, 2, 3, 4]);
+        // Random lines, sections in any order: byte for byte what the old pack gave.
+        let sections = [
+            Section::Decisions,
+            Section::Relevant,
+            Section::Sessions,
+            Section::OpenQuestions,
+            Section::Review,
+            Section::Sources,
+        ];
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        for case in 0..500 {
+            let budget = rng.range(64, 4096);
+            let header = mixed(&mut rng, 40);
+            let n = rng.range(0, 40);
+            let lines: Vec<Line> = (0..n)
+                .map(|_| {
+                    let s = sections[rng.range(0, 5)];
+                    line(s, &mixed(&mut rng, 400), None)
+                })
+                .collect();
+            let p = pack_with(&header, &lines, budget, false).unwrap();
+            assert_eq!(
+                (p.text.clone(), p.tokens_used, p.skipped),
+                pack_before(&header, &lines, budget),
+                "case {case}"
+            );
+            let q = pack(&header, &lines, budget).unwrap();
+            assert_eq!(q.text, p.text, "case {case}");
+        }
+    }
+
+    #[test]
+    fn relevant_leftover_returns_to_other_sections() {
+        // Budget 200, reserve 60. Relevant uses 12 of it (heading 7 + a line of 5). Five
+        // decisions of cost 46 and a session line of 11 get the rest: 2 + 12 + 50 + 46 + 46
+        // = 156, the fourth decision does not fit (202), the session line does (173).
+        // Without a task the decisions crowd the Relevant line out (190, then 202).
+        let mut lines: Vec<Line> = (1..=5)
+            .map(|id| line(Section::Decisions, &words(45), note(id)))
+            .collect();
+        lines.push(line(Section::Relevant, &words(4), note(6)));
+        lines.push(line(Section::Sessions, &words(10), note(7)));
+        let p = pack_with("h", &lines, 200, true).unwrap();
+        assert_eq!(cited(&p, Section::Relevant), vec![6], "{}", p.text);
+        // Held strictly, the reserve would leave the others 140: two decisions.
+        assert_eq!(cited(&p, Section::Decisions), vec![1, 2, 3], "{}", p.text);
+        assert_eq!(cited(&p, Section::Sessions), vec![7], "{}", p.text);
+        assert_eq!(p.tokens_used, 173);
+        assert_eq!(p.tokens_used, r1_sum(&p));
+        let others = p.tokens_used - 2 - (estimate_tokens("## Relevant to the task") + 1 + 5);
+        assert!(others > 200 - 200 * 30 / 100, "{others}");
+        // No Relevant line at all: the whole budget goes to the others, as without a task.
+        let no_relevant: Vec<Line> = lines
+            .iter()
+            .filter(|l| l.section != Section::Relevant)
+            .cloned()
+            .collect();
+        let with = pack_with("h", &no_relevant, 200, true).unwrap();
+        let without = pack_with("h", &no_relevant, 200, false).unwrap();
+        assert_eq!(with.text, without.text);
+        assert_eq!(with.tokens_used, without.tokens_used);
     }
 }
