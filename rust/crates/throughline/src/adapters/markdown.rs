@@ -8,7 +8,12 @@
 //! 1 MiB.
 //!
 //! One file is one conversation:
-//! - `session_id` is a stable UUID of the file path;
+//! - `session_id` is a stable UUID of `<root folder name>/<path below the
+//!   root>`, so a root read natively and inside a container (different
+//!   absolute prefixes) meets in one conversation. Two configured roots with
+//!   the same folder name therefore share the ids of equal relative paths,
+//!   and an inner root added later gives its files new ids. The absolute path
+//!   is in the metadata;
 //! - `project_path` is the root folder, or `markdown/<project>` when the
 //!   frontmatter names a project, never the file path: the project name is
 //!   the last segment of `project_path`. The file path is in the metadata;
@@ -19,7 +24,8 @@
 //!   fenced code block is text. Text before the first heading is the first
 //!   section. A section over 2,000 characters goes on in further messages,
 //!   so the extraction, which cuts each line at 2,000 characters, sees all
-//!   of it;
+//!   of it. Each further message starts with the section's heading line
+//!   again, so it keeps its context when read alone;
 //! - messages carry no uuid, so the messages of a changed file are deleted
 //!   and written again (the runner sees the change as a new SHA-256);
 //! - message n of the file is stamped file mtime plus n µs, so times are
@@ -27,7 +33,13 @@
 //!
 //! Frontmatter is read by a small reader, not a YAML parser: `key: value`,
 //! inline `[a, b]` lists and `- item` lists, for `title`, `tags`, `date` and
-//! `project`. Wikilinks stay text.
+//! `project`. A leading `---` block counts as frontmatter only when it is
+//! shaped like a mapping; otherwise it stays text. Block scalars (`>`, `|`)
+//! are not read. Wikilinks stay text.
+//!
+//! Roots must be absolute after expansion: a relative entry or `~user` would
+//! resolve against the working directory of launchd or `docker exec`, so it
+//! is dropped with one warning line per process.
 
 use super::{stable_uuid, Adapter};
 use crate::types::{NormalisedConversation, NormalisedMessage, Role};
@@ -56,9 +68,16 @@ const NS: Uuid = Uuid::from_u128(0x13361d86_15b2_47e6_9a69_8e9d403b8de2);
 
 /// The roots in a [`ROOTS_ENV`] value: split at `:`, blanks dropped, `~` and
 /// `~/…` expanded against `home`, trailing slashes removed (they would leave
-/// the project name empty), each root once.
+/// the project name empty), each root once. Entries that are not absolute
+/// after expansion are dropped.
 pub fn parse_roots(raw: &str, home: Option<&Path>) -> Vec<PathBuf> {
+    read_roots(raw, home).0
+}
+
+/// [`parse_roots`], plus the entries it dropped as not absolute.
+fn read_roots<'a>(raw: &'a str, home: Option<&Path>) -> (Vec<PathBuf>, Vec<&'a str>) {
     let mut roots: Vec<PathBuf> = Vec::new();
+    let mut dropped = Vec::new();
     for entry in raw.split(':').map(str::trim).filter(|e| !e.is_empty()) {
         let expanded = match (entry.strip_prefix('~'), home) {
             (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
@@ -66,12 +85,16 @@ pub fn parse_roots(raw: &str, home: Option<&Path>) -> Vec<PathBuf> {
             }
             _ => PathBuf::from(entry),
         };
+        if !expanded.is_absolute() {
+            dropped.push(entry);
+            continue;
+        }
         let root: PathBuf = expanded.components().collect();
         if !roots.contains(&root) {
             roots.push(root);
         }
     }
-    roots
+    (roots, dropped)
 }
 
 /// The fields of a frontmatter block that the adapter keeps.
@@ -102,7 +125,9 @@ impl Frontmatter {
 }
 
 /// A leading `---` block closed by `---` or `...`, and the text after it.
-/// Without a closing line there is no frontmatter and all of it is text.
+/// Without a closing line, or when the block is not shaped like a mapping
+/// (two rules around prose, say), there is no frontmatter and all of it is
+/// text.
 fn read_frontmatter(text: &str) -> (Frontmatter, &str) {
     let mut lines = text.split_inclusive('\n');
     let Some(first) = lines.next().filter(|l| l.trim_end() == "---") else {
@@ -114,11 +139,43 @@ fn read_frontmatter(text: &str) -> (Frontmatter, &str) {
         offset += line.len();
         let bare = line.trim_end();
         if bare == "---" || bare == "..." {
+            if !is_mapping(&block) {
+                break;
+            }
             return (frontmatter_fields(&block), &text[offset..]);
         }
         block.push(bare);
     }
     (Frontmatter::default(), text)
+}
+
+/// `key: value` at the start of a line; the key may hold spaces, not `:`.
+fn is_key_line(line: &str) -> bool {
+    line.split_once(':').is_some_and(|(key, rest)| {
+        !key.trim().is_empty()
+            && !line.starts_with([' ', '\t', '-', '#'])
+            && key
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '-' | '.'))
+            && (rest.is_empty() || rest.starts_with([' ', '\t']))
+    })
+}
+
+/// A block of key lines, with comments, indented lines (nested values,
+/// folded text) and `- item` lines between them, and at least one key.
+/// An empty block counts too.
+fn is_mapping(lines: &[&str]) -> bool {
+    let fits = |line: &&str| {
+        let t = line.trim();
+        t.is_empty()
+            || t.starts_with('#')
+            || line.starts_with([' ', '\t'])
+            || t == "-"
+            || t.starts_with("- ")
+            || is_key_line(line)
+    };
+    lines.iter().all(fits)
+        && (lines.iter().all(|l| l.trim().is_empty()) || lines.iter().any(|l| is_key_line(l)))
 }
 
 fn frontmatter_fields(lines: &[&str]) -> Frontmatter {
@@ -148,7 +205,9 @@ fn frontmatter_fields(lines: &[&str]) -> Frontmatter {
             continue;
         };
         let (key, value) = (key.trim(), value.trim());
-        let scalar = Some(unquote(value)).filter(|v| !v.is_empty());
+        // `>` and `|` start a block scalar, which this reader does not read.
+        let scalar =
+            Some(unquote(value)).filter(|v| !v.is_empty() && !value.starts_with(['>', '|']));
         match key {
             "title" => fm.title = scalar,
             "date" => fm.date = scalar,
@@ -334,6 +393,25 @@ fn is_skipped_dir(name: &OsStr) -> bool {
     SKIP_DIRS.iter().any(|d| name == OsStr::new(d))
 }
 
+/// `<root folder name>/<path below the root>`, `/`-separated: the same file
+/// under two mount prefixes gives the same key.
+fn session_key(root: &Path, path: &Path) -> String {
+    let name = root
+        .file_name()
+        .map(OsStr::to_string_lossy)
+        .unwrap_or_default();
+    let below: Vec<String> = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    format!("{name}/{}", below.join("/"))
+}
+
+/// Longest heading line repeated at the top of a continuation message.
+const MAX_REPEATED_HEADING_CHARS: usize = 200;
+
 pub struct MarkdownAdapter {
     roots: Vec<PathBuf>,
 }
@@ -347,7 +425,21 @@ impl MarkdownAdapter {
             .filter(|h| !h.is_empty())
             .map(PathBuf::from)
             .or_else(dirs::home_dir);
-        Self::new(parse_roots(&raw, home.as_deref()))
+        let (roots, dropped) = read_roots(&raw, home.as_deref());
+        // `built_ins` runs per request in the server: say it once.
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        if !dropped.is_empty() {
+            WARNED.call_once(|| {
+                eprintln!(
+                    "[{NAME}] {ROOTS_ENV}: ignored {} entr{} that {} not absolute: {}",
+                    dropped.len(),
+                    if dropped.len() == 1 { "y" } else { "ies" },
+                    if dropped.len() == 1 { "is" } else { "are" },
+                    dropped.join(", ")
+                );
+            });
+        }
+        Self::new(roots)
     }
 
     pub fn new(roots: Vec<PathBuf>) -> Self {
@@ -387,12 +479,24 @@ impl Adapter for MarkdownAdapter {
                 .filter_entry(|e| {
                     e.depth() == 0 || !(e.file_type().is_dir() && is_skipped_dir(e.file_name()))
                 });
-            // Unreadable folders are passed over. Symlinks are not followed
-            // and are not files, so they drop out here.
-            for entry in walk.flatten() {
+            // Symlinks are not followed and are not files, so they drop out
+            // here. Unreadable entries are passed over and counted.
+            let mut unreadable = 0usize;
+            for entry in walk {
+                let Ok(entry) = entry else {
+                    unreadable += 1;
+                    continue;
+                };
                 if entry.file_type().is_file() && self.excluded_reason(entry.path()).is_none() {
                     out.push(entry.into_path());
                 }
+            }
+            if unreadable > 0 {
+                eprintln!(
+                    "[{NAME}] passed over {unreadable} unreadable entr{} under {}",
+                    if unreadable == 1 { "y" } else { "ies" },
+                    root.display()
+                );
             }
         }
         // Nested roots find a file twice.
@@ -440,14 +544,25 @@ impl Adapter for MarkdownAdapter {
         let file_path = path.to_string_lossy().into_owned();
         let mut messages: Vec<NormalisedMessage> = Vec::new();
         for (index, section) in sections.iter().enumerate() {
-            for (part, piece) in split_long(&section.text, MAX_MESSAGE_CHARS)
+            // A continuation starts with the heading line again, so the
+            // pieces leave room for it under the 2,000-character cap.
+            let heading_line =
+                section.text.lines().next().map(str::trim).filter(|h| {
+                    section.level > 0 && h.chars().count() <= MAX_REPEATED_HEADING_CHARS
+                });
+            let room = heading_line.map_or(0, |h| h.chars().count() + 2);
+            for (part, piece) in split_long(&section.text, MAX_MESSAGE_CHARS - room)
                 .into_iter()
                 .enumerate()
             {
+                let content = match heading_line {
+                    Some(h) if part > 0 => format!("{h}\n\n{piece}"),
+                    _ => piece.to_string(),
+                };
                 let at = base + Duration::microseconds(messages.len() as i64);
                 messages.push(NormalisedMessage {
                     role: Role::Document.as_str().into(),
-                    content: piece.to_string(),
+                    content,
                     created_at: Some(at),
                     metadata: json!({
                         "file_path": file_path,
@@ -463,10 +578,8 @@ impl Adapter for MarkdownAdapter {
             return Ok(None);
         };
 
-        let root = self
-            .root_of(path)
-            .map(|r| r.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let root_path = self.root_of(path).unwrap_or(Path::new(""));
+        let root = root_path.to_string_lossy().into_owned();
         let project_path = match &front.project {
             Some(p) => format!("markdown/{}", p.replace(['/', '\\'], "-")),
             None => root.clone(),
@@ -479,7 +592,7 @@ impl Adapter for MarkdownAdapter {
             .cloned();
         let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
         Ok(Some(NormalisedConversation {
-            session_id: stable_uuid(&NS, None, &file_path),
+            session_id: stable_uuid(&NS, None, &session_key(root_path, path)),
             project_path: Some(project_path),
             model: None,
             entrypoint: None,
@@ -506,7 +619,7 @@ mod tests {
     use super::*;
     use crate::adapters::{sha256_file, stable_uuid};
     use crate::ignore::project_name_of;
-    use crate::writer::{replace_messages, upsert_conversation};
+    use crate::writer::{already_ingested, record_ingest, replace_messages, upsert_conversation};
     use chrono::{DateTime, Duration, Utc};
     use postgres::GenericClient;
     use std::fs;
@@ -743,7 +856,12 @@ High tide at nine.
         for (path, conv) in found.iter().zip(&convs) {
             let path_str = path.to_string_lossy();
             assert_eq!(conv.source_tool.as_deref(), Some(NAME));
-            assert_eq!(conv.session_id, stable_uuid(&NS, None, &path_str));
+            let rel = path.strip_prefix(&root).unwrap().to_string_lossy();
+            assert_eq!(
+                conv.session_id,
+                stable_uuid(&NS, None, &format!("field-notes/{rel}")),
+                "R9: root name and relative path, not the absolute path"
+            );
             assert_eq!(conv.metadata["file_path"], *path_str);
             assert!(!conv.messages.is_empty());
             // Section time: file mtime plus the message's position in µs.
@@ -853,12 +971,24 @@ High tide at nine.
             })
             .collect();
         assert_eq!(parts, [(0, 0), (0, 1), (0, 2), (1, 0)]);
-        assert!(long.messages[0].content.starts_with("# Long\n"));
-        assert!(long.messages[1].content.starts_with("Line "));
+        // Every part starts with the section's heading line, so a part read
+        // alone (an extraction window, a search hit) keeps its context.
+        for m in &long.messages[..3] {
+            assert!(
+                m.content.starts_with("# Long\n\n"),
+                "{:?}",
+                &m.content[..20]
+            );
+        }
+        assert!(long.messages[1].content["# Long\n\n".len()..].starts_with("Line "));
         let squeeze = |s: &str| s.split_whitespace().collect::<String>();
         let joined: String = long.messages[..3]
             .iter()
-            .map(|m| m.content.as_str())
+            .enumerate()
+            .map(|(i, m)| match i {
+                0 => m.content.as_str(),
+                _ => &m.content["# Long\n\n".len()..],
+            })
             .collect();
         let section = long_text();
         let section = section.split("\n## After").next().unwrap();
@@ -868,6 +998,28 @@ High tide at nine.
             "no text lost or repeated"
         );
         assert_eq!(heading_paths(long)[2], strings(&["Long"]));
+
+        // A section with no line break fills each window to the space before
+        // the cap; the repeated heading still fits under it.
+        let wide_root = tmp.path().join("cap-check");
+        let wide = write(
+            &wide_root,
+            "wide.md",
+            &format!("## Wide\n\n{}\n", "tide ".repeat(1200)),
+        );
+        let wide = MarkdownAdapter::new(vec![wide_root])
+            .parse(&wide)
+            .unwrap()
+            .unwrap();
+        assert!(wide.messages.len() >= 3);
+        for m in &wide.messages {
+            assert!(m.content.starts_with("## Wide\n\n"));
+            assert!(
+                m.content.chars().count() <= MAX_MESSAGE_CHARS,
+                "{}",
+                m.content.len()
+            );
+        }
 
         // Stable across parses.
         let again = adapter.parse(by("alpha.md").0).unwrap().unwrap();
@@ -923,6 +1075,9 @@ High tide at nine.
         let mut tx = client.transaction().expect("begin test tx");
         let a_id = store(&mut tx, &adapter, &a);
         let b_id = store(&mut tx, &adapter, &b);
+        for path in [&a, &b] {
+            record_ingest(&mut tx, path, &sha256_file(path).unwrap(), 1).unwrap();
+        }
         let a_before = message_rows(&mut tx, a_id);
         let b_before = message_rows(&mut tx, b_id);
         assert_eq!(a_before.len(), 3);
@@ -944,7 +1099,14 @@ High tide at nine.
         let (hash_a, hash_b) = (sha256_file(&a).unwrap(), sha256_file(&b).unwrap());
         fs::write(&a, "# Log\n\nOld first.\n\n## Second\n\nNew second.\n").unwrap();
         assert_ne!(sha256_file(&a).unwrap(), hash_a);
-        assert_eq!(sha256_file(&b).unwrap(), hash_b, "the runner skips b");
+        assert_eq!(sha256_file(&b).unwrap(), hash_b);
+        // The runner's ledger: b is known with its hash, a's new hash is not.
+        assert!(
+            already_ingested(&mut tx, &b, &hash_b).unwrap().is_some(),
+            "the runner skips b"
+        );
+        let new_a = sha256_file(&a).unwrap();
+        assert_eq!(already_ingested(&mut tx, &a, &new_a).unwrap(), None);
 
         assert_eq!(
             store(&mut tx, &adapter, &a),
@@ -1029,6 +1191,13 @@ High tide at nine.
                 PathBuf::from("/srv/notes"),
             ]
         );
+        // Relative entries would resolve against the cwd of launchd or
+        // `docker exec`: dropped, as is `~` without a home and `~user`.
+        assert_eq!(
+            parse_roots("notes:./docs:~other/notes:/srv/notes", Some(home)),
+            [PathBuf::from("/srv/notes")]
+        );
+        assert!(parse_roots("~/notes:~", None).is_empty());
 
         // Nested roots: the file is found once and belongs to the inner root.
         let inner = root.join("a");
@@ -1097,12 +1266,107 @@ High tide at nine.
             crate::adapters::registry::by_name(NAME).unwrap().name(),
             NAME
         );
-        if let Some(mut client) = test_db() {
-            let s = crate::ingest_run::run_adapter(&mut client, &empty, false).unwrap();
-            assert_eq!(
-                (s.files_seen, s.ingested, s.skipped, s.errors),
-                (0, 0, 0, 0)
-            );
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping the runner part of markdown_without_roots_is_a_noop: no PostgreSQL reachable");
+            return;
+        };
+        let s = crate::ingest_run::run_adapter(&mut client, &empty, false).unwrap();
+        assert_eq!(
+            (s.files_seen, s.ingested, s.skipped, s.errors),
+            (0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn markdown_session_id_is_stable_across_mount_prefixes() {
+        // The same root seen natively and inside a container.
+        let tmp = tempfile::tempdir().unwrap();
+        let native = tmp.path().join("native/users/fixture/tide-notes");
+        let mounted = tmp.path().join("container/home/app/tide-notes");
+        let text = "# Plan\n\nCheck the buoys.\n";
+        let a = write(&native, "trips/plan.md", text);
+        let b = write(&mounted, "trips/plan.md", text);
+        let parse = |roots: Vec<PathBuf>, path: &Path| {
+            MarkdownAdapter::new(roots).parse(path).unwrap().unwrap()
+        };
+        let here = parse(vec![native.clone()], &a);
+        let there = parse(vec![mounted.clone()], &b);
+        assert_eq!(here.session_id, there.session_id, "one conversation");
+        assert_eq!(
+            here.session_id,
+            stable_uuid(&NS, None, "tide-notes/trips/plan.md")
+        );
+        // The absolute path stays in the metadata.
+        assert_eq!(here.metadata["file_path"], *a.to_string_lossy());
+        assert_eq!(there.metadata["file_path"], *b.to_string_lossy());
+        for conv in [&here, &there] {
+            assert!(conv
+                .messages
+                .iter()
+                .all(|m| m.metadata["file_path"] == conv.metadata["file_path"]));
         }
+
+        // Another file or another root name is another conversation.
+        let other = write(&native, "trips/other.md", text);
+        assert_ne!(
+            parse(vec![native.clone()], &other).session_id,
+            here.session_id
+        );
+        let renamed = tmp.path().join("native/users/fixture/tide-notes-2");
+        let c = write(&renamed, "trips/plan.md", text);
+        assert_ne!(parse(vec![renamed.clone()], &c).session_id, here.session_id);
+
+        // Pinned limits of the key. Two configured roots with the same name
+        // share the ids of equal relative paths, so one file overwrites the
+        // other's conversation; and an inner root added later gives its
+        // files new ids, because the key starts at the innermost root.
+        let both = vec![native.clone(), mounted.clone()];
+        assert_eq!(
+            parse(both.clone(), &a).session_id,
+            parse(both, &b).session_id
+        );
+        let with_inner = parse(vec![native.clone(), native.join("trips")], &a);
+        assert_eq!(
+            with_inner.session_id,
+            stable_uuid(&NS, None, "trips/plan.md")
+        );
+        assert_ne!(with_inner.session_id, here.session_id);
+    }
+
+    #[test]
+    fn markdown_leading_rule_block_without_keys_is_text() {
+        // Two rules around prose: not frontmatter, nothing dropped.
+        let body = "---\nJust a ruled note.\nNo keys here.\n---\n# After\n\ntext\n";
+        let (front, rest) = read_frontmatter(body);
+        assert_eq!(front, Frontmatter::default());
+        assert_eq!(rest, body);
+        // A list between rules is no mapping either.
+        let list = "---\n- one\n- two\n---\n";
+        assert_eq!(read_frontmatter(list).1, list);
+
+        // Real frontmatter: keys with spaces, comments, nested and indented
+        // lines; a block scalar is not taken as the title.
+        let real = "---\n# comment\ntitle: >\n  Folded title\nLast updated: 2031-05-06\nextra:\n  nested: x\ntags:\n  - reef\n---\n# Heading\n";
+        let (front, rest) = read_frontmatter(real);
+        assert_eq!(rest, "# Heading\n");
+        assert_eq!(front.title, None, "`>` starts a block scalar, not a title");
+        assert_eq!(front.tags, ["reef"]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("field-notes");
+        let ruled = write(&root, "ruled.md", body);
+        let folded = write(&root, "folded.md", real);
+        let adapter = MarkdownAdapter::new(vec![root]);
+        let conv = adapter.parse(&ruled).unwrap().unwrap();
+        assert_eq!(
+            texts(&conv),
+            [
+                "---\nJust a ruled note.\nNo keys here.\n---",
+                "# After\n\ntext"
+            ]
+        );
+        assert_eq!(conv.metadata["frontmatter"], serde_json::json!({}));
+        let conv = adapter.parse(&folded).unwrap().unwrap();
+        assert_eq!(conv.summary.as_deref(), Some("Heading"));
     }
 }
