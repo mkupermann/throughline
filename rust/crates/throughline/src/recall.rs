@@ -794,6 +794,28 @@ fn rank_score(
     }
 }
 
+/// The score `recall` gives each of `cands` under `rank` for the question
+/// `words`, by note id: cosine to `emb` under the default, with the same
+/// full-text fallback without a question vector or for a note without one.
+pub(crate) fn rank_scores<C: GenericClient>(
+    client: &mut C,
+    actor: &Actor,
+    rank: Rank,
+    words: &[String],
+    cands: &[Candidate],
+    emb: Option<&QueryEmbedding>,
+) -> Result<HashMap<i64, f64>> {
+    let order = order_for(client, actor, rank, emb.is_some(), words, cands)?;
+    let now = Utc::now();
+    Ok(cands
+        .iter()
+        .map(|c| {
+            let (s, _) = rank_score(c, words, emb.is_some(), now, &WEIGHTS, &order);
+            (c.id, s)
+        })
+        .collect())
+}
+
 /// Highest score first, the lower id first on a tie.
 fn by_score(scored: &mut [(f64, Why, Candidate)]) {
     scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.id.cmp(&b.2.id)));
