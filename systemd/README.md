@@ -8,7 +8,7 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 | Unit | Schedule | Purpose |
 |------|----------|---------|
 | `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres; then the Rust `ingest --source markdown` and `--source git` |
-| `throughline-extract.timer` | daily at 02:00   | `scripts/extract_memory.py` — distil memory chunks from recent conversations    |
+| `throughline-extract.timer` | daily at 02:00   | Rust `throughline extract-memory` — notes from conversations not yet extracted, 20 per run, documents included |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
 | `throughline-embed.timer`   | hourly at :15    | Rust `throughline embed --limit 10000` — vectors for new notes first, then messages |
 
@@ -22,9 +22,17 @@ repositories with the Rust binary, the same one the embed unit uses; they take
 and write nothing while both are empty. Web pages are not on a timer:
 `ingest --source web` makes network requests, so you start it yourself.
 
-The extract and backup units retain source-checkout compatibility wrappers;
-installed and interactive use should prefer `throughline extract-memory` and
-`throughline backup`.
+The document sources (Markdown folders, git repositories, web pages) and the
+`document` extraction profile exist only in the Rust runtime. The Python
+`throughline` CLI knows neither, and the Python extractor reads only user and
+assistant messages, so it would leave every document unextracted. That is why
+the extract unit runs the Rust binary too, with the model settings from the
+shared file (`OLLAMA_HOST`, `OLLAMA_EMBED_MODEL`, and the server's
+`THROUGHLINE_ANSWER_MODEL`, `THROUGHLINE_OLLAMA_THINK` and
+`THROUGHLINE_OLLAMA_NUM_CTX` if it sets them).
+
+The backup unit retains a source-checkout compatibility wrapper; installed and
+interactive use should prefer `throughline backup`.
 
 The embed unit needs the Rust runtime: it runs
 `~/.local/share/throughline/rust/target/release/throughline`, which
@@ -96,8 +104,9 @@ journalctl --user -u throughline-ingest.service -f
 ## Configuration
 
 All four services read `~/.config/throughline/throughline.env`, which owns
-`PGDATABASE`, `PGHOST`, and `PGPORT`, and for the embed job `OLLAMA_HOST` and
-`OLLAMA_EMBED_MODEL`. Set both to exactly the values the server uses: vectors
+`PGDATABASE`, `PGHOST`, and `PGPORT`, for the embed and extract jobs
+`OLLAMA_HOST` and `OLLAMA_EMBED_MODEL`, and for the ingest job the two lists
+`THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS`. Set both to exactly the values the server uses: vectors
 are keyed by the model string, and an empty `OLLAMA_EMBED_MODEL` means the
 default `nomic-embed-text`. `PGUSER` remains the systemd user. Add
 `PGPASSWORD` to the shared file when password authentication is required:

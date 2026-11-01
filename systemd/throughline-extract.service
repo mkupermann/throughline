@@ -7,11 +7,23 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=%h/.local/share/throughline
-ExecStart=/usr/bin/python3 %h/.local/share/throughline/scripts/extract_memory.py
+# The Rust runtime, built in the checkout (`cargo build --release --manifest-path
+# rust/Cargo.toml -p throughline`), 20 conversations per run. Not the Python
+# extractor: it reads only user and assistant messages, so it never extracts
+# the document sources (Markdown folders, git repositories, web pages), and it
+# knows neither the document profile nor the closing of an old version's notes.
+# With the Compose stack, use instead:
+#   ExecStart=/usr/bin/env docker compose exec -T web throughline extract-memory
+ExecStart=%h/.local/share/throughline/rust/target/release/throughline extract-memory
+# PG* plus the model settings, which must match the server: OLLAMA_HOST,
+# OLLAMA_EMBED_MODEL (each new note gets its vector right away) and, if the
+# server sets them, THROUGHLINE_ANSWER_MODEL, THROUGHLINE_OLLAMA_THINK,
+# THROUGHLINE_OLLAMA_NUM_CTX and THROUGHLINE_EXTRACT_PROFILE.
 EnvironmentFile=%h/.config/throughline/throughline.env
 Environment="PGUSER=%u"
-# Extraction can invoke Claude CLI or Anthropic API, which may take several minutes.
-TimeoutStartSec=30min
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# A local model can take minutes per conversation.
+TimeoutStartSec=2h
 StandardOutput=journal
 StandardError=journal
 Nice=15

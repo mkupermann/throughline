@@ -408,6 +408,14 @@ one message per section, commit or part of a page. "Recent sessions" in the
 context pack and the handoff leave documents out; the notes extracted from
 them count everywhere else.
 
+These sources and the `document` extraction profile exist only in the Rust
+runtime: the container image, or `rust/target/release/throughline` built from
+the checkout. The Python `throughline` CLI knows neither, and the Python
+extractor reads only user and assistant messages, so it ignores document
+messages and leaves them unextracted. The native schedule templates therefore
+run the Rust binary for ingest and extraction of documents
+([INSTALLATION.md](INSTALLATION.md#10-optional-enable-the-scheduler)).
+
 | Source | Setting | In `ingest --source all` | One conversation per |
 | --- | --- | --- | --- |
 | `markdown` | `THROUGHLINE_MARKDOWN_ROOTS`: folders, colon-separated | yes | file |
@@ -516,7 +524,8 @@ Markdown file, a repository folder or a URL, `project:` the project.
   sends requests out, so it runs when you start it.
 - **Behind a proxy that inspects TLS** the container needs the proxy's root CA
   ([INSTALLATION.md](INSTALLATION.md#an-extra-root-ca)); without it every HTTPS
-  fetch fails with a certificate error. With `HTTPS_PROXY` set, the proxy
+  fetch fails with a certificate error. With `HTTPS_PROXY` set (or
+  `HTTP_PROXY` for an `http` URL), the proxy
   resolves the host itself, so the address check cannot catch a name that
   resolves to another address there.
 
@@ -537,11 +546,13 @@ default ([INSTALLATION.md](INSTALLATION.md#mounts-for-documents-gemini-cli-and-c
 always use the profile `document`: it keeps facts, decisions, rules and dates
 from text that is not a dialogue, and a date becomes an `insight` note with the
 date in its text. Sessions keep `THROUGHLINE_EXTRACT_PROFILE`. A document goes
-to the model in windows of up to 20 sections. After a new version the command
-prints `documents: <n> note(s) of old versions closed, <m> repeat(s) of
-forgotten notes dropped`.
+to the model in windows of up to 20 sections. After a new version, when one of
+its counts is above 0, the command prints `documents: <n> note(s) of old
+versions closed, <m> repeat(s) of forgotten notes dropped, <k> notes checked by
+text only`.
 
-The nightly job takes 20 conversations per run. After adding a root with many
+All of this is the Rust `extract-memory`; the Python extractor skips document
+messages. The nightly job takes 20 conversations per run. After adding a root with many
 files, run the first extraction by hand with a higher limit, for example
 `throughline extract-memory --limit 500`, and keep the machine awake meanwhile.
 
@@ -962,7 +973,7 @@ throughline migrate --status             # pending schema migrations
 `doctor` is the one to run when something behaves oddly: it checks Python,
 PostgreSQL and pgvector, every adapter, the embedding and answering backends,
 the schedule, and whether a recent backup exists.
-The Rust `doctor` ends with a `sources:` block: the Markdown roots it sees and
+The Rust `doctor` prints a `sources:` block before its notes: the Markdown roots it sees and
 how many of them are missing, the git roots and the `git` version (or `git
 missing`), the number of URLs, and whether the Gemini CLI and Copilot Chat
 folders are there.

@@ -17,8 +17,11 @@ ExecStart=/usr/bin/env throughline ingest --all
 # both are empty, these lines write nothing. With the Compose stack, use instead:
 #   ExecStart=/usr/bin/env docker compose exec -T web throughline ingest --source markdown
 #   ExecStart=/usr/bin/env docker compose exec -T web throughline ingest --source git
-# Web pages are never fetched on a schedule: `ingest --source web` makes
-# network requests and runs only when you start it.
+# The lines run in order and stop at the first failure: if the Python step
+# fails, markdown and git do not run, and without the Rust build the unit
+# fails after the Python step. `journalctl --user -u throughline-ingest`
+# shows which. Web pages are never fetched on a schedule: `ingest --source
+# web` makes network requests and runs only when you start it.
 ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source markdown
 ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source git
 EnvironmentFile=%h/.config/throughline/throughline.env

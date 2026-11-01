@@ -9,7 +9,8 @@
 #   docker build --build-context extra_ca=/path/to/ca-folder -f Dockerfile.rust .
 # or `build.additional_contexts` in docker-compose.override.yml
 # (docs/INSTALLATION.md). The copy is keyed by the files' content, so adding
-# or changing a CA rebuilds what depends on it.
+# or changing a CA rebuilds what depends on it. Removing the context does
+# not: build once with --no-cache, or the cached layer keeps the old CA.
 FROM scratch AS extra_ca
 
 # ---------- build ----------

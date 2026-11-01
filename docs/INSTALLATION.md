@@ -255,9 +255,17 @@ This loads every plist in `launchd/`. The scheduled jobs are:
 - `com.claude-memory-ingest` — hourly ingestion. After the tool sessions it
   runs the Rust binary in `rust/target/release/` for `--source markdown` and
   `--source git`; set `THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS`
-  in the installed plist (empty, both write nothing). Web pages stay manual:
+  in the installed plist (empty, both write nothing). `scripts/install.sh`
+  writes every plist anew from its template, so a second run empties them
+  again; set them once more afterwards. Web pages stay manual:
   `throughline ingest --source web` is the only step that sends requests out.
-- `com.claude-memory-extract` — daily 02:00 UTC memory extraction
+- `com.claude-memory-extract` — daily 02:00 UTC memory extraction with the
+  Rust binary in `rust/target/release/` (`extract-memory`, 20 conversations per
+  run). The document sources and the `document` profile exist only in the Rust
+  runtime; the Python extractor reads only user and assistant messages and
+  would leave every document unextracted. Set `OLLAMA_HOST`,
+  `OLLAMA_EMBED_MODEL` and any model setting the server uses in the installed
+  plist.
 - `com.claude-memory-backup` — daily 03:00 UTC `pg_dump` with 30-day retention
 - `com.claude-memory-embed` — hourly at minute 15, `throughline embed --limit 10000`:
   vectors for notes the write itself could not embed, then for messages. It

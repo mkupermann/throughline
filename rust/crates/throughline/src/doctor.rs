@@ -162,27 +162,36 @@ fn report<C: GenericClient>(
 /// - `gemini_cli` and `copilot_chat`: `present`, or `not present` with the
 ///   folder that was looked for.
 pub fn source_lines() -> Vec<String> {
-    use crate::adapters::{copilot_chat, gemini_cli, markdown, Adapter};
-    let roots = crate::sources::roots_from_env(markdown::ROOTS_ENV);
-    let missing = roots.iter().filter(|r| !r.is_dir()).count();
+    use crate::adapters::{copilot_chat, gemini_cli, markdown};
+    sources_block(
+        &crate::sources::roots_from_env(markdown::ROOTS_ENV),
+        crate::sources::git::doctor_line(&crate::sources::git::GitSource::from_env()),
+        crate::sources::web::doctor_line(&crate::sources::web::WebSource::from_env()),
+        [
+            &gemini_cli::GeminiCliAdapter::default(),
+            &copilot_chat::CopilotChatAdapter::default(),
+        ],
+    )
+}
+
+/// [`source_lines`] from its parts, without reading the environment.
+fn sources_block(
+    markdown_roots: &[std::path::PathBuf],
+    git_line: String,
+    web_line: String,
+    adapters: [&dyn crate::adapters::Adapter; 2],
+) -> Vec<String> {
+    let n = markdown_roots.len();
+    let missing = markdown_roots.iter().filter(|r| !r.is_dir()).count();
     let mut markdown_line = format!(
-        "{}: {} {} configured",
-        markdown::NAME,
-        roots.len(),
-        if roots.len() == 1 { "root" } else { "roots" }
+        "{}: {n} {} configured",
+        crate::adapters::markdown::NAME,
+        if n == 1 { "root" } else { "roots" }
     );
     if missing > 0 {
         markdown_line.push_str(&format!(", {missing} not found"));
     }
-    let mut lines = vec![
-        markdown_line,
-        crate::sources::git::doctor_line(&crate::sources::git::GitSource::from_env()),
-        crate::sources::web::doctor_line(&crate::sources::web::WebSource::from_env()),
-    ];
-    let adapters: [&dyn Adapter; 2] = [
-        &gemini_cli::GeminiCliAdapter::default(),
-        &copilot_chat::CopilotChatAdapter::default(),
-    ];
+    let mut lines = vec![markdown_line, git_line, web_line];
     for adapter in adapters {
         lines.push(if adapter.is_present() {
             format!("{}: present", adapter.name())
@@ -631,5 +640,46 @@ mod tests {
         let (_, missing) =
             embedding_lines(&mut tx, &crate::access::Actor::local(), &active, Ok(None)).unwrap();
         assert_eq!(missing, "complete");
+    }
+
+    #[test]
+    fn sources_block_counts_missing_roots_and_names_absent_folders() {
+        use crate::adapters::{copilot_chat::CopilotChatAdapter, gemini_cli::GeminiCliAdapter};
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let notes = tmp.path().join("notes");
+        std::fs::create_dir(&notes).expect("notes");
+        let gone = tmp.path().join("gone");
+        let gemini = GeminiCliAdapter::new(notes.clone());
+        let copilot = CopilotChatAdapter::new(gone.clone());
+        let git = "git: 1 root configured, git 2.47.3".to_string();
+        let web = "web: 0 urls configured".to_string();
+
+        let block = sources_block(
+            &[notes.clone(), gone.clone()],
+            git.clone(),
+            web.clone(),
+            [&gemini, &copilot],
+        );
+        assert_eq!(
+            block,
+            vec![
+                "sources:".to_string(),
+                "  markdown: 2 roots configured, 1 not found".to_string(),
+                format!("  {git}"),
+                format!("  {web}"),
+                "  gemini_cli: present".to_string(),
+                format!("  copilot_chat: not present, {} not found", gone.display()),
+            ]
+        );
+
+        let one = sources_block(
+            std::slice::from_ref(&notes),
+            git.clone(),
+            web.clone(),
+            [&gemini, &copilot],
+        );
+        assert_eq!(one[1], "  markdown: 1 root configured");
+        let none = sources_block(&[], git, web, [&gemini, &copilot]);
+        assert_eq!(none[1], "  markdown: 0 roots configured");
     }
 }
