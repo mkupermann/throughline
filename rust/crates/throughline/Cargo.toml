@@ -17,6 +17,8 @@ chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
 glob = "0.3"
+# HTML to text for the web source; headings come out as marked lines.
+html2text = "0.17.4"
 postgres.workspace = true
 regex = "1.13.1"
 # Hermes state.db path. Optional so a SQLite-free build stays possible;

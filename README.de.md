@@ -54,6 +54,8 @@ Die Rust-Registry enthält **13 Adapter**. Sie lesen lokale Dateien. Es sind kei
 
 Das Standard-Compose mountet die ersten neun Tool-Verzeichnisse schreibgeschützt. OpenCode, Aider, Gemini CLI und Copilot Chat brauchen ihre Quellverzeichnisse separat. Quelle der Wahrheit ist die [Adapter-Registry](rust/crates/throughline/src/adapters/registry.rs).
 
+Webseiten werden nur auf Anfrage geholt: `throughline ingest --source web` liest die URLs aus der Datei, die `THROUGHLINE_WEB_URLS` nennt, ein GET je Seite, und `--refetch` holt bekannte Seiten erneut. Stand: gegen einen lokalen Testserver geprüft (private und Loopback-Adressen, Weiterleitungen, `robots.txt`, Größengrenze, Zugangsdaten in der URL); ein Live-Abruf einer öffentlichen Seite mit TLS-Prüfung lief am 01.11.2026 im Testcontainer durch.
+
 ## Die Demo mit fiktiven Daten
 
 Drei Befehle. Kein Modell-Download, kein API-Schlüssel. Du brauchst Git und Docker mit Compose.

@@ -1,9 +1,12 @@
 //! Sources that do not fit the adapter contract. An adapter parses one file
 //! without a database client, and its runner hashes that file. A git
 //! repository is a folder, and its runner reads the store to skip a
-//! repository whose branches did not move, so it runs on its own.
+//! repository whose branches did not move, so it runs on its own. A web
+//! page is a URL, and its runner reads the store to fetch a known page
+//! again only on request.
 
 pub mod git;
+pub mod web;
 
 use std::path::PathBuf;
 

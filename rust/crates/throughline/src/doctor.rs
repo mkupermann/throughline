@@ -152,11 +152,13 @@ fn report<C: GenericClient>(
 }
 
 /// One line per source that is not an adapter, for `throughline doctor`:
-/// `git: <n> roots configured, git <version|missing>`.
+/// `git: <n> roots configured, git <version|missing>` and
+/// `web: <n> urls configured`.
 pub fn source_lines() -> Vec<String> {
-    vec![crate::sources::git::doctor_line(
-        &crate::sources::git::GitSource::from_env(),
-    )]
+    vec![
+        crate::sources::git::doctor_line(&crate::sources::git::GitSource::from_env()),
+        crate::sources::web::doctor_line(&crate::sources::web::WebSource::from_env()),
+    ]
 }
 
 /// The note of a failed check. A team-mode client gets [`hidden_note`].

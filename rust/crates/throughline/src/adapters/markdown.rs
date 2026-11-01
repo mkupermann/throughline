@@ -383,6 +383,27 @@ fn split_long(text: &str, max: usize) -> Vec<&str> {
     out
 }
 
+/// The message texts of a section: pieces of at most [`MAX_MESSAGE_CHARS`]
+/// characters. A continuation starts with the heading line again, so it
+/// keeps its context when read alone; the pieces leave room for it.
+pub fn section_parts(section: &Section) -> Vec<String> {
+    let heading_line = section
+        .text
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|h| section.level > 0 && h.chars().count() <= MAX_REPEATED_HEADING_CHARS);
+    let room = heading_line.map_or(0, |h| h.chars().count() + 2);
+    split_long(&section.text, MAX_MESSAGE_CHARS - room)
+        .into_iter()
+        .enumerate()
+        .map(|(part, piece)| match heading_line {
+            Some(h) if part > 0 => format!("{h}\n\n{piece}"),
+            _ => piece.to_string(),
+        })
+        .collect()
+}
+
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
@@ -544,21 +565,7 @@ impl Adapter for MarkdownAdapter {
         let file_path = path.to_string_lossy().into_owned();
         let mut messages: Vec<NormalisedMessage> = Vec::new();
         for (index, section) in sections.iter().enumerate() {
-            // A continuation starts with the heading line again, so the
-            // pieces leave room for it under the 2,000-character cap.
-            let heading_line =
-                section.text.lines().next().map(str::trim).filter(|h| {
-                    section.level > 0 && h.chars().count() <= MAX_REPEATED_HEADING_CHARS
-                });
-            let room = heading_line.map_or(0, |h| h.chars().count() + 2);
-            for (part, piece) in split_long(&section.text, MAX_MESSAGE_CHARS - room)
-                .into_iter()
-                .enumerate()
-            {
-                let content = match heading_line {
-                    Some(h) if part > 0 => format!("{h}\n\n{piece}"),
-                    _ => piece.to_string(),
-                };
+            for (part, content) in section_parts(section).into_iter().enumerate() {
                 let at = base + Duration::microseconds(messages.len() as i64);
                 messages.push(NormalisedMessage {
                     role: Role::Document.as_str().into(),
