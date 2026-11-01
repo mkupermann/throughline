@@ -422,6 +422,14 @@ ALTER TABLE favorites ALTER COLUMN created_at DROP NOT NULL;
 UPDATE favorites SET created_at = NULL WHERE user_id IS NOT NULL AND created_at IS NOT NULL;
 "#;
 
+/// The role of a section of a file, a commit or a page: text with no
+/// speaker. Alone in its migration, since a value added in a transaction
+/// cannot be used before it commits. The name differs from the Python
+/// package's `016_pm_templates.sql`, which shares the ledger. Idempotent.
+const MESSAGE_ROLE_DOCUMENT: &str = r#"
+ALTER TYPE message_role ADD VALUE IF NOT EXISTS 'document';
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -443,6 +451,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("014_team_mode.sql", TEAM_MODE),
     ("015_account_stars_untimed.sql", ACCOUNT_STARS_UNTIMED),
+    ("016_message_role_document.sql", MESSAGE_ROLE_DOCUMENT),
 ];
 
 /// The newest migration of [`MIGRATIONS`].
@@ -1095,5 +1104,67 @@ END $$;
         );
         let local = crate::favorites::list(&mut tx, &Actor::local(), None).expect("list");
         assert!(local.iter().all(|f| f.created_at.is_some()), "{local:?}");
+    }
+
+    /// The enum before 016 is the same on every schema: the fresh one
+    /// (001), the Python-era `sql/schema.sql` before it had `document`, and
+    /// a copy of either. A type of that shape in the test's own schema stands
+    /// for it, so the shared type takes no lock. The database the tests run
+    /// on must have 016 applied, with every role the code names.
+    #[test]
+    fn migration_016_adds_document_role_on_all_schemas() {
+        use crate::types::Role;
+        let sql = migration("016_message_role_document.sql");
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping migration_016_adds_document_role_on_all_schemas: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let labels = |tx: &mut postgres::Transaction| -> Vec<String> {
+            tx.query(
+                "SELECT enumlabel::text FROM pg_enum \
+                 WHERE enumtypid = 'message_role'::regtype ORDER BY enumsortorder",
+                &[],
+            )
+            .expect("labels")
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect()
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let public = labels(&mut tx);
+        for role in Role::ALL {
+            assert!(
+                public.iter().any(|l| l == role.as_str()),
+                "{role}: {public:?}"
+            );
+        }
+        let applied: bool = tx
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM applied_migrations WHERE migration_name = $1)",
+                &[&"016_message_role_document.sql"],
+            )
+            .expect("ledger")
+            .get(0);
+        assert!(applied, "016 is in the ledger of this database");
+
+        own_schema(&mut tx, &[]);
+        tx.batch_execute(
+            "CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system', 'tool_result')",
+        )
+        .expect("the enum before 016");
+        // twice: a second run is a no-op
+        tx.batch_execute(sql).expect("first run");
+        tx.batch_execute(sql).expect("second run");
+        assert_eq!(
+            labels(&mut tx),
+            ["user", "assistant", "system", "tool_result", "document"]
+        );
+        assert_eq!(
+            Role::ALL.map(Role::as_str),
+            ["user", "assistant", "system", "tool_result", "document"]
+        );
+        assert_eq!(LATEST, "016_message_role_document.sql");
     }
 }

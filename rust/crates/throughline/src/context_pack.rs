@@ -6,6 +6,7 @@ use crate::recall::{
     candidates, query_words, question_vector, rank_scores, recall, Candidate, CandidateFilter,
     QueryEmbedding, Rank, RecallHit, RecallMode, RecallQuery, DEFAULT_RANK, MAX_QUERY_CHARS,
 };
+use crate::types::DOCUMENT_SOURCES;
 use chrono::{DateTime, Utc};
 use postgres::GenericClient;
 use serde::Serialize;
@@ -693,6 +694,7 @@ pub fn build_context<C: GenericClient>(
 }
 
 /// Recent human sessions of the project: the summary as title, else the first user message.
+/// Documents ([`DOCUMENT_SOURCES`]) are not sessions.
 fn sessions<C: GenericClient>(
     client: &mut C,
     project: &str,
@@ -707,9 +709,10 @@ fn sessions<C: GenericClient>(
                   ORDER BY m.created_at, m.id LIMIT 1)
            FROM conversations c
           WHERE c.project_name = $1 AND c.generated_by IS NULL
+            AND NOT COALESCE(c.source_tool, '') = ANY($3)
           ORDER BY c.started_at DESC, c.id DESC
           LIMIT $2",
-        &[&project, &SESSION_LIMIT],
+        &[&project, &SESSION_LIMIT, &DOCUMENT_SOURCES],
     )?;
     for r in rows {
         let id: i64 = r.get(0);
@@ -2180,6 +2183,59 @@ mod tests {
         assert!(
             exercised,
             "no budget used the leftover Relevant lines with Sources"
+        );
+    }
+
+    /// Files, commits and pages are conversations, not sessions: "Recent
+    /// sessions" and the handoff leave them out; their notes still count.
+    #[test]
+    fn recent_sessions_skip_document_sources() {
+        db_tx!("recent_sessions_skip_document_sources", tx);
+        let p = proj();
+        let mut conversation = |tool: Option<&str>, summary: &str, d: u32| -> i64 {
+            tx.query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, source_tool) \
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                &[
+                    &uuid::Uuid::new_v4(),
+                    &format!("/fictional/{p}"),
+                    &day(d),
+                    &summary,
+                    &tool,
+                ],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let kept = conversation(Some("claude_code"), "Kept session", 2);
+        let untagged = conversation(None, "Untagged session", 3);
+        let docs: Vec<i64> = crate::types::DOCUMENT_SOURCES
+            .iter()
+            .zip(4..)
+            .map(|(tool, d)| conversation(Some(tool), &format!("Document from {tool}"), d))
+            .collect();
+        assert_eq!(docs.len(), 3);
+        let mut from_doc = seed("decided in a document", Some(&p), "decision", 8);
+        from_doc.source = Some(docs[0]);
+        insert(&mut tx, &from_doc);
+
+        let out = ctx(&mut tx, &p, None);
+        assert_eq!(
+            cited(&out, Section::Sessions),
+            [untagged, kept],
+            "{}",
+            out.text
+        );
+        assert!(!out.text.contains("Document from git"), "{}", out.text);
+        assert!(out.text.contains("decided in a document"), "{}", out.text);
+
+        let brief = crate::handoff::build_handoff(&mut tx, &Actor::local(), Some(&p), 8).unwrap();
+        let mut listed: Vec<i64> = brief.recent_sessions.iter().map(|s| s.id).collect();
+        listed.sort_unstable();
+        assert_eq!(listed, [kept, untagged]);
+        assert_eq!(
+            brief.stats.memory_chunks, 1,
+            "the note of the document counts"
         );
     }
 }

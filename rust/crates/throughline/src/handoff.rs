@@ -4,6 +4,7 @@
 //! Ranking: decisions and clear first-user text are surfaced first.
 
 use crate::access::{push_visibility, Actor};
+use crate::types::DOCUMENT_SOURCES;
 use anyhow::Result;
 use postgres::types::ToSql;
 use postgres::GenericClient;
@@ -110,6 +111,7 @@ pub fn decision_relevance_score(d: &DecisionNote) -> i32 {
 }
 
 /// Build a compact resume brief for `project` (or the whole corpus).
+/// Documents ([`DOCUMENT_SOURCES`]) are not sessions; their notes count.
 pub fn build_handoff<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
@@ -127,10 +129,11 @@ pub fn build_handoff<C: GenericClient>(
         FROM conversations c
         WHERE ($1::text IS NULL OR project_name = $1)
           AND generated_by IS NULL
+          AND NOT COALESCE(source_tool, '') = ANY($3)
         ORDER BY started_at DESC
         LIMIT $2::bigint
         "#,
-        &[&project, &(limit as i64)],
+        &[&project, &(limit as i64), &DOCUMENT_SOURCES],
     )?;
 
     // Every note query binds the project as $1 and the actor's filter after it.

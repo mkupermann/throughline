@@ -107,7 +107,7 @@ Service `migrate` und startet Web UI oder MCP erst nach erfolgreicher Migration.
 
 Die Rust Laufzeit führt eine eigene Liste, `MIGRATIONS` in
 `rust/crates/throughline/src/migrate.rs`, von `001_rust_core.sql` bis
-`015_account_stars_untimed.sql`. Die nächste Rust Migration ist 016. Beide
+`016_message_role_document.sql`. Die nächste Rust Migration ist 017. Beide
 Laufzeiten schreiben in dieselbe Tabelle `applied_migrations`, und die kennt
 nur den Dateinamen. Ein Rust Name darf deshalb keinen Namen aus
 `throughline/migrations/` wiederholen. Dort liegen schon `016_pm_templates.sql`

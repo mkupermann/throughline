@@ -1433,7 +1433,7 @@ mod tests {
             return;
         };
         let latest = crate::migrate::LATEST;
-        assert_eq!(latest, "015_account_stars_untimed.sql");
+        assert_eq!(latest, "016_message_role_document.sql");
         let mut tx = without_accounts(&mut client);
         // A temporary ledger shadows applied_migrations for this session.
         tx.batch_execute(

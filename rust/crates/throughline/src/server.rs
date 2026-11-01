@@ -864,11 +864,11 @@ async fn recent(
                            (SELECT content FROM messages m
                             WHERE m.conversation_id = c.id AND m.role = 'user'
                               AND COALESCE(m.content,'') <> ''
-                            ORDER BY m.created_at ASC LIMIT 1),
+                            ORDER BY m.created_at ASC, m.id ASC LIMIT 1),
                            (SELECT content FROM messages m
                             WHERE m.conversation_id = c.id
                               AND COALESCE(m.content,'') <> ''
-                            ORDER BY m.created_at ASC LIMIT 1),
+                            ORDER BY m.created_at ASC, m.id ASC LIMIT 1),
                            c.summary, ''), 240),
                        EXISTS (SELECT 1 FROM favorites f
                                WHERE f.kind = 'conversation'
@@ -8141,6 +8141,174 @@ mod tests {
         );
         assert_eq!(mine.memory_chunks, theirs.memory_chunks + 1);
         assert_eq!(mine.embeddings, theirs.embeddings + 1);
+    }
+
+    fn local_state(client: postgres::Client) -> AppState {
+        AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+            embed_breaker: Default::default(),
+        }
+    }
+
+    fn json_body(rt: &tokio::runtime::Runtime, resp: Response) -> serde_json::Value {
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+            .expect("body");
+        serde_json::from_slice(&body).expect("json")
+    }
+
+    /// A document section has no speaker: the transcript shows a file icon
+    /// and the section's first line instead of a role, in both languages,
+    /// and the API hands the role through as `document`.
+    #[test]
+    fn document_messages_render_without_speaker() {
+        let body = |start: &str| {
+            INDEX_HTML
+                .split_once(start)
+                .and_then(|(_, rest)| rest.split_once("\n  }\n"))
+                .map(|(body, _)| body)
+                .unwrap_or_else(|| panic!("index.html lacks {start}"))
+        };
+        let head = body("function docHead(m) {");
+        assert!(head.contains("fileIcon(t(\"role.document\"))"), "{head}");
+        assert!(head.contains("docLabel(m.content)"), "{head}");
+        assert!(!head.contains("role-pill"), "{head}");
+        let label = body("function docLabel(text) {");
+        assert!(label.contains(r#"split("\n")"#), "{label}");
+        let render = body("function renderMessages() {");
+        assert!(
+            render.contains(r#"(m.role === "document" ? docHead(m) : '<span class="role-pill"#),
+            "{render}"
+        );
+        for needle in [
+            r#""role.document": "Document","#,
+            r#""role.document": "Dokument","#,
+            r#"<option value="document" data-i18n="role.document">document</option>"#,
+            r#"detailRoles: new Set(["user", "assistant", "tool", "tool_result", "system", "document"]),"#,
+        ] {
+            assert_eq!(
+                INDEX_HTML.matches(needle).count(),
+                1,
+                "index.html: {needle}"
+            );
+        }
+
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping document_messages_render_without_speaker: no PostgreSQL reachable");
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let id: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, source_tool, summary) \
+                 VALUES (gen_random_uuid(), '/fictional/notes', now(), 'markdown', 'Field notes') \
+                 RETURNING id",
+                &[],
+            )
+            .expect("conversation")
+            .get(0);
+        client
+            .execute(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, $2::text::message_role, $3, now())",
+                &[
+                    &id,
+                    &crate::types::Role::Document.as_str(),
+                    &"## Setup\nInstall the tool first.",
+                ],
+            )
+            .expect("a document message");
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let resp = rt.block_on(conversation(
+            State(state.clone()),
+            Extension(Actor::local()),
+            Path(id),
+            Query(ConversationParams { order: None }),
+        ));
+        let json = json_body(&rt, resp);
+        assert_eq!(json["source_tool"], "markdown", "{json}");
+        assert_eq!(json["messages"][0]["role"], "document", "{json}");
+        assert_eq!(
+            json["messages"][0]["content"], "## Setup\nInstall the tool first.",
+            "{json}"
+        );
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
+    }
+
+    /// Sections of one file share a timestamp. The list preview takes the
+    /// first of them by id, not whichever the sort happens to return.
+    #[test]
+    fn conversation_preview_is_stable_for_equal_timestamps() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping conversation_preview_is_stable_for_equal_timestamps: no PostgreSQL reachable"
+            );
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        let project = format!("preview-{}", uuid::Uuid::new_v4().simple());
+        let id: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, source_tool) \
+                 VALUES (gen_random_uuid(), $1, '2026-03-02T12:00:00Z', 'test') RETURNING id",
+                &[&format!("/fictional/{project}")],
+            )
+            .expect("conversation")
+            .get(0);
+        // The lower id goes in last, so the table holds it behind the other.
+        let (first, second): (i64, i64) = {
+            let r = client
+                .query_one(
+                    "SELECT nextval(pg_get_serial_sequence('messages', 'id')), \
+                            nextval(pg_get_serial_sequence('messages', 'id'))",
+                    &[],
+                )
+                .expect("ids");
+            (r.get(0), r.get(1))
+        };
+        assert!(first < second);
+        for (msg, content) in [(second, "later section"), (first, "first section")] {
+            client
+                .execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at) \
+                     VALUES ($1, $2, 'system', $3, '2026-03-02T12:00:00Z')",
+                    &[&msg, &id, &content],
+                )
+                .expect("message");
+        }
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params: RecentParams =
+            serde_json::from_value(serde_json::json!({ "project": project })).expect("params");
+        let resp = rt.block_on(recent(
+            State(state.clone()),
+            Extension(Actor::local()),
+            Query(params),
+        ));
+        let json = json_body(&rt, resp);
+        assert_eq!(json["total"], 1, "{json}");
+        assert_eq!(
+            json["conversations"][0]["preview"], "first section",
+            "{json}"
+        );
+        state
+            .db
+            .lock()
+            .expect("lock")
+            .batch_execute("ROLLBACK")
+            .expect("rollback");
     }
 }
 

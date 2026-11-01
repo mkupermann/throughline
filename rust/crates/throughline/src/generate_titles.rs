@@ -27,6 +27,25 @@ fn clean_title(raw: &str) -> String {
     t.to_string()
 }
 
+/// Conversations without a summary, newest first. A summary an adapter set,
+/// such as a document's title, is never replaced.
+pub fn untitled_conversations<C: postgres::GenericClient>(
+    client: &mut C,
+    limit: usize,
+) -> Result<Vec<i64>> {
+    Ok(client
+        .query(
+            "SELECT id FROM conversations
+             WHERE summary IS NULL OR summary = ''
+             ORDER BY started_at DESC
+             LIMIT $1::bigint",
+            &[&(limit as i64)],
+        )?
+        .into_iter()
+        .map(|r| r.get(0))
+        .collect())
+}
+
 pub fn fallback_title(messages: &[NormalisedMessage]) -> String {
     let t = first_user_text(messages);
     let mut s: String = t.chars().take(80).collect();
@@ -81,5 +100,33 @@ mod tests {
     fn fallback_title_empty_when_no_user() {
         let msgs = vec![make_msg("system", "hello")];
         assert_eq!(fallback_title(&msgs), "Untitled session");
+    }
+
+    /// A document's adapter sets its summary (front matter, first heading,
+    /// file name). Titling picks only conversations without one, so that
+    /// summary stays.
+    #[test]
+    fn titles_keep_an_adapter_summary() {
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping titles_keep_an_adapter_summary: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let insert = "INSERT INTO conversations (session_id, project_path, started_at, source_tool, summary) \
+                      VALUES (gen_random_uuid(), '/fictional/notes', $1, 'markdown', $2) RETURNING id";
+        let late = |d: u32| {
+            chrono::DateTime::parse_from_rfc3339(&format!("2999-01-{d:02}T00:00:00Z")).unwrap()
+        };
+        let titled: i64 = tx
+            .query_one(insert, &[&late(2), &Some("Field notes")])
+            .expect("titled")
+            .get(0);
+        let untitled: i64 = tx
+            .query_one(insert, &[&late(1), &None::<&str>])
+            .expect("untitled")
+            .get(0);
+        let picked = untitled_conversations(&mut tx, 1000).expect("pick");
+        assert!(picked.contains(&untitled), "{picked:?}");
+        assert!(!picked.contains(&titled), "{picked:?}");
     }
 }
