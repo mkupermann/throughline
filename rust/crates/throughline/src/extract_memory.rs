@@ -1,9 +1,10 @@
 //! Memory extraction from conversation transcripts.
 
+use crate::document_lifecycle;
 use crate::llm::{self, GenerationBackend};
 use crate::pii;
 use crate::self_referential;
-use crate::types::NormalisedMessage;
+use crate::types::{NormalisedMessage, DOCUMENT_SOURCES};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use postgres::GenericClient;
@@ -77,8 +78,10 @@ Rules:
 
 Return the JSON array only. No markdown fences, no prose."#;
 
-/// Selects the extraction prompt: unset (or `default`) keeps
-/// [`EXTRACTION_PROMPT`], `personal` picks [`PERSONAL_EXTRACTION_PROMPT`].
+/// Selects the extraction prompt for sessions: unset (or `default`) keeps
+/// [`EXTRACTION_PROMPT`], `personal` picks [`PERSONAL_EXTRACTION_PROMPT`],
+/// `document` picks [`DOCUMENT_EXTRACTION_PROMPT`]. Document sources take
+/// `document` whatever it says, see [`profile_for`].
 pub const PROFILE_ENV: &str = "THROUGHLINE_EXTRACT_PROFILE";
 
 /// The prompt for conversations between people rather than coding sessions:
@@ -106,14 +109,119 @@ Rules:
 
 Return the JSON array only. No markdown fences, no prose."#;
 
-/// The prompt for a profile value (see [`PROFILE_ENV`]). An unknown value is
-/// an error, so a typo never runs the wrong prompt unnoticed.
-pub fn extraction_prompt(profile: Option<&str>) -> Result<&'static str> {
-    match profile.map(|p| p.trim().to_lowercase()).as_deref() {
-        None | Some("") | Some("default") => Ok(EXTRACTION_PROMPT),
-        Some("personal") => Ok(PERSONAL_EXTRACTION_PROMPT),
-        Some(other) => bail!("{PROFILE_ENV}={other:?} is unknown; use personal or leave it unset"),
+/// The prompt for documents: sections of a file or a web page, or commit
+/// messages. Facts, decisions, rules and dates, each with what it belongs to.
+/// Same reply shape and categories as the default; dates go to `insight`
+/// with the date in the text.
+pub const DOCUMENT_EXTRACTION_PROMPT: &str = r#"You extract durable knowledge from a document: sections of a file or a web page, or commit messages.
+Return ONLY a JSON array. Each item must have this exact shape:
+{"content": "...", "category": "...", "tags": ["..."], "confidence": 0.0-1.0}
+
+Categories (use exactly one):
+- "decision" — a choice the document records (e.g. "the service stores its data in PostgreSQL")
+- "pattern" — a rule or convention the document sets (e.g. "every migration gets its own test")
+- "insight" — a fact, or a date and what happens on it (e.g. "the beta of version 2 ends on 2027-03-01")
+- "preference" — a preference a person or team states (e.g. "the team prefers small pull requests")
+- "contact" — a person or team and their role (e.g. "the platform team owns the deploy pipeline")
+- "error_solution" — a problem and the fix the document gives (e.g. "a stale lock file after an upgrade is fixed by deleting it")
+- "project_context" — durable facts about the project (stack, architecture, constraints)
+- "workflow" — how work is done (e.g. "releases are tagged from main")
+
+Rules:
+1. Each part starts with "document:" and has no speaker. A section usually begins with its heading.
+2. Content must be self-contained — understandable without the document. Name the subject; never write "this document" or "this section".
+3. Every date goes into an "insight" item with the date written in the content, together with what it refers to and the heading or commit it comes from (e.g. "Release plan: the beta of version 2 ends on 2027-03-01"). Keep the date as written.
+4. One fact, decision or rule per item. Take what the text states; do not add your own conclusions.
+5. Skip tables of contents, navigation, boilerplate, licence text and code that only shows syntax.
+6. Tags: 1–5 short lowercase keywords. No empty tags.
+7. If nothing is durable, return [] — never invent memories.
+
+Return the JSON array only. No markdown fences, no prose."#;
+
+/// A named extraction prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    /// Coding sessions: [`EXTRACTION_PROMPT`].
+    Default,
+    /// Conversations between people: [`PERSONAL_EXTRACTION_PROMPT`].
+    Personal,
+    /// Files, pages and commits: [`DOCUMENT_EXTRACTION_PROMPT`].
+    Document,
+}
+
+impl Profile {
+    /// The profile a [`PROFILE_ENV`] value names. Unset, empty and `default`
+    /// are the default. An unknown value is an error, so a typo never runs
+    /// the wrong prompt unnoticed.
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        match value.map(|p| p.trim().to_lowercase()).as_deref() {
+            None | Some("") | Some("default") => Ok(Self::Default),
+            Some("personal") => Ok(Self::Personal),
+            Some("document") => Ok(Self::Document),
+            Some(other) => bail!(
+                "{PROFILE_ENV}={other:?} is unknown; use personal or document, or leave it unset"
+            ),
+        }
     }
+
+    pub fn prompt(self) -> &'static str {
+        match self {
+            Self::Default => EXTRACTION_PROMPT,
+            Self::Personal => PERSONAL_EXTRACTION_PROMPT,
+            Self::Document => DOCUMENT_EXTRACTION_PROMPT,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Personal => "personal",
+            Self::Document => "document",
+        }
+    }
+}
+
+/// The prompt for a profile value (see [`PROFILE_ENV`] and [`Profile::parse`]).
+pub fn extraction_prompt(profile: Option<&str>) -> Result<&'static str> {
+    Profile::parse(profile).map(Profile::prompt)
+}
+
+/// Whether a conversation of `source_tool` is a document (see
+/// [`DOCUMENT_SOURCES`]) rather than a session.
+pub fn is_document_source(source_tool: Option<&str>) -> bool {
+    source_tool.is_some_and(|s| DOCUMENT_SOURCES.contains(&s))
+}
+
+/// The profile for a conversation of `source_tool`: Markdown, git and web
+/// always take [`Profile::Document`]; every other source takes `configured`,
+/// the profile [`PROFILE_ENV`] names (parsed once per run).
+pub fn profile_for(source_tool: Option<&str>, configured: Profile) -> Profile {
+    if is_document_source(source_tool) {
+        Profile::Document
+    } else {
+        configured
+    }
+}
+
+/// [`profile_for`] for a stored conversation.
+pub fn conversation_profile<C: GenericClient>(
+    client: &mut C,
+    conv_id: i64,
+    configured: Profile,
+) -> Result<Profile> {
+    Ok(profile_for(
+        source_tool(client, conv_id)?.as_deref(),
+        configured,
+    ))
+}
+
+fn source_tool<C: GenericClient>(client: &mut C, conv_id: i64) -> Result<Option<String>> {
+    Ok(client
+        .query_opt(
+            "SELECT source_tool FROM conversations WHERE id = $1",
+            &[&conv_id],
+        )?
+        .and_then(|r| r.get(0)))
 }
 
 /// First user text from a message list.
@@ -224,7 +332,8 @@ pub fn windows(
         }
     }
     // Known ceiling: a group larger than max_chars stays one oversized window.
-    // Split inside a group once single timestamps carry that much text.
+    // Documents, whose sections share one timestamp or differ by
+    // microseconds, are cut by `document_windows` instead.
     let mut out: Vec<(String, DateTime<Utc>)> = Vec::new();
     for (text, at) in groups {
         match out.last_mut() {
@@ -239,12 +348,71 @@ pub fn windows(
     out
 }
 
+/// Sections a document window holds at most, so a file of many short
+/// sections is still read in several requests.
+pub const DOCUMENT_WINDOW_SECTIONS: usize = 20;
+
+/// One request's worth of transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Window {
+    pub text: String,
+    /// Timestamp of the window's last line.
+    pub end: DateTime<Utc>,
+    /// Whether the watermark may move to `end` after this window: false
+    /// while the next window goes on with lines of the same timestamp.
+    pub commits: bool,
+}
+
+/// Pack a document's lines (one section each) into windows of at most
+/// `max_sections` lines and `max_chars` bytes, whatever their timestamps.
+/// [`windows`] keeps lines of one timestamp together, so a file whose
+/// sections all carry its mtime would become one window. A section larger
+/// than `max_chars` is a window of its own; the extraction query cuts each
+/// line at 2,000 characters, and the document adapters split longer
+/// sections into continuation messages before that.
+pub fn document_windows(
+    lines: &[(DateTime<Utc>, String)],
+    max_chars: usize,
+    max_sections: usize,
+) -> Vec<Window> {
+    let mut out: Vec<Window> = Vec::new();
+    let mut sections = 0;
+    for (at, line) in lines {
+        match out.last_mut() {
+            Some(w) if sections < max_sections && w.text.len() + 1 + line.len() <= max_chars => {
+                w.text.push('\n');
+                w.text.push_str(line);
+                w.end = *at;
+                sections += 1;
+            }
+            last => {
+                if let Some(w) = last {
+                    w.commits = w.end < *at;
+                }
+                out.push(Window {
+                    text: line.clone(),
+                    end: *at,
+                    commits: true,
+                });
+                sections = 1;
+            }
+        }
+    }
+    out
+}
+
 /// What one extraction pass did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExtractSummary {
     pub windows: usize,
+    /// Notes written and kept.
     pub chunks: usize,
     pub errors: usize,
+    /// Notes of an earlier document version closed before this pass.
+    pub closed: usize,
+    /// Notes this pass wrote and deleted again because they repeat a
+    /// forgotten note of the same document.
+    pub dropped: usize,
 }
 
 /// Conversations with messages after their extraction watermark, newest first.
@@ -290,7 +458,7 @@ pub fn count_pending_conversations<C: GenericClient>(client: &mut C) -> Result<i
 /// window by window. Each window's notes and the advanced watermark commit
 /// together. A failed window is reported and ends this conversation's pass,
 /// so it stays pending for the next run. `prompt` comes from
-/// [`extraction_prompt`].
+/// [`extraction_prompt`] or [`conversation_profile`].
 pub fn extract_conversation<C: GenericClient>(
     client: &mut C,
     backend: &GenerationBackend,
@@ -299,6 +467,48 @@ pub fn extract_conversation<C: GenericClient>(
     prompt: &str,
 ) -> Result<ExtractSummary> {
     llm::ensure_local_or_allowed(backend)?;
+    extract_conversation_with(client, conv_id, window_chars, |text| {
+        extract(backend, prompt, text, true)
+    })
+}
+
+/// [`extract_conversation`] with the model step passed in: a window's text
+/// goes in, its notes come out.
+///
+/// A document (see [`is_document_source`]) differs in three ways. When its
+/// messages were replaced since the last extraction, the old version's notes
+/// are closed first ([`document_lifecycle::reconcile`]). Its sections are cut
+/// into windows by [`document_windows`]. And a written note that repeats a
+/// forgotten note of the same document is deleted again in the same
+/// transaction ([`document_lifecycle::drop_forgotten_repeats`]).
+///
+/// Windows that end inside a run of equal timestamps are sent first and
+/// written together with the window that ends the run, so the watermark
+/// never passes a line that was not sent.
+pub fn extract_conversation_with<C, F>(
+    client: &mut C,
+    conv_id: i64,
+    window_chars: usize,
+    mut model: F,
+) -> Result<ExtractSummary>
+where
+    C: GenericClient,
+    F: FnMut(&str) -> Result<Vec<ExtractedMemory>>,
+{
+    let document = is_document_source(source_tool(client, conv_id)?.as_deref());
+    let mut summary = ExtractSummary::default();
+    if document {
+        if let Some(new_version_at) =
+            document_lifecycle::replaced_since_extraction(client, conv_id)?
+        {
+            let mut tx = client.transaction()?;
+            summary.closed =
+                document_lifecycle::reconcile(&mut tx, conv_id, new_version_at)? as usize;
+            tx.commit()?;
+        }
+    }
+    // Each line is cut at 2,000 characters. Document adapters split longer
+    // sections into continuation messages, so no section text is lost.
     let lines: Vec<(DateTime<Utc>, String)> = client
         .query(
             r#"
@@ -314,28 +524,62 @@ pub fn extract_conversation<C: GenericClient>(
         .iter()
         .map(|r| (r.get(0), r.get(1)))
         .collect();
+    let planned = if document {
+        document_windows(&lines, window_chars, DOCUMENT_WINDOW_SECTIONS)
+    } else {
+        windows(&lines, window_chars)
+            .into_iter()
+            .map(|(text, end)| Window {
+                text,
+                end,
+                commits: true,
+            })
+            .collect()
+    };
+    let repeat_check = document.then(document_lifecycle::repeat_check_model);
 
-    let mut summary = ExtractSummary::default();
-    for (text, end) in windows(&lines, window_chars) {
-        let items = match extract(backend, prompt, &text, true) {
-            Ok(items) => items,
+    let mut replies: Vec<(DateTime<Utc>, Vec<ExtractedMemory>)> = Vec::new();
+    for window in planned {
+        match model(&window.text) {
+            Ok(items) => replies.push((window.end, items)),
             Err(e) => {
                 eprintln!("extract #{conv_id}: {e:#}");
                 summary.errors += 1;
                 break;
             }
-        };
+        }
+        if !window.commits {
+            continue;
+        }
         let mut tx = client.transaction()?;
-        for item in &items {
-            insert_memory(&mut tx, conv_id, item, end)?;
+        let (mut kept, mut dropped) = (0, 0);
+        for (end, items) in &replies {
+            let mut ids = Vec::with_capacity(items.len());
+            for item in items {
+                ids.push(insert_memory(&mut tx, conv_id, item, *end)?);
+            }
+            let gone = match &repeat_check {
+                Some((model_name, min_similarity)) => document_lifecycle::drop_forgotten_repeats(
+                    &mut tx,
+                    conv_id,
+                    &ids,
+                    model_name,
+                    *min_similarity,
+                )? as usize,
+                None => 0,
+            };
+            kept += ids.len() - gone;
+            dropped += gone;
         }
         tx.execute(
             "UPDATE conversations SET memory_extracted_until = $2 WHERE id = $1",
-            &[&conv_id, &end],
+            &[&conv_id, &window.end],
         )?;
         tx.commit()?;
-        summary.windows += 1;
-        summary.chunks += items.len();
+        summary.windows += replies.len();
+        summary.chunks += kept;
+        summary.dropped += dropped;
+        replies.clear();
     }
     Ok(summary)
 }
@@ -746,7 +990,8 @@ mod tests {
             ExtractSummary {
                 windows: 2,
                 chunks: 1,
-                errors: 0
+                errors: 0,
+                ..Default::default()
             }
         );
         let sent: Vec<String> = requests.try_iter().collect();
@@ -799,7 +1044,8 @@ mod tests {
             ExtractSummary {
                 windows: 1,
                 chunks: 0,
-                errors: 0
+                errors: 0,
+                ..Default::default()
             }
         );
         let sent: Vec<String> = requests.try_iter().collect();
@@ -841,7 +1087,8 @@ mod tests {
             ExtractSummary {
                 windows: 1,
                 chunks: 1,
-                errors: 1
+                errors: 1,
+                ..Default::default()
             }
         );
         let until: DateTime<Utc> = tx
@@ -966,5 +1213,579 @@ mod tests {
             "{err}"
         );
         assert_eq!(requests.try_iter().count(), 0, "text was sent");
+    }
+
+    #[test]
+    fn document_profile_is_selected_for_document_sources() {
+        for configured in [Profile::Default, Profile::Personal, Profile::Document] {
+            for source in ["markdown", "git", "web"] {
+                assert_eq!(
+                    profile_for(Some(source), configured),
+                    Profile::Document,
+                    "{source} with {configured:?}"
+                );
+            }
+            for source in [
+                Some("claude_code"),
+                Some("gemini_cli"),
+                Some("locomo"),
+                Some("Markdown"),
+                None,
+            ] {
+                assert_eq!(profile_for(source, configured), configured, "{source:?}");
+            }
+        }
+        for value in ["document", " Document "] {
+            assert_eq!(Profile::parse(Some(value)).unwrap(), Profile::Document);
+            assert_eq!(
+                extraction_prompt(Some(value)).unwrap(),
+                DOCUMENT_EXTRACTION_PROMPT
+            );
+        }
+        assert_eq!(Profile::Document.prompt(), DOCUMENT_EXTRACTION_PROMPT);
+        assert_eq!(Profile::Document.name(), "document");
+        // The error for a typo names every profile there is.
+        let err = extraction_prompt(Some("dokument")).unwrap_err().to_string();
+        assert!(
+            err.contains(PROFILE_ENV) && err.contains("personal") && err.contains("document"),
+            "{err}"
+        );
+
+        // Same reply contract and all eight categories, so parser and insert
+        // stay as they are.
+        assert!(DOCUMENT_EXTRACTION_PROMPT.contains(
+            r#"{"content": "...", "category": "...", "tags": ["..."], "confidence": 0.0-1.0}"#
+        ));
+        let categories: Vec<&str> = DOCUMENT_EXTRACTION_PROMPT
+            .lines()
+            .filter(|l| l.starts_with("- \""))
+            .filter_map(|l| l.split('"').nth(1))
+            .collect();
+        assert_eq!(categories, CATEGORIES);
+        // Dates go to insight, with the date in the text.
+        let date_rule = DOCUMENT_EXTRACTION_PROMPT
+            .lines()
+            .find(|l| l.contains("Every date"))
+            .expect("a rule for dates");
+        assert!(
+            date_rule.contains("\"insight\"") && date_rule.contains("date written in the content")
+        );
+        assert_ne!(DOCUMENT_EXTRACTION_PROMPT, EXTRACTION_PROMPT);
+        assert_ne!(DOCUMENT_EXTRACTION_PROMPT, PERSONAL_EXTRACTION_PROMPT);
+    }
+
+    #[test]
+    fn default_prompt_is_byte_identical() {
+        use sha2::{Digest, Sha256};
+        // Byte for byte the prompt from before profiles existed (sha256 at 8c20aa3).
+        assert_eq!(
+            format!("{:x}", Sha256::digest(EXTRACTION_PROMPT.as_bytes())),
+            "45764bbe79164e10d09f28a4be5860472f0353e1b22cc57ecc9cbff979da513c"
+        );
+        let configured = Profile::parse(None).unwrap();
+        assert_eq!(configured, Profile::Default);
+        for source in [Some("claude_code"), Some("codex"), None] {
+            assert_eq!(
+                profile_for(source, configured).prompt(),
+                EXTRACTION_PROMPT,
+                "{source:?}"
+            );
+        }
+        assert_eq!(
+            Profile::Personal.prompt(),
+            extraction_prompt(Some("personal")).unwrap()
+        );
+    }
+
+    #[test]
+    fn document_windows_split_by_section_count() {
+        let at = ts(T0);
+        let micros = |i: usize| at + chrono::Duration::microseconds(i as i64);
+        let joined = |lines: &[(DateTime<Utc>, String)]| {
+            lines
+                .iter()
+                .map(|(_, l)| l.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let all_text = |w: &[Window]| {
+            w.iter()
+                .map(|w| w.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // 200 sections stamped with the file's mtime: the timestamp grouping
+        // makes them one window whatever the size limit says.
+        let same: Vec<(DateTime<Utc>, String)> = (0..200)
+            .map(|i| (at, format!("document: part {i} of the file")))
+            .collect();
+        assert_eq!(windows(&same, 24_000).len(), 1);
+        let w = document_windows(&same, 24_000, DOCUMENT_WINDOW_SECTIONS);
+        assert_eq!(w.len(), 200usize.div_ceil(DOCUMENT_WINDOW_SECTIONS));
+        assert!(w
+            .iter()
+            .all(|w| w.text.lines().count() <= DOCUMENT_WINDOW_SECTIONS));
+        assert_eq!(all_text(&w), joined(&same), "every section once, in order");
+        // All share one timestamp, so only the last window may move the watermark.
+        let commits: Vec<bool> = w.iter().map(|w| w.commits).collect();
+        assert_eq!(commits.iter().filter(|c| **c).count(), 1);
+        assert_eq!(commits.last(), Some(&true));
+
+        // Sections a microsecond apart, as the adapters stamp them: every
+        // window commits, at its last section's time.
+        let apart: Vec<(DateTime<Utc>, String)> = (0..200)
+            .map(|i| (micros(i), format!("document: part {i} of the file")))
+            .collect();
+        let w = document_windows(&apart, 24_000, DOCUMENT_WINDOW_SECTIONS);
+        assert_eq!(w.len(), 200usize.div_ceil(DOCUMENT_WINDOW_SECTIONS));
+        assert!(w.iter().all(|w| w.commits));
+        assert_eq!(w[0].end, micros(DOCUMENT_WINDOW_SECTIONS - 1));
+        assert_eq!(w.last().unwrap().end, micros(199));
+
+        // The size limit still holds: 1,000-byte sections, 4,500 bytes a window.
+        let big: Vec<(DateTime<Utc>, String)> =
+            (0..10).map(|i| (micros(i), "x".repeat(1000))).collect();
+        let w = document_windows(&big, 4_500, DOCUMENT_WINDOW_SECTIONS);
+        let sizes: Vec<usize> = w.iter().map(|w| w.text.lines().count()).collect();
+        assert_eq!(sizes, [4, 4, 2]);
+        assert!(w.iter().all(|w| w.text.len() <= 4_500));
+        assert_eq!(all_text(&w), joined(&big));
+
+        // A section above the limit is a window of its own, never cut.
+        let mixed = vec![
+            (micros(0), "a".repeat(10)),
+            (micros(1), "b".repeat(50)),
+            (micros(2), "c".repeat(10)),
+        ];
+        let w = document_windows(&mixed, 30, DOCUMENT_WINDOW_SECTIONS);
+        let texts: Vec<&str> = w.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts, [mixed[0].1.as_str(), &mixed[1].1, &mixed[2].1]);
+        assert!(document_windows(&[], 30, DOCUMENT_WINDOW_SECTIONS).is_empty());
+    }
+
+    /// A file as the document adapters store it: one message per section,
+    /// no uuids, stamped with the mtime plus the section index in
+    /// microseconds. `role` is `document`, or `user` for a session control.
+    fn stored_file(
+        session: uuid::Uuid,
+        source_tool: &str,
+        role: &str,
+        mtime: DateTime<Utc>,
+        sections: &[&str],
+    ) -> crate::types::NormalisedConversation {
+        crate::types::NormalisedConversation {
+            session_id: session,
+            project_path: Some("/tmp/doc-lifecycle-test".into()),
+            model: None,
+            entrypoint: None,
+            git_branch: None,
+            started_at: mtime,
+            ended_at: Some(mtime),
+            messages: sections
+                .iter()
+                .enumerate()
+                .map(|(i, s)| NormalisedMessage {
+                    role: role.into(),
+                    content: s.to_string(),
+                    created_at: Some(mtime + chrono::Duration::microseconds(i as i64)),
+                    ..Default::default()
+                })
+                .collect(),
+            token_count_in: None,
+            token_count_out: None,
+            summary: Some("Operations notes".into()),
+            metadata: serde_json::json!({}),
+            source_tool: Some(source_tool.into()),
+        }
+    }
+
+    /// Write a conversation the way ingest does: upsert, then replace its messages.
+    fn store<C: GenericClient>(client: &mut C, conv: &crate::types::NormalisedConversation) -> i64 {
+        let id = crate::writer::upsert_conversation(client, conv).expect("upsert conversation");
+        crate::writer::replace_messages(client, id, conv).expect("replace messages");
+        id
+    }
+
+    fn fact(content: &str) -> ExtractedMemory {
+        ExtractedMemory {
+            content: content.into(),
+            category: "insight".into(),
+            tags: vec![],
+            confidence: 0.8,
+        }
+    }
+
+    #[derive(Debug)]
+    struct StoredNote {
+        id: i64,
+        content: String,
+        status: String,
+        valid_to: Option<DateTime<Utc>>,
+        superseded_by: Option<i64>,
+        source_at: DateTime<Utc>,
+    }
+
+    /// The conversation's notes, oldest first.
+    fn notes_of<C: GenericClient>(client: &mut C, conv: i64) -> Vec<StoredNote> {
+        client
+            .query(
+                "SELECT id, content, COALESCE(status, 'active'), valid_to, superseded_by, source_at \
+                 FROM memory_chunks WHERE source_type = 'conversation' AND source_id = $1 \
+                 ORDER BY id",
+                &[&conv],
+            )
+            .expect("read notes")
+            .iter()
+            .map(|r| StoredNote {
+                id: r.get(0),
+                content: r.get(1),
+                status: r.get(2),
+                valid_to: r.get(3),
+                superseded_by: r.get(4),
+                source_at: r.get(5),
+            })
+            .collect()
+    }
+
+    const FRIDAYS: &str = "Deploys of the ops service run on Fridays.";
+    const PORT: &str = "The ops API listens on port 8080.";
+    const BACKUPS: &str = "Backups of the ops database run nightly at 02:00.";
+
+    #[test]
+    fn reimport_closes_old_notes_and_keeps_forgotten_forgotten() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping reimport_closes_old_notes_and_keeps_forgotten_forgotten: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let session = uuid::Uuid::new_v4();
+        let v1 = ts(T0);
+        let first_version = [
+            "# Ops\nDeploys run on Fridays.",
+            "## Ports\nThe API listens on 8080.",
+        ];
+        let conv = store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", v1, &first_version),
+        );
+        assert_eq!(
+            conversation_profile(&mut tx, conv, Profile::Default).unwrap(),
+            Profile::Document
+        );
+
+        let mut sent = Vec::new();
+        let first = extract_conversation_with(&mut tx, conv, 24_000, |text| {
+            sent.push(text.to_string());
+            Ok(vec![fact(FRIDAYS), fact(PORT)])
+        })
+        .expect("first pass");
+        assert_eq!(
+            first,
+            ExtractSummary {
+                windows: 1,
+                chunks: 2,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            sent,
+            ["document: # Ops\nDeploys run on Fridays.\ndocument: ## Ports\nThe API listens on 8080."]
+        );
+        let old = notes_of(&mut tx, conv);
+        let (old_fridays, old_port) = (old[0].id, old[1].id);
+        // The user forgets the port note.
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&old_port],
+        )
+        .unwrap();
+
+        // The file changes an hour later: same two sections, one new.
+        let v2 = ts(T0 + 3600);
+        let second_version = [
+            first_version[0],
+            first_version[1],
+            "## Backups\nNightly at 02:00.",
+        ];
+        assert_eq!(
+            store(
+                &mut tx,
+                &stored_file(session, "markdown", "document", v2, &second_version)
+            ),
+            conv
+        );
+        assert_eq!(
+            document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
+            Some(v2)
+        );
+        let second = extract_conversation_with(&mut tx, conv, 24_000, |_| {
+            Ok(vec![fact(FRIDAYS), fact(PORT), fact(BACKUPS)])
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 2,
+                errors: 0,
+                closed: 1,
+                dropped: 1,
+            }
+        );
+
+        let after = notes_of(&mut tx, conv);
+        let by_id = |id: i64| after.iter().find(|n| n.id == id).expect("note kept");
+        // The old version's note is closed where the new version starts, with no successor.
+        let closed = by_id(old_fridays);
+        assert_eq!(
+            (
+                closed.status.as_str(),
+                closed.valid_to,
+                closed.superseded_by
+            ),
+            ("superseded", Some(v2), None)
+        );
+        // Forgotten stays forgotten, and its repeat is gone.
+        let forgotten = by_id(old_port);
+        assert_eq!(
+            (forgotten.status.as_str(), forgotten.valid_to),
+            ("forgotten", None)
+        );
+        assert_eq!(after.iter().filter(|n| n.content == PORT).count(), 1);
+        // The current notes are the new version's: the unchanged fact again and the new one.
+        let current: Vec<&StoredNote> = after.iter().filter(|n| n.status == "active").collect();
+        let texts: Vec<&str> = current.iter().map(|n| n.content.as_str()).collect();
+        assert_eq!(texts, [FRIDAYS, BACKUPS]);
+        assert!(current
+            .iter()
+            .all(|n| n.source_at > v2 && n.valid_to.is_none()));
+
+        // Nothing new: no new version, nothing sent, nothing closed.
+        assert_eq!(
+            document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
+            None
+        );
+        let third = extract_conversation_with(&mut tx, conv, 24_000, |_| {
+            unreachable!("nothing is pending")
+        })
+        .expect("third pass");
+        assert_eq!(third, ExtractSummary::default());
+    }
+
+    #[test]
+    fn document_sections_of_one_timestamp_commit_together() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping document_sections_of_one_timestamp_commit_together: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let mut file = stored_file(
+            uuid::Uuid::new_v4(),
+            "web",
+            "document",
+            ts(T0),
+            &["one", "two", "three"],
+        );
+        for m in &mut file.messages {
+            m.created_at = Some(ts(T0));
+        }
+        let conv = store(&mut tx, &file);
+        let watermark = |tx: &mut postgres::Transaction<'_>| -> Option<DateTime<Utc>> {
+            tx.query_one(
+                "SELECT memory_extracted_until FROM conversations WHERE id = $1",
+                &[&conv],
+            )
+            .unwrap()
+            .get(0)
+        };
+
+        // "document: one" is 13 bytes: one section per window, three windows
+        // of one timestamp. The second fails, so nothing is written and the
+        // watermark stays, although the first window got its reply.
+        let mut calls = 0;
+        let failed = extract_conversation_with(&mut tx, conv, 15, |_| {
+            calls += 1;
+            if calls == 2 {
+                anyhow::bail!("model gone");
+            }
+            Ok(vec![fact(FRIDAYS)])
+        })
+        .expect("failed pass");
+        assert_eq!(
+            failed,
+            ExtractSummary {
+                errors: 1,
+                ..Default::default()
+            }
+        );
+        assert!(notes_of(&mut tx, conv).is_empty());
+        assert_eq!(watermark(&mut tx), None);
+
+        let mut sent = Vec::new();
+        let done = extract_conversation_with(&mut tx, conv, 15, |text| {
+            sent.push(text.to_string());
+            Ok(vec![fact(text)])
+        })
+        .expect("second pass");
+        assert_eq!(sent, ["document: one", "document: two", "document: three"]);
+        assert_eq!(
+            done,
+            ExtractSummary {
+                windows: 3,
+                chunks: 3,
+                ..Default::default()
+            }
+        );
+        assert_eq!(watermark(&mut tx), Some(ts(T0)));
+    }
+
+    #[test]
+    fn reimport_of_a_session_changes_no_notes() {
+        // Negative control: the same replace on a session source closes
+        // nothing and drops nothing.
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping reimport_of_a_session_changes_no_notes: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let session = uuid::Uuid::new_v4();
+        let conv = store(
+            &mut tx,
+            &stored_file(session, "claude_code", "user", ts(T0), &["one", "two"]),
+        );
+        extract_conversation_with(&mut tx, conv, 24_000, |_| {
+            Ok(vec![fact(FRIDAYS), fact(PORT)])
+        })
+        .expect("first pass");
+        let old = notes_of(&mut tx, conv);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&old[1].id],
+        )
+        .unwrap();
+        store(
+            &mut tx,
+            &stored_file(
+                session,
+                "claude_code",
+                "user",
+                ts(T0 + 3600),
+                &["one", "two", "three"],
+            ),
+        );
+        let second = extract_conversation_with(&mut tx, conv, 24_000, |_| {
+            Ok(vec![fact(FRIDAYS), fact(PORT), fact(BACKUPS)])
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 3,
+                ..Default::default()
+            }
+        );
+        let first_note = notes_of(&mut tx, conv)
+            .into_iter()
+            .find(|n| n.id == old[0].id)
+            .unwrap();
+        assert_eq!(
+            (first_note.status.as_str(), first_note.valid_to),
+            ("active", None)
+        );
+    }
+
+    #[test]
+    fn forgotten_repeat_is_found_by_vector() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping forgotten_repeat_is_found_by_vector: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let model = format!("test-doc-repeat-{}", uuid::Uuid::new_v4().simple());
+        let file = |tx: &mut postgres::Transaction<'_>| {
+            store(
+                tx,
+                &stored_file(
+                    uuid::Uuid::new_v4(),
+                    "markdown",
+                    "document",
+                    ts(T0),
+                    &["# Cache"],
+                ),
+            )
+        };
+        let (conv, other) = (file(&mut tx), file(&mut tx));
+        let vector = |x: f32, y: f32| {
+            let mut v = vec![0.0f32; 768];
+            v[0] = x;
+            v[1] = y;
+            crate::generate_embeddings::vector_literal(&v)
+        };
+        let note =
+            |tx: &mut postgres::Transaction<'_>, conv: i64, text: &str, v: Option<String>| {
+                let id = insert_memory(tx, conv, &fact(text), ts(T0)).expect("insert note");
+                if let Some(v) = v {
+                    tx.execute(
+                        "INSERT INTO embeddings (source_type, source_id, model, embedding_768) \
+                     VALUES ('memory_chunk', $1, $2, $3::text::vector)",
+                        &[&id, &model, &v],
+                    )
+                    .expect("insert vector");
+                }
+                id
+            };
+        let forgotten = note(
+            &mut tx,
+            conv,
+            "The app cache lives in /var/cache/app.",
+            Some(vector(1.0, 0.0)),
+        );
+        let elsewhere = note(&mut tx, other, "Logs rotate weekly.", None);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = ANY($1)",
+            &[&vec![forgotten, elsewhere]],
+        )
+        .unwrap();
+        // cosine 0.99 to the forgotten note, and 0 to it.
+        let near = note(
+            &mut tx,
+            conv,
+            "The app keeps its cache in /var/cache/app.",
+            Some(vector(0.99, 0.14)),
+        );
+        let far = note(&mut tx, conv, "Logs rotate weekly.", Some(vector(0.0, 1.0)));
+        let ids = [near, far];
+
+        assert_eq!(
+            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &model, 0.999).unwrap(),
+            0,
+            "below the threshold nothing goes"
+        );
+        assert_eq!(
+            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, "another-model", 0.92)
+                .unwrap(),
+            0,
+            "vectors of another model never count"
+        );
+        assert_eq!(
+            document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &model, 0.92).unwrap(),
+            1
+        );
+        let left: Vec<i64> = notes_of(&mut tx, conv).iter().map(|n| n.id).collect();
+        assert_eq!(
+            left,
+            [forgotten, far],
+            "the same text forgotten in another file does not count"
+        );
+        let vectors: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM embeddings WHERE source_type = 'memory_chunk' AND source_id = $1",
+                &[&near],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(vectors, 0, "the dropped note's vector goes with it");
     }
 }

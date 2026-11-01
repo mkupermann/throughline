@@ -17,6 +17,7 @@ pub mod context_pack;
 pub mod costs;
 pub mod decisions;
 pub mod doctor;
+pub mod document_lifecycle;
 pub mod embedding;
 pub mod export_markdown;
 pub mod export_otel;

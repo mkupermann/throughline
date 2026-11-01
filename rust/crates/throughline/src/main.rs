@@ -813,27 +813,39 @@ fn main() -> Result<()> {
             let backend = llm::resolve_backend()?;
             llm::ensure_local_or_allowed(&backend)?;
             let profile = std::env::var(extract_memory::PROFILE_ENV).ok();
-            let prompt = extract_memory::extraction_prompt(profile.as_deref())?;
-            if prompt == extract_memory::PERSONAL_EXTRACTION_PROMPT {
-                eprintln!("extraction profile: personal");
+            let configured = extract_memory::Profile::parse(profile.as_deref())?;
+            if configured != extract_memory::Profile::Default {
+                eprintln!("extraction profile: {}", configured.name());
             }
             let mut total = extract_memory::ExtractSummary::default();
             for conv_id in extract_memory::pending_conversations(&mut client, limit)? {
+                // Markdown, git and web take the document profile.
+                let profile =
+                    extract_memory::conversation_profile(&mut client, conv_id, configured)?;
                 let s = extract_memory::extract_conversation(
                     &mut client,
                     &backend,
                     conv_id,
                     window_chars,
-                    prompt,
+                    profile.prompt(),
                 )?;
                 total.windows += s.windows;
                 total.chunks += s.chunks;
                 total.errors += s.errors;
+                total.closed += s.closed;
+                total.dropped += s.dropped;
             }
             println!(
                 "extracted {} memory chunk(s) from {} window(s), {} error(s)",
                 total.chunks, total.windows, total.errors
             );
+            if total.closed + total.dropped > 0 {
+                println!(
+                    "documents: {} note(s) of old versions closed, \
+                     {} repeat(s) of forgotten notes dropped",
+                    total.closed, total.dropped
+                );
+            }
         }
         Command::Embed { limit } => {
             let mut client = config::DbConfig::from_env()
