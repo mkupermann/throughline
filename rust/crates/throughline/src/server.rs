@@ -10774,6 +10774,7 @@ mod session_tests {
             .chain([
                 "GET /api/ask".into(),
                 "GET /api/answer-eval".into(),
+                "GET /api/backlog".into(),
                 "GET /api/consolidation/proposal".into(),
             ])
             .collect();
@@ -10848,6 +10849,7 @@ mod session_tests {
                 "GET /api/assistants/imported",
                 "GET /api/assistants/imported/{id}",
                 "GET /api/assistants/{tool}",
+                "GET /api/backlog",
                 "GET /api/consolidation/proposal",
                 "POST /api/agent-memory/ingest",
                 "POST /api/consolidate",
