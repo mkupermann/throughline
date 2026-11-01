@@ -7,8 +7,11 @@
 //! fetched only when the web source is asked for by name.
 //!
 //! A URL is fetched once. A known URL (one in the ingestion log, a declined
-//! page included) is fetched again only with `--refetch`. A refetch whose
-//! text did not change writes nothing; a changed page replaces the stored one.
+//! page included) is fetched again only with `--refetch`. The text is
+//! compared with the version stored now (`text_sha256` in the conversation's
+//! metadata): the same text writes nothing, any other text replaces it, an
+//! earlier version included. A refetch that finds no text keeps the stored
+//! version and logs a decline.
 //!
 //! What goes out: one GET per page, one per `robots.txt` and host, each with
 //! `User-Agent: Throughline/<version>` and an `Accept` header. No body, no
@@ -38,14 +41,19 @@
 //!   disallows everything. Its fetch counts toward the budget;
 //! - only `text/html` and `text/plain`; at most 2 MiB, counted while the body
 //!   streams in; 10 s for everything one URL needs (lookups, robots,
-//!   redirects, body).
+//!   redirects, body), a hard bound for the caller; then at most 10 s to turn
+//!   the page into text;
+//! - beyond the required list, also refused: site-local `fec0::/10`, NAT64
+//!   (`64:ff9b::/96` of a refused IPv4, `64:ff9b:1::/48`), 6to4 of a refused
+//!   IPv4, Teredo, and the special-purpose, benchmarking and documentation
+//!   ranges.
 //!
 //! One URL is one conversation:
 //! - `session_id` is a stable UUID of `web/<url>` (the URL as listed, cleaned,
 //!   not the redirect target); `project_path` is `web/<host>`, so the project
 //!   is the host; `summary` is the `<title>`, else the URL; `source_tool` is
 //!   `web`; metadata: `url`, `final_url`, `etag`, `fetched_at`, `status`,
-//!   `content_type`;
+//!   `content_type`, `text_sha256`;
 //! - HTML becomes text with `html2text`: a heading comes out as a marked line
 //!   and becomes a `#` heading, a text line that would read as a heading or a
 //!   code fence is indented by four spaces, and `<noscript>` is dropped.
@@ -56,11 +64,12 @@
 //!   stamped fetch time plus n µs, and never at or before the newest stored
 //!   message, so the extraction sees each version as new;
 //! - a page without text (one that needs JavaScript) is recorded as declined
-//!   in the ingestion log, and nothing else is stored.
+//!   in the ingestion log, and nothing else is stored; on a refetch the
+//!   stored version stays.
 //!
 //! Known limits: bodies are read as UTF-8 (other charsets come out lossy);
-//! there is no conditional GET; deeply nested HTML converts slowly (100,000
-//! nested elements took about 11 s in a release build).
+//! there is no conditional GET; a page whose conversion runs over its 10 s
+//! is an error, and its thread runs on to its end in the background.
 
 use crate::adapters::markdown::{section_parts, split_sections, Section};
 use crate::adapters::stable_uuid;
@@ -106,6 +115,8 @@ const HEADING_MARK: char = '\u{E000}';
 /// Wide enough that a paragraph stays one line.
 const TEXT_WIDTH: usize = 10_000;
 const MAX_TITLE_CHARS: usize = 300;
+/// Time for turning one page into sections.
+const CONVERT_LIMIT: Duration = Duration::from_secs(10);
 
 const NS: Uuid = Uuid::from_u128(0x7c1d_9a52_3e64_4b0f_a8d3_25e9_b14f_c607);
 
@@ -135,18 +146,43 @@ impl Policy {
 pub struct WebSource {
     url_file: Option<PathBuf>,
     policy: Policy,
+    /// What was wrong with the variable, for `doctor` and the run.
+    note: Option<String>,
 }
 
 impl WebSource {
     /// The file in [`URLS_ENV`]. Unset or empty: no file, a no-op.
     pub fn from_env() -> Self {
-        Self::new(super::roots_from_env(URLS_ENV).into_iter().next())
+        let (files, dropped) = super::read_roots_env(URLS_ENV);
+        Self::from_parsed(files, dropped)
+    }
+
+    /// The first of the parsed `files`, with a note on the entries that
+    /// were dropped (not absolute) or are not read (all but the first).
+    pub fn from_parsed(files: Vec<PathBuf>, dropped: Vec<String>) -> Self {
+        let mut notes = Vec::new();
+        if !dropped.is_empty() {
+            notes.push(match dropped.len() {
+                1 => format!("1 entry in {URLS_ENV} is not an absolute path"),
+                n => format!("{n} entries in {URLS_ENV} are not absolute paths"),
+            });
+        }
+        if files.len() > 1 {
+            notes.push(format!(
+                "only the first of {} files in {URLS_ENV} is read",
+                files.len()
+            ));
+        }
+        let mut source = Self::new(files.into_iter().next());
+        source.note = (!notes.is_empty()).then(|| notes.join(", "));
+        source
     }
 
     pub fn new(url_file: Option<PathBuf>) -> Self {
         Self {
             url_file,
             policy: Policy::PRODUCTION,
+            note: None,
         }
     }
 
@@ -181,19 +217,22 @@ impl WebSource {
     }
 }
 
-/// `web: <n> urls configured`, and a note when the file cannot be read.
+/// `web: <n> urls configured`, and a note when the file cannot be read or
+/// the variable is misconfigured.
 pub fn doctor_line(source: &WebSource) -> String {
     let n = source.url_count();
-    let unreadable = source.url_file.is_some() && source.entries().is_err();
-    format!(
-        "web: {n} {} configured{}",
-        if n == 1 { "url" } else { "urls" },
-        if unreadable {
-            ", URL file not readable"
-        } else {
-            ""
-        }
-    )
+    let mut line = format!(
+        "web: {n} {} configured",
+        if n == 1 { "url" } else { "urls" }
+    );
+    if source.url_file.is_some() && source.entries().is_err() {
+        line.push_str(", URL file not readable");
+    }
+    if let Some(note) = &source.note {
+        line.push_str(", ");
+        line.push_str(note);
+    }
+    line
 }
 
 /// `raw` as a URL to fetch: `http` or `https` with a host, the userinfo and
@@ -224,7 +263,14 @@ fn refused(ip: IpAddr, policy: Policy) -> Option<&'static str> {
         IpAddr::V4(v4) => return refused_v4(v4, policy),
         IpAddr::V6(v6) => v6,
     };
-    let first = v6.segments()[0];
+    let s = v6.segments();
+    let first = s[0];
+    // An IPv4 address carried in two segments, refused like a plain one.
+    let embedded = |hi: u16, lo: u16| {
+        let [a, b] = hi.to_be_bytes();
+        let [c, d] = lo.to_be_bytes();
+        refused_v4(Ipv4Addr::new(a, b, c, d), Policy::PRODUCTION)
+    };
     if v6.to_ipv4_mapped().is_some() {
         Some("IPv4-mapped IPv6")
     } else if v6.is_loopback() {
@@ -239,13 +285,25 @@ fn refused(ip: IpAddr, policy: Policy) -> Option<&'static str> {
         Some("unique-local")
     } else if first & 0xffc0 == 0xfe80 {
         Some("link-local")
+    } else if first & 0xffc0 == 0xfec0 {
+        Some("site-local")
+    } else if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        embedded(s[6], s[7]).map(|_| "NAT64 of a non-public IPv4")
+    } else if s[..3] == [0x64, 0xff9b, 1] {
+        Some("NAT64 local-use")
+    } else if first == 0x2002 {
+        embedded(s[1], s[2]).map(|_| "6to4 of a non-public IPv4")
+    } else if s[..2] == [0x2001, 0] {
+        Some("Teredo")
+    } else if s[..2] == [0x2001, 0xdb8] {
+        Some("documentation")
     } else {
         None
     }
 }
 
 fn refused_v4(ip: Ipv4Addr, policy: Policy) -> Option<&'static str> {
-    let [a, b, ..] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     if ip.is_loopback() {
         (!policy.allow_loopback).then_some("loopback")
     } else if a == 0 {
@@ -260,6 +318,12 @@ fn refused_v4(ip: Ipv4Addr, policy: Policy) -> Option<&'static str> {
         Some("multicast")
     } else if a >= 240 {
         Some("reserved")
+    } else if (a, b, c) == (192, 0, 0) {
+        Some("special-purpose")
+    } else if a == 198 && b & 0xfe == 18 {
+        Some("benchmarking")
+    } else if matches!((a, b, c), (192, 0, 2) | (198, 51, 100) | (203, 0, 113)) {
+        Some("documentation")
     } else {
         None
     }
@@ -360,9 +424,26 @@ fn redirect_target(current: &Url, resp: &Response) -> Result<Option<Url>> {
         .map_err(|e| anyhow!("refused: a redirect to a URL that is not allowed: {e}"))
 }
 
-/// The body up to `cap` bytes, and whether there was more. Reading stops
-/// at `cap + 1` bytes or at the deadline.
-fn read_body(mut body: impl Read, cap: u64, deadline: Instant) -> Result<(Vec<u8>, bool)> {
+/// The body up to `cap` bytes, and whether there was more, by the
+/// deadline. reqwest's blocking read waits up to its timeout per call, so
+/// the reading runs on a thread and the caller stops waiting at the
+/// deadline; the thread ends at its next read.
+fn read_body(
+    body: impl Read + Send + 'static,
+    cap: u64,
+    deadline: Instant,
+) -> Result<(Vec<u8>, bool)> {
+    let wait = remaining(deadline)?;
+    let (send, recv) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(read_capped(body, cap, deadline));
+    });
+    recv.recv_timeout(wait)
+        .map_err(|_| anyhow!("the budget ran out while the body was read"))?
+}
+
+/// Reading stops at `cap + 1` bytes or at the deadline.
+fn read_capped(mut body: impl Read, cap: u64, deadline: Instant) -> Result<(Vec<u8>, bool)> {
     let mut out = Vec::new();
     let mut chunk = vec![0u8; 64 * 1024];
     loop {
@@ -584,37 +665,38 @@ impl Fetcher {
 
     fn robots_check(&mut self, url: &Url, deadline: Instant) -> Result<()> {
         let origin = url.origin().ascii_serialization();
-        if !self.robots.contains_key(&origin) {
-            let file = self.robots_file(url, deadline);
-            self.robots.insert(origin.clone(), file);
-        }
         let mut path = url.path().to_string();
         if let Some(query) = url.query() {
             path.push('?');
             path.push_str(query);
         }
-        match &self.robots[&origin] {
-            RobotsFile::Rules(rules) if robots_allows(rules, &path) => Ok(()),
-            RobotsFile::Rules(_) => bail!("refused: robots.txt disallows {path}"),
-            RobotsFile::Unreachable(why) => {
-                bail!("refused: robots.txt unreachable ({why}), so nothing there is fetched")
-            }
+        if let Some(file) = self.robots.get(&origin) {
+            return robots_decision(file, &path);
         }
+        let (file, keep) = self.robots_file(url, deadline);
+        let decision = robots_decision(&file, &path);
+        if keep {
+            self.robots.insert(origin, file);
+        }
+        decision
     }
 
     /// RFC 9309: a 2xx gives rules, a 4xx none (all allowed), anything
-    /// else makes the host unreachable (all disallowed).
-    fn robots_file(&self, url: &Url, deadline: Instant) -> RobotsFile {
-        let unreachable = |e: anyhow::Error| RobotsFile::Unreachable(format!("{e:#}"));
+    /// else makes the host unreachable (all disallowed). The flag says
+    /// whether to keep the outcome for the run: an answer from the server
+    /// yes; a network error, a refused address or a spent budget no, so
+    /// the next URL with its own budget asks again.
+    fn robots_file(&self, url: &Url, deadline: Instant) -> (RobotsFile, bool) {
+        let failed = |e: anyhow::Error| (RobotsFile::Unreachable(format!("{e:#}")), false);
         let Ok(mut current) = url.join("/robots.txt") else {
-            return RobotsFile::Unreachable("no robots.txt URL".into());
+            return (RobotsFile::Unreachable("no robots.txt URL".into()), true);
         };
         for _ in 0..=MAX_REDIRECTS {
             let resp = match checked(&current, self.policy, deadline)
                 .and_then(|t| send(&current, &t, deadline, "text/plain"))
             {
                 Ok(resp) => resp,
-                Err(e) => return unreachable(e),
+                Err(e) => return failed(e),
             };
             match redirect_target(&current, &resp) {
                 Ok(Some(next)) => {
@@ -622,24 +704,36 @@ impl Fetcher {
                     continue;
                 }
                 Ok(None) => {}
-                Err(e) => return unreachable(e),
+                Err(e) => return (RobotsFile::Unreachable(format!("{e:#}")), true),
             }
             let status = resp.status();
             if status.is_success() {
                 return match read_body(resp, MAX_ROBOTS_BYTES, deadline) {
-                    Ok((body, _)) => {
-                        RobotsFile::Rules(robots_rules(&String::from_utf8_lossy(&body)))
-                    }
-                    Err(e) => unreachable(e),
+                    Ok((body, _)) => (
+                        RobotsFile::Rules(robots_rules(&String::from_utf8_lossy(&body))),
+                        true,
+                    ),
+                    Err(e) => failed(e),
                 };
             }
             if status.is_client_error() {
-                return RobotsFile::Rules(Vec::new());
+                return (RobotsFile::Rules(Vec::new()), true);
             }
-            return RobotsFile::Unreachable(format!("HTTP {status}"));
+            return (RobotsFile::Unreachable(format!("HTTP {status}")), true);
         }
         // More than five redirects: unavailable, which RFC 9309 allows.
-        RobotsFile::Rules(Vec::new())
+        (RobotsFile::Rules(Vec::new()), true)
+    }
+}
+
+/// Whether `path` may be fetched under `file`.
+fn robots_decision(file: &RobotsFile, path: &str) -> Result<()> {
+    match file {
+        RobotsFile::Rules(rules) if robots_allows(rules, path) => Ok(()),
+        RobotsFile::Rules(_) => bail!("refused: robots.txt disallows {path}"),
+        RobotsFile::Unreachable(why) => {
+            bail!("refused: robots.txt unreachable ({why}), so nothing there is fetched")
+        }
     }
 }
 
@@ -786,10 +880,27 @@ fn title_of(html: &str) -> Option<String> {
 }
 
 /// The page's title and its sections.
-fn sections_of(page: &Page) -> Result<(Option<String>, Vec<Section>)> {
-    let text = String::from_utf8_lossy(&page.body);
+/// The title and sections of `page`, given up after `limit`. A page that
+/// takes longer (deeply nested markup) is an error; the conversion thread
+/// runs on to its end.
+fn sections_of(page: &Page, limit: Duration) -> Result<(Option<String>, Vec<Section>)> {
+    let (body, plain) = (page.body.clone(), page.content_type == "text/plain");
+    let (send, recv) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(convert(&body, plain));
+    });
+    recv.recv_timeout(limit).map_err(|_| {
+        anyhow!(
+            "turning the page into text took longer than {} s",
+            limit.as_secs_f32()
+        )
+    })?
+}
+
+fn convert(body: &[u8], plain: bool) -> Result<(Option<String>, Vec<Section>)> {
+    let text = String::from_utf8_lossy(body);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    if page.content_type == "text/plain" {
+    if plain {
         return Ok((None, split_sections(text)));
     }
     Ok((
@@ -806,7 +917,7 @@ enum Stored {
 
 /// Write `page` as the conversation of `url`, replacing an earlier version.
 fn store<C: GenericClient>(client: &mut C, url: &Url, page: &Page) -> Result<Stored> {
-    let (title, sections) = sections_of(page)?;
+    let (title, sections) = sections_of(page, CONVERT_LIMIT)?;
     let key = PathBuf::from(url.as_str());
     let parts: Vec<(usize, usize, &Section, String)> = sections
         .iter()
@@ -827,15 +938,26 @@ fn store<C: GenericClient>(client: &mut C, url: &Url, page: &Page) -> Result<Sto
         hash.update(text);
     }
     let hash = format!("{:x}", hash.finalize());
+    // No text (a page that turned into a JavaScript app): the stored
+    // version stays, and the decline is logged.
     if parts.is_empty() {
         w::record_decision(client, &key, &hash)?;
         return Ok(Stored::Declined);
     }
-    if matches!(w::already_ingested(client, &key, &hash)?, Some(n) if n != 0) {
+    // Compared with the version stored now, not with any version the
+    // ledger has seen: a page that goes back to an earlier text replaces
+    // the later one.
+    let session_id = stable_uuid(&NS, None, &format!("{NAME}/{url}"));
+    let stored: Option<String> = client
+        .query_opt(
+            "SELECT metadata->>'text_sha256' FROM conversations WHERE session_id = $1",
+            &[&session_id],
+        )?
+        .and_then(|row| row.get(0));
+    if stored.as_deref() == Some(hash.as_str()) {
         return Ok(Stored::Unchanged);
     }
 
-    let session_id = stable_uuid(&NS, None, &format!("{NAME}/{url}"));
     let mut tx = client.transaction()?;
     let newest: Option<DateTime<Utc>> = tx
         .query_one(
@@ -886,6 +1008,7 @@ fn store<C: GenericClient>(client: &mut C, url: &Url, page: &Page) -> Result<Sto
             "fetched_at": page.fetched_at.to_rfc3339(),
             "status": page.status,
             "content_type": page.content_type,
+            "text_sha256": hash,
         }),
         source_tool: Some(NAME.into()),
         messages,
@@ -908,6 +1031,9 @@ pub fn run<C: GenericClient>(
     rules: &IgnoreRules,
 ) -> Result<IngestSummary> {
     let mut summary = IngestSummary::new(NAME);
+    if let Some(note) = &source.note {
+        eprintln!("[{NAME}] {note}");
+    }
     let entries = match source.entries() {
         Ok(entries) => entries,
         Err(e) => {
@@ -1034,6 +1160,8 @@ mod tests {
         /// connection closes.
         sized: bool,
         delay: Duration,
+        /// Send the body one byte per interval.
+        trickle: Option<Duration>,
     }
 
     impl Reply {
@@ -1044,6 +1172,7 @@ mod tests {
                 body: Vec::new(),
                 sized: true,
                 delay: Duration::ZERO,
+                trickle: None,
             }
         }
         fn typed(content_type: &str, body: impl Into<Vec<u8>>) -> Self {
@@ -1067,6 +1196,10 @@ mod tests {
         }
         fn slow(mut self, delay: Duration) -> Self {
             self.delay = delay;
+            self
+        }
+        fn trickled(mut self, every: Duration) -> Self {
+            self.trickle = Some(every);
             self
         }
     }
@@ -1158,7 +1291,16 @@ mod tests {
         }
         out.push_str("\r\n");
         if stream.write_all(out.as_bytes()).is_ok() {
-            for chunk in reply.body.chunks(64 * 1024) {
+            let size = if reply.trickle.is_some() {
+                1
+            } else {
+                64 * 1024
+            };
+            for chunk in reply.body.chunks(size) {
+                if let Some(every) = reply.trickle {
+                    let _ = stream.flush();
+                    std::thread::sleep(every);
+                }
                 if stream.write_all(chunk).is_err() {
                     break;
                 }
@@ -1472,6 +1614,34 @@ mod tests {
             );
         }
 
+        // A name goes through lookup, check and pin. `.invalid` never
+        // resolves, so a request that arrives proves the pin is used.
+        let pinned = Server::start(vec![("/guide", Reply::html(&guide_page()))]);
+        let deadline = Instant::now() + BUDGET;
+        let target = checked(
+            &url(&format!("http://localhost:{}/guide", pinned.port)),
+            Policy::allowing_loopback(),
+            deadline,
+        )
+        .unwrap();
+        assert_eq!(target.domain.as_deref(), Some("localhost"));
+        assert!(target.addrs.iter().all(|a| a.ip().is_loopback()));
+        let tide = url(&format!("http://tide.invalid:{}/guide", pinned.port));
+        let target = Target {
+            domain: Some("tide.invalid".into()),
+            addrs: vec![SocketAddr::from(([127, 0, 0, 1], pinned.port))],
+        };
+        let resp = send(&tide, &target, deadline, PAGE_ACCEPT).expect("the pinned address");
+        assert_eq!(resp.status().as_u16(), 200);
+        assert!(pinned.heads()[0]
+            .to_ascii_lowercase()
+            .contains(&format!("host: tide.invalid:{}", pinned.port)));
+        let mut by_name = Fetcher::new(Policy::allowing_loopback());
+        assert!(by_name
+            .fetch(&url(&format!("http://localhost:{}/guide", pinned.port)))
+            .is_ok());
+        assert_eq!(pinned.hits("/guide"), 2);
+
         let server = Server::start(vec![("/guide", Reply::html(&guide_page()))]);
         let port = server.port;
         let urls: Vec<String> = [
@@ -1537,10 +1707,33 @@ mod tests {
             ("::ffff:10.0.0.1", "IPv4-mapped IPv6"),
             ("::ffff:1.1.1.1", "IPv4-mapped IPv6"),
             ("::10.0.0.1", "IPv4-compatible IPv6"),
+            ("192.0.0.8", "special-purpose"),
+            ("198.18.0.1", "benchmarking"),
+            ("198.19.255.255", "benchmarking"),
+            ("192.0.2.1", "documentation"),
+            ("198.51.100.1", "documentation"),
+            ("203.0.113.9", "documentation"),
+            ("fec0::1", "site-local"),
+            ("2001:db8::1", "documentation"),
+            ("2001::1", "Teredo"),
+            ("64:ff9b::a00:1", "NAT64 of a non-public IPv4"),
+            ("64:ff9b::7f00:1", "NAT64 of a non-public IPv4"),
+            ("64:ff9b:1::1", "NAT64 local-use"),
+            ("2002:c0a8:101::1", "6to4 of a non-public IPv4"),
         ] {
             assert_eq!(refused(ip.parse().unwrap(), policy), Some(class), "{ip}");
         }
-        for ip in ["100.63.255.255", "100.128.0.1", "172.15.0.1", "172.32.0.1"] {
+        for ip in [
+            "100.63.255.255",
+            "100.128.0.1",
+            "172.15.0.1",
+            "172.32.0.1",
+            "198.17.255.255",
+            "198.20.0.0",
+            "64:ff9b::101:101",
+            "2002:101:101::1",
+            "2001:4860:4860::8888",
+        ] {
             assert_eq!(refused(ip.parse().unwrap(), policy), None, "{ip}");
         }
 
@@ -1830,6 +2023,72 @@ mod tests {
         assert!(err.contains("robots.txt unreachable"), "{err}");
         assert!(started.elapsed() < Duration::from_millis(2_500));
         assert_eq!(slow.hits("/charts/bay"), 0);
+        // A spent budget is not remembered: the next URL asks again.
+        slow.set("/robots.txt", Reply::status(404));
+        short.budget = BUDGET;
+        assert!(short.fetch(&url(&slow.url("/charts/bay"))).is_ok());
+
+        // robots.txt redirects are followed, each hop checked.
+        let moved = Server::start(vec![
+            ("/robots.txt", Reply::redirect(301, "/rules.txt")),
+            (
+                "/rules.txt",
+                Reply::typed("text/plain", "User-agent: *\nDisallow: /closed\n"),
+            ),
+            ("/closed", page()),
+            ("/open", page()),
+        ]);
+        let err = format!(
+            "{:#}",
+            fetcher.fetch(&url(&moved.url("/closed"))).err().unwrap()
+        );
+        assert!(err.contains("robots.txt disallows /closed"), "{err}");
+        assert!(fetcher.fetch(&url(&moved.url("/open"))).is_ok());
+        let private = Server::start(vec![
+            (
+                "/robots.txt",
+                Reply::redirect(302, "http://10.0.0.1/robots.txt"),
+            ),
+            ("/charts/bay", page()),
+        ]);
+        let err = format!(
+            "{:#}",
+            fetcher
+                .fetch(&url(&private.url("/charts/bay")))
+                .err()
+                .unwrap()
+        );
+        assert!(
+            err.contains("robots.txt unreachable") && err.contains("private address 10.0.0.1"),
+            "{err}"
+        );
+        assert_eq!(private.hits("/charts/bay"), 0);
+        // More than five robots redirects: unavailable, so allowed.
+        let looping = Server::start(vec![("/charts/bay", page())]);
+        looping.set("/robots.txt", Reply::redirect(302, "/r1"));
+        for n in 1..=6 {
+            looping.set(
+                &format!("/r{n}"),
+                Reply::redirect(302, &format!("/r{}", n + 1)),
+            );
+        }
+        assert!(fetcher.fetch(&url(&looping.url("/charts/bay"))).is_ok());
+        assert_eq!(looping.hits("/r6"), 0, "five robots redirects at most");
+        // Only the first 500 KiB are read.
+        let padding = format!("#{}\n", "x".repeat(1_023)).repeat(520);
+        let long = Server::start(vec![
+            (
+                "/robots.txt",
+                Reply::typed(
+                    "text/plain",
+                    format!("User-agent: *\nDisallow: /early\n{padding}Disallow: /late\n"),
+                ),
+            ),
+            ("/early", page()),
+            ("/late", page()),
+        ]);
+        assert!(fetcher.fetch(&url(&long.url("/early"))).is_err());
+        assert!(fetcher.fetch(&url(&long.url("/late"))).is_ok());
 
         // A 404 allows everything.
         let none = Server::start(vec![("/charts/bay", page())]);
@@ -1980,8 +2239,20 @@ mod tests {
             "web: 1 url configured"
         );
         assert_eq!(
-            doctor_line(&WebSource::new(Some(two))),
+            doctor_line(&WebSource::new(Some(two.clone()))),
             "web: 2 urls configured"
+        );
+        // A misconfigured variable says why.
+        assert_eq!(
+            doctor_line(&WebSource::from_parsed(Vec::new(), vec!["urls.txt".into()])),
+            "web: 0 urls configured, 1 entry in THROUGHLINE_WEB_URLS is not an absolute path"
+        );
+        assert_eq!(
+            doctor_line(&WebSource::from_parsed(
+                vec![two, dir.path().join("three.txt")],
+                Vec::new()
+            )),
+            "web: 2 urls configured, only the first of 2 files in THROUGHLINE_WEB_URLS is read"
         );
 
         let Some(mut client) = test_db() else {
@@ -2007,6 +2278,102 @@ mod tests {
         assert_eq!(rows(&mut tx), before, "nothing written");
     }
 
+    #[test]
+    fn web_refetch_restores_an_earlier_version() {
+        let test = "web_refetch_restores_an_earlier_version";
+        let v1 = "<title>Harbour notice</title><h1>Notice</h1><p>The pier is open.</p>";
+        let v2 = "<title>Harbour notice</title><h1>Notice</h1><p>The pier is closed today.</p>";
+        let server = Server::start(vec![("/notice", Reply::html(v1))]);
+        let page = server.url("/notice");
+        let (_dir, source) = source_with(std::slice::from_ref(&page), Policy::allowing_loopback());
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping {test}: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let rules = IgnoreRules::default();
+        let text = |tx: &mut postgres::Transaction<'_>| -> String {
+            let id = conversation(tx, &page).unwrap().id;
+            messages(tx, id).into_iter().map(|m| m.content).collect()
+        };
+
+        assert_eq!(
+            run(&mut tx, &source, false, false, &rules)
+                .unwrap()
+                .ingested,
+            1
+        );
+        assert!(text(&mut tx).contains("The pier is open."));
+        server.set("/notice", Reply::html(v2));
+        assert_eq!(
+            run(&mut tx, &source, true, false, &rules).unwrap().ingested,
+            1
+        );
+        assert!(text(&mut tx).contains("closed today"));
+
+        // Back to the first version: it replaces the second.
+        server.set("/notice", Reply::html(v1));
+        let back = run(&mut tx, &source, true, false, &rules).unwrap();
+        assert_eq!(counts(&back), (1, 1, 0, 0, 1));
+        let stored = text(&mut tx);
+        assert!(stored.contains("The pier is open."), "{stored}");
+        assert!(!stored.contains("closed today"), "{stored}");
+        // And now it is the stored version: unchanged.
+        let again = run(&mut tx, &source, true, false, &rules).unwrap();
+        assert_eq!(counts(&again), (1, 0, 1, 0, 0));
+    }
+
+    #[test]
+    fn web_time_bounds_hold_for_body_and_conversion() {
+        // One byte every 0.9 s: a read that starts just before the 1 s
+        // deadline would wait for the next byte, up to the client timeout.
+        // The caller stops waiting at the deadline.
+        let body = format!("<h1>Slow</h1><p>{}</p>", "z".repeat(20));
+        let server = Server::start(vec![(
+            "/slow",
+            Reply::html(&body).trickled(Duration::from_millis(900)),
+        )]);
+        let mut fetcher = Fetcher::new(Policy::allowing_loopback());
+        fetcher.budget = Duration::from_secs(1);
+        let started = Instant::now();
+        let err = format!(
+            "{:#}",
+            fetcher.fetch(&url(&server.url("/slow"))).err().unwrap()
+        );
+        assert!(err.contains("budget"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_millis(1_500),
+            "{:?}",
+            started.elapsed()
+        );
+
+        // The conversion has its own bound.
+        let page = |body: String| Page {
+            url: url("http://tide.invalid/"),
+            status: 200,
+            content_type: "text/html".into(),
+            etag: None,
+            body: body.into_bytes(),
+            fetched_at: Utc::now(),
+        };
+        let deep = page(format!(
+            "{}x{}",
+            "<div>".repeat(50_000),
+            "</div>".repeat(50_000)
+        ));
+        let err = format!(
+            "{:#}",
+            sections_of(&deep, Duration::from_millis(1)).err().unwrap()
+        );
+        assert!(err.contains("longer than"), "{err}");
+        let (title, sections) = sections_of(
+            &page("<title>Pier</title><h1>Pier</h1><p>Open.</p>".into()),
+            CONVERT_LIMIT,
+        )
+        .unwrap();
+        assert_eq!((title.as_deref(), sections.len()), (Some("Pier"), 1));
+    }
+
     /// The production path, by hand inside the container:
     /// `cargo test -p throughline web_live_public_page -- --ignored`.
     #[test]
@@ -2017,7 +2384,7 @@ mod tests {
         let page = fetcher
             .fetch(&live)
             .unwrap_or_else(|e| panic!("live fetch of {live} failed: {e:#}"));
-        let (title, sections) = sections_of(&page).unwrap();
+        let (title, sections) = sections_of(&page, CONVERT_LIMIT).unwrap();
         eprintln!(
             "live: {} -> {} status {} type {} etag {:?} bytes {} title {:?} sections {}",
             live,
