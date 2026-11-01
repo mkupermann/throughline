@@ -206,16 +206,19 @@ services:
       # repositories and web pages"). Markdown folders and git repositories
       # are colon-separated, the URL file is one path. Write them as ~/… :
       # ~ is your home natively and /home/throughline here, so one .env
-      # serves both. Each path also needs a read-only mount at that place
-      # below /home/throughline. Mounts with your own paths belong in
-      # docker-compose.override.yml (git-ignored), never in this file.
+      # serves both. Each path needs a read-only mount at the place it names
+      # (~/x at /home/throughline/x, an absolute path at itself); anything
+      # under ~/Documents/GitHub is mounted already while
+      # THROUGHLINE_PROJECTS_DIR is unset, see below. Mounts with
+      # your own paths belong in docker-compose.override.yml (git-ignored),
+      # never in this file.
       THROUGHLINE_MARKDOWN_ROOTS: "${THROUGHLINE_MARKDOWN_ROOTS:-}"
       THROUGHLINE_GIT_ROOTS: "${THROUGHLINE_GIT_ROOTS:-}"
       # Read only by `ingest --source web`, which runs by hand. `--source
       # all` and the hourly job never fetch a page.
       THROUGHLINE_WEB_URLS: "${THROUGHLINE_WEB_URLS:-}"
-      # Extraction prompt for sessions: empty for coding, or personal.
-      # markdown, git and web always use the document prompt.
+      # Extraction prompt for sessions: empty or default for coding, personal,
+      # or document. markdown, git and web always use the document prompt.
       THROUGHLINE_EXTRACT_PROFILE: "${THROUGHLINE_EXTRACT_PROFILE:-}"
     ports:
       # Loopback by default. Team deployments use a TLS proxy on this host;
