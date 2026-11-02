@@ -976,8 +976,8 @@ try {
     const seen = new Set();
     const dups = icons.filter((g) => (seen.has(g) ? true : (seen.add(g), false)));
     if (dups.length) fail('ae-attention-full', `duplicate nav icon(s) ${dups.join(',')} in [${icons.join(' ')}]`);
-    if (icons.length !== 10) fail('ae-attention-full', `expected 10 nav icons, got ${icons.length}: [${icons.join(' ')}]`);
-    pass('ae-attention-full', `label+hint unclipped (title ${fit.tsw}/${fit.tcw}, hint ${fit.hsw}/${fit.hcw}); 10 unique nav icons`);
+    if (icons.length !== 11) fail('ae-attention-full', `expected 11 nav icons, got ${icons.length}: [${icons.join(' ')}]`);
+    pass('ae-attention-full', `label+hint unclipped (title ${fit.tsw}/${fit.tcw}, hint ${fit.hsw}/${fit.hcw}); 11 unique nav icons`);
   }
 
   // ── (af) Mobile 390px: collapsible sidebar, no horizontal overflow ────

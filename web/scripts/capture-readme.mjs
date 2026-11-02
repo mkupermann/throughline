@@ -75,6 +75,8 @@ try {
   await page.waitForLoadState('networkidle'); await shot('find');
   await view('projects'); await shot('projects');
   await view('assistants'); await page.locator('#asst-tools button').first().click(); await page.locator('#asst-list [data-id]').first().waitFor({state:'visible'}); await page.locator('#asst-list [data-id]').first().click(); await page.locator('#asst-content').waitFor({state:'visible'}); await page.waitForLoadState('networkidle'); await page.locator('#asst-stand').filter({ hasText: /As of|Stand/ }).waitFor(); await shot('assistants');
+  // Masked values only: the capture never presses Show.
+  await view('secrets'); await page.locator('#secrets-list .secret-row').first().waitFor({state:'visible'}); await shot('secrets');
   await view('timeline'); await shot('timeline');
   await page.locator('#timeline-mode-cal').click(); await shot('calendar');
   await view('ask');

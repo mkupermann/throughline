@@ -222,6 +222,14 @@ Die Ansicht zeigt standardmäßig den importierten Stand mit der Zeit des letzte
 
 In Docker sieht der Container die Assistenten-Ordner, die `docker-compose.yml` read-only einbindet (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` und die anderen). `THROUGHLINE_ASSISTANT_HOME` lenkt die Suche auf ein anderes Home, `THROUGHLINE_SCAN_ROOTS` auf die Projektordner, und `THROUGHLINE_HOST_HOME` bildet Host-Pfade in Symlink-Zielen auf das Container-Home ab.
 
+### Secrets. Eingefügte Schlüssel wiederfinden
+
+In Sitzungen sammeln sich Schlüssel und Tokens. Ein API-Schlüssel wird zum Debuggen eingefügt, ein privater Schlüssel steht in einem Log. `throughline scan-secrets` findet zehn klare Muster in jeder Nachricht und in den Dateien der KI-Konfiguration: private Schlüssel, Schlüssel von Anthropic, OpenAI, GitHub, AWS, Google, Slack und Stripe, JWTs und Bearer-Tokens. Jeder Wert steht einmal in der Liste, mit Fundort und dem Zeitpunkt, an dem er zuerst auftauchte. Der Scan läuft nach jedem `ingest`. `throughline scan-secrets --full` prüft alles noch einmal.
+
+Die Ansicht zeigt die Werte maskiert, gefiltert nach Art oder Projekt, neu zu alt oder alt zu neu. **Anzeigen** holt einen Wert im Klartext, und jedes Anzeigen wird protokolliert. Im Team-Modus sind die Ansicht und beide Routen nur für Admins. Suche, `ask`, Kontextpaket, MCP, Übergabe und Exporte lesen diese Liste nie. Die Nachrichten behalten ihren Text. Ein Schlüssel in einer Nachricht ist dort also weiter zu sehen.
+
+![Ansicht Secrets mit fiktiven, maskierten Werten](docs/media/rust/de/secrets.png)
+
 ### Zeitachse. Aktivität über die Zeit verfolgen
 
 Prüfe die Sitzungen pro Tag, filtere nach Assistent, wechsle in den Kalender, navigiere durch Monate oder spring zurück auf heute. Chronologie ist keine Kausalität, und die Ansicht hält diesen Unterschied sichtbar.

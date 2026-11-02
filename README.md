@@ -222,6 +222,14 @@ The view reads the imported copy by default, with the time of the last import sh
 
 In Docker the container sees the assistant folders that `docker-compose.yml` mounts read-only (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` and the others). `THROUGHLINE_ASSISTANT_HOME` points the scan at another home, `THROUGHLINE_SCAN_ROOTS` at the project folders, and `THROUGHLINE_HOST_HOME` maps host paths in symlink targets onto the container home.
 
+### Secrets. Find the keys you pasted
+
+Sessions collect keys and tokens: an API key pasted to debug a call, a private key in a log. `throughline scan-secrets` finds ten clear shapes (private keys, Anthropic, OpenAI, GitHub, AWS, Google, Slack and Stripe keys, JWTs and bearer tokens) in every message and in the AI configuration files, and keeps each value once with where and when it was first seen. The scan runs after every `ingest`. Run `throughline scan-secrets --full` to scan everything again.
+
+The view lists them masked, filtered by kind or project, new to old or old to new. **Show** fetches one clear value, and each reveal is logged. In team mode the view and both routes are for admins. Search, `ask`, the context pack, MCP, the handoff and the exports never read this list. The messages keep their text, so a key that sits in a message still shows in that message.
+
+![Secrets view with fictional, masked values](docs/media/rust/secrets.png)
+
 ### Timeline. Follow activity over time
 
 Inspect sessions per day, filter by assistant, switch to the calendar, navigate months or jump back to today. Chronology is not causality, and the view keeps that distinction visible.
