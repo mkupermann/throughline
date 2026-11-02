@@ -153,24 +153,35 @@ pub fn semantic_in<C: GenericClient>(
     limit: i32,
     project: Option<&str>,
 ) -> Result<Vec<SearchHit>> {
-    // Reuse embed + distance query, then hydrate conversation fields.
+    let vector = crate::embedding::embed_text(backend, query, crate::embedding::TextKind::Query)?;
+    semantic_by_vector(client, backend, &vector, limit, project)
+}
+
+/// [`semantic_in`] with the question vector given. A vector the ranking
+/// cannot use is [`crate::recall::BadQueryVector`] before any SQL runs, so a
+/// caller's transaction stays usable for the lexical half.
+pub(crate) fn semantic_by_vector<C: GenericClient>(
+    client: &mut C,
+    backend: &EmbeddingBackend,
+    vector: &[f32],
+    limit: i32,
+    project: Option<&str>,
+) -> Result<Vec<SearchHit>> {
+    crate::recall::refuse_bad_query_vector(backend, vector)?;
+    // Distance query, then hydrate conversation fields.
     let raw: Vec<(i64, f32)> = match project {
-        None => generate_embeddings::semantic_search(client, backend, query, limit)?
+        None => generate_embeddings::semantic_search_by_vector(client, backend, vector, limit)?
             .into_iter()
             .map(|(id, _snippet, score)| (id, score))
             .collect(),
-        Some(project) => {
-            let vector =
-                crate::embedding::embed_text(backend, query, crate::embedding::TextKind::Query)?;
-            nearest_messages(
-                client,
-                backend.column,
-                &backend.model,
-                &vector,
-                project,
-                limit,
-            )?
-        }
+        Some(project) => nearest_messages(
+            client,
+            backend.column,
+            &backend.model,
+            vector,
+            project,
+            limit,
+        )?,
     };
     if raw.is_empty() {
         return Ok(vec![]);
@@ -591,6 +602,119 @@ pub fn search_from<C: GenericClient>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn backend_at(base_url: &str) -> EmbeddingBackend {
+        let model = "granite-embedding-multilingual:278m";
+        let profile = crate::embedding::profile_for(model, 768).unwrap();
+        EmbeddingBackend {
+            name: "ollama".into(),
+            model: model.into(),
+            base_url: base_url.into(),
+            column: profile.column,
+            dim: profile.dim,
+            profile,
+        }
+    }
+
+    fn bad_vectors() -> Vec<(&'static str, Vec<f32>)> {
+        let mut nan = vec![0.5f32; 768];
+        nan[7] = f32::NAN;
+        let mut inf = vec![0.5f32; 768];
+        inf[3] = f32::INFINITY;
+        vec![
+            ("wrong size", vec![0.5f32; 3]),
+            ("NaN", nan),
+            ("infinite", inf),
+            ("all zero", vec![0.0f32; 768]),
+        ]
+    }
+
+    fn is_bad_vector(e: &anyhow::Error) -> bool {
+        e.downcast_ref::<crate::recall::BadQueryVector>().is_some()
+    }
+
+    /// A bad question vector is refused before any SQL: the transaction
+    /// stays usable, and a good vector still runs.
+    #[test]
+    fn bad_query_vector_reaches_no_sql() {
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping bad_query_vector_reaches_no_sql: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let backend = backend_at("http://127.0.0.1:9");
+        for (what, vector) in bad_vectors() {
+            for project in [None, Some("p-none")] {
+                let e = semantic_by_vector(&mut tx, &backend, &vector, 5, project)
+                    .err()
+                    .unwrap_or_else(|| panic!("{what}: no error"));
+                assert!(is_bad_vector(&e), "{what}: {e}");
+                assert!(e.to_string().contains(&backend.model), "{what}: {e}");
+            }
+            let e = generate_embeddings::semantic_search_by_vector(&mut tx, &backend, &vector, 5)
+                .err()
+                .unwrap_or_else(|| panic!("{what}: no error"));
+            assert!(is_bad_vector(&e), "{what}: {e}");
+            // A refused statement would have aborted the transaction.
+            let one: i32 = tx.query_one("SELECT 1", &[]).expect(what).get(0);
+            assert_eq!(one, 1, "{what}");
+        }
+        let mut good = vec![0.0f32; 768];
+        good[0] = 1.0;
+        semantic_by_vector(&mut tx, &backend, &good, 5, None).expect("a good vector runs");
+        semantic_by_vector(&mut tx, &backend, &good, 5, Some("p-none")).expect("with a project");
+    }
+
+    /// With a model that answers an unusable vector, hybrid search gives the
+    /// lexical hits and says why the semantic half did not run, inside a
+    /// transaction too.
+    #[test]
+    fn hybrid_falls_back_to_lexical_on_a_bad_vector() {
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping hybrid_falls_back_to_lexical_on_a_bad_vector: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES ($1, $2, now()) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &project],
+            )
+            .unwrap()
+            .get(0);
+        let id: i64 = tx
+            .query_one(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user', $2, now()) RETURNING id",
+                &[&conv, &format!("rollout {tag} checklist")],
+            )
+            .unwrap()
+            .get(0);
+        for (what, vector) in [
+            ("wrong size", vec![0.5f32; 3]),
+            ("all zero", vec![0.0f32; 768]),
+        ] {
+            let backend = backend_at(&crate::recall::test_ollama::embedding(vector));
+            for scope in [None, Some(project.as_str())] {
+                let (hits, skipped) =
+                    hybrid_in_checked(&mut tx, &Actor::local(), Some(&backend), &tag, 10, scope)
+                        .unwrap_or_else(|e| panic!("{what}: {e:#}"));
+                let skipped = skipped.unwrap_or_else(|| panic!("{what}: no reason"));
+                assert!(is_bad_vector(&skipped), "{what}: {skipped:#}");
+                assert!(
+                    hits.iter()
+                        .any(|h| h.message_id == Some(id) && h.kind != "semantic"),
+                    "{what}: {:?}",
+                    hits.iter()
+                        .map(|h| (h.message_id, h.kind))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
 
     #[test]
     fn kind_bonus_memory_beats_lexical() {

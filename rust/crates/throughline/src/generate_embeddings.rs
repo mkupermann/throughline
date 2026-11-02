@@ -533,7 +533,19 @@ pub fn semantic_search<C: GenericClient>(
     limit: i32,
 ) -> Result<Vec<(i64, String, f32)>> {
     let vector = embedding::embed_text(backend, query, embedding::TextKind::Query)?;
-    let literal = vector_literal(&vector);
+    semantic_search_by_vector(client, backend, &vector, limit)
+}
+
+/// [`semantic_search`] with the question vector given. A vector the ranking
+/// cannot use is [`crate::recall::BadQueryVector`] before any SQL runs.
+pub(crate) fn semantic_search_by_vector<C: GenericClient>(
+    client: &mut C,
+    backend: &EmbeddingBackend,
+    vector: &[f32],
+    limit: i32,
+) -> Result<Vec<(i64, String, f32)>> {
+    crate::recall::refuse_bad_query_vector(backend, vector)?;
+    let literal = vector_literal(vector);
     let column = backend.column;
     let rows = client.query(
         &format!(

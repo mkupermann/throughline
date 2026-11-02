@@ -329,6 +329,54 @@ mod tests {
         assert!(prompt.contains(&format!("plan {tag} shared")), "{prompt}");
     }
 
+    /// An embedding model that answers a vector of the wrong size: ask still
+    /// answers from the lexical hits and says why the semantic half was skipped.
+    #[test]
+    fn ask_falls_back_to_lexical_on_a_bad_vector() {
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping ask_falls_back_to_lexical_on_a_bad_vector: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES ($1, $2, now()) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &format!("p-{tag}")],
+            )
+            .unwrap()
+            .get(0);
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) \
+             VALUES ($1, 'user', $2, now())",
+            &[&conv, &format!("rollout {tag} checklist")],
+        )
+        .unwrap();
+        let backend = GenerationBackend {
+            kind: llm::BackendKind::Ollama,
+            label: "fake".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            model: "fake".into(),
+            api_key: None,
+        };
+        let mut prompt = String::new();
+        let answer = crate::recall::test_ollama::answering(vec![0.5f32; 3], || {
+            ask_with(&mut tx, &Actor::local(), &tag, &backend, 12, None, |p| {
+                prompt = p.to_string();
+                Ok("from [1]".into())
+            })
+        })
+        .expect("ask answers");
+        let skipped = answer.semantic_skipped.expect("the reason is kept");
+        assert!(skipped.contains("unusable question vector"), "{skipped}");
+        assert!(
+            prompt.contains(&format!("rollout {tag} checklist")),
+            "{prompt}"
+        );
+        assert!(answer.cited);
+    }
+
     #[test]
     fn ask_project_filter_limits_messages() {
         use crate::access::team_test::note;

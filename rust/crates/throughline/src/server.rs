@@ -305,6 +305,9 @@ where
                 .is_some()
             {
                 Err(remote_llm_refused(team, &e))
+            } else if e.downcast_ref::<crate::recall::BadQueryVector>().is_some() {
+                // Search in mode semantic: the model's vector, not the SQL.
+                Err(embed_failed(team, &e))
             } else if team {
                 Err(hidden_failure(&e))
             } else {
@@ -8445,6 +8448,35 @@ mod tests {
 
     /// A SQL error is the caller's business: [`with_db`] hands it back and
     /// runs the closure exactly once, no retry (M26d).
+    /// Search in mode semantic with a model that answers an unusable vector:
+    /// 502 bad_query_vector with the model's name, not a 500.
+    #[test]
+    fn semantic_search_with_a_bad_vector_is_502() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping semantic_search_with_a_bad_vector_is_502: no PostgreSQL reachable");
+            return;
+        };
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let resp = crate::recall::test_ollama::answering(vec![0.5f32; 3], || {
+            rt.block_on(search_handler(
+                State(state.clone()),
+                Extension(crate::access::Actor::local()),
+                Query(SearchParams {
+                    q: Some("deploy".into()),
+                    limit: 5,
+                    mode: Some("semantic".into()),
+                }),
+            ))
+        });
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), usize::MAX))
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("bad_query_vector"), "{text}");
+    }
+
     #[test]
     fn with_db_does_not_retry_a_sql_error() {
         let Some(client) = test_db() else {
