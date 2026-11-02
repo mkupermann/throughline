@@ -139,9 +139,10 @@ a prompt that keeps who people are, what happened to them, what they like and
 what they plan, with times as they were said. Its notes use four of the same
 categories (`contact`, `insight`, `preference`, `decision`). Unset, empty or
 `default` keeps the coding prompt. `document` is the third profile, for text
-that is not a dialogue; the `markdown`, `git` and `web` sources always use it,
-whatever this variable says ([Documents, repositories and web
-pages](#extracting-notes-from-documents)). Any other value stops
+that is not a dialogue: it applies only to the `markdown`, `git` and `web`
+sources, which otherwise use the coding prompt too, and sessions keep the
+coding prompt with it. `personal` applies only to sessions ([Documents,
+repositories and web pages](#extracting-notes-from-documents)). Any other value stops
 `extract-memory` before it reads a conversation, so a typo never runs the wrong
 prompt. With `personal` the command prints `extraction profile: personal`. On a public benchmark of
 personal dialogues the coding prompt kept no note at all, which is why the
@@ -445,8 +446,8 @@ Markdown file, a repository folder or a URL, `project:` the project.
 ### Markdown folders
 
 - **Read:** every `.md` and `.markdown` file below each root. Skipped: the
-  folders `.git`, `node_modules`, `target` and `dist`, symbolic links, and
-  files over 1 MiB.
+  folders `.git`, `node_modules`, `target`, `dist`, `.venv`, `vendor` and
+  `build`, symbolic links, and files over 1 MiB.
 - **Stored:** one conversation per file and one message per section. A section
   starts at an H1, H2 or H3 heading; text before the first heading is a section
   of its own, and a `#` line inside a code fence is text. Underlined (setext)
@@ -457,12 +458,17 @@ Markdown file, a repository folder or a URL, `project:` the project.
 - **Project:** the root's folder name, or `project` from the frontmatter.
 - **Root folder names must be distinct.** A file is known by its root's folder
   name plus its path below the root, so it stays one conversation whether it is
-  read natively or through a mount. Two roots that are both called `docs` share
-  those names, and a file in one overwrites the file with the same relative
-  path in the other.
-- **Changes:** a file with new content replaces its sections; an unchanged
-  file is skipped by its SHA-256 hash. The next `extract-memory` closes the
-  notes of the old version and drops a new note that repeats one you forgot.
+  read natively or through a mount. Of two roots that are both called `docs`,
+  the second is skipped with one warning line, because its files would
+  overwrite the files with the same relative path in the first.
+- **Changes:** a file with new content replaces its sections; a file whose
+  SHA-256 hash equals the one stored last is skipped. A file restored to an
+  earlier version (a branch switch, an undo) counts as changed and replaces
+  the version in between. The next `extract-memory` closes the notes of the
+  old version and drops a new note that repeats a note of the same file you
+  forgot, corrected or that `consolidate` merged. A renamed or moved file is a
+  new conversation, so for it, and for the files of an inner root added later,
+  that check finds nothing.
 - **What stays behind:**
   - A new version whose modification time is older than the last extraction
     of that file, such as a restore from a backup, is stored but not extracted
@@ -491,7 +497,7 @@ Markdown file, a repository folder or a URL, `project:` the project.
   without reading its log. Commits are only ever added, so commits that a
   history rewrite dropped stay stored.
 - **Folder names must be distinct** here too, because the conversation follows
-  the folder name. A second root with the same name is skipped with an error,
+  the folder name. A second root with the same name is skipped with a warning,
   and a renamed folder starts a new conversation.
 - **What stays behind:** commits merged in with dates older than the last
   extraction of that repository are stored but never extracted.
@@ -543,13 +549,22 @@ default ([INSTALLATION.md](INSTALLATION.md#mounts-for-documents-gemini-cli-and-c
 ### Extracting notes from documents
 
 `extract-memory` picks the prompt per conversation. `markdown`, `git` and `web`
-always use the profile `document`: it keeps facts, decisions, rules and dates
-from text that is not a dialogue, and a date becomes an `insight` note with the
-date in its text. Sessions keep `THROUGHLINE_EXTRACT_PROFILE`. A document goes
-to the model in windows of up to 20 sections. After a new version, when one of
+use the coding prompt by default, the same one sessions use. On one
+installation's files (380 Markdown files and 13 repositories, on a copy of
+the database) it kept 7.4 notes per file and 7.6 per window of 20 commits, far
+above the 0.5 per file below which the `document` prompt was to take over, so
+the stop rule did not fire ([BENCHMARKS.md](BENCHMARKS.md#sources)).
+`THROUGHLINE_EXTRACT_PROFILE=document` switches these three sources to the
+`document` prompt: it keeps facts, decisions, rules and dates from text that
+is not a dialogue, and a date becomes an `insight` note with the date in its
+text. In the same measurement it wrote about twice as many notes in nearly
+twice the time; whether they are better is not measured. Web pages were not
+measured with either prompt. Sessions keep the coding prompt under `document`,
+and `personal` never applies to these sources. A document goes to the model in
+windows of up to 20 sections or 20 commits. After a new version, when one of
 its counts is above 0, the command prints `documents: <n> note(s) of old
-versions closed, <m> repeat(s) of forgotten notes dropped, <k> notes checked by
-text only`.
+versions closed, <m> repeat(s) of forgotten or replaced notes dropped, <k>
+notes checked by text only`.
 
 All of this is the Rust `extract-memory`; the Python extractor skips document
 messages. The nightly job takes 20 conversations per run. After adding a root with many

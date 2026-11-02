@@ -4,16 +4,17 @@
 //! `THROUGHLINE_MARKDOWN_ROOTS` (colon-separated, `~` expanded against
 //! `$HOME`). Without roots the adapter finds nothing, so `ingest --source all`
 //! passes over it without a word. Discovery skips `.git`, `node_modules`,
-//! `target` and `dist` folders, symlinks (files and folders) and files over
-//! 1 MiB.
+//! `target`, `dist`, `.venv`, `vendor` and `build` folders, symlinks (files
+//! and folders) and files over 1 MiB.
 //!
 //! One file is one conversation:
 //! - `session_id` is a stable UUID of `<root folder name>/<path below the
 //!   root>`, so a root read natively and inside a container (different
 //!   absolute prefixes) meets in one conversation. Two configured roots with
-//!   the same folder name therefore share the ids of equal relative paths,
-//!   and an inner root added later gives its files new ids. The absolute path
-//!   is in the metadata;
+//!   the same folder name would share the ids of equal relative paths, so
+//!   the later one is skipped with one warning line per process. An inner
+//!   root added later gives its files new ids. The absolute path is in the
+//!   metadata;
 //! - `project_path` is the root folder, or `markdown/<project>` when the
 //!   frontmatter names a project, never the file path: the project name is
 //!   the last segment of `project_path`. The file path is in the metadata;
@@ -61,8 +62,17 @@ pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// characters.
 pub const MAX_MESSAGE_CHARS: usize = 2_000;
 
-/// Folders never read, wherever they sit below a root.
-const SKIP_DIRS: [&str; 4] = [".git", "node_modules", "target", "dist"];
+/// Folders never read, wherever they sit below a root: version control,
+/// dependencies and build output.
+const SKIP_DIRS: [&str; 7] = [
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    ".venv",
+    "vendor",
+    "build",
+];
 
 const NS: Uuid = Uuid::from_u128(0x13361d86_15b2_47e6_9a69_8e9d403b8de2);
 
@@ -435,6 +445,7 @@ const MAX_REPEATED_HEADING_CHARS: usize = 200;
 
 pub struct MarkdownAdapter {
     roots: Vec<PathBuf>,
+    same_name: Vec<PathBuf>,
 }
 
 impl MarkdownAdapter {
@@ -447,24 +458,59 @@ impl MarkdownAdapter {
             .map(PathBuf::from)
             .or_else(dirs::home_dir);
         let (roots, dropped) = read_roots(&raw, home.as_deref());
+        let adapter = Self::new(roots);
         // `built_ins` runs per request in the server: say it once.
         static WARNED: std::sync::Once = std::sync::Once::new();
-        if !dropped.is_empty() {
+        if !dropped.is_empty() || !adapter.same_name.is_empty() {
             WARNED.call_once(|| {
-                eprintln!(
-                    "[{NAME}] {ROOTS_ENV}: ignored {} entr{} that {} not absolute: {}",
-                    dropped.len(),
-                    if dropped.len() == 1 { "y" } else { "ies" },
-                    if dropped.len() == 1 { "is" } else { "are" },
-                    dropped.join(", ")
-                );
+                if !dropped.is_empty() {
+                    eprintln!(
+                        "[{NAME}] {ROOTS_ENV}: ignored {} entr{} that {} not absolute: {}",
+                        dropped.len(),
+                        if dropped.len() == 1 { "y" } else { "ies" },
+                        if dropped.len() == 1 { "is" } else { "are" },
+                        dropped.join(", ")
+                    );
+                }
+                for root in &adapter.same_name {
+                    eprintln!(
+                        "[{NAME}] warning: {}: another root has the folder name {:?}, skipped",
+                        root.display(),
+                        root.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                }
             });
         }
-        Self::new(roots)
+        adapter
     }
 
+    /// The adapter for `roots`. A root whose folder name an earlier root
+    /// already has is skipped ([`MarkdownAdapter::skipped_roots`]): its files
+    /// would get the session ids of the earlier root's files.
     pub fn new(roots: Vec<PathBuf>) -> Self {
-        Self { roots }
+        let mut kept: Vec<PathBuf> = Vec::new();
+        let mut same_name = Vec::new();
+        for root in roots {
+            if kept.iter().any(|k| k.file_name() == root.file_name()) {
+                same_name.push(root);
+            } else {
+                kept.push(root);
+            }
+        }
+        Self {
+            roots: kept,
+            same_name,
+        }
+    }
+
+    /// The roots that are read.
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
+    /// Roots left out because an earlier root has the same folder name.
+    pub fn skipped_roots(&self) -> &[PathBuf] {
+        &self.same_name
     }
 
     /// The innermost root that holds `path`.
@@ -779,6 +825,9 @@ High tide at nine.
         write(&root, ".git/x.md", "# git internals\n");
         write(&root, "target/x.md", "# build output\n");
         write(&root, "dist/x.md", "# bundle\n");
+        write(&root, ".venv/lib/x.md", "# virtual environment\n");
+        write(&root, "sub/vendor/x.md", "# vendored dependency\n");
+        write(&root, "build/x.md", "# build output\n");
         write(&root, "notes.txt", "# not markdown\n");
         #[cfg(unix)]
         {
@@ -838,9 +887,18 @@ High tide at nine.
             "10 valid files, in stable order"
         );
         assert!(adapter.excluded_reason(&root.join("huge.md")).is_some());
-        assert!(adapter
-            .excluded_reason(&root.join("node_modules/x.md"))
-            .is_some());
+        for skipped in [
+            "node_modules/x.md",
+            ".venv/lib/x.md",
+            "sub/vendor/x.md",
+            "build/x.md",
+        ] {
+            assert_eq!(
+                adapter.excluded_reason(&root.join(skipped)),
+                Some("skipped folder"),
+                "{skipped}"
+            );
+        }
         #[cfg(unix)]
         assert!(adapter.excluded_reason(&root.join("link.md")).is_some());
         assert!(adapter.excluded_reason(&root.join("alpha.md")).is_none());
@@ -1324,13 +1382,21 @@ High tide at nine.
         assert_ne!(parse(vec![renamed.clone()], &c).session_id, here.session_id);
 
         // Pinned limits of the key. Two configured roots with the same name
-        // share the ids of equal relative paths, so one file overwrites the
-        // other's conversation; and an inner root added later gives its
-        // files new ids, because the key starts at the innermost root.
-        let both = vec![native.clone(), mounted.clone()];
-        assert_eq!(
-            parse(both.clone(), &a).session_id,
-            parse(both, &b).session_id
+        // would share the ids of equal relative paths, so the later one is
+        // skipped and its files are outside the roots; and an inner root
+        // added later gives its files new ids, because the key starts at the
+        // innermost root.
+        let both = MarkdownAdapter::new(vec![native.clone(), mounted.clone()]);
+        assert_eq!(both.roots(), std::slice::from_ref(&native));
+        assert_eq!(both.skipped_roots(), std::slice::from_ref(&mounted));
+        assert_eq!(both.parse(&a).unwrap().unwrap().session_id, here.session_id);
+        assert!(both.parse(&b).unwrap().is_none());
+        assert!(
+            both.discover()
+                .unwrap()
+                .iter()
+                .all(|p| p.starts_with(&native)),
+            "only the first root is read"
         );
         let with_inner = parse(vec![native.clone(), native.join("trips")], &a);
         assert_eq!(

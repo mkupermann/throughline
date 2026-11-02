@@ -42,7 +42,9 @@
 //! `text`) is the user turn at `timestamp` (ms). `response[]` is the assistant
 //! turn at `responseTimestamp` (ms), else at the request's time. Markdown parts
 //! (`{"value"}` without a kind, `markdownContent`, `markdownVuln`) are kept,
-//! an `inlineReference` becomes its name in backticks (as VS Code copies it),
+//! an `inlineReference` becomes the last segment of its path or name in
+//! backticks (VS Code copies an http(s) URI in full and adds `:line` or
+//! `:start-end`; this adapter keeps neither),
 //! `toolInvocationSerialized` becomes a tool call that holds the tool's
 //! display message (`invocation_message`, not its arguments, which the file
 //! does not keep), and `thinking` and every other kind are dropped. A request
@@ -182,6 +184,9 @@ fn apply_mutation(state: &mut Value, kind: i64, entry: &Value) -> Option<()> {
         1 => *child(node, last, true)? = entry.get("v").cloned().unwrap_or(Value::Null),
         2 => {
             // An `i` that is not an index rejects the line before any change.
+            // A cut past the end (below) rejects it after `child` may have
+            // created the missing key as `[]`: at most one empty element per
+            // line.
             let cut = match entry.get("i") {
                 None | Some(Value::Null) => None,
                 Some(i) => Some(key_index(i)?),
@@ -446,8 +451,9 @@ impl Adapter for CopilotChatAdapter {
                 continue;
             }
             let get_i64 = |k: &str| request.get(k).and_then(Value::as_i64).unwrap_or(0);
-            tokens_in += get_i64("promptTokens");
-            tokens_out += get_i64("completionTokens");
+            // File values: a malformed count must not overflow the sum.
+            tokens_in = tokens_in.saturating_add(get_i64("promptTokens"));
+            tokens_out = tokens_out.saturating_add(get_i64("completionTokens"));
             let tool_name = calls
                 .first()
                 .and_then(|c| c["tool_name"].as_str())
@@ -664,6 +670,32 @@ mod tests {
         assert_eq!(conv.token_count_in, Some(50));
         assert_eq!(conv.token_count_out, Some(12));
         assert!(conv.messages.iter().all(|m| m.uuid.is_some()));
+    }
+
+    #[test]
+    fn copilot_token_sums_saturate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("workspaceStorage/6a1f0e9d8c7b");
+        let session = "4a5b6c7d-aaaa-4a2b-9c3d-00000000000a";
+        let request = |id: &str| {
+            json!({"requestId": id, "timestamp": ms("2026-01-03T09:00:05Z"),
+                   "message": {"text": "count"}, "response": [{"value": "ok"}],
+                   "promptTokens": i64::MAX, "completionTokens": i64::MAX})
+        };
+        let data = json!({
+            "version": 3,
+            "sessionId": session,
+            "creationDate": ms("2026-01-03T09:00:00Z"),
+            "requests": [request("request_1"), request("request_2")]
+        });
+        let path = ws.join(format!("chatSessions/{session}.json"));
+        write(&path, &data.to_string());
+        let conv = CopilotChatAdapter::new(tmp.path().to_path_buf())
+            .parse(&path)
+            .unwrap()
+            .expect("parsed");
+        assert_eq!(conv.token_count_in, Some(i64::MAX));
+        assert_eq!(conv.token_count_out, Some(i64::MAX));
     }
 
     #[test]

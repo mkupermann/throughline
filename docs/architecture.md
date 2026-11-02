@@ -213,7 +213,8 @@ messages carry the role `document` (migration 016). The `markdown` adapter goes
 through the five steps above: one conversation per file, one message per
 section (H1 to H3, cut at 2,000 characters). Its session id comes from the
 root's folder name and the path below the root, so a native and a container
-ingest of the same root meet in one row. `git` and `web` have runners of their
+ingest of the same root meet in one row; a second root with the same folder
+name is skipped with a warning. `git` and `web` have runners of their
 own, because a repository or a URL is not one file to hash. Git fingerprints
 the branch heads (`for-each-ref`) and appends one message per commit, with a
 uuid from the commit's SHA and without the author. Web fetches a known URL again
@@ -237,15 +238,19 @@ positive one — greetings, mechanical tool calls and restatements of general kn
 discarded. The judgement being bought is "is this worth remembering", which is not
 expressible as a rule, which is why an LLM does it.
 
-The source picks the prompt: `markdown`, `git` and `web` conversations use the
-`document` profile, all others `THROUGHLINE_EXTRACT_PROFILE` (coding by default,
-or `personal`). Documents are sent in windows of up to 20 sections, and a run of
+The source and `THROUGHLINE_EXTRACT_PROFILE` pick the prompt together. By
+default every conversation uses the coding prompt, `markdown`, `git` and `web`
+included, because a measurement on real files found it productive enough
+(7.4 notes per Markdown file, see BENCHMARKS.md "Sources"). `document` switches
+only those three sources to the document prompt, `personal` only the sessions.
+Documents are sent in windows of up to 20 sections, and a run of
 sections with one timestamp is committed together, so the watermark never
 passes a section that was not sent. When a new version of a document has
 arrived, the extraction first closes the notes of the old version (superseded,
-with `valid_to`), then drops each new note that repeats a note the user forgot
-in that document, by its text or by a cosine at the consolidation threshold
-(`document_lifecycle.rs`).
+with `valid_to`, without a successor), then drops each new note that repeats a
+note of that document the user forgot, corrected, or `consolidate` merged (a
+note with a successor), by its text or by a cosine at the consolidation
+threshold (`document_lifecycle.rs`).
 
 Extraction, title generation, reflection, and answers are model operations. A
 selected hosted endpoint or the Claude CLI can receive the relevant transcript,

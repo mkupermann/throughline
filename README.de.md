@@ -373,8 +373,11 @@ Die Standard-Laufzeit liegt in [`rust/`](rust/). Nutze eine zum Lockfile passend
 
 ```bash
 cargo build --release --manifest-path rust/Cargo.toml -p throughline
+rust/target/release/throughline migrate
 cargo test --manifest-path rust/Cargo.toml -p throughline --lib
 ```
+
+Führe das Rust-`migrate` nach jedem Build mit neuen Migrationen aus. Einer Datenbank, die nur das Python-CLI migriert hat, fehlt, was Rust-`ingest` und `extract-memory` brauchen; beide brechen dann mit einer Zeile ab, die das sagt. Die nativen Zeitpläne führen es vor jedem Rust-Schritt aus.
 
 Integrationstests brauchen eine Wegwerf-PostgreSQL-Datenbank mit pgvector. Screenshot- und Aufnahme-Werkzeuge liegen unter `web/`. Das macht React nicht zur Standard-Oberfläche.
 

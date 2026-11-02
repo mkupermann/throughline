@@ -80,7 +80,8 @@ class MyToolAdapter(Adapter):
   file, a commit or part of a web page. The database needs migration
   `016_message_role_document.sql` for it, which the Rust runtime applies. The
   `document` extraction prompt follows the source, not the role: only the
-  `markdown`, `git` and `web` sources get it. A Python adapter should not emit
+  `markdown`, `git` and `web` sources get it, and only with
+  `THROUGHLINE_EXTRACT_PROFILE=document`. A Python adapter should not emit
   `document`: the Python package does not know the role, and its extractor
   reads only `user` and `assistant`, so such messages are stored but never
   extracted.

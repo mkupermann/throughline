@@ -502,8 +502,9 @@ impl Adapter for GeminiCliAdapter {
             let created_at = parse_ts(m.get("timestamp")).unwrap_or(last_ts);
             last_ts = created_at;
             let (t_in, t_out, total) = (token(m, "input"), token(m, "output"), token(m, "total"));
-            tokens_in += t_in;
-            tokens_out += t_out;
+            // File values: a malformed count must not overflow the sum.
+            tokens_in = tokens_in.saturating_add(t_in);
+            tokens_out = tokens_out.saturating_add(t_out);
             // Message ids are stable across rewrites; only legacy messages
             // without one fall back to their position.
             let uuid = if id.is_empty() {
@@ -685,6 +686,32 @@ mod tests {
         assert_eq!(conv.ended_at, Some(ts("2026-01-02T10:00:20Z")));
         assert_eq!(conv.token_count_in, Some(230));
         assert_eq!(conv.token_count_out, Some(30));
+    }
+
+    #[test]
+    fn gemini_token_sums_saturate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("c4e1a9d2b7");
+        let path = proj.join("chats/session-2026-01-02T10-00-6d3e2f10.jsonl");
+        let huge = |id: &str, second: u32| {
+            json!({"id": id, "timestamp": format!("2026-01-02T10:00:{second:02}.000Z"),
+                   "type": "gemini", "content": "ok",
+                   "tokens": {"input": i64::MAX, "output": i64::MAX, "total": i64::MAX}})
+        };
+        write_lines(
+            &path,
+            &[
+                meta("6d3e2f10-1a2b-4c3d-8e4f-5a6b7c8d9e0f", "main"),
+                huge("6d3e2f10-0000-4000-8000-000000000001", 1),
+                huge("6d3e2f10-0000-4000-8000-000000000002", 2),
+            ],
+        );
+        let conv = GeminiCliAdapter::new(tmp.path().to_path_buf())
+            .parse(&path)
+            .unwrap()
+            .expect("parsed");
+        assert_eq!(conv.token_count_in, Some(i64::MAX));
+        assert_eq!(conv.token_count_out, Some(i64::MAX));
     }
 
     #[test]
@@ -897,5 +924,56 @@ mod tests {
         // The orphan keeps the real root, not the hash, as its project.
         let orphan_conv = adapter.parse(&orphan).unwrap().expect("orphan");
         assert_eq!(orphan_conv.project_path.as_deref(), Some(root));
+
+        // The same file name with another session id is another session.
+        let other_name = "session-2026-01-03T08-00-c3d4e5f6.jsonl";
+        let other_old = tmp.path().join(&hash).join("chats").join(other_name);
+        write_lines(
+            &other_old,
+            &[
+                meta("c3d4e5f6-cccc-4a2b-9c3d-00000000000c", "main"),
+                json!({"id": "d1", "timestamp": "2026-01-03T08:00:01.000Z", "type": "user",
+                       "content": "a different session"}),
+            ],
+        );
+        write_lines(
+            &slug.join("chats").join(other_name),
+            &[
+                meta("d4e5f607-dddd-4a2b-9c3d-00000000000d", "main"),
+                json!({"id": "d2", "timestamp": "2026-01-03T08:00:02.000Z", "type": "user",
+                       "content": "the slug folder's own session"}),
+            ],
+        );
+        assert!(
+            adapter.parse(&other_old).unwrap().is_some(),
+            "same name, other session id: read"
+        );
+
+        // A legacy `.json` file whose copy is the `.jsonl` successor.
+        let legacy = tmp
+            .path()
+            .join(&hash)
+            .join("chats/session-2026-01-04T07-00-e5f60718.json");
+        let legacy_session = "e5f60718-eeee-4a2b-9c3d-00000000000e";
+        let legacy_lines = [
+            meta(legacy_session, "main"),
+            json!({"id": "e1", "timestamp": "2026-01-04T07:00:01.000Z", "type": "user",
+                   "content": "kept as json"}),
+        ];
+        write_lines(&legacy, &legacy_lines);
+        assert!(
+            adapter.parse(&legacy).unwrap().is_some(),
+            "no copy yet: read"
+        );
+        write_lines(
+            &slug
+                .join("chats")
+                .join("session-2026-01-04T07-00-e5f60718.jsonl"),
+            &legacy_lines,
+        );
+        assert!(
+            adapter.parse(&legacy).unwrap().is_none(),
+            "the .jsonl copy in the slug folder wins"
+        );
     }
 }

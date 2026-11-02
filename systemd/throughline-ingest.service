@@ -10,18 +10,24 @@ Type=oneshot
 WorkingDirectory=%h/.local/share/throughline
 # The package command keeps systemd on the same adapter set as interactive use.
 ExecStart=/usr/bin/env throughline ingest --all
-# Markdown folders and git repositories: the Rust runtime, built in the
-# checkout (`cargo build --release --manifest-path rust/Cargo.toml -p
-# throughline`); the Python ingest does not know them. The folders come from
-# THROUGHLINE_MARKDOWN_ROOTS and THROUGHLINE_GIT_ROOTS in the env file; while
-# both are empty, these lines write nothing. With the Compose stack, use instead:
+# Gemini CLI, Copilot Chat, Markdown folders and git repositories: the Rust
+# runtime, built in the checkout (`cargo build --release --manifest-path
+# rust/Cargo.toml -p throughline`); the Python ingest does not know them. The
+# Rust migrate runs before them and does nothing when the schema is current.
+# Gemini CLI and Copilot Chat write nothing without their folders; the
+# Markdown and git folders come from THROUGHLINE_MARKDOWN_ROOTS and
+# THROUGHLINE_GIT_ROOTS in the env file (distinct folder names), and while
+# both are empty those lines write nothing. With the Compose stack, use instead:
 #   ExecStart=/usr/bin/env docker compose exec -T web throughline ingest --source markdown
 #   ExecStart=/usr/bin/env docker compose exec -T web throughline ingest --source git
 # The lines run in order and stop at the first failure: if the Python step
-# fails, markdown and git do not run, and without the Rust build the unit
+# fails, the Rust steps do not run, and without the Rust build the unit
 # fails after the Python step. `journalctl --user -u throughline-ingest`
 # shows which. Web pages are never fetched on a schedule: `ingest --source
 # web` makes network requests and runs only when you start it.
+ExecStart=%h/.local/share/throughline/rust/target/release/throughline migrate
+ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source gemini_cli
+ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source copilot_chat
 ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source markdown
 ExecStart=%h/.local/share/throughline/rust/target/release/throughline ingest --source git
 EnvironmentFile=%h/.config/throughline/throughline.env

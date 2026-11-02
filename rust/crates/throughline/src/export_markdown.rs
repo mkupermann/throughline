@@ -304,6 +304,7 @@ fn role_label(role: &str) -> &str {
         "assistant" => "Answer",
         "tool_result" => "Execution",
         "system" => "System",
+        "document" => "Document",
         other => other,
     }
 }
@@ -311,6 +312,13 @@ fn role_label(role: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_message_role_has_a_label() {
+        for role in crate::types::Role::ALL {
+            assert_ne!(role_label(role.as_str()), role.as_str(), "{role}");
+        }
+    }
 
     fn conv(id: &str, started: &str, project: &str, messages: i64) -> EvidenceConversation {
         EvidenceConversation {

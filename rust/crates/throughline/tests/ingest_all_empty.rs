@@ -35,9 +35,17 @@ fn connect() -> Option<postgres::Client> {
     cfg.connect(NoTls).ok()
 }
 
-/// Rows in `conversations`, `messages` and `memory_chunks`.
-fn counts(client: &mut postgres::Client) -> [i64; 3] {
-    ["conversations", "messages", "memory_chunks"].map(|table| {
+/// Rows in the tables an ingest writes: `conversations`, `messages`,
+/// `memory_chunks`, `ingestion_log` and `projects`.
+fn counts(client: &mut postgres::Client) -> [i64; 5] {
+    [
+        "conversations",
+        "messages",
+        "memory_chunks",
+        "ingestion_log",
+        "projects",
+    ]
+    .map(|table| {
         client
             .query_one(&format!("SELECT count(*) FROM {table}"), &[])
             .expect("count rows")
@@ -118,7 +126,7 @@ fn ingest_all_with_empty_source_lists_changes_nothing() {
     assert_eq!(
         counts(&mut client),
         before,
-        "conversations, messages, memory_chunks"
+        "conversations, messages, memory_chunks, ingestion_log, projects"
     );
 
     // Control: one root with one file, the same run otherwise.
@@ -140,13 +148,11 @@ fn ingest_all_with_empty_source_lists_changes_nothing() {
         String::from_utf8_lossy(&out.stderr)
     );
     let after = counts(&mut client);
+    let delta: Vec<i64> = after.iter().zip(before).map(|(a, b)| a - b).collect();
     assert_eq!(
-        [
-            after[0] - before[0],
-            after[1] - before[1],
-            after[2] - before[2]
-        ],
-        [1, 1, 0],
-        "the control root adds one conversation with one section and no note"
+        delta,
+        [1, 1, 0, 1, 1],
+        "the control root adds one conversation with one section, no note, \
+         one ledger row and one project"
     );
 }

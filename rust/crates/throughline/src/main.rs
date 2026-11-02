@@ -845,18 +845,13 @@ fn main() -> Result<()> {
             if configured != extract_memory::Profile::Default {
                 eprintln!("extraction profile: {}", configured.name());
             }
-            let mut total = extract_memory::ExtractSummary::default();
-            for conv_id in extract_memory::pending_conversations(&mut client, limit)? {
-                // Markdown, git and web take the document profile.
-                let s = extract_memory::extract_conversation(
-                    &mut client,
-                    &backend,
-                    conv_id,
-                    window_chars,
-                    configured,
-                )?;
-                total.add(&s);
-            }
+            let total = extract_memory::run_pending(
+                &mut client,
+                &backend,
+                limit,
+                window_chars,
+                configured,
+            )?;
             println!(
                 "extracted {} memory chunk(s) from {} window(s), {} error(s)",
                 total.chunks, total.windows, total.errors

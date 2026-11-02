@@ -6,8 +6,9 @@ use crate::types::{IngestSummary, NormalisedConversation};
 use crate::writer as w;
 use anyhow::{Context, Result};
 
-/// One adapter run against the open connection. Unchanged files are skipped
-/// by `(file_path, file_hash)`; refreshes replace messages in place.
+/// One adapter run against the open connection. A file whose hash equals the
+/// hash stored last for its path is skipped ([`w::current_hash`]); refreshes
+/// replace messages in place.
 /// Ignore rules come from `~/.throughline-ignore` and `THROUGHLINE_INGEST_IGNORE`.
 pub fn run_adapter(
     client: &mut postgres::Client,
@@ -19,7 +20,19 @@ pub fn run_adapter(
 }
 
 /// Same as [`run_adapter`], with an explicit rule set (CLI `--ignore` merges in).
+/// Refuses a database that lacks the newest migration of the code list
+/// before it reads a file ([`crate::migrate::require_latest`]).
 pub fn run_adapter_with_rules(
+    client: &mut postgres::Client,
+    adapter: &dyn Adapter,
+    verbose: bool,
+    rules: &IgnoreRules,
+) -> Result<IngestSummary> {
+    crate::migrate::require_latest(client)?;
+    run_one(client, adapter, verbose, rules)
+}
+
+fn run_one(
     client: &mut postgres::Client,
     adapter: &dyn Adapter,
     verbose: bool,
@@ -59,8 +72,11 @@ pub fn run_adapter_with_rules(
             }
         };
 
-        match w::already_ingested(client, path, &content_hash) {
-            Ok(Some(count)) if count != 0 => {
+        // Unchanged means the hash of the version stored last, not any
+        // hash the ledger has seen for this path: v1 restored after v2
+        // replaces v2.
+        match w::current_hash(client, path) {
+            Ok(Some(current)) if current == content_hash => {
                 summary.skipped += 1;
                 continue;
             }
@@ -190,19 +206,17 @@ pub fn run_all(client: &mut postgres::Client, verbose: bool) -> Result<Vec<Inges
 }
 
 /// Same as [`run_all`], with an explicit rule set (CLI `--ignore` merges in).
+/// Refuses a database that lacks the newest migration, as
+/// [`run_adapter_with_rules`] does.
 pub fn run_all_with_rules(
     client: &mut postgres::Client,
     verbose: bool,
     rules: &IgnoreRules,
 ) -> Result<Vec<IngestSummary>> {
+    crate::migrate::require_latest(client)?;
     let mut out = Vec::new();
     for adapter in crate::adapters::registry::built_ins() {
-        out.push(run_adapter_with_rules(
-            client,
-            adapter.as_ref(),
-            verbose,
-            rules,
-        )?);
+        out.push(run_one(client, adapter.as_ref(), verbose, rules)?);
     }
     // Git repositories: their own runner (a folder has no file hash). No
     // roots or no git binary: an empty summary, and the rest goes on.
@@ -352,4 +366,196 @@ pub fn ingest_status(client: &mut postgres::Client) -> Result<IngestStatusReport
         total_messages,
         total_files_logged: 0,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::markdown::MarkdownAdapter;
+
+    /// Connect to the database (`PG*` env). Skip when unreachable so offline
+    /// `cargo test --lib` stays green. Mirrors the writer.rs test helper.
+    fn test_db() -> Option<postgres::Client> {
+        use postgres::NoTls;
+        let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+        let user = std::env::var("PGUSER")
+            .unwrap_or_else(|_| std::env::var("USERNAME").unwrap_or_else(|_| "postgres".into()));
+        let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "throughline".into());
+        let mut cfg = postgres::Config::new();
+        cfg.host(&host)
+            .port(
+                std::env::var("PGPORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(5432),
+            )
+            .user(&user)
+            .dbname(&dbname);
+        if let Ok(pw) = std::env::var("PGPASSWORD") {
+            cfg.password(pw);
+        }
+        cfg.connect(NoTls).ok()
+    }
+
+    /// The runner commits per file, so these tests write to the database.
+    /// This removes what they wrote under `root`, also when an assertion
+    /// fails.
+    struct Cleanup {
+        root: std::path::PathBuf,
+    }
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let Some(mut client) = test_db() else { return };
+            let root = self.root.to_string_lossy().into_owned();
+            let name = root.rsplit('/').next().unwrap_or_default().to_string();
+            let _ = client.execute(
+                "DELETE FROM conversations WHERE source_tool = 'markdown' AND project_path = $1",
+                &[&root],
+            );
+            let _ = client.execute(
+                "DELETE FROM ingestion_log WHERE starts_with(file_path, $1)",
+                &[&format!("{root}/")],
+            );
+            let _ = client.execute("DELETE FROM projects WHERE name = $1", &[&name]);
+        }
+    }
+
+    /// A Markdown root with a unique folder name below a fresh temp folder.
+    fn root_in(tmp: &std::path::Path) -> std::path::PathBuf {
+        let root = tmp.join(format!("ledger-notes-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir(&root).expect("root");
+        root
+    }
+
+    fn sections<C: postgres::GenericClient>(client: &mut C, root: &std::path::Path) -> Vec<String> {
+        client
+            .query(
+                "SELECT m.content FROM messages m JOIN conversations c ON c.id = m.conversation_id \
+                 WHERE c.source_tool = 'markdown' AND c.project_path = $1 ORDER BY m.created_at",
+                &[&root.to_string_lossy().into_owned()],
+            )
+            .expect("sections")
+            .iter()
+            .map(|r| r.get(0))
+            .collect()
+    }
+
+    /// A database whose ledger lacks the newest migration (a native install
+    /// migrated by the Python CLI only) is refused before a file is read,
+    /// with one line that names the migration and the command.
+    #[test]
+    fn ingest_refuses_unmigrated_database() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping ingest_refuses_unmigrated_database: no PostgreSQL reachable");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = root_in(tmp.path());
+        let _cleanup = Cleanup { root: root.clone() };
+        std::fs::write(root.join("tide.md"), "# Tide\n\nThe gate opens at six.\n").unwrap();
+        let adapter = MarkdownAdapter::new(vec![root.clone()]);
+        let rules = IgnoreRules::default();
+
+        // A temporary ledger shadows applied_migrations for this session.
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE applied_migrations (migration_name text PRIMARY KEY); \
+                 INSERT INTO applied_migrations VALUES ('015_account_stars_untimed.sql')",
+            )
+            .expect("ledger without the latest migration");
+        let latest = crate::migrate::LATEST;
+        let refused = [
+            run_adapter_with_rules(&mut client, &adapter, false, &rules)
+                .map(|_| ())
+                .expect_err("one adapter"),
+            run_all_with_rules(&mut client, false, &rules)
+                .map(|_| ())
+                .expect_err("all sources"),
+            crate::sources::git::run(
+                &mut client,
+                &crate::sources::git::GitSource::new(vec![root.clone()]),
+                false,
+                &rules,
+            )
+            .map(|_| ())
+            .expect_err("git"),
+            crate::sources::web::run(
+                &mut client,
+                &crate::sources::web::WebSource::new(None),
+                false,
+                false,
+                &rules,
+            )
+            .map(|_| ())
+            .expect_err("web"),
+        ];
+        for err in refused {
+            let line = format!("{err:#}");
+            assert!(line.contains(latest), "{line}");
+            assert!(line.contains("throughline migrate"), "{line}");
+            assert!(!line.contains('\n'), "one line: {line}");
+        }
+        assert!(sections(&mut client, &root).is_empty(), "nothing written");
+
+        // Control: with the latest migration in the ledger the same run reads
+        // the file, so the refusal above came from the ledger.
+        client
+            .execute("INSERT INTO applied_migrations VALUES ($1)", &[&latest])
+            .expect("latest migration");
+        let s = run_adapter_with_rules(&mut client, &adapter, false, &rules).expect("migrated");
+        assert_eq!((s.ingested, s.errors), (1, 0));
+        assert_eq!(
+            sections(&mut client, &root),
+            ["# Tide\n\nThe gate opens at six."]
+        );
+        client
+            .batch_execute("DROP TABLE pg_temp.applied_migrations")
+            .expect("drop the temporary ledger");
+    }
+
+    /// v1 → v2 → v1: the runner compares a file with the hash stored last
+    /// for its path, not with any earlier one, so the restored v1 replaces
+    /// v2 in the store. An unchanged file is still skipped.
+    #[test]
+    fn file_ledger_restores_an_earlier_version() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping file_ledger_restores_an_earlier_version: no PostgreSQL reachable");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = root_in(tmp.path());
+        let _cleanup = Cleanup { root: root.clone() };
+        let file = root.join("gate.md");
+        let adapter = MarkdownAdapter::new(vec![root.clone()]);
+        let rules = IgnoreRules::default();
+        let run = |client: &mut postgres::Client| {
+            let s = run_adapter_with_rules(client, &adapter, false, &rules).expect("ingest");
+            (s.ingested, s.skipped, s.errors)
+        };
+        const V1: &str = "# Gate\n\nThe gate opens at six.\n";
+        const V2: &str = "# Gate\n\nThe gate opens at seven.\n";
+
+        std::fs::write(&file, V1).unwrap();
+        assert_eq!(run(&mut client), (1, 0, 0), "v1 is new");
+        assert_eq!(run(&mut client), (0, 1, 0), "v1 unchanged: skipped");
+        std::fs::write(&file, V2).unwrap();
+        assert_eq!(run(&mut client), (1, 0, 0), "v2 replaces v1");
+        assert_eq!(
+            sections(&mut client, &root),
+            ["# Gate\n\nThe gate opens at seven."]
+        );
+
+        std::fs::write(&file, V1).unwrap();
+        assert_eq!(run(&mut client), (1, 0, 0), "v1 again replaces v2");
+        assert_eq!(
+            sections(&mut client, &root),
+            ["# Gate\n\nThe gate opens at six."]
+        );
+        assert_eq!(
+            run(&mut client),
+            (0, 1, 0),
+            "the restored v1 is now current"
+        );
+    }
 }

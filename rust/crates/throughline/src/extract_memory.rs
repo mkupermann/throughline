@@ -78,10 +78,11 @@ Rules:
 
 Return the JSON array only. No markdown fences, no prose."#;
 
-/// Selects the extraction prompt for sessions: unset (or `default`) keeps
-/// [`EXTRACTION_PROMPT`], `personal` picks [`PERSONAL_EXTRACTION_PROMPT`],
-/// `document` picks [`DOCUMENT_EXTRACTION_PROMPT`]. Document sources take
-/// `document` whatever it says, see [`profile_for`].
+/// Selects the extraction prompt: unset (or `default`) keeps
+/// [`EXTRACTION_PROMPT`] for every source, `personal` picks
+/// [`PERSONAL_EXTRACTION_PROMPT`] for sessions, `document` picks
+/// [`DOCUMENT_EXTRACTION_PROMPT`] for the document sources. See
+/// [`profile_for`].
 pub const PROFILE_ENV: &str = "THROUGHLINE_EXTRACT_PROFILE";
 
 /// The prompt for conversations between people rather than coding sessions:
@@ -192,14 +193,21 @@ pub fn is_document_source(source_tool: Option<&str>) -> bool {
     source_tool.is_some_and(|s| DOCUMENT_SOURCES.contains(&s))
 }
 
-/// The profile for a conversation of `source_tool`: Markdown, git and web
-/// always take [`Profile::Document`]; every other source takes `configured`,
-/// the profile [`PROFILE_ENV`] names (parsed once per run).
+/// The profile for a conversation of `source_tool`, given `configured`, the
+/// profile [`PROFILE_ENV`] names (parsed once per run).
+///
+/// Markdown, git and web take the production prompt ([`Profile::Default`]):
+/// the measurement chose it, because it kept 7.4 notes per file where the
+/// stop rule asked for 0.5. `document` is opt-in for them. `personal` is
+/// for conversations between people and never applies to a document.
+/// Sessions take `configured`, except `document`, whose prompt reads parts
+/// without a speaker; they keep the production prompt then.
 pub fn profile_for(source_tool: Option<&str>, configured: Profile) -> Profile {
-    if is_document_source(source_tool) {
-        Profile::Document
-    } else {
-        configured
+    match (is_document_source(source_tool), configured) {
+        (true, Profile::Document) => Profile::Document,
+        (true, _) => Profile::Default,
+        (false, Profile::Document) => Profile::Default,
+        (false, profile) => profile,
     }
 }
 
@@ -411,9 +419,9 @@ pub struct ExtractSummary {
     /// Notes of an earlier document version closed before this pass.
     pub closed: usize,
     /// Notes this pass wrote and deleted again because they repeat a
-    /// forgotten note of the same document.
+    /// forgotten or replaced note of the same document.
     pub dropped: usize,
-    /// Notes kept after a forgotten check that could compare text only,
+    /// Notes kept after a repeat check that could compare text only,
     /// because no vector could be made.
     pub text_only: usize,
 }
@@ -433,7 +441,7 @@ impl ExtractSummary {
         (self.closed + self.dropped + self.text_only > 0).then(|| {
             format!(
                 "documents: {} note(s) of old versions closed, \
-                 {} repeat(s) of forgotten notes dropped, {} notes checked by text only",
+                 {} repeat(s) of forgotten or replaced notes dropped, {} notes checked by text only",
                 self.closed, self.dropped, self.text_only
             )
         })
@@ -479,6 +487,27 @@ pub fn count_pending_conversations<C: GenericClient>(client: &mut C) -> Result<i
     Ok(row.get(0))
 }
 
+/// Extract up to `limit` pending conversations ([`pending_conversations`]),
+/// one after the other, and add up their summaries. Refuses a database that
+/// lacks the newest migration of the code list before it reads anything
+/// ([`crate::migrate::require_latest`]): the extraction reads and writes
+/// columns that only the Rust migrations add.
+pub fn run_pending<C: GenericClient>(
+    client: &mut C,
+    backend: &GenerationBackend,
+    limit: usize,
+    window_chars: usize,
+    configured: Profile,
+) -> Result<ExtractSummary> {
+    crate::migrate::require_latest(client)?;
+    let mut total = ExtractSummary::default();
+    for conv_id in pending_conversations(client, limit)? {
+        let s = extract_conversation(client, backend, conv_id, window_chars, configured)?;
+        total.add(&s);
+    }
+    Ok(total)
+}
+
 /// Extract memories from one conversation's messages after its watermark,
 /// window by window. Each window's notes and the advanced watermark commit
 /// together. A failed window is reported and ends this conversation's pass,
@@ -508,10 +537,11 @@ pub fn extract_conversation<C: GenericClient>(
 ///
 /// A document (see [`is_document_source`]) differs in three ways. When its
 /// messages were replaced since the last extraction, the old version's notes
-/// are closed first ([`document_lifecycle::reconcile`]). Its sections are cut
+/// are closed ([`document_lifecycle::reconcile`]) in the transaction of the
+/// first window that commits, before its notes are written. Its sections are cut
 /// into windows by [`document_windows`]. And a written note that repeats a
-/// forgotten note of the same document is deleted again in the same
-/// transaction ([`document_lifecycle::drop_forgotten_repeats`] with
+/// forgotten or replaced note of the same document is deleted again in the same
+/// transaction ([`document_lifecycle::drop_repeats`] with
 /// `repeat_check`).
 ///
 /// Windows that end inside a run of equal timestamps are sent first and
@@ -554,14 +584,13 @@ where
     )?;
     let lines: Vec<(DateTime<Utc>, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
     let mut summary = ExtractSummary::default();
-    if let Some(new_version_at) = rows
+    // The old version's notes are closed in the transaction of the first
+    // window that commits, so they stay current while the model fails. Once
+    // that window commits, the watermark has passed the new version's first
+    // message and the signal is off, so nothing is closed twice.
+    let mut new_version_at = rows
         .first()
-        .and_then(|r| r.get::<_, Option<DateTime<Utc>>>(2))
-    {
-        let mut tx = client.transaction()?;
-        summary.closed = document_lifecycle::reconcile(&mut tx, conv_id, new_version_at)? as usize;
-        tx.commit()?;
-    }
+        .and_then(|r| r.get::<_, Option<DateTime<Utc>>>(2));
     let planned = if document {
         document_windows(&lines, window_chars, DOCUMENT_WINDOW_SECTIONS)
     } else {
@@ -590,13 +619,16 @@ where
         }
         let mut tx = client.transaction()?;
         let mut written = ExtractSummary::default();
+        if let Some(at) = new_version_at {
+            written.closed = document_lifecycle::reconcile(&mut tx, conv_id, at)? as usize;
+        }
         for (end, items) in &replies {
             let mut ids = Vec::with_capacity(items.len());
             for item in items {
                 ids.push(insert_memory(&mut tx, conv_id, item, *end)?);
             }
             let check = if document {
-                document_lifecycle::drop_forgotten_repeats(&mut tx, conv_id, &ids, repeat_check)?
+                document_lifecycle::drop_repeats(&mut tx, conv_id, &ids, repeat_check)?
             } else {
                 document_lifecycle::RepeatOutcome::default()
             };
@@ -609,6 +641,7 @@ where
             &[&conv_id, &window.end],
         )?;
         tx.commit()?;
+        new_version_at = None;
         written.windows = replies.len();
         summary.add(&written);
         replies.clear();
@@ -1247,12 +1280,17 @@ mod tests {
     }
 
     #[test]
-    fn document_profile_is_selected_for_document_sources() {
-        for configured in [Profile::Default, Profile::Personal, Profile::Document] {
+    fn document_profile_is_opt_in_for_document_sources() {
+        // (configured, document sources, sessions)
+        for (configured, documents, sessions) in [
+            (Profile::Default, Profile::Default, Profile::Default),
+            (Profile::Personal, Profile::Default, Profile::Personal),
+            (Profile::Document, Profile::Document, Profile::Default),
+        ] {
             for source in ["markdown", "git", "web"] {
                 assert_eq!(
                     profile_for(Some(source), configured),
-                    Profile::Document,
+                    documents,
                     "{source} with {configured:?}"
                 );
             }
@@ -1263,7 +1301,11 @@ mod tests {
                 Some("Markdown"),
                 None,
             ] {
-                assert_eq!(profile_for(source, configured), configured, "{source:?}");
+                assert_eq!(
+                    profile_for(source, configured),
+                    sessions,
+                    "{source:?} with {configured:?}"
+                );
             }
         }
         for value in ["document", " Document "] {
@@ -1541,6 +1583,11 @@ mod tests {
         );
         assert_eq!(
             conversation_profile(&mut tx, conv, Profile::Default).unwrap(),
+            Profile::Default,
+            "the production prompt unless THROUGHLINE_EXTRACT_PROFILE=document"
+        );
+        assert_eq!(
+            conversation_profile(&mut tx, conv, Profile::Document).unwrap(),
             Profile::Document
         );
 
@@ -1650,6 +1697,329 @@ mod tests {
         })
         .expect("third pass");
         assert_eq!(third, ExtractSummary::default());
+    }
+
+    // Texts and tags of their own: the embedder fixtures are shared by
+    // the tests that run at the same time.
+    const TIDE_TUESDAYS: &str = "Releases of the tide service ship on Tuesdays.";
+    const TIDE_PORT: &str = "The tide API answers on port 7070.";
+    const TIDE_PORT_FIXED: &str = "The tide API answers on port 7443.";
+    const TIDE_PORT_SAID: &str = "Port 7070 is where the tide API answers.";
+    const TIDE_SNAPSHOTS: &str = "Snapshots of the tide database are taken hourly.";
+    const TIDE_LOGS: &str = "Tide logs are pruned each month.";
+    const DOCK_KEPT: &str = "The dock queue keeps its spool in /srv/dock-spool.";
+    const DOCK_BELOW: &str = "Dock queue spool files sit below /srv/dock-spool.";
+
+    /// A note the user corrected, and one `consolidate` merged, both have a
+    /// successor. An unrelated edit of the file re-extracts their text; the
+    /// repeat goes like the repeat of a forgotten note, by text or by
+    /// vector. A note that only the new version closed has no successor, so
+    /// its text comes back as a current note.
+    #[test]
+    fn reimport_does_not_revive_a_superseded_note() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping reimport_does_not_revive_a_superseded_note: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let session = uuid::Uuid::new_v4();
+        let first_version = [
+            "# Tide\nReleases on Tuesdays.",
+            "## Ports\nThe API answers on 7070.",
+            "## Snapshots\nHourly.",
+        ];
+        let conv = store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", ts(T0), &first_version),
+        );
+        extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+            Ok(vec![
+                fact(TIDE_TUESDAYS),
+                fact(TIDE_PORT),
+                fact(TIDE_SNAPSHOTS),
+            ])
+        })
+        .expect("first pass");
+        let old = notes_of(&mut tx, conv);
+        let (tuesdays, port, snapshots) = (old[0].id, old[1].id, old[2].id);
+
+        // The user corrects the port: a note of their own replaces it.
+        let fixed: i64 = tx
+            .query_one(
+                "INSERT INTO memory_chunks (source_type, content, category, confidence, status) \
+                 VALUES ('manual', $1, 'insight', 1.0, 'active') RETURNING id",
+                &[&TIDE_PORT_FIXED],
+            )
+            .unwrap()
+            .get(0);
+        // `consolidate` merges the Tuesdays note into a consolidation note.
+        let merged: i64 = tx
+            .query_one(
+                "INSERT INTO memory_chunks \
+                     (source_type, content, category, confidence, status, merged_from) \
+                 VALUES ('consolidation', $1, 'insight', 0.8, 'active', $2) RETURNING id",
+                &[&TIDE_TUESDAYS, &vec![tuesdays]],
+            )
+            .unwrap()
+            .get(0);
+        for (id, successor) in [(port, fixed), (tuesdays, merged)] {
+            tx.execute(
+                "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2, \
+                     superseded_at = now(), valid_to = now() WHERE id = $1",
+                &[&id, &successor],
+            )
+            .unwrap();
+        }
+
+        // An unrelated edit: a new section at the end.
+        let v2 = ts(T0 + 3600);
+        let mut second_version = first_version.to_vec();
+        second_version.push("## Logs\nPruned monthly.");
+        store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", v2, &second_version),
+        );
+        // The paraphrase lies at cosine 0.99 to the corrected note, the
+        // other facts on axes of their own.
+        let fixtures = [
+            ("ship on Tuesdays", axis(0)),
+            ("answers on port 7070", plane(1.0, 0.0)),
+            ("is where the tide API answers", plane(0.99, 0.14)),
+            ("are taken hourly", axis(2)),
+            ("pruned each month", axis(3)),
+        ];
+        let second = with_vectors(&fixtures, || {
+            extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+                Ok(vec![
+                    fact(TIDE_TUESDAYS),
+                    fact(TIDE_PORT_SAID),
+                    fact(TIDE_SNAPSHOTS),
+                    fact(TIDE_LOGS),
+                ])
+            })
+        })
+        .expect("second pass");
+        assert_eq!(
+            second,
+            ExtractSummary {
+                windows: 1,
+                chunks: 2,
+                errors: 0,
+                closed: 1,
+                dropped: 2,
+                text_only: 0,
+            }
+        );
+
+        let after = notes_of(&mut tx, conv);
+        let current: Vec<&str> = after
+            .iter()
+            .filter(|n| n.status == "active")
+            .map(|n| n.content.as_str())
+            .collect();
+        assert_eq!(current, [TIDE_SNAPSHOTS, TIDE_LOGS]);
+        let by_id = |id: i64| after.iter().find(|n| n.id == id).expect("note kept");
+        assert_eq!(by_id(port).superseded_by, Some(fixed));
+        assert_eq!(by_id(tuesdays).superseded_by, Some(merged));
+        assert_eq!(
+            (
+                by_id(snapshots).status.as_str(),
+                by_id(snapshots).superseded_by
+            ),
+            ("superseded", None),
+            "closed by the new version, without a successor"
+        );
+        assert!(after.iter().all(|n| n.content != TIDE_PORT_SAID));
+        assert_eq!(
+            after.iter().filter(|n| n.content == TIDE_TUESDAYS).count(),
+            1
+        );
+        let successors: Vec<String> = tx
+            .query(
+                "SELECT COALESCE(status, 'active') FROM memory_chunks WHERE id = ANY($1) ORDER BY id",
+                &[&vec![fixed, merged]],
+            )
+            .unwrap()
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(successors, ["active", "active"], "the successors stay");
+    }
+
+    /// A new note without a vector, because the write could not embed it,
+    /// gets one when the repeat check needs it, so a paraphrase of a
+    /// forgotten note is still found by vector.
+    #[test]
+    fn repeat_check_embeds_a_new_note_on_demand() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping repeat_check_embeds_a_new_note_on_demand: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = store(
+            &mut tx,
+            &stored_file(
+                uuid::Uuid::new_v4(),
+                "markdown",
+                "document",
+                ts(T0),
+                &["# Dock\nSpool in /srv."],
+            ),
+        );
+        // Plain inserts: neither note has a vector.
+        let note = |tx: &mut postgres::Transaction<'_>, text: &str| -> i64 {
+            tx.query_one(
+                "INSERT INTO memory_chunks (source_type, source_id, content, category, confidence, status) \
+                 VALUES ('conversation', $1, $2, 'insight', 0.8, 'active') RETURNING id",
+                &[&conv, &text],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let forgotten = note(&mut tx, DOCK_KEPT);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&forgotten],
+        )
+        .unwrap();
+        let new = note(&mut tx, DOCK_BELOW);
+        let check = active();
+        let vectors = |tx: &mut postgres::Transaction<'_>, id: i64| -> i64 {
+            tx.query_one(
+                "SELECT count(*) FROM embeddings WHERE source_type = 'memory_chunk' \
+                 AND source_id = $1 AND model = $2",
+                &[&id, &check.model],
+            )
+            .unwrap()
+            .get(0)
+        };
+        assert_eq!((vectors(&mut tx, forgotten), vectors(&mut tx, new)), (0, 0));
+        let fixtures = [
+            ("its spool in /srv/dock-spool", plane(1.0, 0.0)),
+            ("sit below /srv/dock-spool", plane(0.99, 0.14)),
+        ];
+        let outcome = with_vectors(&fixtures, || {
+            document_lifecycle::drop_repeats(&mut tx, conv, &[new], &check)
+        })
+        .expect("check");
+        assert_eq!(
+            outcome,
+            document_lifecycle::RepeatOutcome {
+                dropped: 1,
+                text_only: 0
+            },
+            "found by the vector made for the new note"
+        );
+        assert_eq!(vectors(&mut tx, forgotten), 1, "kept for the next check");
+    }
+
+    /// An empty forgotten note cannot be repeated: it is left out of the
+    /// check, so it does not turn every later check into a text-only one.
+    #[test]
+    fn empty_forgotten_note_is_left_out_of_the_check() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping empty_forgotten_note_is_left_out_of_the_check: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = store(
+            &mut tx,
+            &stored_file(
+                uuid::Uuid::new_v4(),
+                "markdown",
+                "document",
+                ts(T0),
+                &["# Weir\nOpen."],
+            ),
+        );
+        let note = |tx: &mut postgres::Transaction<'_>, text: &str| -> i64 {
+            tx.query_one(
+                "INSERT INTO memory_chunks (source_type, source_id, content, category, confidence, status) \
+                 VALUES ('conversation', $1, $2, 'insight', 0.8, 'active') RETURNING id",
+                &[&conv, &text],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let empty = note(&mut tx, "   ");
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'forgotten' WHERE id = $1",
+            &[&empty],
+        )
+        .unwrap();
+        let new = note(&mut tx, WEIR_OPEN);
+        let outcome = with_vectors(&[("weir gate opens", axis(5))], || {
+            document_lifecycle::drop_repeats(&mut tx, conv, &[new], &active())
+        })
+        .expect("check");
+        assert_eq!(outcome, document_lifecycle::RepeatOutcome::default());
+    }
+
+    const WEIR_OPEN: &str = "The weir gate opens at the spring tide.";
+
+    /// While the model fails on a new version, the old version's notes
+    /// stay current: they are closed with the first window that commits.
+    #[test]
+    fn reimport_keeps_old_notes_current_while_the_model_fails() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping reimport_keeps_old_notes_current_while_the_model_fails: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let session = uuid::Uuid::new_v4();
+        let conv = store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", ts(T0), &["# Quay\nOld."]),
+        );
+        extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+            Ok(vec![fact("The quay closes at dusk.")])
+        })
+        .expect("first pass");
+        let v2 = ts(T0 + 3600);
+        store(
+            &mut tx,
+            &stored_file(session, "markdown", "document", v2, &["# Quay\nNew."]),
+        );
+        let failed = extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+            anyhow::bail!("model gone")
+        })
+        .expect("failed pass");
+        assert_eq!(
+            failed,
+            ExtractSummary {
+                errors: 1,
+                ..Default::default()
+            }
+        );
+        let statuses = |tx: &mut postgres::Transaction<'_>| -> Vec<String> {
+            notes_of(tx, conv).into_iter().map(|n| n.status).collect()
+        };
+        assert_eq!(statuses(&mut tx), ["active"], "still current");
+        assert_eq!(
+            document_lifecycle::replaced_since_extraction(&mut tx, conv).unwrap(),
+            Some(v2),
+            "the new version is still pending"
+        );
+
+        let done = extract_conversation_with(&mut tx, conv, 24_000, &active(), |_| {
+            Ok(vec![fact("The quay closes at midnight.")])
+        })
+        .expect("second pass");
+        assert_eq!(
+            done,
+            ExtractSummary {
+                windows: 1,
+                chunks: 1,
+                closed: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(statuses(&mut tx), ["superseded", "active"]);
+        assert_eq!(notes_of(&mut tx, conv)[0].valid_to, Some(v2));
     }
 
     #[test]
@@ -1849,8 +2219,7 @@ mod tests {
             .get(0);
         assert!((cosine - 0.99).abs() < 0.001, "{cosine}");
 
-        let mut run =
-            |c| document_lifecycle::drop_forgotten_repeats(&mut tx, conv, &ids, &c).unwrap();
+        let mut run = |c| document_lifecycle::drop_repeats(&mut tx, conv, &ids, &c).unwrap();
         assert_eq!(
             run(check(&model, 0.999)),
             outcome(0, 0),
@@ -2048,7 +2417,7 @@ mod tests {
             total.document_line().as_deref(),
             Some(
                 "documents: 0 note(s) of old versions closed, \
-                 2 repeat(s) of forgotten notes dropped, 2 notes checked by text only"
+                 2 repeat(s) of forgotten or replaced notes dropped, 2 notes checked by text only"
             )
         );
         assert_eq!(ExtractSummary::default().document_line(), None);
@@ -2125,5 +2494,54 @@ mod tests {
         let check = active();
         assert_eq!(check.model, crate::embedding::configured_model());
         assert_eq!(check.min_similarity, consolidation_threshold(&check.model));
+    }
+
+    /// The Rust extraction on a database the Python CLI migrated: refused
+    /// before a conversation is read or a request is sent, in one line that
+    /// names the missing migration and the command.
+    #[test]
+    fn extract_refuses_unmigrated_database() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping extract_refuses_unmigrated_database: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = seed_conversation(&mut tx, &[(1, "first"), (2, "second")]);
+        // A temporary ledger shadows applied_migrations for this session.
+        tx.batch_execute(
+            "CREATE TEMP TABLE applied_migrations (migration_name text PRIMARY KEY) ON COMMIT DROP; \
+             INSERT INTO applied_migrations VALUES ('015_account_stars_untimed.sql')",
+        )
+        .expect("ledger without the latest migration");
+        // Nothing listens there: a request would fail the conversation, not
+        // the run.
+        let backend = ollama_at("http://127.0.0.1:9".into());
+        let err =
+            run_pending(&mut tx, &backend, 100_000, 24_000, Profile::Default).expect_err("refused");
+        let line = format!("{err:#}");
+        assert!(line.contains(crate::migrate::LATEST), "{line}");
+        assert!(line.contains("throughline migrate"), "{line}");
+        assert!(!line.contains('\n'), "one line: {line}");
+        assert!(
+            pending_conversations(&mut tx, 100_000)
+                .unwrap()
+                .contains(&conv),
+            "nothing was read"
+        );
+
+        // Control: with the latest migration the run gets as far as the
+        // conversation and records the failed request as an error.
+        tx.execute(
+            "INSERT INTO applied_migrations VALUES ($1)",
+            &[&crate::migrate::LATEST],
+        )
+        .expect("latest migration");
+        tx.execute(
+            "UPDATE conversations SET started_at = now() + interval '100 years' WHERE id = $1",
+            &[&conv],
+        )
+        .expect("first in line");
+        let s = run_pending(&mut tx, &backend, 1, 24_000, Profile::Default).expect("migrated");
+        assert_eq!((s.windows, s.errors), (0, 1), "{s:?}");
     }
 }

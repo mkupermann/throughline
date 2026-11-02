@@ -7,29 +7,41 @@ No root, no system-wide install — everything lives under `~/.config/systemd/us
 
 | Unit | Schedule | Purpose |
 |------|----------|---------|
-| `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres; then the Rust `ingest --source markdown` and `--source git` |
-| `throughline-extract.timer` | daily at 02:00   | Rust `throughline extract-memory` — notes from conversations not yet extracted, 20 per run, documents included |
+| `throughline-ingest.timer`  | hourly           | `throughline ingest --all` — pull available local-tool sessions into Postgres; then the Rust `migrate` and `ingest --source` for `gemini_cli`, `copilot_chat`, `markdown` and `git` |
+| `throughline-extract.timer` | daily at 02:00   | Rust `throughline migrate`, then `extract-memory` — notes from conversations not yet extracted, 20 per run, documents included |
 | `throughline-backup.timer`  | daily at 03:00   | `scripts/backup.sh` — `pg_dump` the `throughline` database                      |
-| `throughline-embed.timer`   | hourly at :15    | Rust `throughline embed --limit 10000` — vectors for new notes first, then messages |
+| `throughline-embed.timer`   | hourly at :15    | Rust `throughline migrate`, then `embed --limit 10000` — vectors for new notes first, then messages |
 
 All four services are `Type=oneshot`: they run, finish, and exit. The timer units keep
 them on schedule.
 
 The ingest unit invokes the packaged `throughline ingest --all` command through
-the shared environment. Its two further steps read Markdown folders and git
-repositories with the Rust binary, the same one the embed unit uses; they take
-`THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS` from the shared file
-and write nothing while both are empty. Web pages are not on a timer:
+the shared environment. Its further steps run the Rust binary, the same one the
+embed unit uses: `migrate`, then Gemini CLI, Copilot Chat, Markdown folders and
+git repositories. Gemini CLI and Copilot Chat write nothing without their
+folders. Markdown and git take `THROUGHLINE_MARKDOWN_ROOTS` and
+`THROUGHLINE_GIT_ROOTS` from the shared file (distinct root folder names) and
+write nothing while both are empty. Web pages are not on a timer:
 `ingest --source web` makes network requests, so you start it yourself.
+
+Every Rust job runs the Rust `migrate` before its work. The Python
+`throughline migrate` does not add the columns and the `document` role the Rust
+ingest and extraction need, and the Rust `ingest` and `extract-memory` stop with
+`the database lacks migration …: run \`throughline migrate\` first` when they
+are missing. `migrate` does nothing on a current schema.
 
 The document sources (Markdown folders, git repositories, web pages) and the
 `document` extraction profile exist only in the Rust runtime. The Python
 `throughline` CLI knows neither, and the Python extractor reads only user and
 assistant messages, so it would leave every document unextracted. That is why
 the extract unit runs the Rust binary too, with the model settings from the
-shared file (`OLLAMA_HOST`, `OLLAMA_EMBED_MODEL`, and the server's
-`THROUGHLINE_ANSWER_MODEL`, `THROUGHLINE_OLLAMA_THINK` and
-`THROUGHLINE_OLLAMA_NUM_CTX` if it sets them).
+shared file: `OLLAMA_HOST`, `OLLAMA_EMBED_MODEL`, and every model setting the
+server sets, such as `THROUGHLINE_ANSWER_BACKEND`, `THROUGHLINE_ANSWER_BASE_URL`,
+`THROUGHLINE_ANSWER_API_KEY`, `THROUGHLINE_ANSWER_MODEL`,
+`THROUGHLINE_OLLAMA_THINK`, `THROUGHLINE_OLLAMA_NUM_CTX`,
+`THROUGHLINE_LLM_TIMEOUT_SECS`, `THROUGHLINE_EMBED_MODEL` and
+`THROUGHLINE_EXTRACT_PROFILE`. Without them it falls back to the local Ollama
+defaults.
 
 The backup unit retains a source-checkout compatibility wrapper; installed and
 interactive use should prefer `throughline backup`.

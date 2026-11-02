@@ -27,7 +27,7 @@
 //! (`Signed-off-by:`, `Co-authored-by:`, `Cc:` …) before it is split into
 //! subject and body, so a trailer typed right under the subject goes too.
 //! Mail addresses become `[mail]`. Three merge subjects lose the account or
-//! remote: `Merge pull request #N from <account>/<branch>`, `Merge … of
+//! remote: `Merge pull request #N from <account>/<branch>`, `Merge branch … of
 //! <url>` (only the repository name stays) and `Merge remote-tracking
 //! branch '<remote>/<branch>'`. There is nothing to filter commits by person
 //! (organisation rule: no employee monitoring). A name written into the text
@@ -165,11 +165,11 @@ impl GitSource {
         !self.roots.is_empty() && self.version().is_some()
     }
 
-    /// git inside `root`: no search for a repository above it (above the
-    /// resolved folder when the root is a symlink), and `safe.directory` for
-    /// this root alone (as given and resolved), so a repository owned by
-    /// another user, as in the container, can be read.
-    fn git_in(&self, root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    /// The command for git inside `root`: no search for a repository above
+    /// it (above the resolved folder when the root is a symlink), and
+    /// `safe.directory` for this root alone (as given and resolved), so a
+    /// repository owned by another user, as in the container, can be read.
+    fn command_in(&self, root: &Path, args: &[&str]) -> Command {
         let mut cmd = self.command();
         let real = root.canonicalize().ok();
         if let Some(parent) = real.as_deref().unwrap_or(root).parent() {
@@ -184,10 +184,14 @@ impl GitSource {
             value.push(dir.as_os_str());
             cmd.arg("-c").arg(value);
         }
-        let out = cmd
-            .arg("-C")
-            .arg(root)
-            .args(args)
+        cmd.arg("-C").arg(root).args(args);
+        cmd
+    }
+
+    /// Run [`GitSource::command_in`] and return its output.
+    fn git_in(&self, root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+        let out = self
+            .command_in(root, args)
             .output()
             .with_context(|| format!("start git {}", args[0]))?;
         if !out.status.success() {
@@ -257,13 +261,15 @@ pub fn doctor_line(source: &GitSource) -> String {
 }
 
 /// Ingest every configured repository. Ignore rules apply to the root
-/// (`path:`) and its folder name (`project:`).
+/// (`path:`) and its folder name (`project:`). Refuses a database that lacks
+/// the newest migration ([`crate::migrate::require_latest`]).
 pub fn run<C: GenericClient>(
     client: &mut C,
     source: &GitSource,
     verbose: bool,
     rules: &IgnoreRules,
 ) -> Result<IngestSummary> {
+    crate::migrate::require_latest(client)?;
     let mut summary = IngestSummary::new(NAME);
     if !source.is_present() {
         if !source.roots.is_empty() {
@@ -289,11 +295,12 @@ pub fn run<C: GenericClient>(
             summary.ignored_project += 1;
             continue;
         }
-        // The conversation is keyed by the folder name.
+        // The conversation is keyed by the folder name: a second root with
+        // the same name is left out, as for Markdown.
         if !names.insert(name.clone()) {
-            summary.errors += 1;
+            summary.skipped += 1;
             eprintln!(
-                "[{NAME}] {project_path}: another root has the folder name {name:?}, skipped"
+                "[{NAME}] warning: {project_path}: another root has the folder name {name:?}, skipped"
             );
             continue;
         }
@@ -488,14 +495,15 @@ fn without_people_lines(body: &str) -> String {
 
 /// Merge subjects without the account or remote:
 /// - `Merge pull request #7 from account/branch` → `… from branch`;
-/// - `Merge branch 'x' of host:account/repo` → `… of repo` (any URL);
+/// - `Merge branch 'x' of host:account/repo` → `… of repo` (any URL; also
+///   `branches` and `tag`/`tags`, the forms git writes);
 /// - `Merge remote-tracking branch 'remote/x'` → `… 'x'`.
 fn without_merge_account(subject: &str) -> String {
     static RES: OnceLock<[Regex; 3]> = OnceLock::new();
     let res = RES.get_or_init(|| {
         [
             r"^(Merge pull request #\d+ from )[^/\s]+/(\S+)",
-            r"^(Merge .*? of )\S*/([^/\s]+)",
+            r"^(Merge (?:branch|branches|tag|tags) .*? of )\S*/([^/\s]+)",
             r"^(Merge remote-tracking branch ')[^'/\s]+/([^']+')",
         ]
         .map(|re| Regex::new(re).expect("valid merge regex"))
@@ -1106,6 +1114,77 @@ mod tests {
         );
     }
 
+    /// A repository owned by another user (a container mount) is read only
+    /// because `safe.directory` names the root; the tests run as the owner,
+    /// so the argument list is checked instead.
+    #[test]
+    fn git_command_trusts_only_the_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("harbor-trust");
+        fs::create_dir_all(&root).unwrap();
+        let real = root.canonicalize().unwrap();
+        let cmd = GitSource::new(vec![root.clone()]).command_in(&root, &["log"]);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let mut expected = vec![
+            "-c".to_string(),
+            format!("safe.directory={}", root.display()),
+        ];
+        if real != root {
+            expected.push("-c".into());
+            expected.push(format!("safe.directory={}", real.display()));
+        }
+        expected.extend(["-C".to_string(), root.display().to_string(), "log".into()]);
+        assert_eq!(args, expected);
+        let ceiling = cmd
+            .get_envs()
+            .find(|(k, _)| *k == "GIT_CEILING_DIRECTORIES")
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()));
+        assert_eq!(ceiling, Some(real.parent().unwrap().display().to_string()));
+        assert!(cmd.get_envs().any(|(k, v)| k == "GIT_DIR" && v.is_none()));
+    }
+
+    /// Two roots with the same folder name would share one conversation:
+    /// the second is skipped with a warning, not counted as an error.
+    #[test]
+    fn git_second_root_with_the_same_name_is_skipped() {
+        let test = "git_second_root_with_the_same_name_is_skipped";
+        if git_missing(test) {
+            return;
+        }
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping {test}: no PostgreSQL reachable");
+            return;
+        };
+        let name = format!("harbor-twin-{}", Uuid::new_v4().simple());
+        let mut first = Repo::new(&name);
+        first.commit("First twin", &["a.txt"]);
+        let mut second = Repo::new(&name);
+        second.commit("Second twin", &["b.txt"]);
+        second.commit("Second twin again", &["c.txt"]);
+        assert_ne!(first.root, second.root);
+        let mut tx = client.transaction().expect("begin test tx");
+        let source = GitSource::new(vec![first.root.clone(), second.root.clone()]);
+        let s = run(&mut tx, &source, false, &IgnoreRules::default()).unwrap();
+        assert_eq!(
+            (
+                s.files_seen,
+                s.ingested,
+                s.skipped,
+                s.errors,
+                s.messages_written
+            ),
+            (2, 1, 1, 0, 1),
+            "the first root is read, the second skipped"
+        );
+        let id = conversation_id(&mut tx, &name).unwrap();
+        let rows = messages(&mut tx, id);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].2.starts_with("First twin"), "{}", rows[0].2);
+    }
+
     /// A root that is a symlink to a plain folder inside another repository
     /// must not reach that repository.
     #[cfg(unix)]
@@ -1166,6 +1245,18 @@ mod tests {
                 &[]
             ),
             "Merge branch 'main' of harbor-ledger into soundings"
+        );
+        assert_eq!(
+            commit_content(
+                "Merge tag 'v2.1' of example.invalid:erikam/harbor-ledger",
+                &[]
+            ),
+            "Merge tag 'v2.1' of harbor-ledger"
+        );
+        // A subject that only starts with "Merge" keeps its paths.
+        assert_eq!(
+            commit_content("Merge the lists of src/tide.rs and src/gauge.rs", &[]),
+            "Merge the lists of src/tide.rs and src/gauge.rs"
         );
         // The message text is cut, the file list is not.
         let long = format!("Chart the bay\n\n{}", "a".repeat(9_000));

@@ -8,7 +8,8 @@
 //!
 //! The rules are the ones agent memory files follow (`agent_memory.rs`):
 //! the old version's notes are closed, not deleted, and a forgotten note
-//! stays forgotten. Import revives nothing. The extraction job runs these
+//! stays forgotten. A note the user corrected or `consolidate` merged keeps
+//! its successor. Import revives nothing. The extraction job runs these
 //! steps without an account, so local and team mode behave the same.
 
 use crate::embedding::{self, EmbedBreaker};
@@ -75,7 +76,7 @@ pub fn reconcile<C: GenericClient>(
         .context("close the notes of the old document version")
 }
 
-/// How repeats of forgotten notes are recognised.
+/// How repeats of forgotten or replaced notes are recognised.
 pub struct RepeatCheck<'a> {
     /// The embedding model whose vectors are compared.
     pub model: String,
@@ -106,10 +107,10 @@ pub fn consolidation_threshold(model: &str) -> f64 {
     })
 }
 
-/// What [`drop_forgotten_repeats`] did with one batch of new notes.
+/// What [`drop_repeats`] did with one batch of new notes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RepeatOutcome {
-    /// New notes deleted as repeats of a forgotten note.
+    /// New notes deleted as repeats of a forgotten or replaced note.
     pub dropped: u64,
     /// New notes kept after a check that could only compare text, because a
     /// vector was missing and could not be made.
@@ -117,17 +118,22 @@ pub struct RepeatOutcome {
 }
 
 /// Delete those of `note_ids`, just written for `conversation_id`, that say
-/// again what a forgotten note of the same conversation said: the same text
-/// (ignoring surrounding whitespace), or a vector of `check.model` at or
-/// above `check.min_similarity` cosine to the forgotten note's vector.
-/// Consolidation leaves forgotten notes out, so nothing else would catch
-/// the repeat.
+/// again what an earlier note of the same conversation said that the user
+/// or a job took out of the current set: a forgotten note, or one with a
+/// successor (`superseded_by`: corrected by the user, merged by
+/// `consolidate`). A repeat has the same text (ignoring surrounding
+/// whitespace), or a vector of `check.model` at or above
+/// `check.min_similarity` cosine to that note's vector. Notes that
+/// [`reconcile`] closed have no successor and do not count, so a fact that
+/// is still in the new version comes back as a current note. Consolidation
+/// leaves forgotten notes out, so nothing else would catch the repeat. A
+/// note without text cannot be repeated and is left out.
 ///
 /// A missing vector, on either side, is embedded on demand under the
 /// breaker and the quick timeout, and stored. The `embed` job skips
 /// forgotten notes, so after a model switch the forgotten ones have none.
 /// When no vector can be made, a note is checked by text only and counted.
-pub fn drop_forgotten_repeats<C: GenericClient>(
+pub fn drop_repeats<C: GenericClient>(
     client: &mut C,
     conversation_id: i64,
     note_ids: &[i64],
@@ -136,17 +142,19 @@ pub fn drop_forgotten_repeats<C: GenericClient>(
     if note_ids.is_empty() {
         return Ok(RepeatOutcome::default());
     }
-    let forgotten: Vec<i64> = client
+    let earlier: Vec<i64> = client
         .query(
             "SELECT id FROM memory_chunks \
              WHERE source_type = 'conversation' AND source_id = $1 \
-               AND status = 'forgotten' AND id <> ALL($2) ORDER BY id",
+               AND (status = 'forgotten' OR superseded_by IS NOT NULL) \
+               AND btrim(COALESCE(content, '')) <> '' \
+               AND id <> ALL($2) ORDER BY id",
             &[&conversation_id, &note_ids],
         )?
         .iter()
         .map(|r| r.get(0))
         .collect();
-    if forgotten.is_empty() {
+    if earlier.is_empty() {
         return Ok(RepeatOutcome::default());
     }
     let mut repeats: Vec<i64> = client
@@ -155,9 +163,9 @@ pub fn drop_forgotten_repeats<C: GenericClient>(
              WHERE n.id = ANY($1) \
                AND EXISTS (SELECT 1 FROM memory_chunks f \
                            WHERE f.id = ANY($2) AND btrim(f.content) = btrim(n.content))",
-            &[&note_ids, &forgotten],
+            &[&note_ids, &earlier],
         )
-        .context("find repeats of forgotten notes by text")?
+        .context("find repeats of forgotten or replaced notes by text")?
         .iter()
         .map(|r| r.get(0))
         .collect();
@@ -176,9 +184,9 @@ pub fn drop_forgotten_repeats<C: GenericClient>(
             .query_one("SELECT to_regclass('public.embeddings') IS NOT NULL", &[])?
             .get(0);
         if has_embeddings {
-            let mut all_forgotten = true;
-            for id in &forgotten {
-                all_forgotten &= ensure_vector(client, *id, check)?;
+            let mut all_earlier = true;
+            for id in &earlier {
+                all_earlier &= ensure_vector(client, *id, check)?;
             }
             let mut with_vector = Vec::new();
             for id in &rest {
@@ -188,8 +196,8 @@ pub fn drop_forgotten_repeats<C: GenericClient>(
                     text_only += 1;
                 }
             }
-            let similar = similar_to_forgotten(client, &with_vector, &forgotten, check)?;
-            if !all_forgotten {
+            let similar = similar_to_earlier(client, &with_vector, &earlier, check)?;
+            if !all_earlier {
                 text_only += with_vector
                     .iter()
                     .filter(|id| !similar.contains(id))
@@ -209,23 +217,23 @@ pub fn drop_forgotten_repeats<C: GenericClient>(
         )?;
         dropped = client
             .execute("DELETE FROM memory_chunks WHERE id = ANY($1)", &[&repeats])
-            .context("delete repeats of forgotten notes")?;
+            .context("delete repeats of forgotten or replaced notes")?;
     }
     Ok(RepeatOutcome { dropped, text_only })
 }
 
 /// Those of `ids` whose vector of `check.model` lies at or above the
-/// threshold to the vector of one of `forgotten`.
-fn similar_to_forgotten<C: GenericClient>(
+/// threshold to the vector of one of `earlier`.
+fn similar_to_earlier<C: GenericClient>(
     client: &mut C,
     ids: &[i64],
-    forgotten: &[i64],
+    earlier: &[i64],
     check: &RepeatCheck<'_>,
 ) -> Result<Vec<i64>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let params: [&(dyn ToSql + Sync); 4] = [&ids, &forgotten, &check.model, &check.min_similarity];
+    let params: [&(dyn ToSql + Sync); 4] = [&ids, &earlier, &check.model, &check.min_similarity];
     Ok(client
         .query(
             "SELECT DISTINCT en.source_id FROM embeddings en JOIN embeddings ef \
@@ -237,7 +245,7 @@ fn similar_to_forgotten<C: GenericClient>(
                             1 - (en.embedding_1536 <=> ef.embedding_1536)) >= $4",
             &params,
         )
-        .context("find repeats of forgotten notes by vector")?
+        .context("find repeats of forgotten or replaced notes by vector")?
         .iter()
         .map(|r| r.get(0))
         .collect())
@@ -288,7 +296,7 @@ fn ensure_vector<C: GenericClient>(
             Ok(true)
         }
         Err(e) => {
-            eprintln!("forgotten check: note {id}: {e}");
+            eprintln!("repeat check: note {id}: {e}");
             Ok(false)
         }
     }
