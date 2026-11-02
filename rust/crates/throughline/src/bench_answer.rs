@@ -126,7 +126,7 @@ pub(crate) fn answer_memory<C: GenericClient>(
             project: &item.sample_id,
             task: Some(&item.question),
             budget: context_pack::DEFAULT_BUDGET,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         },
         emb,
     )?;

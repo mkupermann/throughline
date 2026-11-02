@@ -7108,9 +7108,9 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
-  // The session tools: every adapter but the document sources (markdown,
-  // git, web). "Sessions only" sends them as the recall source filter.
-  const SESSION_SOURCES = ["claude_code", "codex", "cursor", "zed", "continue_dev", "cline", "windsurf", "vibe", "hermes", "opencode", "aider", "gemini_cli", "copilot_chat"];
+  // "Sessions only" sends the keyword `sessions`: the server keeps every
+  // source but the document sources (markdown, git, web), unknown tools and
+  // conversations without a recorded tool included.
   function sessionsOnlyOn() {
     const b = $("memory-sessions-only");
     return !!b && !b.hidden && b.getAttribute("aria-pressed") === "true";
@@ -7124,7 +7124,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     if (pager) pager.hidden = true;
     if (note) note.hidden = true;
     const p = new URLSearchParams({ mode: "current", limit: "50", q: state.memory.q });
-    if (sessionsOnlyOn()) p.set("sources", SESSION_SOURCES.join(","));
+    if (sessionsOnlyOn()) p.set("sources", "sessions");
     try {
       const data = await fetchJson("/api/recall?" + p.toString());
       const hits = data.hits || [];

@@ -57,6 +57,9 @@ pub struct EvalReport {
     pub seed: u64,
     /// The weights `weighted` ranked with.
     pub weights: Weights,
+    /// The source filter of every method but `phrase` (empty lists: every
+    /// source).
+    pub sources: recall::SourceFilter,
     pub scores: Vec<MethodScore>,
     pub cases: Vec<CaseRanks>,
 }
@@ -195,14 +198,17 @@ pub(crate) fn shuffle(ids: &mut [i64], rng: &mut Rng) {
 pub const METHODS: [&str; 5] = ["fulltext", "weighted", "cosine", "phrase", "random"];
 
 /// Ranks every case by each method. `weighted` uses `weights`; every
-/// question is scored at one `now`. With `parts`, the score parts of all
-/// candidates are collected per question at that same `now`.
+/// question is scored at one `now`. `sources` filters the candidates of
+/// every method but `phrase`, which searches messages. With `parts`, the
+/// score parts of all candidates are collected per question at that same
+/// `now`.
 pub fn run_eval<C: GenericClient>(
     client: &mut C,
     cases: &[EvalCase],
     k: usize,
     seed: u64,
     weights: &Weights,
+    sources: &recall::SourceFilter,
     mut parts: Option<&mut Vec<QuestionParts>>,
 ) -> Result<EvalReport> {
     let now = Utc::now();
@@ -227,7 +233,7 @@ pub fn run_eval<C: GenericClient>(
             known_at: None,
             limit: RANK_DEPTH,
             rank: Rank::Fulltext,
-            sources: &[],
+            sources,
         };
         let mut ranked = |q: &RecallQuery| -> Result<Vec<i64>> {
             Ok(recall::recall_with(client, q, emb.as_ref(), weights, now)?
@@ -301,6 +307,7 @@ pub fn run_eval<C: GenericClient>(
         k,
         seed,
         weights: *weights,
+        sources: sources.clone(),
         scores,
         cases: out_cases,
     })
@@ -589,7 +596,7 @@ pub fn run_locomo<C: GenericClient>(
                 known_at: None,
                 limit: depth,
                 rank,
-                sources: &[],
+                sources: &recall::ALL_SOURCES,
             };
             let result = recall::recall(client, &q, emb.as_ref())?;
             if result.degraded.is_some() {

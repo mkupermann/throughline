@@ -214,8 +214,8 @@ migrations of its own: columns the Rust extraction reads and the `document`
 role of the Markdown, git and web sources. After building it, and after every
 upgrade, run `rust/target/release/throughline migrate` once. The scheduled
 jobs of section 10 run it before each Rust step; it does nothing on a current
-schema. Without it the Rust `ingest` and `extract-memory` stop with `the
-database lacks migration …: run \`throughline migrate\` first`.
+schema. Without it the Rust `ingest` and `extract-memory` stop with one line,
+``the database lacks migration …: run the Rust `throughline migrate` (rust/target/release/throughline migrate, or `docker compose run --rm migrate`)``.
 
 ## 7. Configure the native connection
 

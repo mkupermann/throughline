@@ -32,7 +32,7 @@ The migrations above are those of the earlier Python application, and the audit 
 
 - Rolling the image back after 014 needs the verified backup restored. 014 replaces the unique key of `favorites`, and an older image sets stars with the old key, so starring fails until the backup is back.
 - Do not run the Python migrations against the database afterwards. On a database that has not recorded `013_team_access.sql`, it would create `access_audit` and its triggers again.
-- `throughline serve` refuses to start, in local and team mode, until the newest Rust migration has run. Compose runs `migrate` before `web`; on a native install run `throughline migrate` after every upgrade. Applied Python migrations the Rust list does not know, such as `015_project_assignments.sql`, do not stop it.
+- `throughline serve` refuses to start, in local and team mode, until the newest Rust migration has run. Compose runs `migrate` before `web`; on a native install run the Rust `rust/target/release/throughline migrate` after every upgrade (the Python CLI's `throughline migrate` does not add the Rust migrations). The Rust `ingest` and `extract-memory` refuse the same way. Applied Python migrations the Rust list does not know, such as `015_project_assignments.sql`, do not stop it.
 
 ## Recall ranks by meaning
 

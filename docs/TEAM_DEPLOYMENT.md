@@ -22,8 +22,8 @@ The server checks the database before it binds the port and refuses to start whe
 | `team` | `THROUGHLINE_PUBLIC_URL` is missing, or uses `http` on a host that is not loopback | `team mode needs THROUGHLINE_PUBLIC_URL with https (http only on localhost, 127.x.x.x or ::1)` |
 | `team` | `THROUGHLINE_PUBLIC_URL` has an empty or invalid port, such as `https://host:` | `THROUGHLINE_PUBLIC_URL has an empty or invalid port: leave it out or give a number up to 65535` |
 | `team` | no enabled account has the role `admin` | ``team mode needs an enabled admin: run `throughline account add <name> --role admin` `` |
-| both | the newest migration of the Rust runtime has not run (migrations the Rust runtime does not know do not matter) | ``the database lacks migration <newest migration>: run `throughline migrate` first`` |
-| both | no migration has run yet (no table `applied_migrations`) | ``read applied_migrations (run `throughline migrate` first)`` |
+| both | the newest migration of the Rust runtime has not run (migrations the Rust runtime does not know do not matter) | ``the database lacks migration <newest migration>: run the Rust `throughline migrate` (rust/target/release/throughline migrate, or `docker compose run --rm migrate`)`` |
+| both | no migration has run yet (no table `applied_migrations`) | ``read applied_migrations (run the Rust `throughline migrate` (rust/target/release/throughline migrate, or `docker compose run --rm migrate`))`` |
 
 The `local` rule is there so a team database cannot run open by mistake: a missing variable would otherwise show every private note to anyone who reaches the port. `throughline doctor` prints `auth mode: local` or `auth mode: team (<n> accounts, <m> private notes)`.
 

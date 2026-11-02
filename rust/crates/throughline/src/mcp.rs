@@ -298,7 +298,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (the default in mode current; meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match; the default in the other modes) or weighted (meaning and reliability; full text without embeddings). sources limits the notes to those extracted from the named tools, for example the session tools without markdown, git and web",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (the default in mode current; meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match; the default in the other modes) or weighted (meaning and reliability; full text without embeddings). sources limits the notes to those extracted from the named tools; sources [\"sessions\"] leaves out markdown, git and web",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -434,7 +434,7 @@ fn build_pack<C: GenericClient>(
     project: &str,
     task: Option<&str>,
     budget: usize,
-    sources: &[String],
+    sources: &crate::recall::SourceFilter,
     prepared: Prepared,
 ) -> Result<crate::context_pack::ContextPack, Value> {
     let emb = match prepared {
@@ -474,16 +474,16 @@ static SOURCES_SCHEMA: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| 
     json!({
         "type": "array",
         "items": { "type": "string" },
-        "description": "Only notes from conversations of these tools (source_tool values such as claude_code, codex, markdown, git, web); left out or empty: every source. Notes written by hand or over MCP always count. A comma-separated string works too"
+        "description": "Only notes from conversations of these tools (source_tool values such as claude_code, codex, markdown, git, web), or [\"sessions\"] for every source but markdown, git and web; left out or empty: every source. Notes written by hand or over MCP always count. A comma-separated string works too"
     })
 });
 
 /// The `sources` argument: absent, null, an array of strings or a comma
 /// list ([`crate::recall::parse_sources`]); empty means every source.
-fn sources_arg(args: &Value) -> Result<Vec<String>, Value> {
+fn sources_arg(args: &Value) -> Result<crate::recall::SourceFilter, Value> {
     let invalid = |m: &str| json!({ "code": -32602, "message": m });
     let raw = match args.get("sources") {
-        None | Some(Value::Null) => return Ok(Vec::new()),
+        None | Some(Value::Null) => return Ok(crate::recall::SourceFilter::all()),
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(items)) => items
             .iter()
@@ -950,7 +950,7 @@ fn read_resource<C: GenericClient>(
             name,
             None,
             crate::context_pack::DEFAULT_BUDGET,
-            &[],
+            &crate::recall::ALL_SOURCES,
             None,
         )?;
         crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
@@ -1040,7 +1040,7 @@ fn get_prompt<C: GenericClient>(
         project,
         task,
         crate::context_pack::DEFAULT_BUDGET,
-        &[],
+        &crate::recall::ALL_SOURCES,
         prepared,
     )?;
     crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));

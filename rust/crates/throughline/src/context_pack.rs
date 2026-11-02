@@ -393,9 +393,9 @@ pub struct ContextRequest<'a> {
     pub project: &'a str,
     pub task: Option<&'a str>,
     pub budget: usize,
-    /// The `source_tool` values whose notes and sessions may appear
-    /// ([`crate::recall::parse_sources`]); empty: every source.
-    pub sources: &'a [String],
+    /// Whose notes and sessions may appear ([`crate::recall::parse_sources`];
+    /// [`crate::recall::ALL_SOURCES`] for every source).
+    pub sources: &'a crate::recall::SourceFilter,
 }
 
 const DECISION_CATEGORIES: [&str; 3] = ["decision", "preference", "project_context"];
@@ -712,11 +712,13 @@ pub fn build_context<C: GenericClient>(
 fn sessions<C: GenericClient>(
     client: &mut C,
     project: &str,
-    sources: &[String],
+    sources: &crate::recall::SourceFilter,
     lines: &mut Vec<Line>,
 ) -> anyhow::Result<()> {
+    let filter = crate::recall::SourceFilter::predicate("c", 4, 5);
     let rows = client.query(
-        "SELECT c.id, c.started_at, COALESCE(c.source_tool, 'unknown'),
+        &format!(
+            "SELECT c.id, c.started_at, COALESCE(c.source_tool, 'unknown'),
                 NULLIF(btrim(c.summary), ''),
                 (SELECT left(m.content, 400) FROM messages m
                   WHERE m.conversation_id = c.id AND m.role::text = 'user'
@@ -725,10 +727,17 @@ fn sessions<C: GenericClient>(
            FROM conversations c
           WHERE c.project_name = $1 AND c.generated_by IS NULL
             AND NOT COALESCE(c.source_tool, '') = ANY($3)
-            AND (cardinality($4::text[]) = 0 OR c.source_tool = ANY($4::text[]))
+            AND {filter}
           ORDER BY c.started_at DESC, c.id DESC
-          LIMIT $2",
-        &[&project, &SESSION_LIMIT, &DOCUMENT_SOURCES, &sources],
+          LIMIT $2"
+        ),
+        &[
+            &project,
+            &SESSION_LIMIT,
+            &DOCUMENT_SOURCES,
+            &sources.only,
+            &sources.except,
+        ],
     )?;
     for r in rows {
         let id: i64 = r.get(0);
@@ -761,27 +770,32 @@ fn review<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     project: &str,
-    sources: &[String],
+    sources: &crate::recall::SourceFilter,
     shown: &HashSet<i64>,
     lines: &mut Vec<Line>,
 ) -> anyhow::Result<()> {
     let skip: Vec<i64> = shown.iter().copied().collect();
-    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> =
-        vec![&project, &skip, &REVIEW_LIMIT, &sources];
+    let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![
+        &project,
+        &skip,
+        &REVIEW_LIMIT,
+        &sources.only,
+        &sources.except,
+    ];
+    let filter = crate::recall::SourceFilter::predicate("rc", 4, 5);
     let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
         &format!(
             "SELECT mc.id, mc.content, COALESCE(mc.status, 'active'),
                 COALESCE(mc.valid_from, mc.source_at, mc.created_at)
            FROM memory_chunks mc
+           LEFT JOIN conversations rc ON mc.source_type = 'conversation' AND rc.id = mc.source_id
           WHERE (mc.project_name = $1 OR mc.project_name IS NULL)
             AND COALESCE(mc.status, 'active') NOT IN ('forgotten', 'superseded', 'merged')
             AND mc.superseded_by IS NULL
             AND NOT (mc.id = ANY($2))
             AND (mc.status = 'stale' OR mc.expires_at <= now() OR mc.valid_to <= now())
-            AND (cardinality($4::text[]) = 0 OR mc.source_type <> 'conversation'
-                 OR EXISTS (SELECT 1 FROM conversations rc
-                            WHERE rc.id = mc.source_id AND rc.source_tool = ANY($4::text[])))
+            AND {filter}
             AND {seen}
           ORDER BY COALESCE(mc.valid_from, mc.source_at, mc.created_at) DESC, mc.id
           LIMIT $3"
@@ -1147,7 +1161,7 @@ mod tests {
                 project,
                 task,
                 budget: 8_000,
-                sources: &[],
+                sources: &crate::recall::ALL_SOURCES,
             },
             None,
         )
@@ -1279,7 +1293,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         // The default rank is cosine: the closest vector leads, word match or not.
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
@@ -1330,7 +1344,7 @@ mod tests {
             project: &p,
             task: Some("burrow survey"),
             budget: 8_000,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
         let r = relevant_lines(&out);
@@ -1448,7 +1462,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 70,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
         let d = decision_lines(&out);
@@ -1528,7 +1542,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
         let d = decision_lines(&out);
@@ -1569,7 +1583,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         // No vector for the task: full text, and the pack says so.
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
@@ -1746,7 +1760,7 @@ mod tests {
                 project: &project,
                 task: Some("x"),
                 budget: 64,
-                sources: &[],
+                sources: &crate::recall::ALL_SOURCES,
             },
             None,
         )
@@ -1824,7 +1838,7 @@ mod tests {
                     project: &p,
                     task: Some("secret"),
                     budget: 8_000,
-                    sources: &[],
+                    sources: &crate::recall::ALL_SOURCES,
                 },
                 None,
             )
@@ -1925,7 +1939,7 @@ mod tests {
             project: &p,
             task: Some("quokka"),
             budget: 300,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         };
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
         let r = relevant_lines(&out);
@@ -2184,7 +2198,7 @@ mod tests {
                 project: &p,
                 task: Some("quokka"),
                 budget,
-                sources: &[],
+                sources: &crate::recall::ALL_SOURCES,
             };
             let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
             assert!(out.within_budget, "budget {budget}");
@@ -2313,7 +2327,11 @@ mod tests {
             insert(&mut tx, &by_hand),
             insert(&mut tx, &stale_file),
         ];
-        let pack = |tx: &mut postgres::Transaction<'_>, sources: &[String]| {
+        let pack = |tx: &mut postgres::Transaction<'_>, only: &[String]| {
+            let filter = crate::recall::SourceFilter {
+                only: only.to_vec(),
+                except: Vec::new(),
+            };
             build_context(
                 tx,
                 &Actor::local(),
@@ -2321,7 +2339,7 @@ mod tests {
                     project: &p,
                     task: None,
                     budget: 8_000,
-                    sources,
+                    sources: &filter,
                 },
                 None,
             )
