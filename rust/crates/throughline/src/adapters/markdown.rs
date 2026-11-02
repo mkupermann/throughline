@@ -76,10 +76,11 @@ const SKIP_DIRS: [&str; 7] = [
 
 const NS: Uuid = Uuid::from_u128(0x13361d86_15b2_47e6_9a69_8e9d403b8de2);
 
-/// The roots in a [`ROOTS_ENV`] value: split at `:`, blanks dropped, `~` and
-/// `~/…` expanded against `home`, trailing slashes removed (they would leave
-/// the project name empty), each root once. Entries that are not absolute
-/// after expansion are dropped.
+/// The roots in a [`ROOTS_ENV`] value: split at `:` (a Windows drive letter
+/// stays part of its entry), blanks dropped, `~` and `~/…` expanded against
+/// `home`, trailing slashes removed (they would leave the project name
+/// empty), each root once. Entries that are not absolute after expansion are
+/// dropped.
 pub fn parse_roots(raw: &str, home: Option<&Path>) -> Vec<PathBuf> {
     read_roots(raw, home).0
 }
@@ -88,7 +89,11 @@ pub fn parse_roots(raw: &str, home: Option<&Path>) -> Vec<PathBuf> {
 fn read_roots<'a>(raw: &'a str, home: Option<&Path>) -> (Vec<PathBuf>, Vec<&'a str>) {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut dropped = Vec::new();
-    for entry in raw.split(':').map(str::trim).filter(|e| !e.is_empty()) {
+    for entry in split_entries(raw)
+        .into_iter()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
         let expanded = match (entry.strip_prefix('~'), home) {
             (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
                 home.join(rest.trim_start_matches('/'))
@@ -105,6 +110,36 @@ fn read_roots<'a>(raw: &'a str, home: Option<&Path>) -> (Vec<PathBuf>, Vec<&'a s
         }
     }
     (roots, dropped)
+}
+
+/// Split the colon-separated list. On Windows a drive letter (`C:\…`,
+/// `C:/…`) is not a separator: without this a root `C:\Users\…` would split
+/// into `C` and `\Users\…`, and neither is absolute (M26d). On Unix every
+/// `:` separates, as it always did.
+#[cfg(windows)]
+fn split_entries(raw: &str) -> Vec<&str> {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b':' {
+            continue;
+        }
+        let drive = i - start == 1
+            && bytes[start].is_ascii_alphanumeric()
+            && matches!(bytes.get(i + 1), Some(b'\\' | b'/') | None);
+        if !drive {
+            out.push(&raw[start..i]);
+            start = i + 1;
+        }
+    }
+    out.push(&raw[start..]);
+    out
+}
+
+#[cfg(not(windows))]
+fn split_entries(raw: &str) -> Vec<&str> {
+    raw.split(':').collect()
 }
 
 /// The fields of a frontmatter block that the adapter keeps.
@@ -857,6 +892,16 @@ High tide at nine.
         items.iter().map(|s| s.to_string()).collect()
     }
 
+    /// The relative path in the form [`session_key`] builds it: components
+    /// joined with `/`. `Path::display()` would show `\` on Windows and miss
+    /// the expectation (M26d).
+    fn slash_path(p: &Path) -> String {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
     #[test]
     fn markdown_root_yields_ten_conversations_with_sections() {
         let tmp = tempfile::tempdir().unwrap();
@@ -868,7 +913,7 @@ High tide at nine.
         let found = adapter.discover().unwrap();
         let rel: Vec<String> = found
             .iter()
-            .map(|p| p.strip_prefix(&root).unwrap().display().to_string())
+            .map(|p| slash_path(&p.strip_prefix(&root).unwrap()))
             .collect();
         assert_eq!(
             rel,
@@ -921,7 +966,7 @@ High tide at nine.
         for (path, conv) in found.iter().zip(&convs) {
             let path_str = path.to_string_lossy();
             assert_eq!(conv.source_tool.as_deref(), Some(NAME));
-            let rel = path.strip_prefix(&root).unwrap().to_string_lossy();
+            let rel = slash_path(&path.strip_prefix(&root).unwrap());
             assert_eq!(
                 conv.session_id,
                 stable_uuid(&NS, None, &format!("field-notes/{rel}")),
@@ -1243,24 +1288,26 @@ High tide at nine.
         let conv = adapter.parse(&slashed).unwrap().unwrap();
         assert_eq!(project_name_of(conv.project_path.as_deref()), "sea-charts");
 
-        // `~` against `$HOME`; empty entries dropped; duplicates once.
-        let home = Path::new("/home/fixture");
+        // `~` against `$HOME`; empty entries dropped; duplicates once. The
+        // fixture paths are absolute on every platform: `/srv/notes` would
+        // not be absolute on Windows (M26d).
+        let home = tmp.path().join("home-fixture");
+        let notes = tmp.path().join("notes-fixture");
         assert_eq!(
             parse_roots(
-                "~/harbor-notes: ~ ::/srv/notes/::~/harbor-notes",
-                Some(home)
+                &format!("~/harbor-notes: ~ ::{}/::~/harbor-notes", notes.display()),
+                Some(home.as_path())
             ),
-            [
-                home.join("harbor-notes"),
-                home.to_path_buf(),
-                PathBuf::from("/srv/notes"),
-            ]
+            [home.join("harbor-notes"), home.to_path_buf(), notes.clone()]
         );
         // Relative entries would resolve against the cwd of launchd or
         // `docker exec`: dropped, as is `~` without a home and `~user`.
         assert_eq!(
-            parse_roots("notes:./docs:~other/notes:/srv/notes", Some(home)),
-            [PathBuf::from("/srv/notes")]
+            parse_roots(
+                &format!("notes:./docs:~other/notes:{}", notes.display()),
+                Some(home.as_path())
+            ),
+            [notes.clone()]
         );
         assert!(parse_roots("~/notes:~", None).is_empty());
 

@@ -100,7 +100,7 @@ def test_application_image_runs_unprivileged_and_compose_owns_remote_bind(compos
     assert "THROUGHLINE_ALLOW_REMOTE" not in dockerfile
     assert "THROUGHLINE_HOST=127.0.0.1" in dockerfile
     assert web_environment["THROUGHLINE_HOST"] == "0.0.0.0"
-    assert web_environment["THROUGHLINE_ALLOW_REMOTE"] == "1"
+    assert "THROUGHLINE_ALLOW_REMOTE" not in web_environment
 
 
 def test_application_uid_and_gid_are_build_time_configuration(compose: dict) -> None:
@@ -274,14 +274,15 @@ def test_current_outbound_templates_do_not_advertise_an_unused_anthropic_key() -
     assert "OPENAI_API_KEY=sk-" not in env_text
 
 
-def test_compose_persists_private_backups_in_a_named_volume(compose: dict) -> None:
+def test_compose_persists_private_backups_on_the_host(compose: dict) -> None:
     """A container-only backup path disappears when the web container is replaced."""
     web = compose["services"]["web"]
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert web["environment"]["CLAUDE_MEMORY_BACKUP_DIR"] == "/var/lib/throughline/backups"
-    assert "backup_data:/var/lib/throughline/backups" in web["volumes"]
-    assert compose["volumes"]["backup_data"]["name"] == "throughline_backup_data"
+    assert web["environment"]["THROUGHLINE_BACKUP_DIR"] == "/var/lib/throughline/backups"
+    assert "${THROUGHLINE_BACKUP_DIR_HOST:-./backups}:/var/lib/throughline/backups" in web["volumes"]
+    assert "backup_data" not in compose["volumes"]
     assert 'install -d -m 700 -o throughline -g "$THROUGHLINE_GID" /var/lib/throughline/backups' in dockerfile
 
 

@@ -134,7 +134,14 @@ impl GitSource {
     }
 
     fn command(&self) -> Command {
-        let mut cmd = Command::new("git");
+        let mut cmd = match &self.search_path {
+            // Resolved here by hand: `Command` finds a bare `git` through the
+            // process PATH and PATHEXT even when the child env carries
+            // another PATH, so `with_search_path` would not pin the lookup
+            // on Windows (M26d).
+            Some(path) => Command::new(git_from_path(path)),
+            None => Command::new("git"),
+        };
         if let Some(path) = &self.search_path {
             cmd.env("PATH", path);
         }
@@ -248,6 +255,27 @@ impl GitSource {
         };
         Ok((commits, total))
     }
+}
+
+/// The `git` inside `search_path`, or a name that cannot resolve so the
+/// spawn fails and `version()` reports `None`. `Command` finds a bare name
+/// through the process PATH and PATHEXT regardless of a child `PATH`, so the
+/// lookup happens here instead (M26d).
+fn git_from_path(search_path: &std::ffi::OsStr) -> PathBuf {
+    for dir in std::env::split_paths(search_path) {
+        let mut candidates = vec![dir.join("git")];
+        if cfg!(windows) {
+            let exts = std::env::var_os("PATHEXT")
+                .unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
+            for ext in std::env::split_paths(&exts) {
+                candidates.push(dir.join(format!("git{}", ext.to_string_lossy())));
+            }
+        }
+        if let Some(found) = candidates.into_iter().find(|c| c.is_file()) {
+            return found;
+        }
+    }
+    Path::new(search_path).join("git-not-installed")
 }
 
 /// `git: <n> roots configured, git <version|missing>`.

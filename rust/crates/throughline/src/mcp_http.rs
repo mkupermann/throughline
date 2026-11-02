@@ -114,7 +114,9 @@ pub async fn mcp_post(
             .await
             .unwrap_or(None);
     match with_db(&state, move |client| {
-        Ok(dispatch_with(client, &msg, &ctx, prepared))
+        // Cloned, not moved: `with_db` may run the closure a second time on a
+        // rebuilt connection (M26d).
+        Ok(dispatch_with(client, &msg, &ctx, prepared.clone()))
     })
     .await
     {

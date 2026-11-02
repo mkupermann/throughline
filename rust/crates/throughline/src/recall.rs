@@ -252,6 +252,9 @@ pub struct RecallQuery<'a> {
     pub sources: &'a SourceFilter,
 }
 
+// `Clone` so a `with_db` closure can pass the vector again on its second run
+// after a reconnect (M26d).
+#[derive(Clone)]
 pub struct QueryEmbedding {
     pub model: String,
     pub column: &'static str,
