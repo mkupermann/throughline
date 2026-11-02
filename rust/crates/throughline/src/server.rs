@@ -3412,6 +3412,10 @@ async fn operate_handler(
                 let s = crate::config_import::run(client)?;
                 s.to_string()
             }
+            "scan-secrets" => {
+                let s = crate::secrets::scan(client, true)?;
+                crate::secrets::summary_line(&s)
+            }
             other => return Err(anyhow::anyhow!("unknown job: {other}")),
         };
         Ok(out)
@@ -3601,6 +3605,59 @@ async fn health_recovery_handler(
             }))
             .into_response()
         }
+        Err(resp) => resp,
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SecretsParams {
+    kind: Option<String>,
+    project: Option<String>,
+    q: Option<String>,
+    /// `asc` or `desc` (default) by first sighting.
+    order: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// `GET /api/secrets`: the secrets found, masked, with the count per kind.
+/// The clear value never appears here (M24).
+async fn secrets_handler(
+    State(state): State<AppState>,
+    Query(params): Query<SecretsParams>,
+) -> Response {
+    match with_db(&state, move |client| {
+        fn blank(v: &Option<String>) -> Option<&str> {
+            v.as_deref().map(str::trim).filter(|s| !s.is_empty())
+        }
+        let query = crate::secrets::ListQuery {
+            kind: blank(&params.kind),
+            project: blank(&params.project),
+            q: blank(&params.q),
+            order_desc: order_dir(params.order.as_deref(), true) == "DESC",
+            limit: params.limit.unwrap_or(100).clamp(1, 500),
+            offset: params.offset.unwrap_or(0).max(0),
+        };
+        let (rows, total) = crate::secrets::list(client, &query)?;
+        let kinds: Vec<Value> = crate::secrets::kinds(client)?
+            .into_iter()
+            .map(|(kind, count)| serde_json::json!({ "kind": kind, "count": count }))
+            .collect();
+        Ok(serde_json::json!({ "secrets": rows, "total": total, "kinds": kinds }))
+    })
+    .await
+    {
+        Ok(body) => Json(body).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// `GET /api/secrets/{id}/reveal`: the clear value of one secret. Every
+/// call is logged in `secret_reveals`.
+async fn secret_reveal_handler(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
+    match with_db(&state, move |client| crate::secrets::reveal(client, id)).await {
+        Ok(Some(value)) => Json(serde_json::json!({ "id": id, "value": value })).into_response(),
+        Ok(None) => api_error(StatusCode::NOT_FOUND, "not_found", "secret not found"),
         Err(resp) => resp,
     }
 }
@@ -4775,6 +4832,8 @@ fn routes() -> Vec<Route> {
         route(M::GET, "/api/costs", costs_handler),
         route(M::GET, "/api/ingest-status", ingest_status_handler),
         route(M::GET, "/api/backlog", backlog_handler),
+        route(M::GET, "/api/secrets", secrets_handler),
+        route(M::GET, "/api/secrets/{id}/reveal", secret_reveal_handler),
         route(M::GET, "/api/audit", audit_handler),
         route(M::GET, "/api/stale-digest", stale_digest_handler),
         route(M::GET, "/api/answer-eval", answer_eval_handler),
@@ -5211,6 +5270,8 @@ mod tests {
             (Method::GET, "/api/consolidation/proposal", Role::Admin),
             (Method::POST, "/api/operate", Role::Admin),
             (Method::GET, "/api/backlog", Role::Admin),
+            (Method::GET, "/api/secrets", Role::Admin),
+            (Method::GET, "/api/secrets/{id}/reveal", Role::Admin),
             (Method::POST, "/api/consolidate", Role::Admin),
             (Method::POST, "/api/writeback", Role::Admin),
             (Method::POST, "/api/agent-memory/ingest", Role::Admin),
@@ -8672,6 +8733,72 @@ mod tests {
 
     /// `/api/search?q=x&mode=semantic` without an embedding backend
     /// reports `"mode":"lexical"`.
+    /// The list route never carries a clear value. reveal does, and an
+    /// unknown id is a 404 (M24).
+    #[test]
+    fn secrets_route_masks_and_reveal_returns_the_value() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping secrets_route_masks_and_reveal_returns_the_value: no PostgreSQL reachable"
+            );
+            return;
+        };
+        client.batch_execute("BEGIN").expect("begin");
+        // Built at run time, never a literal.
+        let value = format!("gh{}_{}", "o", "Zy7Wx6Vu5".repeat(4));
+        let conv: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES (gen_random_uuid(), '/work/m24-route', now()) RETURNING id",
+                &[],
+            )
+            .expect("conversation")
+            .get(0);
+        client
+            .execute(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user', $2, now())",
+                &[&conv, &format!("token {value}")],
+            )
+            .expect("message");
+        crate::secrets::scan_in(&mut client, &[], true).expect("scan");
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let resp = rt.block_on(secrets_handler(
+            State(state.clone()),
+            Query(SecretsParams {
+                kind: Some("github_token".into()),
+                ..Default::default()
+            }),
+        ));
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = json_body(&rt, resp);
+        assert!(
+            !v.to_string().contains(&value),
+            "no clear value in the list"
+        );
+        let masked = crate::secrets::mask("github_token", &value);
+        let id = v["secrets"]
+            .as_array()
+            .expect("secrets")
+            .iter()
+            .find(|s| s["masked"] == masked.as_str())
+            .and_then(|s| s["id"].as_i64())
+            .expect("our secret is listed");
+        assert!(v["kinds"]
+            .as_array()
+            .expect("kinds")
+            .iter()
+            .any(|k| k["kind"] == "github_token"));
+        let resp = rt.block_on(secret_reveal_handler(State(state.clone()), Path(id)));
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(json_body(&rt, resp)["value"], value.as_str());
+        let resp = rt.block_on(secret_reveal_handler(State(state.clone()), Path(-1)));
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let mut client = state.db.lock().expect("lock");
+        client.batch_execute("ROLLBACK").expect("rollback");
+    }
+
     #[test]
     fn semantic_mode_without_embedding_backend_reports_lexical() {
         let Some(mut client) = test_db() else {
@@ -11360,6 +11487,8 @@ mod session_tests {
                 "GET /api/answer-eval".into(),
                 "GET /api/backlog".into(),
                 "GET /api/consolidation/proposal".into(),
+                "GET /api/secrets".into(),
+                "GET /api/secrets/{id}/reveal".into(),
             ])
             .collect();
         expected.sort();
@@ -11435,6 +11564,8 @@ mod session_tests {
                 "GET /api/assistants/{tool}",
                 "GET /api/backlog",
                 "GET /api/consolidation/proposal",
+                "GET /api/secrets",
+                "GET /api/secrets/{id}/reveal",
                 "POST /api/agent-memory/ingest",
                 "POST /api/consolidate",
                 "POST /api/mimo-memory/ingest",

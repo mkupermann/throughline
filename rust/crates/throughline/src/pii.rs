@@ -18,7 +18,7 @@ struct Rules {
 
 /// Returns true when the match is a known test/placeholder value or code
 /// expression that should not be redacted.
-fn is_test_placeholder(value: &str) -> bool {
+pub(crate) fn is_test_placeholder(value: &str) -> bool {
     let lower = value.to_lowercase();
     // Placeholder / test emails
     if lower.contains("example.com")

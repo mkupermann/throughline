@@ -45,6 +45,7 @@ pub mod reflect_memory;
 pub mod repair;
 pub mod retention;
 pub mod search;
+pub mod secrets;
 pub mod self_referential;
 pub mod server;
 pub mod sources;
