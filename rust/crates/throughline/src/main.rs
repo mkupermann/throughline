@@ -8,8 +8,8 @@ use throughline::{
     access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, bench_answer, config,
     conflicts, context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
     extract_memory, generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
-    memory_writeback, migrate, ops_jobs, project_instructions, recall, recall_eval, reflect_memory,
-    repair, retention, search, server, stale_digest, temporal, types,
+    memory_writeback, merge_from, migrate, ops_jobs, project_instructions, recall, recall_eval,
+    reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
 };
 
 #[derive(Parser)]
@@ -191,6 +191,19 @@ enum Command {
     },
     /// Import AI-assistant configuration inventory into the database.
     ImportConfig,
+    /// Insert-only merge from a second database on this server (same
+    /// connection, `--source-db` names the source database).
+    MergeFrom {
+        /// Source database name on the same PostgreSQL server.
+        #[arg(long = "source-db")]
+        source_db: String,
+        /// Commit the merge; without it the report is printed and rolled back.
+        #[arg(long)]
+        apply: bool,
+        /// Skills (`kind = 'skills'`) to take over: `a,b` or `--skills a --skills b`.
+        #[arg(long, value_delimiter = ',')]
+        skills: Vec<String>,
+    },
     /// Agent accountability: Throughline self-actions and MCP writes.
     Audit {
         #[arg(long, default_value_t = 30)]
@@ -1040,6 +1053,31 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let summary = throughline::config_import::run(&mut client)?;
             println!("{summary}");
+        }
+        Command::MergeFrom {
+            source_db,
+            apply,
+            skills,
+        } => {
+            let cfg = config::DbConfig::from_env();
+            let mut target = cfg.connect().context("connect to PostgreSQL")?;
+            let mut source_cfg = cfg.clone();
+            source_cfg.dbname = source_db;
+            let mut source = source_cfg
+                .connect()
+                .context("connect to the source database")?;
+            // Active embedding model; on failure no vectors are taken over.
+            let embed_model = embedding::resolve().ok().map(|b| b.model);
+            let report = merge_from::merge_from(
+                &mut target,
+                &mut source,
+                &merge_from::MergeOptions {
+                    apply,
+                    skills,
+                    embed_model,
+                },
+            )?;
+            print!("{report}");
         }
         Command::Audit { since } => {
             let mut client = config::DbConfig::from_env()

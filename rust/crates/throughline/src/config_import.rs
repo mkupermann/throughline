@@ -216,16 +216,19 @@ pub fn run(client: &mut postgres::Client) -> Result<ImportSummary> {
         }
     }
 
-    // Mark vanished rows.
+    // Mark vanished rows. `mac-merge:` rows are skill configs that
+    // `throughline merge-from` copied from another machine: no local
+    // inventory file owns them, so the sweep leaves them untouched (M29).
     let vanished = if items.is_empty() {
         tx.execute(
-            "UPDATE assistant_configs SET present=false WHERE present",
+            "UPDATE assistant_configs SET present=false \
+             WHERE present AND path NOT LIKE 'mac-merge:%'",
             &[],
         )?
     } else {
         tx.execute(
             "UPDATE assistant_configs SET present=false \
-             WHERE present AND (tool, path) NOT IN \
+             WHERE present AND path NOT LIKE 'mac-merge:%' AND (tool, path) NOT IN \
              (SELECT * FROM unnest($1::text[], $2::text[]) AS t(tool, path))",
             &[&tools_seen, &paths_seen],
         )?

@@ -33,6 +33,7 @@ pub mod mcp;
 pub mod mcp_http;
 pub mod mcp_protocol;
 pub mod memory_writeback;
+pub mod merge_from;
 pub mod migrate;
 pub mod ops_jobs;
 pub mod pii;
