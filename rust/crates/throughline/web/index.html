@@ -1041,6 +1041,7 @@ td.td-id, td.td-num, td.td-date {
 .role-assistant { background: var(--bg-hover); color: var(--text); }
 .role-tool, .role-tool-result { background: transparent; border-color: var(--border); color: var(--text-2); }
 .role-system { background: transparent; border-color: var(--border-subtle); color: var(--text-3); }
+.role-document { background: transparent; border-color: var(--border); color: var(--text); }
 .msg-doc {
   display: inline-flex;
   align-items: center;
@@ -2303,6 +2304,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
             </select>
           </label>
           <button class="btn btn-ghost togglable" id="memory-meaning" type="button" aria-pressed="false" data-i18n="mem.meaning" data-i18n-attr="title:mem.meaning.title" title="Rank the hits by meaning (cosine of the embeddings). Without a reachable Ollama they are ranked by words, and a notice says so.">By meaning</button>
+          <button class="btn btn-ghost togglable" id="memory-sessions-only" type="button" aria-pressed="false" hidden data-i18n="mem.sessionsOnly" data-i18n-attr="title:mem.sessionsOnly.title" title="Ranked by meaning, leave out the notes from Markdown files, git repositories and web pages. Notes written by hand stay.">Sessions only</button>
           <button class="btn btn-ghost togglable fav-toggle" id="memory-fav-only" type="button" aria-pressed="false" data-i18n="fav.only">Favorites only</button>
           <button class="btn btn-primary" id="memory-go" type="button" data-i18n="mem.searchBtn">Search</button>
           <button class="btn btn-ghost" id="memory-ingest" type="button" data-min-role="admin" data-i18n="mem.ingest">Import memory</button>
@@ -2591,6 +2593,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           <button class="btn btn-ghost togglable" data-role="assistant" type="button" aria-pressed="true" data-i18n="detail.assistant">Assistant</button>
           <button class="btn btn-ghost togglable" data-role="tool" type="button" aria-pressed="true" data-i18n="detail.tool">Tool</button>
           <button class="btn btn-ghost togglable" data-role="system" type="button" aria-pressed="true" data-i18n="detail.system">System</button>
+          <button class="btn btn-ghost togglable" data-role="document" type="button" aria-pressed="true" data-i18n="detail.document">Document</button>
           <button class="btn btn-ghost" id="detail-expand" type="button" data-i18n="detail.expandAll">Expand all</button>
           <label class="field" style="margin-left:auto">
             <span class="field-label" data-i18n="sort.label">Sort</span>
@@ -2953,6 +2956,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.asof": "As of",
       "mem.meaning": "By meaning",
       "mem.meaning.title": "Rank the hits by meaning (cosine of the embeddings). Without a reachable Ollama they are ranked by words, and a notice says so.",
+      "mem.sessionsOnly": "Sessions only",
+      "mem.sessionsOnly.title": "Ranked by meaning, leave out the notes from Markdown files, git repositories and web pages. Notes written by hand stay.",
       "mem.score": "score ",
       "mem.degraded": "Ollama not reachable — ranked by words, not by meaning",
       "mem.noVectors": "{n} notes have no vector yet and were ranked by words. The next embed run adds them.",
@@ -3198,6 +3203,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "detail.assistant": "Assistant",
       "detail.tool": "Tool",
       "detail.system": "System",
+      "detail.document": "Document",
       "detail.expandAll": "Expand all",
       "detail.collapseAll": "Collapse all",
       "detail.collapse": "Collapse",
@@ -3694,6 +3700,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "mem.asof": "Stand am",
       "mem.meaning": "Nach Bedeutung",
       "mem.meaning.title": "Treffer nach Bedeutung ordnen (Kosinus der Embeddings). Ist Ollama nicht erreichbar, werden sie nach Wörtern geordnet, und ein Hinweis sagt das.",
+      "mem.sessionsOnly": "Nur Sessions",
+      "mem.sessionsOnly.title": "Nach Bedeutung geordnet die Notizen aus Markdown-Dateien, Git-Repositories und Webseiten weglassen. Von Hand geschriebene Notizen bleiben.",
       "mem.score": "Score ",
       "mem.degraded": "Ollama nicht erreichbar, Rangfolge nach Wörtern statt nach Bedeutung",
       "mem.noVectors": "{n} Notizen haben noch keinen Vektor und wurden nach Wörtern geordnet. Der nächste Embed-Lauf ergänzt sie.",
@@ -3932,6 +3940,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "detail.assistant": "Assistent",
       "detail.tool": "Werkzeug",
       "detail.system": "System",
+      "detail.document": "Dokument",
       "detail.expandAll": "Alle aufklappen",
       "detail.collapseAll": "Alle zuklappen",
       "detail.collapse": "Zuklappen",
@@ -5126,7 +5135,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       '<div class="row" role="button" tabindex="0" data-msg="' + m.id + '">' +
       '<div class="row-id">#' + m.id + "</div>" +
       '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">' +
-      '<span class="role-pill role-' + escapeHtml(role.replace(/_/g, "-")) + '">' + escapeHtml(role) + "</span>" +
+      '<span class="role-pill role-' + escapeHtml(role.replace(/_/g, "-")) + '">' + escapeHtml(roleLabel(role)) + "</span>" +
       tool + tc +
       '<span class="chip">conv #' + m.conversation_id + "</span>" +
       "</div>" +
@@ -7099,6 +7108,14 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
+  // The session tools: every adapter but the document sources (markdown,
+  // git, web). "Sessions only" sends them as the recall source filter.
+  const SESSION_SOURCES = ["claude_code", "codex", "cursor", "zed", "continue_dev", "cline", "windsurf", "vibe", "hermes", "opencode", "aider", "gemini_cli", "copilot_chat"];
+  function sessionsOnlyOn() {
+    const b = $("memory-sessions-only");
+    return !!b && !b.hidden && b.getAttribute("aria-pressed") === "true";
+  }
+
   // "By meaning": recall over current notes with the server's default rank
   // (cosine), no paging. Without Ollama it ranks by words and says degraded.
   async function loadMemoryMeaning(el) {
@@ -7107,6 +7124,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     if (pager) pager.hidden = true;
     if (note) note.hidden = true;
     const p = new URLSearchParams({ mode: "current", limit: "50", q: state.memory.q });
+    if (sessionsOnlyOn()) p.set("sources", SESSION_SOURCES.join(","));
     try {
       const data = await fetchJson("/api/recall?" + p.toString());
       const hits = data.hits || [];
@@ -7358,8 +7376,15 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       loadMemory();
     }
     const meaning = $("memory-meaning");
+    const sessionsOnly = $("memory-sessions-only");
     if (meaning) meaning.addEventListener("click", () => {
       meaning.setAttribute("aria-pressed", meaningOn() ? "false" : "true");
+      // The source filter belongs to recall, which only "By meaning" asks.
+      if (sessionsOnly) sessionsOnly.hidden = !meaningOn();
+      apply();
+    });
+    if (sessionsOnly) sessionsOnly.addEventListener("click", () => {
+      sessionsOnly.setAttribute("aria-pressed", sessionsOnlyOn() ? "false" : "true");
       apply();
     });
     if (go) go.addEventListener("click", apply);

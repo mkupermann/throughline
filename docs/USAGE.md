@@ -250,9 +250,12 @@ throughline recall "how do we deploy" --project demo --mode current --limit 5
 throughline recall "how do we deploy" --rank fulltext
 throughline recall "how do we deploy" --rank weighted
 throughline recall "deployment target" --mode as_of --at 2026-01-15 --json
+throughline recall "how do we deploy" --sources claude_code,codex
 ```
 
-Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `rank` (`fulltext`, `weighted` or `cosine`), `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`). A mode or rank that does not exist, a date that does not parse, `as_of` without a date, or a question longer than 2,000 characters gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `rank`, `valid_at`, `known_at` and `limit`; bad values give error -32602. The MCP `search` tool also honours `project` now.
+Over HTTP: `GET /api/recall?q=docker&project=demo&mode=current&limit=5`. The other parameters are `rank` (`fulltext`, `weighted` or `cosine`), `valid_at` and `known_at` (RFC 3339 or `YYYY-MM-DD`) and `sources`. A mode or rank that does not exist, a date that does not parse, `as_of` without a date, a malformed source name, or a question longer than 2,000 characters gives 422 `validation_error`. Over MCP, the `recall` tool takes `query` (required), `project`, `mode`, `rank`, `valid_at`, `known_at`, `limit` and `sources`; bad values give error -32602. The MCP `search` tool also honours `project` now.
+
+**The source filter.** `sources` (CLI `--sources`, MCP an array or a comma list) names the tools whose notes may come back, as `source_tool` values: `claude_code`, `codex`, `gemini_cli`, `markdown`, `git`, `web` and the rest. Left out or empty, every source counts. A note counts for the conversation at the start of its chain, so a correction of a note from a file is still a file note; a note without a conversation (written by hand or over MCP, a consolidation) passes every filter, and a note from a conversation without a recorded tool passes none. The filter exists because of a measurement: after one installation's Markdown files and repositories were imported, the cross-language questions of the 74-question set lost 5 of their top-5 hits to notes from those documents ([BENCHMARKS.md](BENCHMARKS.md#sources)). The memory view's "Sessions only" toggle (German "Nur Sessions"), shown while "By meaning" is on, sends every session tool, that is every source but `markdown`, `git` and `web`.
 
 Cosine has been the default since 2026-10-31. Before that, full text was the default, because the first measurement (below) did not show the gain for the weighted ranking that the bar set beforehand asked for, and that bar came with the rule that the simpler alternative then becomes the default. The second measurement on 74 questions found the right note far more often by cosine than by full text, and by the same rule the default moved to the method with the most hits. Full text means `ts_rank` of the question's words, joined by OR: notes that share words come first, the others follow by id. Pass `rank=fulltext` (CLI `--rank fulltext`) for the old default, or `rank=weighted` to rank by the weighted sum. Either way, `why` lists the weighted parts, and `why.fulltext` holds the `ts_rank` when full text ranked the hits.
 
@@ -357,9 +360,10 @@ Granite reads at most 512 tokens. Longer text is cut silently by Ollama: 2 of th
 throughline context --project demo
 throughline context --project demo --task "fix the login redirect" --budget 1200
 throughline context --project demo --json
+throughline context --project demo --sources claude_code,codex
 ```
 
-Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`. Over MCP, the `project_context` tool takes `project` (required), `task` and `budget`. The answer holds `text` (the briefing), `items` (each line with its section, token cost and citation), `citations`, `tokens_used`, `budget`, `within_budget`, `skipped`, `estimate` and `degraded` (why "Relevant to the task" did not rank fully by meaning, as in `recall`; null otherwise).
+Over HTTP: `GET /api/context?project=demo&task=…&budget=1200`, with `sources` as in recall: it limits the notes and the recent sessions to those tools. Over MCP, the `project_context` tool takes `project` (required), `task`, `budget` and `sources`. A note from a Markdown file, a repository or a web page is cited as `(source: document "…")`, one from a session as `(source: session "…")`. The answer holds `text` (the briefing), `items` (each line with its section, token cost and citation), `citations`, `tokens_used`, `budget`, `within_budget`, `skipped`, `estimate` and `degraded` (why "Relevant to the task" did not rank fully by meaning, as in `recall`; null otherwise).
 
 ### What goes in, and in which order
 
@@ -685,8 +689,8 @@ Those keys come from the Codex MCP documentation (read on 2026-10-30), not from 
 | Tool | What it does | Counts as use |
 | --- | --- | --- |
 | `search` | Keyword search over messages. Arguments: `query`, `limit`, `project`. | no |
-| `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext`, `weighted` or `cosine`. | yes |
-| `project_context` | The context pack of a project (`project`, `task`, `budget`). | yes |
+| `recall` | Memory notes with the reason for each hit. Modes `current`, `as_of`, `associative`, `grounded`; rank `fulltext`, `weighted` or `cosine`; `sources` limits the notes to some tools. | yes |
+| `project_context` | The context pack of a project (`project`, `task`, `budget`, `sources`). | yes |
 | `get_note` | One note by `id` with its source and its whole supersede chain, oldest first. A forgotten note is not found, and forgotten notes leave the chain. | yes |
 | `conflicts` | The conflict report, optionally for one `project`. Each row has a kind: `contradiction` (open), `documented_supersession` (already resolved by a replacement) or `stale_tool_drift` (never-used notes of one tool). | no |
 | `list_projects` | Known project names. | no |

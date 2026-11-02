@@ -124,6 +124,41 @@ pub fn check_query(text: &str) -> Result<(), String> {
     }
     Ok(())
 }
+/// Most entries a source filter may hold.
+pub const MAX_SOURCES: usize = 32;
+
+/// The `source_tool` values in a source filter: a comma list (`sources=` of
+/// the API and `--sources` of the CLI). Blanks are dropped, each value once;
+/// empty means every source. A value is 1 to 64 lowercase letters, digits,
+/// `_` or `-`, so a typo in the syntax is an error, not an empty result.
+pub fn parse_sources(raw: Option<&str>) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for value in raw.unwrap_or("").split(',').map(str::trim) {
+        if value.is_empty() {
+            continue;
+        }
+        let ok = value.len() <= 64
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
+        if !ok {
+            return Err(format!(
+                "sources holds {value:?}: use source names such as claude_code or markdown, comma-separated"
+            ));
+        }
+        if !out.iter().any(|v| v == value) {
+            out.push(value.to_string());
+        }
+    }
+    if out.len() > MAX_SOURCES {
+        return Err(format!(
+            "sources holds {} names, at most {MAX_SOURCES}",
+            out.len()
+        ));
+    }
+    Ok(out)
+}
+
 /// `as_of` admits a note that shares a word with the question or has at
 /// least the active model's `as_of_min_cosine` to it. Without an embedding
 /// no cosine exists, so the threshold is moot.
@@ -144,6 +179,11 @@ pub struct RecallQuery<'a> {
     /// the seeds fill `limit`, the neighbours get the same room again.
     pub limit: usize,
     pub rank: Rank,
+    /// The `source_tool` values whose notes may appear ([`parse_sources`]);
+    /// empty: every source. A note counts for the conversation at the root
+    /// of its chain; a note without one (written by hand, over MCP, a
+    /// consolidation) passes any filter.
+    pub sources: &'a [String],
 }
 
 pub struct QueryEmbedding {
@@ -388,6 +428,8 @@ pub struct RecallHit {
     pub source_type: String,
     pub conversation_id: Option<i64>,
     pub session_title: Option<String>,
+    /// The tool of that conversation (`claude_code`, `markdown`, …).
+    pub source_tool: Option<String>,
     /// When the source said it: `source_at` of the chain's first note, else
     /// the start of its conversation.
     pub source_at: Option<DateTime<Utc>>,
@@ -524,6 +566,7 @@ pub(crate) struct Candidate {
     pub source_type: String,
     pub conversation_id: Option<i64>,
     pub session_title: Option<String>,
+    pub source_tool: Option<String>,
     pub superseded_by: Option<i64>,
     pub supersedes: Option<i64>,
     pub confidence: f64,
@@ -595,6 +638,9 @@ fn load_candidates<C: GenericClient>(
     if filter == CandidateFilter::Ids {
         params.push(&ids);
     }
+    // The source filter applies to the conversation at the chain's root.
+    params.push(&q.sources);
+    let sources_param = params.len();
     // The chain is cut at a note the actor does not see: no successor, no
     // predecessor, no merge member and no root behind it.
     let seen = push_visibility(q.actor, "mc", &mut params);
@@ -617,7 +663,7 @@ fn load_candidates<C: GenericClient>(
                      WHERE EXISTS (SELECT 1 FROM memory_chunks mm WHERE mm.id = u.x AND {seen_member})
                      ORDER BY u.n),
                mc.expires_at, COALESCE(root.source_at, c.started_at),
-               COALESCE(mc.access_count, 0)::bigint, mc.last_accessed
+               COALESCE(mc.access_count, 0)::bigint, mc.last_accessed, c.source_tool
         FROM memory_chunks mc
         LEFT JOIN LATERAL (
             WITH RECURSIVE up(id, source_type, source_id, source_at, depth) AS (
@@ -632,6 +678,8 @@ fn load_candidates<C: GenericClient>(
         {join}
         WHERE {state} {predicate} AND {seen}
           AND ($3::text IS NULL OR mc.project_name = $3 OR mc.project_name IS NULL)
+          AND (cardinality(${sources_param}::text[]) = 0 OR c.id IS NULL
+               OR c.source_tool = ANY(${sources_param}::text[]))
         "#
     );
     let rows = client.query(&sql, &params)?;
@@ -659,6 +707,7 @@ fn load_candidates<C: GenericClient>(
             source_at: r.get(18),
             access_count: r.get(19),
             last_accessed: r.get(20),
+            source_tool: r.get(21),
         })
         .collect())
 }
@@ -1171,6 +1220,7 @@ pub(crate) fn recall_with<C: GenericClient>(
             source_type: c.source_type,
             conversation_id: c.conversation_id,
             session_title: c.session_title,
+            source_tool: c.source_tool,
             source_at: c.source_at,
             superseded_by: c.superseded_by,
             supersedes: c.supersedes,
@@ -1447,6 +1497,7 @@ mod tests {
             known_at: None,
             limit: 50,
             rank: Rank::Fulltext,
+            sources: &[],
         }
     }
 
@@ -1500,6 +1551,7 @@ mod tests {
             source_type: "manual".into(),
             conversation_id: None,
             session_title: None,
+            source_tool: None,
             superseded_by: None,
             supersedes: None,
             confidence: 0.7,
@@ -3454,5 +3506,122 @@ mod tests {
             &secret,
             "the successor's hit",
         );
+    }
+
+    #[test]
+    fn parse_sources_reads_a_comma_list() {
+        assert_eq!(parse_sources(None).unwrap(), Vec::<String>::new());
+        assert_eq!(parse_sources(Some(" , ")).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_sources(Some(" claude_code, codex ,claude_code,gemini_cli")).unwrap(),
+            ["claude_code", "codex", "gemini_cli"]
+        );
+        for bad in ["Markdown", "claude code", "web;drop", "x'y"] {
+            assert!(parse_sources(Some(bad)).is_err(), "{bad}");
+        }
+        let many: Vec<String> = (0..=MAX_SOURCES).map(|i| format!("s{i}")).collect();
+        assert!(parse_sources(Some(&many.join(","))).is_err());
+    }
+
+    /// The S9 consequence: with the session tools as the filter, notes from
+    /// files, repositories and pages stay out, also as the root of a chain;
+    /// notes without a conversation stay in. Without a filter all come back.
+    #[test]
+    fn recall_sources_filter_excludes_document_notes() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping recall_sources_filter_excludes_document_notes: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let conv = |tx: &mut postgres::Transaction<'_>, tool: &str| -> i64 {
+            tx.query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, source_tool) \
+                 VALUES ($1, $2, now(), $3, $4) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &format!("/tmp/{project}"), &format!("{tool} {tag}"), &tool],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let (session, file, repo) = (
+            conv(&mut tx, "claude_code"),
+            conv(&mut tx, "markdown"),
+            conv(&mut tx, "git"),
+        );
+        let text = |what: &str| format!("pelican harbour {what} {tag}");
+        let note =
+            |tx: &mut postgres::Transaction<'_>, what: &str, kind: &str, from: Option<i64>| {
+                let content = text(what);
+                let mut s = Seed::new(&content, long_ago());
+                s.project = Some(&project);
+                s.source_type = kind;
+                s.source_id = from;
+                seed(tx, &s)
+            };
+        let from_session = note(&mut tx, "session", "conversation", Some(session));
+        let from_file = note(&mut tx, "file", "conversation", Some(file));
+        let from_repo = note(&mut tx, "repo", "conversation", Some(repo));
+        let by_hand = note(&mut tx, "by hand", "manual", None);
+        // A correction of the file's note: its chain starts in the file.
+        let old_file = note(&mut tx, "old file", "conversation", Some(file));
+        let correction = note(&mut tx, "correction", "ui_pin", None);
+        tx.execute(
+            "UPDATE memory_chunks SET status = 'superseded', superseded_by = $2 WHERE id = $1",
+            &[&old_file, &correction],
+        )
+        .unwrap();
+
+        let found = |tx: &mut postgres::Transaction<'_>, sources: &[String]| -> Vec<i64> {
+            let mut q = query("pelican harbour", Some(&project));
+            q.sources = sources;
+            let mut ids: Vec<i64> = recall(tx, &q, None)
+                .unwrap()
+                .hits
+                .iter()
+                .map(|h| h.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        let sorted = |mut v: Vec<i64>| {
+            v.sort();
+            v
+        };
+        let sessions: Vec<String> = ["claude_code", "codex", "gemini_cli"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            found(&mut tx, &sessions),
+            sorted(vec![from_session, by_hand]),
+            "sessions only"
+        );
+        assert_eq!(
+            found(&mut tx, &[]),
+            sorted(vec![
+                from_session,
+                from_file,
+                from_repo,
+                by_hand,
+                correction
+            ]),
+            "every source"
+        );
+        assert_eq!(
+            found(&mut tx, &["markdown".to_string()]),
+            sorted(vec![from_file, by_hand, correction]),
+            "markdown only, the correction with its file"
+        );
+        // The hit names its tool.
+        let mut q = query("pelican harbour", Some(&project));
+        let all = Vec::new();
+        q.sources = &all;
+        let r = recall(&mut tx, &q, None).unwrap();
+        let tool = |id: i64| r.hits[position(&r, id).unwrap()].source_tool.clone();
+        assert_eq!(tool(from_repo).as_deref(), Some("git"));
+        assert_eq!(tool(correction).as_deref(), Some("markdown"));
+        assert_eq!(tool(by_hand), None);
     }
 }

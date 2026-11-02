@@ -1334,6 +1334,8 @@ struct RecallParams {
     /// `cosine` | `fulltext` | `weighted`; without it `default_rank(mode)`:
     /// cosine in `current`, full text in the other modes.
     rank: Option<String>,
+    /// Comma list of `source_tool` values; empty or absent: every source.
+    sources: Option<String>,
 }
 
 struct ParsedRecall {
@@ -1344,6 +1346,7 @@ struct ParsedRecall {
     valid_at: Option<chrono::DateTime<chrono::Utc>>,
     known_at: Option<chrono::DateTime<chrono::Utc>>,
     limit: usize,
+    sources: Vec<String>,
 }
 
 /// Check mode and dates before the database is touched.
@@ -1379,6 +1382,7 @@ fn parse_recall_params(
         .limit
         .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
         .clamp(1, 50) as usize;
+    let sources = crate::recall::parse_sources(params.sources.as_deref()).map_err(invalid)?;
     Ok(ParsedRecall {
         mode,
         rank,
@@ -1386,6 +1390,7 @@ fn parse_recall_params(
         valid_at,
         known_at,
         limit,
+        sources,
     })
 }
 
@@ -1394,6 +1399,8 @@ struct ContextParams {
     project: Option<String>,
     task: Option<String>,
     budget: Option<i64>,
+    /// Comma list of `source_tool` values; empty or absent: every source.
+    sources: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1401,6 +1408,7 @@ struct ParsedContext {
     project: String,
     task: Option<String>,
     budget: usize,
+    sources: Vec<String>,
 }
 
 /// Check project, task and budget before the database is touched.
@@ -1431,10 +1439,12 @@ fn parse_context_params(
             crate::context_pack::MAX_BUDGET
         )));
     }
+    let sources = crate::recall::parse_sources(params.sources.as_deref()).map_err(invalid)?;
     Ok(ParsedContext {
         project: project.to_string(),
         task: task.map(String::from),
         budget: budget as usize,
+        sources,
     })
 }
 
@@ -1488,6 +1498,7 @@ async fn context_handler(
                 project: &parsed.project,
                 task: parsed.task.as_deref(),
                 budget: parsed.budget,
+                sources: &parsed.sources,
             },
             emb.as_ref(),
         ) {
@@ -1567,6 +1578,7 @@ async fn recall_handler(
             known_at: parsed.known_at,
             limit: parsed.limit,
             rank: parsed.rank,
+            sources: &parsed.sources,
         };
         let result = crate::recall::recall(client, &q, emb.as_ref())?;
         let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
@@ -4905,6 +4917,95 @@ mod tests {
         ));
     }
 
+    /// "Sessions only" sends every session tool as the recall source filter:
+    /// the page's list is the registry without the document sources, and
+    /// the toggle has both labels.
+    #[test]
+    fn page_sessions_only_sends_the_session_sources() {
+        let list = INDEX_HTML
+            .split_once("const SESSION_SOURCES = [")
+            .and_then(|(_, rest)| rest.split_once("];"))
+            .map(|(list, _)| list)
+            .expect("SESSION_SOURCES");
+        let mut page: Vec<String> = list
+            .split(',')
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .collect();
+        page.sort();
+        let mut sessions: Vec<String> = crate::adapters::registry::built_ins()
+            .iter()
+            .map(|a| a.name().to_string())
+            .filter(|n| !crate::types::DOCUMENT_SOURCES.contains(&n.as_str()))
+            .collect();
+        sessions.sort();
+        assert_eq!(page, sessions);
+        assert!(crate::recall::parse_sources(Some(&page.join(","))).is_ok());
+        let call = INDEX_HTML
+            .split_once("async function loadMemoryMeaning(el) {")
+            .and_then(|(_, rest)| rest.split_once(r#"fetchJson("/api/recall?""#))
+            .map(|(body, _)| body)
+            .expect("loadMemoryMeaning and its recall call");
+        assert!(
+            call.contains(r#"if (sessionsOnlyOn()) p.set("sources", SESSION_SOURCES.join(","));"#),
+            "{call}"
+        );
+        for needle in [
+            r#"id="memory-sessions-only""#,
+            r#""mem.sessionsOnly": "Sessions only","#,
+            r#""mem.sessionsOnly": "Nur Sessions","#,
+            r#""detail.document": "Document","#,
+            r#""detail.document": "Dokument","#,
+        ] {
+            assert!(INDEX_HTML.contains(needle), "index.html lacks {needle}");
+        }
+    }
+
+    /// `sources` on `/api/recall` and `/api/context`: a comma list, refused
+    /// with 422 when a name is malformed.
+    #[test]
+    fn api_sources_parameter_is_a_comma_list() {
+        let recall = |sources: Option<&str>| RecallParams {
+            q: Some("x".into()),
+            project: None,
+            mode: None,
+            valid_at: None,
+            known_at: None,
+            limit: None,
+            rank: None,
+            sources: sources.map(String::from),
+        };
+        assert!(parse_recall_params(&recall(None))
+            .unwrap()
+            .sources
+            .is_empty());
+        assert_eq!(
+            parse_recall_params(&recall(Some("claude_code,codex")))
+                .unwrap()
+                .sources,
+            ["claude_code", "codex"]
+        );
+        let err = parse_recall_params(&recall(Some("Claude Code")))
+            .err()
+            .unwrap();
+        assert_eq!(
+            (err.0, err.1),
+            (StatusCode::UNPROCESSABLE_ENTITY, "validation_error")
+        );
+        let context = |sources: Option<&str>| ContextParams {
+            project: Some("P".into()),
+            task: None,
+            budget: None,
+            sources: sources.map(String::from),
+        };
+        assert_eq!(
+            parse_context_params(&context(Some(" markdown ,")))
+                .unwrap()
+                .sources,
+            ["markdown"]
+        );
+        assert!(parse_context_params(&context(Some("a;b"))).is_err());
+    }
+
     /// Team mode needs the page's sign-in form and the request token on
     /// writes; a later edit of the page must not drop them silently.
     #[test]
@@ -5436,6 +5537,7 @@ mod tests {
             known_at: None,
             limit: None,
             rank: None,
+            sources: None,
         };
         let resp = rt.block_on(recall_handler(
             State(state.clone()),
@@ -5662,6 +5764,7 @@ mod tests {
                     project: Some(project.clone()),
                     task: Some("quokka habitat".into()),
                     budget: None,
+                    sources: None,
                 }),
             ));
             assert_eq!(resp.status(), StatusCode::OK);
@@ -5721,6 +5824,7 @@ mod tests {
             known_at: None,
             limit: None,
             rank: None,
+            sources: None,
         };
         let rank = |mode: &str, v: Option<&str>| parse_recall_params(&p(mode, v)).unwrap().rank;
         assert_eq!(rank("current", None), DEFAULT_RANK);
@@ -5800,6 +5904,7 @@ mod tests {
                 known_at: None,
                 limit: None,
                 rank: rank.map(String::from),
+                sources: None,
             };
             let resp = crate::recall::test_ollama::unreachable(|| {
                 rt.block_on(recall_handler(
@@ -5913,6 +6018,7 @@ mod tests {
             known_at: None,
             limit: None,
             rank: None,
+            sources: None,
         };
         let call = |headers: HeaderMap| {
             rt.block_on(recall_handler(
@@ -5982,6 +6088,7 @@ mod tests {
             project: Some(project.clone()),
             task: None,
             budget: Some(1000),
+            sources: None,
         };
         let call = |headers: HeaderMap| {
             rt.block_on(context_handler(
@@ -6097,6 +6204,7 @@ mod tests {
                     known_at: None,
                     limit: None,
                     rank: None,
+                    sources: None,
                 }),
             ))
         };
@@ -6645,6 +6753,7 @@ mod tests {
             project: project.map(String::from),
             task,
             budget,
+            sources: None,
         };
         let long = "abc ".repeat(500);
         for bad in [
@@ -6688,6 +6797,7 @@ mod tests {
             project: Some("word ".repeat(200)),
             task: None,
             budget: Some(64),
+            sources: None,
         };
         let resp = rt.block_on(context_handler(
             State(state.clone()),
@@ -6713,6 +6823,7 @@ mod tests {
             known_at: k.map(String::from),
             limit: None,
             rank: None,
+            sources: None,
         };
         let ranked = |r: &str| RecallParams {
             rank: Some(r.into()),

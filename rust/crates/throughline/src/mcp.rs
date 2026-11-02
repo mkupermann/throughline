@@ -298,7 +298,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (the default in mode current; meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match; the default in the other modes) or weighted (meaning and reliability; full text without embeddings)",
+                "description": "Recall memory notes, with the reason for each hit. Modes: current (valid now), as_of (what was valid or known on a date), associative (plus related notes), grounded (cites the source message). Rank: cosine (the default in mode current; meaning; notes without a vector yet rank by their words; without a reachable embedding model everything ranks by full text and the answer says degraded), fulltext (word match; the default in the other modes) or weighted (meaning and reliability; full text without embeddings). sources limits the notes to those extracted from the named tools, for example the session tools without markdown, git and web",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -312,6 +312,7 @@ fn tools_list() -> Value {
                         "valid_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
                         "known_at": { "type": "string", "description": "YYYY-MM-DD; for as_of" },
                         "limit": { "type": "integer", "default": 10 },
+                        "sources": SOURCES_SCHEMA.clone(),
                         "rank": {
                             "type": "string",
                             "enum": ["fulltext", "weighted", "cosine"],
@@ -329,13 +330,14 @@ fn tools_list() -> Value {
             },
             {
                 "name": "project_context",
-                "description": "Pack the current decisions, notes, recent sessions and open questions of a project into a token budget, with citations. Give a task to pull in the notes that match it",
+                "description": "Pack the current decisions, notes, recent sessions and open questions of a project into a token budget, with citations. Give a task to pull in the notes that match it. sources limits notes and sessions to the named tools",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "project": { "type": "string" },
                         "task": { "type": "string" },
-                        "budget": { "type": "integer", "default": 2000, "description": "estimated tokens, 64 to 32768" }
+                        "budget": { "type": "integer", "default": 2000, "description": "estimated tokens, 64 to 32768" },
+                        "sources": SOURCES_SCHEMA.clone()
                     },
                     "required": ["project"]
                 }
@@ -432,6 +434,7 @@ fn build_pack<C: GenericClient>(
     project: &str,
     task: Option<&str>,
     budget: usize,
+    sources: &[String],
     prepared: Prepared,
 ) -> Result<crate::context_pack::ContextPack, Value> {
     let emb = match prepared {
@@ -446,6 +449,7 @@ fn build_pack<C: GenericClient>(
             project,
             task,
             budget,
+            sources,
         },
         emb.as_ref(),
     )
@@ -463,6 +467,35 @@ fn optional_str<'a>(args: &'a Value, name: &str, message: &str) -> Result<Option
         Some(Value::String(s)) => Ok(Some(s.trim())),
         Some(_) => Err(json!({ "code": -32602, "message": message })),
     }
+}
+
+/// The `sources` argument of `recall` and `project_context`.
+static SOURCES_SCHEMA: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+    json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Only notes from conversations of these tools (source_tool values such as claude_code, codex, markdown, git, web); left out or empty: every source. Notes written by hand or over MCP always count. A comma-separated string works too"
+    })
+});
+
+/// The `sources` argument: absent, null, an array of strings or a comma
+/// list ([`crate::recall::parse_sources`]); empty means every source.
+fn sources_arg(args: &Value) -> Result<Vec<String>, Value> {
+    let invalid = |m: &str| json!({ "code": -32602, "message": m });
+    let raw = match args.get("sources") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| invalid("sources must hold strings"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .join(","),
+        Some(_) => return Err(invalid("sources must be an array of strings")),
+    };
+    crate::recall::parse_sources(Some(&raw)).map_err(|e| invalid(&e))
 }
 
 #[cfg(test)]
@@ -559,6 +592,7 @@ fn call_tool_with<C: GenericClient>(
                 .and_then(|l| l.as_i64())
                 .unwrap_or(crate::recall::DEFAULT_LIMIT as i64)
                 .clamp(1, 50) as usize;
+            let sources = sources_arg(&args)?;
             let emb = match prepared {
                 Some(emb) => emb,
                 None => crate::recall::question_vector(
@@ -578,6 +612,7 @@ fn call_tool_with<C: GenericClient>(
                 known_at,
                 limit,
                 rank,
+                sources: &sources,
             };
             let result =
                 crate::recall::recall(client, &q, emb.as_ref()).map_err(|e| internal(actor, e))?;
@@ -615,7 +650,8 @@ fn call_tool_with<C: GenericClient>(
                         ))
                     })?,
             };
-            let pack = build_pack(client, actor, project, task, budget, prepared)?;
+            let sources = sources_arg(&args)?;
+            let pack = build_pack(client, actor, project, task, budget, &sources, prepared)?;
             let ids = crate::context_pack::cited_note_ids(&pack);
             crate::lifecycle::record_use_or_log(client, &ids);
             Ok(text_result(
@@ -914,6 +950,7 @@ fn read_resource<C: GenericClient>(
             name,
             None,
             crate::context_pack::DEFAULT_BUDGET,
+            &[],
             None,
         )?;
         crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
@@ -1003,6 +1040,7 @@ fn get_prompt<C: GenericClient>(
         project,
         task,
         crate::context_pack::DEFAULT_BUDGET,
+        &[],
         prepared,
     )?;
     crate::lifecycle::record_use_or_log(client, &crate::context_pack::cited_note_ids(&pack));
@@ -1333,8 +1371,25 @@ mod tests {
         );
         // The default depends on the mode, so there is no single one.
         assert!(schema["properties"]["rank"].get("default").is_none());
-        for k in ["project", "valid_at", "known_at", "limit"] {
+        for k in ["project", "valid_at", "known_at", "limit", "sources"] {
             assert!(schema["properties"].get(k).is_some(), "{k}");
+        }
+        assert_eq!(schema["properties"]["sources"]["type"], "array");
+        let pack = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "project_context")
+            .expect("project_context tool");
+        assert_eq!(
+            pack["inputSchema"]["properties"]["sources"]["items"]["type"],
+            "string"
+        );
+        for t in [tool, pack] {
+            assert!(
+                t["description"].as_str().unwrap().contains("sources"),
+                "{t}"
+            );
         }
     }
 
@@ -1672,6 +1727,90 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err["code"], -32602);
+    }
+
+    /// `sources` as an array or a comma list: only notes from those tools,
+    /// a note without a conversation always; the pack takes it too.
+    #[test]
+    fn mcp_recall_accepts_sources() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping mcp_recall_accepts_sources: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("proj-{tag}");
+        let mut note_from = |tool: &str| -> i64 {
+            let conv: i64 = tx
+                .query_one(
+                    "INSERT INTO conversations (session_id, project_path, started_at, source_tool) \
+                     VALUES ($1, $2, now(), $3) RETURNING id",
+                    &[&uuid::Uuid::new_v4(), &format!("/tmp/{project}"), &tool],
+                )
+                .unwrap()
+                .get(0);
+            tx.query_one(
+                "INSERT INTO memory_chunks (source_type, source_id, content, category, project_name, \
+                     confidence, status) \
+                 VALUES ('conversation', $1, $2, 'decision', $3, 0.8, 'active') RETURNING id",
+                &[&conv, &format!("kestrel decision from {tool} {tag}"), &project],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let (session, file) = (note_from("claude_code"), note_from("markdown"));
+        let by_hand = call_text(
+            &mut tx,
+            "write",
+            json!({ "content": format!("kestrel decision by hand {tag}"), "project": project }),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        let recall_ids = |tx: &mut postgres::Transaction<'_>, sources: Value| -> Vec<i64> {
+            let mut args = json!({ "query": format!("kestrel {tag}"), "project": project, "rank": "fulltext" });
+            if !sources.is_null() {
+                args["sources"] = sources;
+            }
+            let mut ids: Vec<i64> = call_text(tx, "recall", args)["hits"]
+                .as_array()
+                .expect("hits")
+                .iter()
+                .map(|h| h["id"].as_i64().unwrap())
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
+        let mut all = vec![session, file, by_hand];
+        all.sort_unstable();
+        assert_eq!(recall_ids(&mut tx, Value::Null), all);
+        assert_eq!(recall_ids(&mut tx, json!([])), all);
+        let mut sessions = vec![session, by_hand];
+        sessions.sort_unstable();
+        assert_eq!(
+            recall_ids(&mut tx, json!(["claude_code", "codex"])),
+            sessions
+        );
+        assert_eq!(recall_ids(&mut tx, json!("claude_code, codex")), sessions);
+
+        for bad in [json!(5), json!([1]), json!("Claude Code")] {
+            let err = call_tool(
+                &mut tx,
+                &Actor::local(),
+                &json!({ "name": "recall", "arguments": { "query": "x", "sources": bad } }),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("sources {bad} must be refused"));
+            assert_eq!(err["code"], -32602);
+        }
+
+        let pack = call_text(
+            &mut tx,
+            "project_context",
+            json!({ "project": project, "sources": ["claude_code"] }),
+        );
+        let text = pack["text"].as_str().expect("text");
+        assert!(text.contains("from claude_code"), "{text}");
+        assert!(!text.contains("from markdown"), "{text}");
     }
 
     #[test]

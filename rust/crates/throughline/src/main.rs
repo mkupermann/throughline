@@ -84,6 +84,10 @@ enum Command {
         /// Print the full result as JSON.
         #[arg(long)]
         json: bool,
+        /// Only notes from these tools, comma-separated `source_tool`
+        /// values (`claude_code,codex`, say); without it every source.
+        #[arg(long)]
+        sources: Option<String>,
     },
     /// Answer a question from the corpus with citations.
     Ask {
@@ -259,6 +263,10 @@ enum Command {
         /// Print the full pack as JSON.
         #[arg(long)]
         json: bool,
+        /// Only notes and sessions from these tools, comma-separated
+        /// `source_tool` values; without it every source.
+        #[arg(long)]
+        sources: Option<String>,
     },
     /// Find notes that say nearly the same thing and merge them on approval.
     Consolidate {
@@ -636,8 +644,11 @@ fn main() -> Result<()> {
             limit,
             rank,
             json,
+            sources,
         } => {
             let mode: recall::RecallMode = mode.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            let sources =
+                recall::parse_sources(sources.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
             let asked_rank: Option<recall::Rank> = rank
                 .as_deref()
                 .map(str::parse)
@@ -672,6 +683,7 @@ fn main() -> Result<()> {
                 known_at,
                 limit: limit.clamp(1, 50),
                 rank,
+                sources: &sources,
             };
             let result = recall::recall(&mut client, &q, emb.as_ref())?;
             let ids: Vec<i64> = result.hits.iter().map(|h| h.id).collect();
@@ -695,7 +707,10 @@ fn main() -> Result<()> {
             task,
             budget,
             json,
+            sources,
         } => {
+            let sources =
+                recall::parse_sources(sources.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
             if !(context_pack::MIN_BUDGET..=context_pack::MAX_BUDGET).contains(&budget) {
                 anyhow::bail!(
                     "--budget must be between {} and {}",
@@ -722,6 +737,7 @@ fn main() -> Result<()> {
                     project,
                     task,
                     budget,
+                    sources: &sources,
                 },
                 emb.as_ref(),
             )?;
