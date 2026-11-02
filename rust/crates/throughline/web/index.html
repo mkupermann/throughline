@@ -801,6 +801,15 @@ select option { background: var(--bg-elevated); color: var(--text); }
   .row { grid-template-columns: 80px 1fr; }
   .row-meta { display: none; }
 }
+/* Secrets: the kind chip needs room, and Show stays on narrow screens. */
+.row.secret-row { grid-template-columns: 150px 80px 1fr auto; }
+.secret-value { word-break: break-all; white-space: normal; }
+@media (max-width: 900px) {
+  .row.secret-row { grid-template-columns: 1fr auto; }
+  .secret-row .row-id { grid-column: 1 / -1; }
+  .secret-row .row-meta.secret-tool { display: none; }
+  .secret-row .row-meta:last-child { display: block; }
+}
 /* Single-content rows (e.g. needs-attention): full-width title, no clipping */
 .row.row-single { grid-template-columns: 1fr; }
 .row-single .row-title { white-space: normal; }
@@ -1945,6 +1954,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       <button type="button" data-view="find"><span class="icon">⌕</span><span data-i18n="nav.find">Search</span></button>
       <button type="button" data-view="projects"><span class="icon">▣</span><span data-i18n="nav.projects">Projects</span></button>
       <button type="button" data-view="assistants" data-min-role="admin"><span class="icon">☷</span><span data-i18n="nav.assistants">AI configuration</span></button>
+      <button type="button" data-view="secrets" data-min-role="admin"><span class="icon">⚿</span><span data-i18n="nav.secrets">Secrets</span></button>
       <button type="button" data-view="timeline"><span class="icon">⌁</span><span data-i18n="nav.timeline">Timeline</span></button>
       <button type="button" data-view="ask" data-min-role="editor"><span class="icon">✦</span><span data-i18n="nav.ask">Research</span></button>
       <button type="button" data-view="operate"><span class="icon">⇅</span><span data-i18n="nav.operate">Import and status</span></button>
@@ -2579,6 +2589,39 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         </div>
       </section>
 
+      <!-- SECRETS -->
+      <section id="view-secrets" hidden>
+        <div class="page-header">
+          <div>
+            <h1 data-i18n="sec.title">Secrets</h1>
+            <p data-i18n="sec.sub">Keys and tokens found in sessions and configuration files. Values stay masked until you show one, and every reveal is logged.</p>
+          </div>
+          <div class="meta" id="sec-count"></div>
+        </div>
+        <div class="toolbar">
+          <label class="field">
+            <span class="field-label" data-i18n="sec.kind">Kind</span>
+            <select id="sec-kind"><option value="" data-i18n="sec.kind.all">All kinds</option></select>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="sec.project">Project</span>
+            <select id="sec-project"><option value="" data-i18n="sec.project.all">All projects</option></select>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="sec.search">Search</span>
+            <input id="sec-q" type="search" data-i18n-attr="placeholder:sec.search.ph" placeholder="Project, tool or path…" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="sort.label">Sort</span>
+            <select id="sec-sort">
+              <option value="desc" data-i18n="sort.newOld">New to old</option>
+              <option value="asc" data-i18n="sort.oldNew">Old to new</option>
+            </select>
+          </label>
+        </div>
+        <div class="list list-anim" id="secrets-list"></div>
+      </section>
+
       <!-- DETAIL -->
       <section id="view-detail" hidden>
         <div class="detail-hero">
@@ -2689,12 +2732,13 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     ask: $("view-ask"),
     operate: $("view-operate"),
     assistants: $("view-assistants"),
+    secrets: $("view-secrets"),
     detail: $("view-detail"),
     msg: $("view-msg"),
   };
   const navBtns = Array.from(document.querySelectorAll("#nav button"));
-  // The ten main views that get a URL hash (#detail/#msg do not).
-  const MAIN_VIEWS = ["home", "history", "browse", "memory", "find", "projects", "assistants", "timeline", "ask", "operate"];
+  // The eleven main views that get a URL hash (#detail/#msg do not).
+  const MAIN_VIEWS = ["home", "history", "browse", "memory", "find", "projects", "assistants", "secrets", "timeline", "ask", "operate"];
   let current = "home";
   let previous = "home";
   let paletteIndex = 0;
@@ -2745,6 +2789,27 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "nav.find": "Search",
       "nav.projects": "Projects",
       "nav.assistants": "AI configuration",
+      "nav.secrets": "Secrets",
+      "sec.title": "Secrets",
+      "sec.sub": "Keys and tokens found in sessions and configuration files. Values stay masked until you show one, and every reveal is logged.",
+      "sec.kind": "Kind",
+      "sec.kind.all": "All kinds",
+      "sec.project": "Project",
+      "sec.project.all": "All projects",
+      "sec.search": "Search",
+      "sec.search.ph": "Project, tool or path…",
+      "sec.count": "{n} secrets",
+      "sec.none": "No secrets found",
+      "sec.none.sub": "The scan runs after every import, or from the command line with throughline scan-secrets.",
+      "sec.none.filter": "Nothing matches these filters.",
+      "sec.couldNotLoad": "Could not load secrets",
+      "sec.session": "Session",
+      "sec.first": "First seen",
+      "sec.occ1": "occurrence",
+      "sec.occN": "occurrences",
+      "sec.show": "Show",
+      "sec.hide": "Hide",
+      "sec.revealFailed": "Could not show the value",
       "nav.timeline": "Timeline",
       "nav.ask": "Research",
       "nav.operate": "Import and status",
@@ -3494,6 +3559,27 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "nav.find": "Suche",
       "nav.projects": "Projekte",
       "nav.assistants": "KI-Konfiguration",
+      "nav.secrets": "Secrets",
+      "sec.title": "Secrets",
+      "sec.sub": "Schlüssel und Tokens aus Sitzungen und Konfigurationsdateien. Die Werte bleiben maskiert, bis du einen anzeigst. Jedes Anzeigen wird protokolliert.",
+      "sec.kind": "Art",
+      "sec.kind.all": "Alle Arten",
+      "sec.project": "Projekt",
+      "sec.project.all": "Alle Projekte",
+      "sec.search": "Suche",
+      "sec.search.ph": "Projekt, Werkzeug oder Pfad…",
+      "sec.count": "{n} Secrets",
+      "sec.none": "Keine Secrets gefunden",
+      "sec.none.sub": "Der Scan läuft nach jedem Import oder auf der Kommandozeile mit throughline scan-secrets.",
+      "sec.none.filter": "Zu diesen Filtern passt nichts.",
+      "sec.couldNotLoad": "Secrets konnten nicht geladen werden",
+      "sec.session": "Sitzung",
+      "sec.first": "Zuerst gesehen",
+      "sec.occ1": "Fundstelle",
+      "sec.occN": "Fundstellen",
+      "sec.show": "Anzeigen",
+      "sec.hide": "Verbergen",
+      "sec.revealFailed": "Wert konnte nicht angezeigt werden",
       "nav.timeline": "Zeitachse",
       "nav.ask": "Recherche",
       "nav.operate": "Import und Status",
@@ -4563,7 +4649,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
 
   // Views above a team-mode role: research calls a model (editor), the AI
   // configuration reads files of the host (admin).
-  const VIEW_ROLES = { ask: "editor", assistants: "admin" };
+  const VIEW_ROLES = { ask: "editor", assistants: "admin", secrets: "admin" };
   function allowedView(name) {
     const need = VIEW_ROLES[name];
     if (!need || roleAtLeast(need)) return name;
@@ -4606,6 +4692,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     if (name === "find") $("find-q").focus();
     if (name === "projects") loadProjects();
     if (name === "assistants") loadAssistants();
+    if (name === "secrets") loadSecrets();
     if (name === "timeline") loadTimeline();
   }
 
@@ -5589,6 +5676,105 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); }
       });
     });
+  }
+
+  // --- secrets (M24b): masked list, reveal on request ------------
+  let secretsSeq = 0;
+  async function loadSecrets() {
+    const el = $("secrets-list");
+    if (!el) return;
+    const seq = ++secretsSeq;
+    el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+    const p = new URLSearchParams();
+    if ($("sec-kind").value) p.set("kind", $("sec-kind").value);
+    if ($("sec-project").value) p.set("project", $("sec-project").value);
+    const q = $("sec-q").value.trim();
+    if (q) p.set("q", q);
+    p.set("order", $("sec-sort").value || "desc");
+    p.set("limit", "500");
+    try {
+      const data = await fetchJson("/api/secrets?" + p.toString());
+      if (seq !== secretsSeq) return;
+      fillSecretKinds(data.kinds || []);
+      fillSecretProjects();
+      const rows = data.secrets || [];
+      $("sec-count").textContent = t("sec.count").replace("{n}", String(data.total ?? rows.length));
+      el.innerHTML = rows.length
+        ? rows.map(secretRowHtml).join("")
+        : emptyBox(t("sec.none"), q || $("sec-kind").value || $("sec-project").value ? t("sec.none.filter") : t("sec.none.sub"), "");
+    } catch (e) {
+      if (seq !== secretsSeq) return;
+      el.innerHTML = emptyBox(t("sec.couldNotLoad"), e.message);
+    }
+  }
+  function fillSecretKinds(kinds) {
+    const sel = $("sec-kind");
+    const have = new Set(Array.from(sel.options).map((o) => o.value));
+    kinds.forEach((k) => {
+      if (have.has(k.kind)) return;
+      const o = document.createElement("option");
+      o.value = k.kind;
+      o.textContent = k.kind + " (" + k.count + ")";
+      sel.appendChild(o);
+    });
+  }
+  let secretProjectsLoaded = false;
+  async function fillSecretProjects() {
+    if (secretProjectsLoaded) return;
+    secretProjectsLoaded = true;
+    try {
+      const data = await fetchJson("/api/secrets?limit=500");
+      const names = Array.from(new Set((data.secrets || []).map((s) => s.project).filter(Boolean))).sort();
+      const sel = $("sec-project");
+      names.forEach((n) => {
+        const o = document.createElement("option");
+        o.value = n;
+        o.textContent = n;
+        sel.appendChild(o);
+      });
+    } catch { secretProjectsLoaded = false; }
+  }
+  function secretRowHtml(s) {
+    const where = s.source_type === "config"
+      ? escapeHtml(s.config_path || "")
+      : (s.conversation_id
+          ? '<a href="#session/' + s.conversation_id + '">' + escapeHtml(t("sec.session")) + " #" + s.conversation_id + "</a>"
+          : "");
+    return (
+      '<div class="row secret-row" data-secret="' + s.id + '">' +
+      '<div class="row-id"><span class="chip">' + escapeHtml(s.kind) + "</span></div>" +
+      '<div class="row-meta secret-tool">' + escapeHtml(s.tool || s.source_type || "") + "</div>" +
+      '<div class="row-main"><div class="row-title"><code class="secret-value" data-masked="' + escapeHtml(s.masked) + '">' + escapeHtml(s.masked) + "</code></div>" +
+      '<div class="row-sub">' + (s.first_seen_at ? t("sec.first") + " " + fmtDateTime(s.first_seen_at) : "") +
+      " · " + s.occurrences + " " + t(s.occurrences === 1 ? "sec.occ1" : "sec.occN") +
+      (s.project ? " · " + escapeHtml(s.project) : "") +
+      (where ? " · " + where : "") +
+      "</div></div>" +
+      '<div class="row-meta"><button type="button" class="btn btn-ghost secret-reveal" aria-pressed="false" data-reveal="' + s.id + '">' + escapeHtml(t("sec.show")) + "</button></div>" +
+      "</div>"
+    );
+  }
+  async function toggleSecret(btn) {
+    const row = btn.closest(".secret-row");
+    const code = row && row.querySelector(".secret-value");
+    if (!code) return;
+    if (btn.getAttribute("aria-pressed") === "true") {
+      code.textContent = code.dataset.masked;
+      btn.setAttribute("aria-pressed", "false");
+      btn.textContent = t("sec.show");
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const r = await fetchJson("/api/secrets/" + encodeURIComponent(btn.dataset.reveal) + "/reveal");
+      code.textContent = r.value;
+      btn.setAttribute("aria-pressed", "true");
+      btn.textContent = t("sec.hide");
+    } catch (e) {
+      toast(t("sec.revealFailed") + ": " + e.message);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function loadProjects() {
@@ -8367,6 +8553,17 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
     if ($("cal-today")) $("cal-today").addEventListener("click", () => { calMonth = new Date(); calMonth.setDate(1); renderCalendar(); });
     if ($("timeline-range")) $("timeline-range").addEventListener("change", () => loadTimeline());
     if ($("proj-q")) $("proj-q").addEventListener("input", () => { projQuery = $("proj-q").value; renderProjects(); });
+    if ($("sec-sort")) {
+      wireSort("secrets", $("sec-sort"), () => loadSecrets(), "desc");
+      $("sec-kind").addEventListener("change", () => loadSecrets());
+      $("sec-project").addEventListener("change", () => loadSecrets());
+      let secTimer = null;
+      $("sec-q").addEventListener("input", () => { clearTimeout(secTimer); secTimer = setTimeout(loadSecrets, 250); });
+      $("secrets-list").addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button.secret-reveal");
+        if (btn) { ev.preventDefault(); toggleSecret(btn); }
+      });
+    }
     {
       const projSortEl = $("proj-sort");
       if (projSortEl) {

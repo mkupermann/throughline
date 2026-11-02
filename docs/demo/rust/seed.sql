@@ -8,6 +8,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 TRUNCATE messages, conversations, memory_chunks, projects, favorites RESTART IDENTITY CASCADE;
+TRUNCATE secrets, secret_occurrences, secret_reveals, secret_scan_state RESTART IDENTITY CASCADE;
 
 INSERT INTO projects (name, description) VALUES
 ('Atlas-demo', 'Fictional retrieval study: preserve decisions and investigate long-document failures.'),
@@ -57,4 +58,27 @@ SELECT CASE WHEN c.id%3=0 THEN 'manual' ELSE 'conversation' END,
  c.started_at + interval '25 minutes',
  CASE WHEN c.id%3=0 THEN c.started_at + interval '25 minutes' - interval '2 days' ELSE c.ended_at END
 FROM conversations c WHERE c.id > 6;
+
+-- Fictional secrets for the Secrets view. Each value is put together here at
+-- run time, so no secret-shaped string is in the repository, and none is in
+-- a message: the demo's message counts stay as they are.
+WITH v(kind, val, conv) AS (VALUES
+  ('github_token', 'gh' || 'p_' || repeat('Fict10nalDemo', 3), 2),
+  ('openai_key', 'sk' || '-proj-' || repeat('Fict10nalDemoKey', 3), 5),
+  ('aws_key_id', 'AK' || 'IA' || 'FICTIONALDEMOK3Y', 9),
+  ('github_token', 'gh' || 'p_' || repeat('Demo0nlyFict', 3), 16)
+)
+INSERT INTO secrets (kind, value, fingerprint, masked, first_seen_at, last_seen_at,
+  occurrences, source_type, message_id, conversation_id, project, tool)
+SELECT v.kind, v.val, encode(sha256(convert_to(v.val, 'UTF8')), 'hex'),
+  left(v.val, 4) || '•••' || right(v.val, 4), m.created_at, m.created_at,
+  1, 'message', m.id, c.id, c.project_name, c.source_tool
+FROM v
+JOIN conversations c ON c.id = v.conv
+JOIN LATERAL (SELECT id, created_at FROM messages WHERE conversation_id = c.id
+              ORDER BY id LIMIT 1) m ON TRUE;
+INSERT INTO secret_occurrences (secret_id, source_type, ref, seen_at)
+SELECT id, 'message', message_id::text, first_seen_at FROM secrets;
+-- The messages hold no secret, so a scan from here finds nothing new.
+INSERT INTO secret_scan_state (id, last_message_id) SELECT 1, max(id) FROM messages;
 COMMIT;

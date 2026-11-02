@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Secrets view
+
+- A view **Secrets** (admin) lists what `scan-secrets` found: kind, masked value, first sighting, occurrences, project and a link to the session or the config path. Filters by kind and project, a text search over project, tool and path, sorted new to old or old to new. **Show** fetches one clear value through `/api/secrets/{id}/reveal`, which logs every call; **Hide** masks it again. On a narrow screen the button stays.
+- The README demo carries four fictional secrets, put together in `seed.sql` at run time and not in any message, so the demo's counts stay 18/72/12. `web/scripts/e2e-secrets.mjs` checks the view against it (15 checks), and `capture-readme.mjs` takes `secrets.png` with masked values only.
+
 ### Search and ask refuse an unusable question vector
 
 - Search and `ask` check the question vector as `recall` does: the size the model's profile gives, every value finite, a norm above zero. A vector that fails reaches no SQL. Before, pgvector refused it inside the query (a 500 for every semantic search, and a failed transaction for the lexical half that followed), and a zero norm ranked by id.
