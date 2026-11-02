@@ -373,8 +373,11 @@ The default runtime lives in [`rust/`](rust/). Use a toolchain compatible with i
 
 ```bash
 cargo build --release --manifest-path rust/Cargo.toml -p throughline
+rust/target/release/throughline migrate
 cargo test --manifest-path rust/Cargo.toml -p throughline --lib
 ```
+
+Run the Rust `migrate` after every build that brings new migrations; a database migrated only by the Python CLI lacks what the Rust `ingest` and `extract-memory` need, and both stop with one line that says so. The native scheduled jobs run it before each Rust step.
 
 Integration tests need a disposable PostgreSQL database with pgvector. Screenshot and recording tooling lives under `web/`. That does not make React the default interface.
 

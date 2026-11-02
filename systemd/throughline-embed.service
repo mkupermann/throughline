@@ -11,9 +11,11 @@ WorkingDirectory=%h/.local/share/throughline
 # The Rust runtime, built in the checkout (`cargo build --release --manifest-path
 # rust/Cargo.toml -p throughline`). Not the Python CLI: its `embed` ignores
 # OLLAMA_EMBED_MODEL and uses nomic-embed-text on Ollama, so after a switch of
-# the model it fills nothing recall reads. Notes first, then messages.
-# With the Compose stack, use instead:
+# the model it fills nothing recall reads. Notes first, then messages. The
+# Rust migrate runs first and does nothing when the schema is current.
+# With the Compose stack, use instead (and drop ExecStartPre):
 #   ExecStart=/usr/bin/env docker compose exec -T web throughline embed --limit 10000
+ExecStartPre=%h/.local/share/throughline/rust/target/release/throughline migrate
 ExecStart=%h/.local/share/throughline/rust/target/release/throughline embed --limit 10000
 # PG* plus OLLAMA_HOST and OLLAMA_EMBED_MODEL, which must match the server.
 EnvironmentFile=%h/.config/throughline/throughline.env

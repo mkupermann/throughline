@@ -59,7 +59,8 @@ Drei Quellen lesen Text ohne Sprecher, ihre Messages tragen deshalb die Rolle
 oben: eine Conversation pro Datei, eine Message pro Abschnitt (H1 bis H3, ab
 2.000 Zeichen geteilt). Seine Session-ID entsteht aus dem Ordnernamen der
 Wurzel und dem Pfad darunter. Ein nativer Lauf und ein Lauf im Container über
-dieselbe Wurzel treffen sich so in derselben Zeile. `git` und `web` haben eigene
+dieselbe Wurzel treffen sich so in derselben Zeile. Eine zweite Wurzel mit
+demselben Ordnernamen wird mit einer Warnung übersprungen. `git` und `web` haben eigene
 Runner, weil ein Repository oder eine URL keine einzelne Datei zum Hashen ist.
 Git vergleicht die Branch-Köpfe (`for-each-ref`) und hängt pro Commit eine
 Message an, mit einer UUID aus dem SHA und ohne Autor. Web holt eine bekannte
@@ -69,12 +70,17 @@ ihre Messages deshalb als Block. `ingest --source all` liest Markdown und Git,
 aber keine Webseiten: Die Web-Quelle schickt als einzige Anfragen nach außen und
 läuft nur, wenn man sie ausdrücklich nennt.
 
-Bei der Extraktion bestimmt die Quelle den Prompt. `markdown`, `git` und `web`
-nutzen das Profil `document`, alle anderen `THROUGHLINE_EXTRACT_PROFILE`.
-Kommt eine neue Fassung eines Dokuments, schließt die Extraktion zuerst die
-Notizen der alten Fassung (superseded, mit `valid_to`). Danach verwirft sie jede
-neue Notiz, die eine vergessene Notiz desselben Dokuments wiederholt, am Text
-oder an einem Kosinus ab der Konsolidierungsschwelle.
+Bei der Extraktion bestimmen Quelle und `THROUGHLINE_EXTRACT_PROFILE` den
+Prompt gemeinsam. Ohne Einstellung nutzt jede Unterhaltung den Coding-Prompt,
+auch `markdown`, `git` und `web`: Eine Messung an echten Dateien fand ihn
+ergiebig genug (7,4 Notizen je Markdown-Datei, siehe BENCHMARKS.md
+„Sources“). `document` schaltet nur diese drei Quellen auf den
+Dokument-Prompt, `personal` nur die Sessions. Kommt eine neue Fassung eines
+Dokuments, schließt die Extraktion zuerst die Notizen der alten Fassung
+(superseded, mit `valid_to`, ohne Nachfolger). Danach verwirft sie jede neue
+Notiz, die eine Notiz desselben Dokuments wiederholt, die der Nutzer vergessen
+oder korrigiert hat oder die `consolidate` zusammengeführt hat (eine Notiz mit
+Nachfolger), am Text oder an einem Kosinus ab der Konsolidierungsschwelle.
 
 ## Datenmodell
 

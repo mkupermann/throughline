@@ -162,13 +162,17 @@ fn insert_message<C: GenericClient>(
     Ok(())
 }
 
+/// A `projects` row for every project name a conversation has. `status` is
+/// TEXT in a fresh schema and the enum `project_status` in one from
+/// `sql/schema.sql`: the literal stays untyped in the outer select, so it
+/// takes the column's type (a `DISTINCT` beside it would make it text).
 pub fn backfill_projects<C: GenericClient>(client: &mut C) -> Result<u64> {
     let inserted = client.execute(
         r#"
         INSERT INTO projects (name, status)
-        SELECT DISTINCT project_name, 'active'
-        FROM conversations
-        WHERE project_name IS NOT NULL AND project_name <> ''
+        SELECT d.name, 'active'
+        FROM (SELECT DISTINCT project_name AS name FROM conversations
+              WHERE project_name IS NOT NULL AND project_name <> '') d
         ON CONFLICT (name) DO NOTHING
         "#,
         &[],
@@ -202,6 +206,24 @@ pub fn already_ingested<C: GenericClient>(
     Ok(rows.first().map(|r| r.get(0)))
 }
 
+/// The hash of the version of `path` that was stored last: the newest
+/// ledger row with records ([`record_ingest`] stamps each write). A file
+/// whose hash differs from it is read again, even when the ledger knows the
+/// hash from an earlier version (v1, then v2, then v1 again).
+pub fn current_hash<C: GenericClient>(client: &mut C, path: &Path) -> Result<Option<String>> {
+    let rows = client.query(
+        "SELECT file_hash FROM ingestion_log \
+         WHERE file_path = $1 AND COALESCE(record_count, 0) <> 0 \
+         ORDER BY ingested_at DESC NULLS LAST, id DESC LIMIT 1",
+        &[&path.to_string_lossy().to_string()],
+    )?;
+    Ok(rows.first().map(|r| r.get(0)))
+}
+
+/// Record that `path` with `file_hash` was stored with `record_count`
+/// records. `ingested_at` is the clock time of this call, also when the
+/// hash is known from an earlier version, so [`current_hash`] finds the
+/// version stored last, within one transaction too.
 pub fn record_ingest<C: GenericClient>(
     client: &mut C,
     path: &Path,
@@ -209,9 +231,10 @@ pub fn record_ingest<C: GenericClient>(
     record_count: usize,
 ) -> Result<()> {
     client.execute(
-        "INSERT INTO ingestion_log (file_path, file_hash, record_count) \
-         VALUES ($1, $2, $3) \
-         ON CONFLICT (file_path, file_hash) DO UPDATE SET record_count = EXCLUDED.record_count",
+        "INSERT INTO ingestion_log (file_path, file_hash, record_count, ingested_at) \
+         VALUES ($1, $2, $3, clock_timestamp()) \
+         ON CONFLICT (file_path, file_hash) DO UPDATE \
+         SET record_count = EXCLUDED.record_count, ingested_at = EXCLUDED.ingested_at",
         &[
             &path.to_string_lossy().to_string(),
             &file_hash,

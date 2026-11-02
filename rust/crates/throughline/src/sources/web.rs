@@ -89,6 +89,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -438,8 +439,10 @@ fn read_body(
     std::thread::spawn(move || {
         let _ = send.send(read_capped(body, cap, deadline));
     });
-    recv.recv_timeout(wait)
-        .map_err(|_| anyhow!("the budget ran out while the body was read"))?
+    recv.recv_timeout(wait).map_err(|e| match e {
+        RecvTimeoutError::Timeout => anyhow!("the budget ran out while the body was read"),
+        RecvTimeoutError::Disconnected => anyhow!("the body reader stopped"),
+    })?
 }
 
 /// Reading stops at `cap + 1` bytes or at the deadline.
@@ -879,21 +882,21 @@ fn title_of(html: &str) -> Option<String> {
     (!title.is_empty()).then(|| title.chars().take(MAX_TITLE_CHARS).collect())
 }
 
-/// The page's title and its sections.
 /// The title and sections of `page`, given up after `limit`. A page that
 /// takes longer (deeply nested markup) is an error; the conversion thread
-/// runs on to its end.
+/// runs on to its end. A converter that panics is an error of its own.
 fn sections_of(page: &Page, limit: Duration) -> Result<(Option<String>, Vec<Section>)> {
     let (body, plain) = (page.body.clone(), page.content_type == "text/plain");
     let (send, recv) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = send.send(convert(&body, plain));
     });
-    recv.recv_timeout(limit).map_err(|_| {
-        anyhow!(
+    recv.recv_timeout(limit).map_err(|e| match e {
+        RecvTimeoutError::Timeout => anyhow!(
             "turning the page into text took longer than {} s",
             limit.as_secs_f32()
-        )
+        ),
+        RecvTimeoutError::Disconnected => anyhow!("the converter stopped"),
     })?
 }
 
@@ -1022,7 +1025,8 @@ fn store<C: GenericClient>(client: &mut C, url: &Url, page: &Page) -> Result<Sto
 
 /// Fetch the configured pages. A known URL is fetched again only with
 /// `refetch`. Ignore rules apply to the URL (`path:`) and the host
-/// (`project:`), before anything is fetched.
+/// (`project:`), before anything is fetched. Refuses a database that lacks
+/// the newest migration ([`crate::migrate::require_latest`]).
 pub fn run<C: GenericClient>(
     client: &mut C,
     source: &WebSource,
@@ -1030,6 +1034,7 @@ pub fn run<C: GenericClient>(
     verbose: bool,
     rules: &IgnoreRules,
 ) -> Result<IngestSummary> {
+    crate::migrate::require_latest(client)?;
     let mut summary = IngestSummary::new(NAME);
     if let Some(note) = &source.note {
         eprintln!("[{NAME}] {note}");
@@ -2009,7 +2014,7 @@ mod tests {
         let slow = Server::start(vec![
             (
                 "/robots.txt",
-                Reply::typed("text/plain", "").slow(Duration::from_secs(3)),
+                Reply::typed("text/plain", "").slow(Duration::from_secs(10)),
             ),
             ("/charts/bay", page()),
         ]);
@@ -2021,7 +2026,13 @@ mod tests {
             short.fetch(&url(&slow.url("/charts/bay"))).err().unwrap()
         );
         assert!(err.contains("robots.txt unreachable"), "{err}");
-        assert!(started.elapsed() < Duration::from_millis(2_500));
+        // Budget plus 2 s of slack for a loaded test run, far below the
+        // 10 s the server would take.
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
         assert_eq!(slow.hits("/charts/bay"), 0);
         // A spent budget is not remembered: the next URL asks again.
         slow.set("/robots.txt", Reply::status(404));
@@ -2087,7 +2098,11 @@ mod tests {
             ("/early", page()),
             ("/late", page()),
         ]);
-        assert!(fetcher.fetch(&url(&long.url("/early"))).is_err());
+        let err = format!(
+            "{:#}",
+            fetcher.fetch(&url(&long.url("/early"))).err().unwrap()
+        );
+        assert!(err.contains("robots.txt disallows /early"), "{err}");
         assert!(fetcher.fetch(&url(&long.url("/late"))).is_ok());
 
         // A 404 allows everything.
@@ -2341,8 +2356,9 @@ mod tests {
             fetcher.fetch(&url(&server.url("/slow"))).err().unwrap()
         );
         assert!(err.contains("budget"), "{err}");
+        // Budget plus 2 s of slack; the whole body would take 18 s.
         assert!(
-            started.elapsed() < Duration::from_millis(1_500),
+            started.elapsed() < Duration::from_secs(3),
             "{:?}",
             started.elapsed()
         );
@@ -2409,5 +2425,20 @@ mod tests {
         let s = run(&mut tx, &source, false, true, &IgnoreRules::default()).unwrap();
         eprintln!("live store: {:?}", counts(&s));
         assert_eq!((s.ingested, s.errors), (1, 0));
+    }
+
+    /// TLS verification stays on: no client in this file may turn it off.
+    /// A loopback HTTPS server with a self-signed certificate would test it
+    /// end to end, but needs a TLS server crate the tests do not have.
+    #[test]
+    fn web_never_turns_tls_verification_off() {
+        let source = include_str!("web.rs");
+        for switch in [
+            concat!("danger_accept_invalid", "_certs"),
+            concat!("danger_accept_invalid", "_hostnames"),
+            concat!("tls_built_in_root_certs", "(false)"),
+        ] {
+            assert!(!source.contains(switch), "{switch}");
+        }
     }
 }

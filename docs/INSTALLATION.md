@@ -107,8 +107,8 @@ override file unless the list names it, for example
 `COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml`. Afterwards
 `docker compose exec web throughline doctor` lists under `sources:` what the
 container can see; a Markdown root reported as not found is usually a missing
-mount. Roots of the same folder name collide, so give every root a distinct
-name ([USAGE.md](USAGE.md#markdown-folders)).
+mount. Roots need distinct folder names: of two roots with the same name, the
+second is skipped with a warning ([USAGE.md](USAGE.md#markdown-folders)).
 
 ### An extra root CA
 
@@ -209,6 +209,14 @@ Verify the migration state:
 throughline migrate --status
 ```
 
+The Rust runtime (`rust/target/release/throughline`, see section 10) has
+migrations of its own: columns the Rust extraction reads and the `document`
+role of the Markdown, git and web sources. After building it, and after every
+upgrade, run `rust/target/release/throughline migrate` once. The scheduled
+jobs of section 10 run it before each Rust step; it does nothing on a current
+schema. Without it the Rust `ingest` and `extract-memory` stop with `the
+database lacks migration …: run \`throughline migrate\` first`.
+
 ## 7. Configure the native connection
 
 The standard libpq variables select the database. A repository-root `.env` is
@@ -253,15 +261,17 @@ the first six user-facing surfaces; project and detail pages open from links.
 This loads every plist in `launchd/`. The scheduled jobs are:
 
 - `com.claude-memory-ingest` — hourly ingestion. After the tool sessions it
-  runs the Rust binary in `rust/target/release/` for `--source markdown` and
+  runs the Rust binary in `rust/target/release/`: `migrate`, then
+  `--source gemini_cli`, `--source copilot_chat`, `--source markdown` and
   `--source git`; set `THROUGHLINE_MARKDOWN_ROOTS` and `THROUGHLINE_GIT_ROOTS`
-  in the installed plist (empty, both write nothing). `scripts/install.sh`
+  in the installed plist (empty, both write nothing; distinct root folder
+  names). `scripts/install.sh`
   writes every plist anew from its template, so a second run empties them
   again; set them once more afterwards. Web pages stay manual:
   `throughline ingest --source web` is the only step that sends requests out.
 - `com.claude-memory-extract` — daily 02:00 UTC memory extraction with the
-  Rust binary in `rust/target/release/` (`extract-memory`, 20 conversations per
-  run). The document sources and the `document` profile exist only in the Rust
+  Rust binary in `rust/target/release/` (`migrate`, then `extract-memory`, 20
+  conversations per run). The document sources and the `document` profile exist only in the Rust
   runtime; the Python extractor reads only user and assistant messages and
   would leave every document unextracted. Set `OLLAMA_HOST`,
   `OLLAMA_EMBED_MODEL` and any model setting the server uses in the installed
@@ -269,7 +279,7 @@ This loads every plist in `launchd/`. The scheduled jobs are:
 - `com.claude-memory-backup` — daily 03:00 UTC `pg_dump` with 30-day retention
 - `com.claude-memory-embed` — hourly at minute 15, `throughline embed --limit 10000`:
   vectors for notes the write itself could not embed, then for messages. It
-  runs the Rust binary in `rust/target/release/` (the Python CLI's `embed`
+  runs the Rust binary in `rust/target/release/`, `migrate` first (the Python CLI's `embed`
   ignores `OLLAMA_EMBED_MODEL`). Set `OLLAMA_EMBED_MODEL` and
   `OLLAMA_HOST` in the installed plist to the server's values.
 
