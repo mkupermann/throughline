@@ -430,6 +430,46 @@ const MESSAGE_ROLE_DOCUMENT: &str = r#"
 ALTER TYPE message_role ADD VALUE IF NOT EXISTS 'document';
 "#;
 
+/// Secrets found in messages and configuration files (M24). The clear
+/// value lives only here; every reveal is logged. `secret_scan_state`
+/// holds the last message id an incremental scan has read. Idempotent.
+const SECRETS: &str = r#"
+CREATE TABLE IF NOT EXISTS secrets (
+    id              BIGSERIAL PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    value           TEXT NOT NULL,
+    fingerprint     TEXT NOT NULL UNIQUE,
+    masked          TEXT NOT NULL,
+    first_seen_at   TIMESTAMPTZ,
+    last_seen_at    TIMESTAMPTZ,
+    occurrences     INT NOT NULL DEFAULT 0,
+    source_type     TEXT NOT NULL,
+    message_id      BIGINT,
+    conversation_id BIGINT,
+    project         TEXT,
+    tool            TEXT,
+    config_path     TEXT,
+    scanned_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS secret_occurrences (
+    secret_id   BIGINT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    ref         TEXT NOT NULL,
+    seen_at     TIMESTAMPTZ,
+    UNIQUE (secret_id, source_type, ref)
+);
+CREATE TABLE IF NOT EXISTS secret_reveals (
+    id          BIGSERIAL PRIMARY KEY,
+    secret_id   BIGINT NOT NULL,
+    revealed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS secret_scan_state (
+    id              INT PRIMARY KEY CHECK (id = 1),
+    last_message_id BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS secrets_kind_idx ON secrets (kind, first_seen_at DESC);
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -452,6 +492,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("014_team_mode.sql", TEAM_MODE),
     ("015_account_stars_untimed.sql", ACCOUNT_STARS_UNTIMED),
     ("016_message_role_document.sql", MESSAGE_ROLE_DOCUMENT),
+    ("017_secrets.sql", SECRETS),
 ];
 
 /// The newest migration of [`MIGRATIONS`].
@@ -1172,6 +1213,6 @@ END $$;
             Role::ALL.map(Role::as_str),
             ["user", "assistant", "system", "tool_result", "document"]
         );
-        assert_eq!(LATEST, "016_message_role_document.sql");
+        assert_eq!(LATEST, "017_secrets.sql");
     }
 }

@@ -107,6 +107,8 @@ pub(crate) const ROUTE_ROLES: &[(&str, &str, Role)] = &[
     ("POST", "/api/consolidate", Role::Admin),
     ("POST", "/api/operate", Role::Admin),
     ("GET", "/api/backlog", Role::Admin),
+    ("GET", "/api/secrets", Role::Admin),
+    ("GET", "/api/secrets/{id}/reveal", Role::Admin),
     ("POST", "/api/writeback", Role::Admin),
     ("POST", "/api/agent-memory/ingest", Role::Admin),
     ("POST", "/api/mimo-memory/ingest", Role::Admin),
@@ -1433,7 +1435,7 @@ mod tests {
             return;
         };
         let latest = crate::migrate::LATEST;
-        assert_eq!(latest, "016_message_role_document.sql");
+        assert_eq!(latest, "017_secrets.sql");
         let mut tx = without_accounts(&mut client);
         // A temporary ledger shadows applied_migrations for this session.
         tx.batch_execute(

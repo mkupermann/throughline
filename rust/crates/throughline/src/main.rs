@@ -199,6 +199,13 @@ enum Command {
     },
     /// Import AI-assistant configuration inventory into the database.
     ImportConfig,
+    /// Find secrets in messages and AI configuration files and store them
+    /// in the secrets table. Prints counts only, never a value.
+    ScanSecrets {
+        /// Read every message again, not only those since the last scan.
+        #[arg(long)]
+        full: bool,
+    },
     /// Insert-only merge from a second database on this server (same
     /// connection, `--source-db` names the source database).
     MergeFrom {
@@ -1066,6 +1073,13 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let summary = throughline::config_import::run(&mut client)?;
             println!("{summary}");
+        }
+        Command::ScanSecrets { full } => {
+            let mut client = config::DbConfig::from_env()
+                .connect()
+                .context("connect to PostgreSQL")?;
+            let summary = throughline::secrets::scan(&mut client, full)?;
+            println!("{}", throughline::secrets::summary_line(&summary));
         }
         Command::MergeFrom {
             source_db,

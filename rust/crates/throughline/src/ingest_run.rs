@@ -251,6 +251,18 @@ pub fn run_all_with_rules(
             eprintln!("[config_import] ingest failed: {e:#}");
         }
     }
+    // Secrets in the new messages and the config files (M24). Counts only.
+    match crate::secrets::scan(client, false) {
+        Ok(summary) => {
+            let mut s = IngestSummary::new("secrets");
+            s.files_seen = summary.messages_scanned + summary.configs_scanned;
+            s.ingested = summary.new_secrets;
+            out.push(s);
+        }
+        Err(e) => {
+            eprintln!("[secrets] scan failed: {e:#}");
+        }
+    }
     Ok(out)
 }
 
