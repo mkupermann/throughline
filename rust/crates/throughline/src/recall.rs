@@ -127,11 +127,66 @@ pub fn check_query(text: &str) -> Result<(), String> {
 /// Most entries a source filter may hold.
 pub const MAX_SOURCES: usize = 32;
 
-/// The `source_tool` values in a source filter: a comma list (`sources=` of
-/// the API and `--sources` of the CLI). Blanks are dropped, each value once;
-/// empty means every source. A value is 1 to 64 lowercase letters, digits,
-/// `_` or `-`, so a typo in the syntax is an error, not an empty result.
-pub fn parse_sources(raw: Option<&str>) -> Result<Vec<String>, String> {
+/// The keyword of [`parse_sources`] for every source but the documents.
+pub const SESSIONS_KEYWORD: &str = "sessions";
+
+/// Which conversations' notes may appear. `only` empty: no list; `except`
+/// empty: nothing left out. A note counts for the conversation at the root
+/// of its chain; a note without a conversation passes every filter.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SourceFilter {
+    /// Only these `source_tool` values (a conversation without one fails).
+    pub only: Vec<String>,
+    /// Never these `source_tool` values (a conversation without one passes).
+    pub except: Vec<String>,
+}
+
+impl SourceFilter {
+    /// Every source.
+    pub const fn all() -> Self {
+        Self {
+            only: Vec::new(),
+            except: Vec::new(),
+        }
+    }
+
+    /// Every source but the documents ([`crate::types::DOCUMENT_SOURCES`]),
+    /// including tools the code does not know and conversations without a
+    /// recorded tool.
+    pub fn sessions() -> Self {
+        Self {
+            only: Vec::new(),
+            except: crate::types::DOCUMENT_SOURCES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+
+    pub fn is_all(&self) -> bool {
+        self.only.is_empty() && self.except.is_empty()
+    }
+
+    /// SQL condition on the conversation `alias` (joined, may be missing):
+    /// `only` and `except` are bound at `$only` and `$except` as `text[]`.
+    pub fn predicate(alias: &str, only: usize, except: usize) -> String {
+        format!(
+            "({alias}.id IS NULL OR ((cardinality(${only}::text[]) = 0 \
+                OR {alias}.source_tool = ANY(${only}::text[])) \
+             AND NOT COALESCE({alias}.source_tool = ANY(${except}::text[]), false)))"
+        )
+    }
+}
+
+/// Every source; the filter of callers without one.
+pub static ALL_SOURCES: SourceFilter = SourceFilter::all();
+
+/// A source filter from a comma list (`sources=` of the API, `--sources` of
+/// the CLI): `source_tool` values, or the keyword `sessions` alone for
+/// [`SourceFilter::sessions`]. Blanks are dropped, each value once; empty
+/// means every source. A value is 1 to 64 lowercase letters, digits, `_` or
+/// `-`, so a typo in the syntax is an error, not an empty result.
+pub fn parse_sources(raw: Option<&str>) -> Result<SourceFilter, String> {
     let mut out: Vec<String> = Vec::new();
     for value in raw.unwrap_or("").split(',').map(str::trim) {
         if value.is_empty() {
@@ -143,12 +198,20 @@ pub fn parse_sources(raw: Option<&str>) -> Result<Vec<String>, String> {
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
         if !ok {
             return Err(format!(
-                "sources holds {value:?}: use source names such as claude_code or markdown, comma-separated"
+                "sources holds {value:?}: use source names such as claude_code or markdown, comma-separated, or sessions"
             ));
         }
         if !out.iter().any(|v| v == value) {
             out.push(value.to_string());
         }
+    }
+    if out.iter().any(|v| v == SESSIONS_KEYWORD) {
+        if out.len() > 1 {
+            return Err(format!(
+                "sources: {SESSIONS_KEYWORD} stands alone, not with other names"
+            ));
+        }
+        return Ok(SourceFilter::sessions());
     }
     if out.len() > MAX_SOURCES {
         return Err(format!(
@@ -156,7 +219,10 @@ pub fn parse_sources(raw: Option<&str>) -> Result<Vec<String>, String> {
             out.len()
         ));
     }
-    Ok(out)
+    Ok(SourceFilter {
+        only: out,
+        except: Vec::new(),
+    })
 }
 
 /// `as_of` admits a note that shares a word with the question or has at
@@ -179,11 +245,11 @@ pub struct RecallQuery<'a> {
     /// the seeds fill `limit`, the neighbours get the same room again.
     pub limit: usize,
     pub rank: Rank,
-    /// The `source_tool` values whose notes may appear ([`parse_sources`]);
-    /// empty: every source. A note counts for the conversation at the root
-    /// of its chain; a note without one (written by hand, over MCP, a
-    /// consolidation) passes any filter.
-    pub sources: &'a [String],
+    /// Whose notes may appear ([`parse_sources`]; [`ALL_SOURCES`] for every
+    /// source). A note counts for the conversation at the root of its chain;
+    /// a note without one (written by hand, over MCP, a consolidation)
+    /// passes any filter.
+    pub sources: &'a SourceFilter,
 }
 
 pub struct QueryEmbedding {
@@ -639,8 +705,9 @@ fn load_candidates<C: GenericClient>(
         params.push(&ids);
     }
     // The source filter applies to the conversation at the chain's root.
-    params.push(&q.sources);
-    let sources_param = params.len();
+    params.push(&q.sources.only);
+    params.push(&q.sources.except);
+    let sources = SourceFilter::predicate("c", params.len() - 1, params.len());
     // The chain is cut at a note the actor does not see: no successor, no
     // predecessor, no merge member and no root behind it.
     let seen = push_visibility(q.actor, "mc", &mut params);
@@ -678,8 +745,7 @@ fn load_candidates<C: GenericClient>(
         {join}
         WHERE {state} {predicate} AND {seen}
           AND ($3::text IS NULL OR mc.project_name = $3 OR mc.project_name IS NULL)
-          AND (cardinality(${sources_param}::text[]) = 0 OR c.id IS NULL
-               OR c.source_tool = ANY(${sources_param}::text[]))
+          AND {sources}
         "#
     );
     let rows = client.query(&sql, &params)?;
@@ -1497,7 +1563,7 @@ mod tests {
             known_at: None,
             limit: 50,
             rank: Rank::Fulltext,
-            sources: &[],
+            sources: &crate::recall::ALL_SOURCES,
         }
     }
 
@@ -3510,13 +3576,25 @@ mod tests {
 
     #[test]
     fn parse_sources_reads_a_comma_list() {
-        assert_eq!(parse_sources(None).unwrap(), Vec::<String>::new());
-        assert_eq!(parse_sources(Some(" , ")).unwrap(), Vec::<String>::new());
+        assert!(parse_sources(None).unwrap().is_all());
+        assert!(parse_sources(Some(" , ")).unwrap().is_all());
         assert_eq!(
-            parse_sources(Some(" claude_code, codex ,claude_code,gemini_cli")).unwrap(),
+            parse_sources(Some(" claude_code, codex ,claude_code,gemini_cli"))
+                .unwrap()
+                .only,
             ["claude_code", "codex", "gemini_cli"]
         );
-        for bad in ["Markdown", "claude code", "web;drop", "x'y"] {
+        assert_eq!(
+            parse_sources(Some(" sessions ")).unwrap(),
+            SourceFilter::sessions()
+        );
+        for bad in [
+            "Markdown",
+            "claude code",
+            "web;drop",
+            "x'y",
+            "sessions,codex",
+        ] {
             assert!(parse_sources(Some(bad)).is_err(), "{bad}");
         }
         let many: Vec<String> = (0..=MAX_SOURCES).map(|i| format!("s{i}")).collect();
@@ -3574,9 +3652,13 @@ mod tests {
         )
         .unwrap();
 
-        let found = |tx: &mut postgres::Transaction<'_>, sources: &[String]| -> Vec<i64> {
+        let found = |tx: &mut postgres::Transaction<'_>, only: &[String]| -> Vec<i64> {
+            let filter = SourceFilter {
+                only: only.to_vec(),
+                except: Vec::new(),
+            };
             let mut q = query("pelican harbour", Some(&project));
-            q.sources = sources;
+            q.sources = &filter;
             let mut ids: Vec<i64> = recall(tx, &q, None)
                 .unwrap()
                 .hits
@@ -3615,13 +3697,67 @@ mod tests {
             "markdown only, the correction with its file"
         );
         // The hit names its tool.
-        let mut q = query("pelican harbour", Some(&project));
-        let all = Vec::new();
-        q.sources = &all;
+        let q = query("pelican harbour", Some(&project));
         let r = recall(&mut tx, &q, None).unwrap();
         let tool = |id: i64| r.hits[position(&r, id).unwrap()].source_tool.clone();
         assert_eq!(tool(from_repo).as_deref(), Some("git"));
         assert_eq!(tool(correction).as_deref(), Some("markdown"));
         assert_eq!(tool(by_hand), None);
+    }
+
+    /// `sessions` keeps every tool but the documents, also a tool the code
+    /// does not know and a conversation without a recorded tool.
+    #[test]
+    fn sources_sessions_keyword_keeps_unknown_and_null_tools() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping sources_sessions_keyword_keeps_unknown_and_null_tools: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().unwrap();
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("p-{tag}");
+        let conv = |tx: &mut postgres::Transaction<'_>, tool: Option<&str>| -> i64 {
+            tx.query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, source_tool) \
+                 VALUES ($1, $2, now(), $3, $4) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &format!("/tmp/{project}"), &tag, &tool],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let (known, unknown, untooled, file) = (
+            conv(&mut tx, Some("claude_code")),
+            conv(&mut tx, Some("some_future_tool")),
+            conv(&mut tx, None),
+            conv(&mut tx, Some("markdown")),
+        );
+        let note = |tx: &mut postgres::Transaction<'_>, what: &str, from: i64| {
+            let content = format!("heron estuary {what} {tag}");
+            let mut s = Seed::new(&content, long_ago());
+            s.project = Some(&project);
+            s.source_type = "conversation";
+            s.source_id = Some(from);
+            seed(tx, &s)
+        };
+        let n_known = note(&mut tx, "known", known);
+        let n_unknown = note(&mut tx, "unknown", unknown);
+        let n_null = note(&mut tx, "null", untooled);
+        let n_file = note(&mut tx, "file", file);
+        let filter = parse_sources(Some("sessions")).unwrap();
+        let mut q = query("heron estuary", Some(&project));
+        q.sources = &filter;
+        let mut ids: Vec<i64> = recall(&mut tx, &q, None)
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.id)
+            .collect();
+        ids.sort();
+        let mut want = vec![n_known, n_unknown, n_null];
+        want.sort();
+        assert_eq!(ids, want);
+        assert!(!ids.contains(&n_file));
     }
 }

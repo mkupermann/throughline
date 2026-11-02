@@ -311,6 +311,10 @@ enum Command {
         /// Write the six score parts of every candidate per question to this JSON file.
         #[arg(long = "dump-parts")]
         dump_parts: Option<String>,
+        /// With `set`: only notes from these tools, comma-separated
+        /// `source_tool` values or `sessions`; without it every source.
+        #[arg(long)]
+        sources: Option<String>,
     },
     /// Answer LoCoMo questions (categories 1-4) for the answer benchmark,
     /// only with PGDATABASE=throughline_bench. Counts no use.
@@ -1239,13 +1243,14 @@ fn main() -> Result<()> {
             json,
             weights,
             dump_parts,
+            sources,
             ..
         } if mode == "locomo" => {
             let db = config::DbConfig::from_env();
             // Benchmark data never reaches a real store: refuse before connecting.
             adapters::locomo::check_database(&db.dbname)?;
-            if set.is_some() || weights.is_some() || dump_parts.is_some() {
-                anyhow::bail!("--set, --weights and --dump-parts belong to --mode set");
+            if set.is_some() || weights.is_some() || dump_parts.is_some() || sources.is_some() {
+                anyhow::bail!("--set, --weights, --dump-parts and --sources belong to --mode set");
             }
             let qa = qa.ok_or_else(|| anyhow::anyhow!("--mode locomo needs --qa"))?;
             let items = recall_eval::load_qa(std::path::Path::new(&qa))?;
@@ -1266,9 +1271,12 @@ fn main() -> Result<()> {
             json,
             weights,
             dump_parts,
+            sources,
             ..
         } => {
             let set = set.ok_or_else(|| anyhow::anyhow!("--mode set needs --set"))?;
+            let sources =
+                recall::parse_sources(sources.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
             if qa.is_some() {
                 anyhow::bail!("--qa belongs to --mode locomo");
             }
@@ -1281,8 +1289,15 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let weights = weights.unwrap_or(recall::WEIGHTS);
             let mut parts = dump_parts.as_ref().map(|_| Vec::new());
-            let report =
-                recall_eval::run_eval(&mut client, &cases, k, seed, &weights, parts.as_mut())?;
+            let report = recall_eval::run_eval(
+                &mut client,
+                &cases,
+                k,
+                seed,
+                &weights,
+                &sources,
+                parts.as_mut(),
+            )?;
             if let (Some(path), Some(parts)) = (dump_parts, parts) {
                 let file =
                     std::fs::File::create(&path).with_context(|| format!("create {path}"))?;

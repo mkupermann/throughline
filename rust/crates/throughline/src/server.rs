@@ -1334,7 +1334,8 @@ struct RecallParams {
     /// `cosine` | `fulltext` | `weighted`; without it `default_rank(mode)`:
     /// cosine in `current`, full text in the other modes.
     rank: Option<String>,
-    /// Comma list of `source_tool` values; empty or absent: every source.
+    /// Comma list of `source_tool` values, or `sessions`; empty or absent:
+    /// every source.
     sources: Option<String>,
 }
 
@@ -1346,7 +1347,7 @@ struct ParsedRecall {
     valid_at: Option<chrono::DateTime<chrono::Utc>>,
     known_at: Option<chrono::DateTime<chrono::Utc>>,
     limit: usize,
-    sources: Vec<String>,
+    sources: crate::recall::SourceFilter,
 }
 
 /// Check mode and dates before the database is touched.
@@ -1408,7 +1409,7 @@ struct ParsedContext {
     project: String,
     task: Option<String>,
     budget: usize,
-    sources: Vec<String>,
+    sources: crate::recall::SourceFilter,
 }
 
 /// Check project, task and budget before the database is touched.
@@ -4917,36 +4918,22 @@ mod tests {
         ));
     }
 
-    /// "Sessions only" sends every session tool as the recall source filter:
-    /// the page's list is the registry without the document sources, and
-    /// the toggle has both labels.
+    /// "Sessions only" sends the keyword `sessions`, which the server
+    /// resolves to every source but the documents; the toggle has both labels.
     #[test]
     fn page_sessions_only_sends_the_session_sources() {
-        let list = INDEX_HTML
-            .split_once("const SESSION_SOURCES = [")
-            .and_then(|(_, rest)| rest.split_once("];"))
-            .map(|(list, _)| list)
-            .expect("SESSION_SOURCES");
-        let mut page: Vec<String> = list
-            .split(',')
-            .map(|v| v.trim().trim_matches('"').to_string())
-            .collect();
-        page.sort();
-        let mut sessions: Vec<String> = crate::adapters::registry::built_ins()
-            .iter()
-            .map(|a| a.name().to_string())
-            .filter(|n| !crate::types::DOCUMENT_SOURCES.contains(&n.as_str()))
-            .collect();
-        sessions.sort();
-        assert_eq!(page, sessions);
-        assert!(crate::recall::parse_sources(Some(&page.join(","))).is_ok());
+        assert!(!INDEX_HTML.contains("SESSION_SOURCES"));
+        assert_eq!(
+            crate::recall::parse_sources(Some("sessions")).unwrap(),
+            crate::recall::SourceFilter::sessions()
+        );
         let call = INDEX_HTML
             .split_once("async function loadMemoryMeaning(el) {")
             .and_then(|(_, rest)| rest.split_once(r#"fetchJson("/api/recall?""#))
             .map(|(body, _)| body)
             .expect("loadMemoryMeaning and its recall call");
         assert!(
-            call.contains(r#"if (sessionsOnlyOn()) p.set("sources", SESSION_SOURCES.join(","));"#),
+            call.contains(r#"if (sessionsOnlyOn()) p.set("sources", "sessions");"#),
             "{call}"
         );
         for needle in [
@@ -4974,15 +4961,19 @@ mod tests {
             rank: None,
             sources: sources.map(String::from),
         };
-        assert!(parse_recall_params(&recall(None))
-            .unwrap()
-            .sources
-            .is_empty());
+        assert!(parse_recall_params(&recall(None)).unwrap().sources.is_all());
         assert_eq!(
             parse_recall_params(&recall(Some("claude_code,codex")))
                 .unwrap()
-                .sources,
+                .sources
+                .only,
             ["claude_code", "codex"]
+        );
+        assert_eq!(
+            parse_recall_params(&recall(Some("sessions")))
+                .unwrap()
+                .sources,
+            crate::recall::SourceFilter::sessions()
         );
         let err = parse_recall_params(&recall(Some("Claude Code")))
             .err()
@@ -5000,9 +4991,11 @@ mod tests {
         assert_eq!(
             parse_context_params(&context(Some(" markdown ,")))
                 .unwrap()
-                .sources,
+                .sources
+                .only,
             ["markdown"]
         );
+        assert!(parse_context_params(&context(Some("sessions,codex"))).is_err());
         assert!(parse_context_params(&context(Some("a;b"))).is_err());
     }
 

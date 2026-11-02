@@ -27,8 +27,8 @@ write nothing while both are empty. Web pages are not on a timer:
 Every Rust job runs the Rust `migrate` before its work. The Python
 `throughline migrate` does not add the columns and the `document` role the Rust
 ingest and extraction need, and the Rust `ingest` and `extract-memory` stop with
-`the database lacks migration …: run \`throughline migrate\` first` when they
-are missing. `migrate` does nothing on a current schema.
+``the database lacks migration …: run the Rust `throughline migrate` (rust/target/release/throughline migrate, or `docker compose run --rm migrate`)``
+when they are missing. `migrate` does nothing on a current schema.
 
 The document sources (Markdown folders, git repositories, web pages) and the
 `document` extraction profile exist only in the Rust runtime. The Python

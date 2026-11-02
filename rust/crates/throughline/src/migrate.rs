@@ -457,6 +457,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
 /// The newest migration of [`MIGRATIONS`].
 pub const LATEST: &str = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
+/// What to run when [`require_latest`] refuses. On a native install the
+/// `throughline` on `PATH` is the Python CLI, whose `migrate` does not add
+/// the Rust migrations, so the line names the Rust binary.
+pub const MIGRATE_HINT: &str = "run the Rust `throughline migrate` \
+     (rust/target/release/throughline migrate, or `docker compose run --rm migrate`)";
+
 /// Refuse a database whose ledger lacks [`LATEST`]. Migrations run in
 /// order and stop at the first failure, so the newest one stands for all of
 /// them. Names the code does not know are fine: the Python package records
@@ -467,10 +473,10 @@ pub fn require_latest<C: postgres::GenericClient>(client: &mut C) -> Result<()> 
             "SELECT EXISTS (SELECT 1 FROM applied_migrations WHERE migration_name = $1)",
             &[&LATEST],
         )
-        .context("read applied_migrations (run `throughline migrate` first)")?
+        .with_context(|| format!("read applied_migrations ({MIGRATE_HINT})"))?
         .get(0);
     if !applied {
-        bail!("the database lacks migration {LATEST}: run `throughline migrate` first");
+        bail!("the database lacks migration {LATEST}: {MIGRATE_HINT}");
     }
     Ok(())
 }
@@ -584,7 +590,8 @@ mod tests {
             .expect_err("a fresh database is refused")
             .to_string();
             assert_eq!(
-                err, "read applied_migrations (run `throughline migrate` first)",
+                err,
+                format!("read applied_migrations ({MIGRATE_HINT})"),
                 "{mode:?}"
             );
         }
