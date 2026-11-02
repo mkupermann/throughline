@@ -1,8 +1,10 @@
 # Throughline Benchmarks
 
 The first section, [Recall and public benchmarks](#recall-and-public-benchmarks),
-measures how well the Rust runtime finds notes (2026-10-31). Everything from
-[Historical numbers](#historical-numbers) on is older.
+measures how well the Rust runtime finds notes (2026-10-31). [Sources](#sources)
+measures the document sources: Markdown folders and git repositories
+(2026-11-01). Everything from [Historical numbers](#historical-numbers) on is
+older.
 
 ## Recall and public benchmarks
 
@@ -287,6 +289,49 @@ throughline recall-eval --set calibration.json --k 5 --seed 7 --json \
 throughline recall-eval --set test.json --k 5 --seed 7 --json \
   --weights 0.85,0,0,0.15,0,0
 ```
+
+## Sources
+
+Measured on 2026-11-01 and 2026-11-02 on a copy of the same installation's
+database (the setup above), generation with `qwen3.6:27b` on the local Ollama.
+Three questions, each with a bar written down before its run: which prompt the
+document sources need, what importing documents costs the existing recall, and
+whether a question about a file finds that file. Web pages were not measured.
+
+- **Imported:** 380 Markdown files from three folders (3,181 sections) and 13 git
+  repositories (3,156 commits). A fourteenth repository was skipped because its
+  folder name matched another root's.
+- **Prompt (stop rule).** The production prompt stays unless it yields fewer
+  than 0.5 notes per file (per window of 20 commits for git). On 20 files drawn
+  with seed 7 it gave 7.4 notes per file in 44 s per file; the `document` prompt
+  gave 14.8 in 79 s, one file timing out. On 20 windows of one repository:
+  7.6 notes per window (0.38 per commit) in 43 s against 14.0 (0.70) in 64 s.
+  The stop rule did not fire, so the production prompt is the default for these
+  sources; `document` doubles the notes at nearly double the time. Whether its
+  notes are better was not judged. The full extraction with the production
+  prompt wrote 2,776 notes from the files (7.3 per file) and 1,580 from the
+  repositories (0.50 per commit) in 8 h 03 min.
+- **Existing recall (bar: at most 2 of the 74 questions' top-5 hits lost).**
+  Cosine 70 → 65 of 74 (94.6 % → 87.8 %), weighted 70 → 65, full text 37 → 35;
+  random 0 → 3 is noise from the larger candidate set. All five cosine losses
+  are cross-language questions, pushed out by notes from the files (among them
+  the same files kept in two folders) and the repositories. That misses the
+  bar. The consequence is the source filter (`sources`, "Sessions only" in the
+  memory view, [USAGE.md](USAGE.md#recall-finding-notes-by-meaning)); its default is every
+  source, so without it the loss stays. The set was not run again with the
+  filter.
+- **Finding a file (bar: 70 % hit@5 at file level, no project filter).** 10
+  questions on 10 of the drawn files, paraphrased, each answer in exactly one
+  file; written by the measuring side and approved by the owner, not written
+  by the owner. Cosine: 60 % without the project filter (MRR 0.39), 70 % with
+  it; random 0 % both ways. At note level 30 %: only 6 of the 10 files had a
+  note that states the answer, so the extraction, not the ranking, is the
+  limit. That misses the bar.
+- **Limits.** One installation, one machine, one run per prompt. The model is
+  not deterministic: the same 20 files gave 148 and 142 notes in two runs.
+  Ten questions make each one 10 points. The measured configuration
+  (production prompt, document windows, document lifecycle) needed a switch
+  that is not part of the code then; the shipped default is now the same.
 
 ## Historical numbers
 

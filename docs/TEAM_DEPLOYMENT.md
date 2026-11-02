@@ -166,6 +166,7 @@ Conversations and their messages, projects, costs and the timeline are one share
 - The server's command line and `throughline mcp` over stdio run as the operator, without an account. They see everything, private notes included: `export-markdown`, `ask`, `recall`, `context`, `handoff` and the rest. Anyone with a shell or database access on the server is an operator.
 - Jobs touch shared notes only. Private notes are not reflected on, merged, written back or marked stale by a job.
 - One database connection behind a lock serves all requests. A slow request delays the others. That is fine for a small team, not for many people at once.
+- The Operate ingest holds that connection while it reads Markdown roots and git repositories. git runs without a timeout, so the first read of several large repositories, or a root on a slow mount, stalls every other request meanwhile. Run those sources with the command line or the hourly job instead.
 - The session cookie has no `__Host-` prefix.
 - No account page in the browser, no password reset by mail, no SSO or OAuth, no tenants, no rights per project.
 
