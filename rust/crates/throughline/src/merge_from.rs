@@ -1703,8 +1703,8 @@ mod tests {
         dbs.target()
             .execute(
                 "DELETE FROM applied_migrations \
-                 WHERE migration_name = '015_account_stars_untimed.sql'",
-                &[],
+                 WHERE migration_name = $1",
+                &[&crate::migrate::LATEST],
             )
             .unwrap();
         let session = uuid::Uuid::new_v4();
@@ -1717,7 +1717,7 @@ mod tests {
         let (source, target) = dbs.both();
         let err = merge_from(target, source, &opts).expect_err("must abort");
         assert!(
-            format!("{err:#}").contains("015_account_stars_untimed.sql"),
+            format!("{err:#}").contains(crate::migrate::LATEST),
             "{err:#}"
         );
         assert_existing_unchanged(dbs.target(), &snap);
