@@ -481,6 +481,9 @@ Markdown file, a repository folder or a URL, `project:` the project.
   - A file that was emptied, grew past 1 MiB or became a symbolic link keeps
     its last stored sections. A deleted file, and every file of a root you take
     off the list, keeps its conversation until you delete it.
+  - A note that `consolidate` merged from a file's notes stays current when the
+    file changes, even if the new version no longer says it. Forget it by hand
+    then.
 
 ### Git repositories
 
@@ -505,6 +508,12 @@ Markdown file, a repository folder or a URL, `project:` the project.
   and a renamed folder starts a new conversation.
 - **What stays behind:** commits merged in with dates older than the last
   extraction of that repository are stored but never extracted.
+- **Extraction cost:** a repository is extracted in windows of 20 commits, so
+  its first extraction at the 5,000-commit cap is about 250 model requests.
+  Repositories come after every pending session and file, because the queue
+  runs newest first by the oldest message and a repository's oldest message
+  is its first commit. Progress is kept per window; a run cut short, by the
+  systemd unit's 2-hour limit say, goes on at the next.
 - Git runs without a timeout. `safe.directory` is set for the configured roots
   only, so a repository owned by another user, as behind a container mount, can
   be read.
@@ -523,7 +532,10 @@ Markdown file, a repository folder or a URL, `project:` the project.
   refused, after every redirect too, and there are at most 5 redirects.
   `robots.txt` is honoured (the group for `Throughline`, else `*`); a server
   error or timeout on it counts as disallowed. Only `text/html` and
-  `text/plain`, at most 2 MiB and 10 seconds per URL. A page that shows text
+  `text/plain`, at most 2 MiB and 10 seconds per URL for the fetch, and another
+  10 seconds for turning the page into text. A conversion that takes longer is
+  an error for that URL; its work goes on in the background until it ends or
+  the command exits. A page that shows text
   only with JavaScript is recorded as declined and stores nothing; on a
   refetch the stored version stays. A refused or
   failed URL is tried again on the next run.
@@ -535,9 +547,12 @@ Markdown file, a repository folder or a URL, `project:` the project.
 - **Behind a proxy that inspects TLS** the container needs the proxy's root CA
   ([INSTALLATION.md](INSTALLATION.md#an-extra-root-ca)); without it every HTTPS
   fetch fails with a certificate error. With `HTTPS_PROXY` set (or
-  `HTTP_PROXY` for an `http` URL), the proxy
+  `HTTP_PROXY` for an `http` URL, or `ALL_PROXY` for both; `NO_PROXY` lists
+  hosts that go direct), the proxy
   resolves the host itself, so the address check cannot catch a name that
-  resolves to another address there.
+  resolves to another address there. The check still resolves every name
+  locally first, so on a network where only the proxy can resolve names every
+  fetch fails with `look up …`.
 
 ### Gemini CLI and Copilot Chat
 
