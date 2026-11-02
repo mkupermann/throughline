@@ -498,10 +498,16 @@ async fn search_handler(
             .as_ref()
             .map(crate::embedding::label)
             .unwrap_or_else(|| "unavailable".into());
+        let mut effective_mode = m.clone();
         let hits = match m.as_str() {
             "semantic" => match backend.as_ref() {
                 Some(b) => crate::search::semantic(client, b, &q, limit)?,
-                None => crate::search::search(client, &actor, &q, limit, None)?,
+                None => {
+                    // Without an embedding backend, semantic search silently
+                    // falls back to lexical; report the mode actually used.
+                    effective_mode = "lexical".into();
+                    crate::search::search(client, &actor, &q, limit, None)?
+                }
             },
             "lexical" => crate::search::search(client, &actor, &q, limit, None)?,
             _ => crate::search::hybrid(client, &actor, backend.as_ref(), &q, limit)?,
@@ -512,7 +518,7 @@ async fn search_handler(
             .filter_map(|h| h.message_id)
             .collect();
         let owners = note_owners(client, team, &actor, &notes)?;
-        Ok((hits, backend_label, m, owners))
+        Ok((hits, backend_label, effective_mode, owners))
     })
     .await
     {
@@ -3244,6 +3250,22 @@ struct JobParams {
     job: Option<String>,
 }
 
+/// The `extract-memory` job: run extraction and format the summary line.
+/// Limit 5 conversations per run, window 24 000 chars (same defaults as the
+/// CLI `extract-memory` command).
+fn extract_memory_job<C: postgres::GenericClient>(
+    client: &mut C,
+    backend: &crate::llm::GenerationBackend,
+) -> anyhow::Result<String> {
+    let profile_env = std::env::var(crate::extract_memory::PROFILE_ENV).ok();
+    let configured = crate::extract_memory::Profile::parse(profile_env.as_deref())?;
+    let s = crate::extract_memory::run_pending(client, backend, 5, 24_000, configured)?;
+    Ok(format!(
+        "extract-memory: {} window(s), {} note(s) written, {} error(s)",
+        s.windows, s.chunks, s.errors
+    ))
+}
+
 async fn operate_handler(
     State(state): State<AppState>,
     Query(params): Query<JobParams>,
@@ -3314,11 +3336,7 @@ async fn operate_handler(
             "extract-memory" => {
                 let backend = crate::llm::resolve_backend()?;
                 crate::llm::ensure_local_or_allowed(&backend)?;
-                let rows = client.query(
-                    "SELECT id, COALESCE(summary,'') FROM conversations WHERE generated_by IS NULL ORDER BY started_at DESC LIMIT 5",
-                    &[],
-                )?;
-                format!("extract-memory: scanned {} conversation(s)", rows.len())
+                extract_memory_job(client, &backend)?
             }
             "reflect" => {
                 let s = crate::reflect_memory::dedup(client, &Actor::shared_only(), false)?;
@@ -8413,6 +8431,178 @@ mod tests {
             .expect("lock")
             .batch_execute("ROLLBACK")
             .expect("rollback");
+    }
+
+    // ---- helpers for extract-memory / search tests ----
+
+    /// Answer each Ollama chat request with the next canned reply.
+    fn fake_ollama(replies: Vec<&'static str>) -> String {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake ollama");
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for content in replies {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut len = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; len];
+                reader.read_exact(&mut body).unwrap();
+                let reply = serde_json::json!({ "message": { "content": content } }).to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+        });
+        base
+    }
+
+    fn ollama_at(base_url: String) -> crate::llm::GenerationBackend {
+        crate::llm::GenerationBackend {
+            kind: crate::llm::BackendKind::Ollama,
+            label: "test".into(),
+            base_url,
+            model: "test".into(),
+            api_key: None,
+        }
+    }
+
+    /// A conversation with one user message per `(seconds after T0, text)`.
+    const T0: i64 = 4_070_908_800; // 2099-01-01T00:00:00Z
+
+    fn seed_extraction_conversation<C: GenericClient>(
+        client: &mut C,
+        lines: &[(i64, &str)],
+    ) -> i64 {
+        let id: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, ended_at) \
+                 VALUES ($1, '/tmp/extract-test', $2, $3) RETURNING id",
+                &[&uuid::Uuid::new_v4(), &ts(T0), &ts(T0 + 3600)],
+            )
+            .expect("seed conversation")
+            .get(0);
+        for (secs, text) in lines {
+            client
+                .execute(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) \
+                     VALUES ($1, 'user', $2, $3)",
+                    &[&id, text, &ts(T0 + secs)],
+                )
+                .expect("seed message");
+        }
+        id
+    }
+
+    fn ts(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, 0).expect("valid timestamp")
+    }
+
+    const EXTRACTION_REPLY: &str =
+        r#"[{"content":"use sqlx","category":"decision","tags":["db"],"confidence":0.9}]"#;
+
+    /// Operate-Job `extract-memory` with a stub model writes at least one
+    /// note and the return text mentions the count.
+    #[test]
+    fn extract_memory_job_writes_notes_and_reports_count() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping extract_memory_job_writes_notes_and_reports_count: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let conv = seed_extraction_conversation(&mut tx, &[(1, "let's use sqlx for the database")]);
+        let base = fake_ollama(vec![EXTRACTION_REPLY]);
+        let backend = ollama_at(base);
+        let msg = extract_memory_job(&mut tx, &backend).expect("extract-memory job");
+        // At least one note was written.
+        let count: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM memory_chunks WHERE source_type = 'conversation' AND source_id = $1",
+                &[&conv],
+            )
+            .expect("count notes")
+            .get(0);
+        assert!(count >= 1, "at least one note written, got {count}");
+        // The return text mentions the number.
+        assert!(
+            msg.contains("1 note(s) written"),
+            "return text mentions note count: {msg}"
+        );
+        assert!(
+            msg.contains("0 error(s)"),
+            "return text mentions error count: {msg}"
+        );
+        // Drop tx → rollback.
+    }
+
+    /// `/api/search?q=x&mode=semantic` without an embedding backend
+    /// reports `"mode":"lexical"`.
+    #[test]
+    fn semantic_mode_without_embedding_backend_reports_lexical() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping semantic_mode_without_embedding_backend_reports_lexical: no PostgreSQL reachable");
+            return;
+        };
+        // Force no embedding backend.
+        let old = std::env::var("THROUGHLINE_EMBED_BACKEND").ok();
+        std::env::set_var("THROUGHLINE_EMBED_BACKEND", "openai");
+        client.batch_execute("BEGIN").expect("begin");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        seed_note(
+            &mut client,
+            &format!("semantic-fallback wombat {tag}"),
+            "insight",
+        );
+        let state = AppState {
+            db: Arc::new(Mutex::new(client)),
+            agent_key: Arc::new(crate::agent_key::KeyState::Off),
+            mcp_read_only: false,
+            auth_mode: crate::access::AuthMode::Local,
+            public_url: None,
+            login: Default::default(),
+            embed_breaker: Default::default(),
+        };
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let params = SearchParams {
+            q: Some(format!("wombat {tag}")),
+            limit: 20,
+            mode: Some("semantic".into()),
+        };
+        let resp = rt.block_on(search_handler(
+            State(state.clone()),
+            Extension(Actor::local()),
+            Query(params),
+        ));
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = rt
+            .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            v["mode"].as_str(),
+            Some("lexical"),
+            "semantic without embedding backend must report lexical: {v}"
+        );
+        let mut client = state.db.lock().expect("lock");
+        client.batch_execute("ROLLBACK").expect("rollback");
+        // Restore env.
+        match old {
+            Some(val) => std::env::set_var("THROUGHLINE_EMBED_BACKEND", val),
+            None => std::env::remove_var("THROUGHLINE_EMBED_BACKEND"),
+        }
     }
 }
 

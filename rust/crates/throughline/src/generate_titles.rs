@@ -11,8 +11,16 @@ Prefer concrete nouns over vague phrases. Reply with the title only — no quote
 pub fn title_messages(messages: &[NormalisedMessage]) -> Result<String> {
     let backend = llm::resolve_backend()?;
     llm::ensure_local_or_allowed(&backend)?;
+    title_messages_with(&backend, messages)
+}
+
+/// [`title_messages`] with the backend already resolved.
+pub fn title_messages_with(
+    backend: &llm::GenerationBackend,
+    messages: &[NormalisedMessage],
+) -> Result<String> {
     let transcript = render_transcript(messages, 4000);
-    let mut title = llm::complete(&backend, Some(TITLE_PROMPT), &transcript)?;
+    let mut title = llm::complete(backend, Some(TITLE_PROMPT), &transcript)?;
     title = clean_title(&title);
     if title.len() > 120 {
         title.truncate(120);
@@ -56,6 +64,59 @@ pub fn fallback_title(messages: &[NormalisedMessage]) -> String {
         s = "Untitled session".into();
     }
     s
+}
+
+/// Title up to `limit` untitled conversations. With a backend, a failed
+/// title is not saved (summary stays NULL) and counted as failed; without
+/// a backend the fallback title is used. Returns `(titled, failed)`.
+pub fn run_titling<C: postgres::GenericClient>(
+    client: &mut C,
+    limit: usize,
+    backend: Option<&llm::GenerationBackend>,
+) -> Result<(usize, usize)> {
+    let ids = untitled_conversations(client, limit)?;
+    let mut titled = 0usize;
+    let mut failed = 0usize;
+    for id in ids {
+        let msgs = client.query(
+            r#"
+            SELECT role::text, COALESCE(content,'') FROM messages
+            WHERE conversation_id = $1 ORDER BY created_at, id
+            "#,
+            &[&id],
+        )?;
+        let messages: Vec<NormalisedMessage> = msgs
+            .into_iter()
+            .map(|r| NormalisedMessage {
+                role: r.get(0),
+                content: r.get(1),
+                ..Default::default()
+            })
+            .collect();
+        match backend {
+            Some(b) => match title_messages_with(b, &messages) {
+                Ok(title) => {
+                    client.execute(
+                        "UPDATE conversations SET summary = $2, updated_at = now() WHERE id = $1",
+                        &[&id, &title],
+                    )?;
+                    titled += 1;
+                }
+                Err(_) => {
+                    failed += 1;
+                }
+            },
+            None => {
+                let title = fallback_title(&messages);
+                client.execute(
+                    "UPDATE conversations SET summary = $2, updated_at = now() WHERE id = $1",
+                    &[&id, &title],
+                )?;
+                titled += 1;
+            }
+        }
+    }
+    Ok((titled, failed))
 }
 
 #[cfg(test)]
@@ -128,5 +189,136 @@ mod tests {
         let picked = untitled_conversations(&mut tx, 1000).expect("pick");
         assert!(picked.contains(&untitled), "{picked:?}");
         assert!(!picked.contains(&titled), "{picked:?}");
+    }
+
+    // ---- helpers for the failure test ----
+
+    /// Answer Ollama chat requests with a canned reply (200) or an error (500).
+    fn fake_ollama_mixed(replies: Vec<Result<String, ()>>) -> String {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake ollama");
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for reply in replies {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut len = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; len];
+                reader.read_exact(&mut body).unwrap();
+                match reply {
+                    Ok(content) => {
+                        let resp =
+                            serde_json::json!({ "message": { "content": content } }).to_string();
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                             Content-Length: {}\r\nConnection: close\r\n\r\n{resp}",
+                            resp.len()
+                        )
+                        .unwrap();
+                    }
+                    Err(()) => {
+                        write!(
+                            stream,
+                            "HTTP/1.1 500 Internal Server Error\r\n\
+                             Content-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+        });
+        base
+    }
+
+    fn ollama_at(base_url: String) -> llm::GenerationBackend {
+        llm::GenerationBackend {
+            kind: llm::BackendKind::Ollama,
+            label: "test".into(),
+            base_url,
+            model: "test".into(),
+            api_key: None,
+        }
+    }
+
+    fn seed_conv<C: postgres::GenericClient>(client: &mut C, label: &str, day: u32) -> i64 {
+        let started = chrono::DateTime::parse_from_rfc3339(&format!("2999-01-{day:02}T00:00:00Z"))
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let id: i64 = client
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at) \
+                 VALUES (gen_random_uuid(), '/fictional/titles', $1) RETURNING id",
+                &[&started],
+            )
+            .expect("seed conv")
+            .get(0);
+        client
+            .execute(
+                "INSERT INTO messages (conversation_id, role, content, created_at) \
+                 VALUES ($1, 'user', $2, $3)",
+                &[&id, &format!("{label} needs a title"), &started],
+            )
+            .expect("seed message");
+        id
+    }
+
+    /// A title failure leaves the summary NULL and the run continues with
+    /// the next conversation; a second run with a working stub sets it.
+    #[test]
+    fn failed_title_is_not_saved_and_next_run_fixes_it() {
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!(
+                "skipping failed_title_is_not_saved_and_next_run_fixes_it: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        // A is newer (day 2) so it comes first in untitled_conversations.
+        let a = seed_conv(&mut tx, "conversation A", 2);
+        let b = seed_conv(&mut tx, "conversation B", 1);
+
+        // First run: stub fails for A (HTTP 500), succeeds for B.
+        let base = fake_ollama_mixed(vec![Err(()), Ok("Title for B".into())]);
+        let backend = ollama_at(base);
+        let (titled, failed) = run_titling(&mut tx, 10, Some(&backend)).expect("first run");
+        assert_eq!(titled, 1, "B is titled");
+        assert_eq!(failed, 1, "A fails");
+        let summary_a: Option<String> = tx
+            .query_one("SELECT summary FROM conversations WHERE id = $1", &[&a])
+            .expect("read A")
+            .get(0);
+        assert_eq!(summary_a, None, "A.summary stays NULL after failure");
+        let summary_b: Option<String> = tx
+            .query_one("SELECT summary FROM conversations WHERE id = $1", &[&b])
+            .expect("read B")
+            .get(0);
+        assert_eq!(summary_b.as_deref(), Some("Title for B"), "B has the title");
+
+        // Second run: working stub for the remaining conversation A.
+        let base2 = fake_ollama_mixed(vec![Ok("Title for A".into())]);
+        let backend2 = ollama_at(base2);
+        let (titled2, failed2) = run_titling(&mut tx, 10, Some(&backend2)).expect("second run");
+        assert_eq!(titled2, 1, "A is titled on retry");
+        assert_eq!(failed2, 0, "no failures on retry");
+        let summary_a2: Option<String> = tx
+            .query_one("SELECT summary FROM conversations WHERE id = $1", &[&a])
+            .expect("read A again")
+            .get(0);
+        assert_eq!(
+            summary_a2.as_deref(),
+            Some("Title for A"),
+            "A has the title"
+        );
     }
 }

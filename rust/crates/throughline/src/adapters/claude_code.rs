@@ -235,8 +235,10 @@ fn per_message_total(message: &Value) -> Option<i64> {
 }
 
 fn sum_usage(entries: &[Value]) -> (Option<i64>, Option<i64>) {
+    use std::collections::HashSet;
     let mut tin = 0i64;
     let mut tout = 0i64;
+    let mut seen: HashSet<String> = HashSet::new();
     for e in entries {
         let Some(msg) = e.get("message") else {
             continue;
@@ -244,6 +246,13 @@ fn sum_usage(entries: &[Value]) -> (Option<i64>, Option<i64>) {
         let Some(usage) = msg.get("usage") else {
             continue;
         };
+        // Lines that share a message.id belong to the same API response and
+        // carry identical usage; count each id once.
+        if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
+            if !seen.insert(id.to_string()) {
+                continue;
+            }
+        }
         tin += usage
             .get("input_tokens")
             .and_then(|v| v.as_i64())
@@ -399,6 +408,7 @@ impl Adapter for ClaudeCodeAdapter {
 
         let mut last_ts = started_at;
         let mut messages = Vec::new();
+        let mut seen_msg_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for e in &msg_entries {
             let msg = e.get("message").cloned().unwrap_or(Value::Null);
             let tool_calls = extract_tool_calls(&msg);
@@ -416,6 +426,18 @@ impl Adapter for ClaudeCodeAdapter {
             };
             let ts = parse_timestamp_or(e.get("timestamp").and_then(|t| t.as_str()), last_ts);
             last_ts = ts;
+            // Only the first line of a shared message.id carries the usage
+            // total; later blocks of the same API response get None.
+            let token_count = match msg.get("id").and_then(|v| v.as_str()) {
+                Some(id) => {
+                    if seen_msg_ids.insert(id.to_string()) {
+                        per_message_total(&msg)
+                    } else {
+                        None
+                    }
+                }
+                None => per_message_total(&msg),
+            };
             messages.push(NormalisedMessage {
                 role: map_role(e).to_string(),
                 content: extract_content(&msg),
@@ -427,7 +449,7 @@ impl Adapter for ClaudeCodeAdapter {
                     .get("model")
                     .and_then(|m| m.as_str())
                     .map(|s| s.to_string()),
-                token_count: per_message_total(&msg),
+                token_count,
                 is_sidechain: e
                     .get("isSidechain")
                     .and_then(|v| v.as_bool())
@@ -641,5 +663,103 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(conv.ended_at.unwrap(), expected);
+    }
+
+    /// Claude Code writes one JSONL line per content block; all lines of one
+    /// API response share `message.id` and `usage`. `sum_usage` counts each
+    /// id once, and only the first line of an id carries `token_count`.
+    #[test]
+    fn shared_message_id_counts_usage_once_and_tokens_on_first_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = Uuid::new_v4();
+        let entries = vec![
+            json!({
+                "sessionId": session,
+                "cwd": "/home/dev/my-project",
+                "timestamp": "2026-01-02T10:00:00Z",
+                "message": {"role": "user", "content": "hello"}
+            }),
+            // Three lines of the same API response (same message.id, same usage).
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:01Z",
+                "message": {
+                    "id": "msg-aaa", "role": "assistant",
+                    "content": [{"type": "text", "text": "part one"}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50}
+                }
+            }),
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:01Z",
+                "message": {
+                    "id": "msg-aaa", "role": "assistant",
+                    "content": [{"type": "text", "text": "part two"}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50}
+                }
+            }),
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:01Z",
+                "message": {
+                    "id": "msg-aaa", "role": "assistant",
+                    "content": [{"type": "text", "text": "part three"}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50}
+                }
+            }),
+            // A separate API response with its own id and usage.
+            json!({
+                "sessionId": session,
+                "timestamp": "2026-01-02T10:00:02Z",
+                "message": {
+                    "id": "msg-bbb", "role": "assistant",
+                    "content": [{"type": "text", "text": "second answer"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5}
+                }
+            }),
+        ];
+        let path = write_session(tmp.path(), "shared-id.jsonl", &entries);
+        let adapter = ClaudeCodeAdapter::new(tmp.path().to_path_buf());
+        let conv = adapter.parse(&path).unwrap().expect("parsed");
+
+        // sum_usage: 100 + 10 = 110 in, 50 + 5 = 55 out.
+        assert_eq!(
+            conv.token_count_in,
+            Some(110),
+            "input tokens per unique message.id"
+        );
+        assert_eq!(
+            conv.token_count_out,
+            Some(55),
+            "output tokens per unique message.id"
+        );
+
+        // Exactly two messages carry a token_count (first of msg-aaa, msg-bbb).
+        let with_tokens: Vec<Option<i64>> = conv
+            .messages
+            .iter()
+            .filter(|m| m.role == "assistant")
+            .map(|m| m.token_count)
+            .collect();
+        assert_eq!(with_tokens.len(), 4, "four assistant lines");
+        assert_eq!(
+            with_tokens.iter().filter(|t| t.is_some()).count(),
+            2,
+            "exactly two assistant messages carry token_count"
+        );
+        assert_eq!(
+            with_tokens[0],
+            Some(150),
+            "first line of msg-aaa carries usage"
+        );
+        assert_eq!(
+            with_tokens[1], None,
+            "second line of msg-aaa has no token_count"
+        );
+        assert_eq!(
+            with_tokens[2], None,
+            "third line of msg-aaa has no token_count"
+        );
+        assert_eq!(with_tokens[3], Some(15), "msg-bbb carries its own usage");
     }
 }
