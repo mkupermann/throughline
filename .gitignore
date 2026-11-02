@@ -136,3 +136,14 @@ vscode/node_modules
 vscode/dist
 vscode/*.vsix
 vscode/.vscode-test
+
+# local scratch, never commit
+docs/media/rust/ux/
+ask_*.json
+tmp_m9/
+rust/crates/throughline/tmp_m9/
+rust/crates/throughline/tmp_m9_unit/
+web/.tmp-m8/
+script_check_*.js
+mem_check.json
+*.dump

@@ -115,6 +115,8 @@ pub fn writeback<C: GenericClient>(
         .into_iter()
         .map(|r| {
             let s: String = r.get(0);
+            // A key in a note never reaches a file in the project (M24d).
+            let (s, _) = crate::secrets::redact(&s);
             let s = s.replace('\n', " ");
             s.chars().take(160).collect::<String>()
         })
@@ -211,6 +213,36 @@ mod tests {
         let text = std::fs::read_to_string(&summary.file).unwrap();
         assert!(text.contains(&format!("mine note {tag}")), "{text}");
         assert!(!text.contains(&format!("other note {tag}")), "{text}");
+    }
+
+    /// A key in a note reaches the project file masked (M24d).
+    #[test]
+    fn writeback_masks_secrets() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping writeback_masks_secrets: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let project = format!("wb-key-{tag}");
+        // Built at run time, never a literal.
+        let key = format!("gh{}_{}", "p", "Zy7Wx6Vu5".repeat(4));
+        tx.execute(
+            "INSERT INTO memory_chunks (source_type, content, category, project_name, status)
+             VALUES ('manual', $1, 'decision', $2, 'active')",
+            &[&format!("deploy with {key} {tag}"), &project],
+        )
+        .expect("seed note");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(&project);
+        std::fs::create_dir_all(&root).unwrap();
+        let summary =
+            writeback(&mut tx, &Actor::shared_only(), &root, None, 1000).expect("writeback");
+        let text = std::fs::read_to_string(&summary.file).unwrap();
+        assert!(text.contains(&tag), "the note is written");
+        assert!(!text.contains(&key), "no clear key in the file");
+        assert!(crate::secrets::find(&text).is_empty());
+        assert!(text.contains("[secret ghp_•••"), "masked in place");
     }
 
     #[test]

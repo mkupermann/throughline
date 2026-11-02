@@ -206,6 +206,16 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Check the staged changes of the git repository in the current
+    /// directory for secrets, as the pre-commit hook does. Prints file,
+    /// line and kind of each, never the value, and exits 1 on a finding.
+    /// Fingerprints in `.secrets-allowlist` at the repository root pass.
+    CheckStaged {
+        /// Check every tracked file instead of the staged changes, and print
+        /// each finding's fingerprint for the allowlist.
+        #[arg(long)]
+        all: bool,
+    },
     /// Insert-only merge from a second database on this server (same
     /// connection, `--source-db` names the source database).
     MergeFrom {
@@ -1087,6 +1097,70 @@ fn main() -> Result<()> {
                 .context("connect to PostgreSQL")?;
             let summary = throughline::secrets::scan(&mut client, full)?;
             println!("{}", throughline::secrets::summary_line(&summary));
+        }
+        Command::CheckStaged { all } => {
+            let git = |args: &[&str]| -> Result<String> {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .output()
+                    .context("run git")?;
+                if !out.status.success() {
+                    anyhow::bail!(
+                        "git {} failed: {}",
+                        args.join(" "),
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            };
+            let root = git(&["rev-parse", "--show-toplevel"])?;
+            let allow_path = std::path::Path::new(root.trim()).join(".secrets-allowlist");
+            let allow = std::fs::read_to_string(&allow_path)
+                .map(|t| throughline::secrets::parse_allowlist(&t))
+                .unwrap_or_default();
+            if all {
+                let mut n = 0;
+                let files = git(&["ls-files", "-z"])?;
+                for file in files.split('\0').filter(|f| !f.is_empty()) {
+                    let path = std::path::Path::new(root.trim()).join(file);
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        continue; // binary or unreadable
+                    };
+                    // As git stores it: a Windows checkout may have CRLF, and a
+                    // key over several lines must give the same fingerprint.
+                    let text = text.replace("\r\n", "\n");
+                    for f in throughline::secrets::find(&text) {
+                        let fp = throughline::secrets::fingerprint(&f.value);
+                        if allow.contains(&fp) {
+                            continue;
+                        }
+                        let at = text.find(&f.value).unwrap_or(0);
+                        let line = text[..at].matches('\n').count() + 1;
+                        println!("secret-check: {file}:{line} {} {fp}", f.kind);
+                        n += 1;
+                    }
+                }
+                if n == 0 {
+                    println!("secret-check: ok");
+                    return Ok(());
+                }
+                std::process::exit(1);
+            }
+            let diff = git(&["diff", "--cached", "-U0", "--no-color", "--no-ext-diff"])?;
+            let found = throughline::secrets::check_staged(&diff, &allow);
+            if found.is_empty() {
+                println!("secret-check: ok");
+            } else {
+                for (file, line, kind) in &found {
+                    println!("secret-check: {file}:{line} {kind}");
+                }
+                eprintln!(
+                    "secret-check: {} secret(s) staged; unstage them, or add the fingerprint \
+                     of an invented test value to .secrets-allowlist",
+                    found.len()
+                );
+                std::process::exit(1);
+            }
         }
         Command::MergeFrom {
             source_db,

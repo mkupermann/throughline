@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### No secrets into a repository
+
+- `throughline check-staged` checks the staged changes for the ten secret kinds and exits 1 on a finding, printing file, line and kind, never the value. `--all` checks every tracked file and prints each finding's fingerprint. Fingerprints in `.secrets-allowlist` pass: the invented values of the PII tests are listed there.
+- The pre-commit framework runs it as the hook `secret-check`. `scripts/hooks/pre-commit` does the same as a plain git hook (`git config core.hooksPath scripts/hooks`). Both skip with a note when no Rust binary with `check-staged` is found.
+- CI runs gitleaks over every commit (`.gitleaks.toml`: default rules, the PII fixture files and two invented test strings allowed). The history scans clean.
+- Writing to AGENTS.md and the handoff brief replace every secret with `[secret <masked>]` before the text leaves: notes, session titles, first messages, open questions and the headline.
+- `.gitignore` covers local scratch files (`ask_*.json`, `tmp_m9/`, `*.dump` and others).
+
 ### Secrets view
 
 - A view **Secrets** (admin) lists what `scan-secrets` found: kind, masked value, first sighting, occurrences, project and a link to the session or the config path. Filters by kind and project, a text search over project, tool and path, sorted new to old or old to new. **Show** fetches one clear value through `/api/secrets/{id}/reveal`, which logs every call; **Hide** masks it again. On a narrow screen the button stays.
