@@ -227,6 +227,7 @@ pub fn run_eval<C: GenericClient>(
             known_at: None,
             limit: RANK_DEPTH,
             rank: Rank::Fulltext,
+            sources: &[],
         };
         let mut ranked = |q: &RecallQuery| -> Result<Vec<i64>> {
             Ok(recall::recall_with(client, q, emb.as_ref(), weights, now)?
@@ -588,6 +589,7 @@ pub fn run_locomo<C: GenericClient>(
                 known_at: None,
                 limit: depth,
                 rank,
+                sources: &[],
             };
             let result = recall::recall(client, &q, emb.as_ref())?;
             if result.degraded.is_some() {

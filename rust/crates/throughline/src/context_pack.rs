@@ -393,6 +393,9 @@ pub struct ContextRequest<'a> {
     pub project: &'a str,
     pub task: Option<&'a str>,
     pub budget: usize,
+    /// The `source_tool` values whose notes and sessions may appear
+    /// ([`crate::recall::parse_sources`]); empty: every source.
+    pub sources: &'a [String],
 }
 
 const DECISION_CATEGORIES: [&str; 3] = ["decision", "preference", "project_context"];
@@ -442,10 +445,12 @@ struct NoteView<'a> {
     source_at: Option<DateTime<Utc>>,
     conversation_id: Option<i64>,
     session_title: &'a Option<String>,
+    source_tool: Option<&'a str>,
 }
 
 /// `- [m#id · date · category] content (source: session "Title", date)`; the part in the last
-/// parentheses is left out for a note that does not come from a conversation.
+/// parentheses is left out for a note that does not come from a conversation. A note from a
+/// file, repository or page ([`DOCUMENT_SOURCES`]) says `document` instead of `session`.
 fn note_line(section: Section, n: &NoteView, origins: &mut HashMap<i64, Origin>) -> Line {
     let date = n.source_at.unwrap_or(n.valid_from);
     let mut text = format!(
@@ -461,8 +466,13 @@ fn note_line(section: Section, n: &NoteView, origins: &mut HashMap<i64, Origin>)
             title: n.session_title.as_deref().map(session_label),
             date: n.source_at,
         };
+        let kind = if n.source_tool.is_some_and(|t| DOCUMENT_SOURCES.contains(&t)) {
+            "document"
+        } else {
+            "session"
+        };
         text.push_str(&format!(
-            " (source: session \"{}\", {})",
+            " (source: {kind} \"{}\", {})",
             o.label(),
             ymd(date)
         ));
@@ -491,6 +501,7 @@ fn hit_line(section: Section, h: &RecallHit, origins: &mut HashMap<i64, Origin>)
             source_at: h.source_at,
             conversation_id: h.conversation_id,
             session_title: &h.session_title,
+            source_tool: h.source_tool.as_deref(),
         },
         origins,
     )
@@ -507,6 +518,7 @@ fn candidate_line(section: Section, c: &Candidate, origins: &mut HashMap<i64, Or
             source_at: c.source_at,
             conversation_id: c.conversation_id,
             session_title: &c.session_title,
+            source_tool: c.source_tool.as_deref(),
         },
         origins,
     )
@@ -573,6 +585,7 @@ pub fn build_context<C: GenericClient>(
         known_at: None,
         limit: RELEVANT_LIMIT,
         rank: DEFAULT_RANK,
+        sources: req.sources,
     };
     let loaded = candidates(client, CandidateFilter::Current, &query, emb)?;
     let task = req.task.map(str::trim).filter(|t| !t.is_empty());
@@ -635,7 +648,7 @@ pub fn build_context<C: GenericClient>(
         }
     }
 
-    sessions(client, req.project, &mut lines)?;
+    sessions(client, req.project, req.sources, &mut lines)?;
 
     let mut questions = 0;
     for c in &current {
@@ -653,7 +666,7 @@ pub fn build_context<C: GenericClient>(
         lines.push(candidate_line(Section::OpenQuestions, c, &mut origins));
     }
 
-    review(client, actor, req.project, &shown, &mut lines)?;
+    review(client, actor, req.project, req.sources, &shown, &mut lines)?;
 
     // Sources: the sessions behind the lines that made it into the pack, first appearance first.
     // With a task, "Relevant to the task" fills its share of the budget first.
@@ -694,10 +707,12 @@ pub fn build_context<C: GenericClient>(
 }
 
 /// Recent human sessions of the project: the summary as title, else the first user message.
-/// Documents ([`DOCUMENT_SOURCES`]) are not sessions.
+/// Documents ([`DOCUMENT_SOURCES`]) are not sessions. A source filter keeps the sessions of
+/// its tools.
 fn sessions<C: GenericClient>(
     client: &mut C,
     project: &str,
+    sources: &[String],
     lines: &mut Vec<Line>,
 ) -> anyhow::Result<()> {
     let rows = client.query(
@@ -710,9 +725,10 @@ fn sessions<C: GenericClient>(
            FROM conversations c
           WHERE c.project_name = $1 AND c.generated_by IS NULL
             AND NOT COALESCE(c.source_tool, '') = ANY($3)
+            AND (cardinality($4::text[]) = 0 OR c.source_tool = ANY($4::text[]))
           ORDER BY c.started_at DESC, c.id DESC
           LIMIT $2",
-        &[&project, &SESSION_LIMIT, &DOCUMENT_SOURCES],
+        &[&project, &SESSION_LIMIT, &DOCUMENT_SOURCES, &sources],
     )?;
     for r in rows {
         let id: i64 = r.get(0);
@@ -739,16 +755,19 @@ fn sessions<C: GenericClient>(
 }
 
 /// Notes that are stale or have lapsed and have no successor; replaced and forgotten notes stay out.
+/// A source filter keeps the notes extracted from conversations of its tools and every note
+/// without a conversation.
 fn review<C: GenericClient>(
     client: &mut C,
     actor: &Actor,
     project: &str,
+    sources: &[String],
     shown: &HashSet<i64>,
     lines: &mut Vec<Line>,
 ) -> anyhow::Result<()> {
     let skip: Vec<i64> = shown.iter().copied().collect();
     let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> =
-        vec![&project, &skip, &REVIEW_LIMIT];
+        vec![&project, &skip, &REVIEW_LIMIT, &sources];
     let seen = push_visibility(actor, "mc", &mut params);
     let rows = client.query(
         &format!(
@@ -760,6 +779,9 @@ fn review<C: GenericClient>(
             AND mc.superseded_by IS NULL
             AND NOT (mc.id = ANY($2))
             AND (mc.status = 'stale' OR mc.expires_at <= now() OR mc.valid_to <= now())
+            AND (cardinality($4::text[]) = 0 OR mc.source_type <> 'conversation'
+                 OR EXISTS (SELECT 1 FROM conversations rc
+                            WHERE rc.id = mc.source_id AND rc.source_tool = ANY($4::text[])))
             AND {seen}
           ORDER BY COALESCE(mc.valid_from, mc.source_at, mc.created_at) DESC, mc.id
           LIMIT $3"
@@ -1125,6 +1147,7 @@ mod tests {
                 project,
                 task,
                 budget: 8_000,
+                sources: &[],
             },
             None,
         )
@@ -1256,6 +1279,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
+            sources: &[],
         };
         // The default rank is cosine: the closest vector leads, word match or not.
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
@@ -1306,6 +1330,7 @@ mod tests {
             project: &p,
             task: Some("burrow survey"),
             budget: 8_000,
+            sources: &[],
         };
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
         let r = relevant_lines(&out);
@@ -1423,6 +1448,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 70,
+            sources: &[],
         };
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
         let d = decision_lines(&out);
@@ -1502,6 +1528,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
+            sources: &[],
         };
         let out = build_context(&mut tx, &Actor::local(), &req, Some(&emb)).unwrap();
         let d = decision_lines(&out);
@@ -1542,6 +1569,7 @@ mod tests {
             project: &p,
             task: Some("quokka habitat"),
             budget: 8_000,
+            sources: &[],
         };
         // No vector for the task: full text, and the pack says so.
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
@@ -1718,6 +1746,7 @@ mod tests {
                 project: &project,
                 task: Some("x"),
                 budget: 64,
+                sources: &[],
             },
             None,
         )
@@ -1795,6 +1824,7 @@ mod tests {
                     project: &p,
                     task: Some("secret"),
                     budget: 8_000,
+                    sources: &[],
                 },
                 None,
             )
@@ -1895,6 +1925,7 @@ mod tests {
             project: &p,
             task: Some("quokka"),
             budget: 300,
+            sources: &[],
         };
         let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
         let r = relevant_lines(&out);
@@ -2153,6 +2184,7 @@ mod tests {
                 project: &p,
                 task: Some("quokka"),
                 budget,
+                sources: &[],
             };
             let out = build_context(&mut tx, &Actor::local(), &req, None).unwrap();
             assert!(out.within_budget, "budget {budget}");
@@ -2237,5 +2269,99 @@ mod tests {
             brief.stats.memory_chunks, 1,
             "the note of the document counts"
         );
+    }
+
+    /// The source filter of the pack: notes and recent sessions of the named
+    /// tools, notes without a conversation, and a document note cited as a
+    /// document when no filter is set.
+    #[test]
+    fn context_pack_sources_filter() {
+        db_tx!("context_pack_sources_filter", tx);
+        let p = proj();
+        let mut conversation = |tool: &str, summary: &str, d: u32| -> i64 {
+            tx.query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, summary, source_tool) \
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                &[
+                    &uuid::Uuid::new_v4(),
+                    &format!("/fictional/{p}"),
+                    &day(d),
+                    &summary,
+                    &tool,
+                ],
+            )
+            .unwrap()
+            .get(0)
+        };
+        let claude = conversation("claude_code", "Claude session", 2);
+        let codex = conversation("codex", "Codex session", 3);
+        let file = conversation("markdown", "Harbour notes", 4);
+        let mut from_claude = seed("decided with claude", Some(&p), "decision", 5);
+        from_claude.source = Some(claude);
+        let mut from_codex = seed("decided with codex", Some(&p), "decision", 6);
+        from_codex.source = Some(codex);
+        let mut from_file = seed("decided in the harbour notes", Some(&p), "decision", 7);
+        from_file.source = Some(file);
+        let by_hand = seed("decided by hand", Some(&p), "decision", 8);
+        let mut stale_file = seed("stale rule from the harbour notes", Some(&p), "insight", 9);
+        stale_file.source = Some(file);
+        stale_file.status = "stale";
+        let ids = [
+            insert(&mut tx, &from_claude),
+            insert(&mut tx, &from_codex),
+            insert(&mut tx, &from_file),
+            insert(&mut tx, &by_hand),
+            insert(&mut tx, &stale_file),
+        ];
+        let pack = |tx: &mut postgres::Transaction<'_>, sources: &[String]| {
+            build_context(
+                tx,
+                &Actor::local(),
+                &ContextRequest {
+                    project: &p,
+                    task: None,
+                    budget: 8_000,
+                    sources,
+                },
+                None,
+            )
+            .unwrap()
+        };
+
+        let all = pack(&mut tx, &[]);
+        let mut decided = cited(&all, Section::Decisions);
+        decided.sort_unstable();
+        assert_eq!(decided, ids[..4]);
+        assert_eq!(cited(&all, Section::Review), [ids[4]]);
+        assert_eq!(cited(&all, Section::Sessions), [codex, claude]);
+        assert!(
+            all.text
+                .contains("decided in the harbour notes (source: document \"Harbour notes\""),
+            "{}",
+            all.text
+        );
+        assert!(
+            all.text
+                .contains("decided with codex (source: session \"Codex session\""),
+            "{}",
+            all.text
+        );
+
+        let sessions = pack(&mut tx, &["claude_code".to_string(), "codex".to_string()]);
+        let mut decided = cited(&sessions, Section::Decisions);
+        decided.sort_unstable();
+        assert_eq!(decided, [ids[0], ids[1], ids[3]], "{}", sessions.text);
+        assert!(
+            cited(&sessions, Section::Review).is_empty(),
+            "{}",
+            sessions.text
+        );
+        assert!(!sessions.text.contains("harbour"), "{}", sessions.text);
+
+        let codex_only = pack(&mut tx, &["codex".to_string()]);
+        assert_eq!(cited(&codex_only, Section::Sessions), [codex]);
+        let mut decided = cited(&codex_only, Section::Decisions);
+        decided.sort_unstable();
+        assert_eq!(decided, [ids[1], ids[3]]);
     }
 }
