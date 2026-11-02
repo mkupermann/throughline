@@ -129,10 +129,9 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *pg-env
-      # The image deliberately has no remote-bind bypass. Docker networking
-      # requires 0.0.0.0 in the container; the port mapping below is loopback.
+      # Docker networking requires 0.0.0.0 in the container; the port
+      # mapping below is loopback.
       THROUGHLINE_HOST: "0.0.0.0"
-      THROUGHLINE_ALLOW_REMOTE: "1"
       # local (default): one user, no sign-in; refuses to start on a database
       # with accounts or private notes. team: sign-in, roles, private notes;
       # needs an enabled admin (`throughline account add <name> --role admin`)
@@ -158,10 +157,18 @@ services:
       # Project Management is opt-in. Off unless .env sets THROUGHLINE_ENABLE_PM=1;
       # the knowledge pipeline (ingest, find, ask, export) never depends on it.
       THROUGHLINE_ENABLE_PM: "${THROUGHLINE_ENABLE_PM:-0}"
-      # This path is a named volume initialized with 0700 ownership in the
-      # image, so backups survive web-container replacement without becoming
-      # readable by other container users.
+      # Backups from the UI and `throughline backup` land here: the container
+      # side of the bind mount below (override the host folder with
+      # THROUGHLINE_BACKUP_DIR_HOST). The image creates the folder 0700 for
+      # the throughline user; on a bind mount the host folder's permissions
+      # apply instead — create it on the host so the container user can write.
+      THROUGHLINE_BACKUP_DIR: /var/lib/throughline/backups
+      # The older name for the same folder, read by the Python-era tools.
       CLAUDE_MEMORY_BACKUP_DIR: /var/lib/throughline/backups
+      # The host side of that mount, so the UI message after a backup can say
+      # where the dump appears on this machine (the pattern of
+      # THROUGHLINE_EXPORT_HOST_PATH below).
+      THROUGHLINE_BACKUP_HOST_PATH: "${THROUGHLINE_BACKUP_DIR_HOST:-./backups}"
       # The Markdown export is the one thing this service writes for a person
       # to read, so it needs somewhere on the host. Everything else here is a
       # read-only source mount or a named volume, and the container's own
@@ -237,7 +244,9 @@ services:
       # Read-only, damit die Ansicht KI-Konfiguration Projektregeln und
       # Skill-Ziele sieht; fehlt der Ordner, legt Docker ihn leer an.
       - ${THROUGHLINE_PROJECTS_DIR:-~/Documents/GitHub}:/home/throughline/Documents/GitHub:ro
-      - backup_data:/var/lib/throughline/backups
+      # Writable, and on the host: override with THROUGHLINE_BACKUP_DIR_HOST
+      # to keep the dumps in a vault or backup folder.
+      - ${THROUGHLINE_BACKUP_DIR_HOST:-./backups}:/var/lib/throughline/backups
       # Writable, and on the host: override with THROUGHLINE_EXPORT_DIR to send
       # the export straight into a vault or notes folder.
       - ${THROUGHLINE_EXPORT_DIR:-./exports}:/home/throughline/exports
@@ -323,8 +332,5 @@ volumes:
   # Database storage — this volume contains all ingested memory data.
   postgres_data:
     name: throughline_postgres_data
-  # Private logical database dumps created by `throughline backup` in web.
-  backup_data:
-    name: throughline_backup_data
   ollama_data:
     name: throughline_ollama_data

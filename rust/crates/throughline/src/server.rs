@@ -252,13 +252,21 @@ pub(crate) fn unauthorized(detail: &str) -> Response {
 /// that from a Tokio worker panics ("Cannot start a runtime from within a
 /// runtime") and poisons the shared client. `spawn_blocking` runs the closure
 /// on the blocking pool, where `block_on` is legal.
+///
+/// A restarted Postgres leaves the shared client closed. When the client is
+/// closed before the work runs, or the work fails with a connection error,
+/// `with_db` builds one fresh connection (`DbConfig::from_env().connect()`),
+/// replaces the client in the mutex and runs the closure one more time. That
+/// is the only retry: a second failure is handed back to the caller, and a
+/// SQL error never triggers a retry at all. The closure is `FnMut` so it can
+/// run again on the rebuilt connection.
 // `Response` (axum) is the error type and inherently larger than the lint
 // threshold; boxing it would churn every call site for no benefit.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn with_db<T, F>(state: &AppState, f: F) -> Result<T, Response>
 where
     T: Send + 'static,
-    F: FnOnce(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
+    F: FnMut(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
 {
     let db = state.db.clone();
     let team = state.auth_mode == crate::access::AuthMode::Team;
@@ -272,7 +280,22 @@ where
             let _ = client.batch_execute("ROLLBACK");
             client
         });
-        f(&mut client)
+        // One recovery per call, never a second: rebuild once when the client
+        // is closed (the server was restarted or the backend killed) or when
+        // the closure failed on the connection rather than on its SQL, then
+        // run the closure one final time and keep that answer.
+        let mut f = f;
+        let mut rebuilt = false;
+        if client.is_closed() {
+            *client = crate::config::DbConfig::from_env().connect()?;
+            rebuilt = true;
+        }
+        let mut result = f(&mut client);
+        if !rebuilt && result.as_ref().err().is_some_and(connection_error) {
+            *client = crate::config::DbConfig::from_env().connect()?;
+            result = f(&mut client);
+        }
+        result
     })
     .await;
     match joined {
@@ -302,6 +325,17 @@ where
             join.to_string(),
         )),
     }
+}
+
+/// A failure of the connection rather than of the SQL: `postgres` carries no
+/// database error (the server never answered). SQL errors are the caller's
+/// business and are never retried.
+fn connection_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<postgres::Error>()
+            .is_some_and(|pg| pg.as_db_error().is_none())
+    })
 }
 
 /// A 500 with the error code only. Team mode answers this way: database
@@ -1633,8 +1667,20 @@ async fn memory_handler(
         };
     let team = state.auth_mode == crate::access::AuthMode::Team;
     match with_db(&state, move |client| {
+        // Cloned, not moved: `with_db` may run the closure a second time on a
+        // rebuilt connection (M26d).
         list_memory_rows(
-            client, &actor, q, cat, status, favorites, limit, offset, dir, valid_at, known_at,
+            client,
+            &actor,
+            q.clone(),
+            cat.clone(),
+            status.clone(),
+            favorites,
+            limit,
+            offset,
+            dir,
+            valid_at,
+            known_at,
         )
     })
     .await
@@ -3283,8 +3329,19 @@ async fn operate_handler(
                 .to_string()
         });
         let message = match tokio::task::spawn_blocking(move || {
-            crate::ops_jobs::backup_database(std::path::Path::new(&dir), 14)
-                .map(|path| format!("backup: {}", path.display()))
+            crate::ops_jobs::backup_database(std::path::Path::new(&dir), 14).map(|path| {
+                let mut message = format!("backup: {}", path.display());
+                // In Docker that path is a container path. Name where the
+                // dump appears on the host, the way the export panel does
+                // with THROUGHLINE_EXPORT_HOST_PATH.
+                let host = std::env::var("THROUGHLINE_BACKUP_HOST_PATH").unwrap_or_default();
+                let host = host.trim().trim_end_matches(['/', '\\']);
+                if !host.is_empty() {
+                    let file = path.file_name().unwrap_or_default().to_string_lossy();
+                    message = format!("{message} (appears on this machine under {host}/{file})");
+                }
+                message
+            })
         })
         .await
         {
@@ -8283,6 +8340,71 @@ mod tests {
             .block_on(axum::body::to_bytes(resp.into_body(), 1024 * 1024))
             .expect("body");
         serde_json::from_slice(&body).expect("json")
+    }
+
+    /// A restarted Postgres leaves the shared client closed. The next
+    /// [`with_db`] call rebuilds the connection and answers instead of
+    /// handing the caller an error (M26d).
+    #[test]
+    fn with_db_answers_after_the_backend_is_killed() {
+        let Some(client) = test_db() else {
+            eprintln!(
+                "skipping with_db_answers_after_the_backend_is_killed: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let pid: i32 = rt
+            .block_on(with_db(&state, |client| {
+                Ok(client.query_one("SELECT pg_backend_pid()", &[])?.get(0))
+            }))
+            .expect("the first call answers");
+        // Kill that backend from a second connection, as a restart would.
+        let mut killer = test_db().expect("second connection");
+        killer
+            .execute("SELECT pg_terminate_backend($1)", &[&pid])
+            .expect("terminate");
+        // Wait until the shared client has noticed its connection is gone;
+        // without that the next call could still slip through on the dead
+        // connection and never exercise the rebuild.
+        for _ in 0..100 {
+            if state.db.lock().expect("db lock").is_closed() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let one: i32 = rt
+            .block_on(with_db(&state, |client| {
+                Ok(client.query_one("SELECT 1", &[])?.get(0))
+            }))
+            .expect("with_db reconnects and answers");
+        assert_eq!(one, 1);
+    }
+
+    /// A SQL error is the caller's business: [`with_db`] hands it back and
+    /// runs the closure exactly once, no retry (M26d).
+    #[test]
+    fn with_db_does_not_retry_a_sql_error() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping with_db_does_not_retry_a_sql_error: no PostgreSQL reachable");
+            return;
+        };
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = runs.clone();
+        let outcome = rt.block_on(with_db(&state, move |client| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            client.batch_execute("SELECT * FROM no_such_table_m26d")?;
+            Ok(())
+        }));
+        assert!(outcome.is_err(), "the SQL error surfaces");
+        assert_eq!(
+            runs.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the closure runs exactly once"
+        );
     }
 
     /// A document section has no speaker: the transcript shows a file icon

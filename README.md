@@ -117,7 +117,7 @@ docker compose up -d migrate web
 docker compose exec web throughline doctor
 ```
 
-Rust reads `THROUGHLINE_BACKUP_DIR`, not the older `CLAUDE_MEMORY_BACKUP_DIR` variable still present in Compose. The explicit `--dir` keeps the backup out of the container's disposable layer. Keep off-host copies and verify restoration.
+Rust reads `THROUGHLINE_BACKUP_DIR`, not the older `CLAUDE_MEMORY_BACKUP_DIR` variable still present in Compose. The explicit `--dir` keeps the backup out of the container's disposable layer. The folder is a bind mount: a dump written to `/var/lib/throughline/backups` appears in `./backups` next to `docker-compose.yml` on the host (override the host folder with `THROUGHLINE_BACKUP_DIR_HOST`). Keep off-host copies and verify restoration.
 
 ```bash
 docker compose exec web throughline export-markdown --out /home/throughline/exports
