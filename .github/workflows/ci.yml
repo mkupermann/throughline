@@ -458,3 +458,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Dockerfile.rust
         run: docker build -f Dockerfile.rust .
+
+  secret-scan:
+    name: No secrets in the history (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks over every commit
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.24.2 \
+            git /repo --config /repo/.gitleaks.toml --redact --no-banner

@@ -264,10 +264,30 @@ pub fn build_handoff<C: GenericClient>(
         tools.join(", ")
     );
 
+    // The brief goes to the clipboard, the UI and project files: no key
+    // from a note or a session leaves in it (M24d).
+    let clean = |s: String| crate::secrets::redact(&s).0;
+    let recent_sessions: Vec<SessionNote> = recent_sessions
+        .into_iter()
+        .map(|s| SessionNote {
+            first_user: clean(s.first_user),
+            summary: s.summary.map(clean),
+            ..s
+        })
+        .collect();
+    let decisions: Vec<DecisionNote> = decisions
+        .into_iter()
+        .map(|d| DecisionNote {
+            content: clean(d.content),
+            ..d
+        })
+        .collect();
+    let open_questions: Vec<String> = open_questions.into_iter().map(clean).collect();
+    let stale_memory: Vec<String> = stale_memory.into_iter().map(clean).collect();
     Ok(HandoffBrief {
         project: project.map(|s| s.to_string()),
         generated_at: chrono::Utc::now(),
-        headline,
+        headline: clean(headline),
         recent_sessions,
         decisions,
         open_questions,
@@ -577,6 +597,65 @@ mod tests {
             ]
         );
         assert!(clipboard_candidates("plan9").is_empty());
+    }
+
+    /// No key from a note or a session's first message leaves in the brief
+    /// (M24d), in the JSON or the text.
+    #[test]
+    fn handoff_masks_secrets() {
+        use crate::access::team_test::note;
+        let Some(mut client) = crate::config::DbConfig::from_env().connect().ok() else {
+            eprintln!("skipping handoff_masks_secrets: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let project = format!("ho-key-{}", uuid::Uuid::new_v4().simple());
+        let p = Some(project.as_str());
+        // Built at run time, never a literal.
+        let gh = format!("gh{}_{}", "p", "Zy7Wx6Vu5".repeat(4));
+        let aws = format!("{}{}", "AKIA", "QWER7TYU8IOP9ASD");
+        note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("decided to rotate {gh}"),
+            "decision",
+            p,
+        );
+        note(
+            &mut tx,
+            None,
+            "shared",
+            &format!("is {aws} still live?"),
+            "insight",
+            p,
+        );
+        let conv: i64 = tx
+            .query_one(
+                "INSERT INTO conversations (session_id, project_path, started_at, message_count) \
+                 VALUES (gen_random_uuid(), $1, now(), 1) RETURNING id",
+                &[&project],
+            )
+            .unwrap()
+            .get(0);
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) \
+             VALUES ($1, 'user', $2, now())",
+            &[
+                &conv,
+                &format!("please call the api with {gh} and fix the deploy"),
+            ],
+        )
+        .unwrap();
+        let brief = build_handoff(&mut tx, &Actor::local(), p, 8).expect("handoff");
+        let json = serde_json::to_string(&brief).unwrap();
+        let text = render_text(&brief);
+        for (what, s) in [("json", &json), ("text", &text)] {
+            assert!(!s.contains(&gh) && !s.contains(&aws), "{what}: a clear key");
+            assert!(crate::secrets::find(s).is_empty(), "{what}");
+        }
+        assert!(json.contains("[secret ghp_•••"), "{json}");
+        assert!(json.contains("[secret AKIA•••"), "{json}");
     }
 
     #[test]

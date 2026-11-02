@@ -29,6 +29,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: secret-check
+        name: refuse staged secrets (throughline check-staged)
+        entry: sh scripts/hooks/pre-commit
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: no-stray-toplevel
         name: refuse files that are not part of this project
         entry: python3 scripts/check_toplevel.py

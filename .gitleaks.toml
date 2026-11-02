@@ -1,0 +1,20 @@
+# gitleaks for this repository: the default rules, minus the files that hold
+# invented test values on purpose. The same values are listed by fingerprint
+# in .secrets-allowlist for `throughline check-staged`.
+title = "throughline"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Invented test values for the PII and secret scanners"
+paths = [
+  '''rust/crates/throughline/src/pii\.rs''',
+  '''tests/test_pii\.py''',
+  '''\.secrets-allowlist''',
+]
+# Invented values in tests that the generic rule reads as keys.
+regexes = [
+  '''Sup3rGeheim2026''',
+  '''s3cret-Key_0123456789''',
+]

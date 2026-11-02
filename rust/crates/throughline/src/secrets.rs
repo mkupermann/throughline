@@ -128,6 +128,99 @@ pub fn mask(kind: &str, value: &str) -> String {
     format!("{head}•••{tail}")
 }
 
+/// `text` with every value [`find`] sees replaced by `[secret <masked>]`,
+/// and how many values were replaced. For text that leaves Throughline for
+/// a file in a project (writeback, handoff).
+pub fn redact(text: &str) -> (String, usize) {
+    let found = find(text);
+    if found.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let mut out = text.to_string();
+    // Longest first, so a value inside another is not cut apart.
+    let mut sorted = found;
+    sorted.sort_by_key(|f| std::cmp::Reverse(f.value.len()));
+    for f in &sorted {
+        out = out.replace(&f.value, &format!("[secret {}]", mask(f.kind, &f.value)));
+    }
+    (out, sorted.len())
+}
+
+/// The secrets in the added lines of `diff` (`git diff --cached -U0`) whose
+/// fingerprint is not in `allow`: file, line in the new version, kind. A
+/// value is never part of the result. A private key spans lines, so the
+/// added lines of one hunk are checked together and a key counts at the
+/// line where it starts.
+pub fn check_staged(diff: &str, allow: &HashSet<String>) -> Vec<(String, usize, &'static str)> {
+    let mut out = Vec::new();
+    let mut file = String::new();
+    // The added lines of the current hunk: (line number, text).
+    let mut hunk: Vec<(usize, &str)> = Vec::new();
+    let mut next = 0usize;
+    // A "+++ " line is a file header only right after "--- "; inside a hunk
+    // it is an added line that starts with "++ ".
+    let mut header = false;
+    let flush = |file: &str, hunk: &mut Vec<(usize, &str)>, out: &mut Vec<_>| {
+        if hunk.is_empty() {
+            return;
+        }
+        let joined: String = hunk.iter().map(|(_, l)| *l).collect::<Vec<_>>().join("\n");
+        for f in find(&joined) {
+            if allow.contains(&fingerprint(&f.value)) {
+                continue;
+            }
+            let at = joined.find(&f.value).unwrap_or(0);
+            let row = joined[..at].matches('\n').count();
+            out.push((file.to_string(), hunk[row].0, f.kind));
+        }
+        hunk.clear();
+    };
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            flush(&file, &mut hunk, &mut out);
+            header = true;
+            continue;
+        }
+        if header {
+            if let Some(path) = line.strip_prefix("+++ ") {
+                file = path.strip_prefix("b/").unwrap_or(path).to_string();
+                header = false;
+            }
+            // "--- a/…", "index …", "new file mode …" and the like.
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("@@ ") {
+            flush(&file, &mut hunk, &mut out);
+            // "@@ -a,b +c,d @@": the new version starts at line c.
+            next = rest
+                .split_whitespace()
+                .find_map(|p| p.strip_prefix('+'))
+                .and_then(|p| p.split(',').next())
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0);
+        } else if let Some(added) = line.strip_prefix('+') {
+            hunk.push((next, added));
+            next += 1;
+        } else if !line.starts_with('-') && !line.starts_with('\\') {
+            next += 1;
+        }
+    }
+    flush(&file, &mut hunk, &mut out);
+    out
+}
+
+/// Fingerprints from an allowlist file: one per line, 64 hex characters,
+/// anything after them (a `#` comment) ignored. Blank and `#` lines skip.
+pub fn parse_allowlist(text: &str) -> HashSet<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(|h| h.to_ascii_lowercase())
+        .collect()
+}
+
 /// What one scan did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ScanSummary {
@@ -523,6 +616,113 @@ mod tests {
         assert!(find("write to anna.berg@kupermann.com").is_empty());
         assert!(find("PASSWORD=Sup3rGeheim2026").is_empty());
         assert!(find("/Users/anna/project").is_empty());
+    }
+
+    #[test]
+    fn redact_replaces_and_counts() {
+        let gh = sample("github_token");
+        let aws = sample("aws_key_id");
+        let text = format!("use {gh} and {aws}, then {gh} again");
+        let (out, n) = redact(&text);
+        assert_eq!(n, 2, "two distinct values");
+        assert!(find(&out).is_empty(), "{out}");
+        assert_eq!(out.matches("[secret ").count(), 3, "{out}");
+        assert!(out.contains(&format!("[secret {}]", mask("github_token", &gh))));
+        let (same, zero) = redact("nothing here");
+        assert_eq!((same.as_str(), zero), ("nothing here", 0));
+    }
+
+    /// A diff as `git diff --cached -U0` prints it.
+    fn diff_of(file: &str, start: usize, added: &[&str], removed: &[&str]) -> String {
+        let mut d = format!(
+            "diff --git a/{file} b/{file}\nindex 1111111..2222222 100644\n--- a/{file}\n+++ b/{file}\n@@ -{start},{} +{start},{} @@\n",
+            removed.len(),
+            added.len()
+        );
+        for r in removed {
+            d.push_str(&format!("-{r}\n"));
+        }
+        for a in added {
+            d.push_str(&format!("+{a}\n"));
+        }
+        d
+    }
+
+    #[test]
+    fn check_staged_reports_file_line_and_kind_only() {
+        let gh = sample("github_token");
+        let added = ["first", "", &format!("token = \"{gh}\"")];
+        let diff = diff_of("src/app.rs", 10, &added, &[]);
+        let found = check_staged(&diff, &HashSet::new());
+        assert_eq!(found, vec![("src/app.rs".to_string(), 12, "github_token")]);
+        assert!(!format!("{found:?}").contains(&gh));
+    }
+
+    #[test]
+    fn check_staged_ignores_removed_lines_and_headers() {
+        let gh = sample("github_token");
+        let removed = format!("old = \"{gh}\"");
+        let diff = diff_of("src/app.rs", 3, &["clean"], &[&removed]);
+        assert!(check_staged(&diff, &HashSet::new()).is_empty());
+        // An added line that starts with "++ " is content, not a file header.
+        let plus = format!("++ {gh}");
+        let diff = diff_of("notes.md", 1, &[&plus], &[]);
+        assert_eq!(
+            check_staged(&diff, &HashSet::new()),
+            vec![("notes.md".to_string(), 1, "github_token")]
+        );
+    }
+
+    #[test]
+    fn check_staged_passes_allowlisted_fingerprints() {
+        let gh = sample("github_token");
+        let aws = sample("aws_key_id");
+        let diff = diff_of("t.py", 1, &[&gh, &aws], &[]);
+        let allow = parse_allowlist(&format!(
+            "# comment\n\n{}  # t.py:1 github_token\nnot-a-fingerprint\n",
+            fingerprint(&gh)
+        ));
+        assert_eq!(allow.len(), 1);
+        assert_eq!(
+            check_staged(&diff, &allow),
+            vec![("t.py".to_string(), 2, "aws_key_id")]
+        );
+    }
+
+    #[test]
+    fn check_staged_finds_a_private_key_across_lines() {
+        let key = sample("private_key");
+        let lines: Vec<&str> = key.lines().collect();
+        let mut added = vec!["intro"];
+        added.extend(lines.iter().copied());
+        let diff = diff_of("id_test", 1, &added, &[]);
+        assert_eq!(
+            check_staged(&diff, &HashSet::new()),
+            vec![("id_test".to_string(), 2, "private_key")]
+        );
+    }
+
+    /// The invented values in pii.rs and tests/test_pii.py are on the
+    /// repository's allowlist: staging both files whole reports nothing.
+    #[test]
+    fn repository_allowlist_covers_the_pii_fixtures() {
+        let allow = parse_allowlist(include_str!("../../../../.secrets-allowlist"));
+        for (file, text) in [
+            ("rust/crates/throughline/src/pii.rs", include_str!("pii.rs")),
+            (
+                "tests/test_pii.py",
+                include_str!("../../../../tests/test_pii.py"),
+            ),
+        ] {
+            let lines: Vec<&str> = text.lines().collect();
+            let diff = diff_of(file, 1, &lines, &[]);
+            assert!(
+                !check_staged(&diff, &HashSet::new()).is_empty(),
+                "{file} holds fixtures"
+            );
+            let left = check_staged(&diff, &allow);
+            assert!(left.is_empty(), "{file}: {left:?}");
+        }
     }
 
     #[test]

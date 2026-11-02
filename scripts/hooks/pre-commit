@@ -1,0 +1,19 @@
+#!/bin/sh
+# Refuse a commit that stages a secret. Enable once per clone:
+#   git config core.hooksPath scripts/hooks
+# Prints file, line and kind of each finding, never the value.
+root=$(git rev-parse --show-toplevel) || exit 1
+bin=""
+# The repository's own Rust build first: another `throughline` on the PATH
+# (the Python CLI) has no check-staged.
+for cand in "$root/rust/target/release/throughline" "$root/rust/target/release/throughline.exe" throughline; do
+  if "$cand" check-staged --help >/dev/null 2>&1; then
+    bin="$cand"
+    break
+  fi
+done
+if [ -z "$bin" ]; then
+  echo "secret check skipped: no throughline binary with check-staged found" >&2
+  exit 0
+fi
+exec "$bin" check-staged

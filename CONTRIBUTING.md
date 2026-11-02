@@ -149,6 +149,25 @@ Postgres. Run them with:
 make test-integration
 ```
 
+### Secret check
+
+No key or token may reach the repository. The hook `secret-check` runs
+`throughline check-staged` on the staged changes and refuses the commit on a
+finding. It prints file, line and kind, never the value. It needs the Rust
+binary: the release build in `rust/target/release` first, else a `throughline`
+on the `PATH` that knows `check-staged` (the Python CLI does not). Without one
+the check is skipped with a note. Without the `pre-commit` framework, the same
+script works as a plain git hook:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+An invented test value that must stay in the code goes into
+`.secrets-allowlist` by fingerprint. `throughline check-staged --all` checks
+every tracked file and prints the fingerprint of each finding. CI runs
+gitleaks over the whole history with `.gitleaks.toml`.
+
 ## Running the CI checks locally
 
 ```bash
