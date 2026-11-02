@@ -913,7 +913,7 @@ High tide at nine.
         let found = adapter.discover().unwrap();
         let rel: Vec<String> = found
             .iter()
-            .map(|p| slash_path(&p.strip_prefix(&root).unwrap()))
+            .map(|p| slash_path(p.strip_prefix(&root).unwrap()))
             .collect();
         assert_eq!(
             rel,
@@ -966,7 +966,7 @@ High tide at nine.
         for (path, conv) in found.iter().zip(&convs) {
             let path_str = path.to_string_lossy();
             assert_eq!(conv.source_tool.as_deref(), Some(NAME));
-            let rel = slash_path(&path.strip_prefix(&root).unwrap());
+            let rel = slash_path(path.strip_prefix(&root).unwrap());
             assert_eq!(
                 conv.session_id,
                 stable_uuid(&NS, None, &format!("field-notes/{rel}")),
@@ -1307,7 +1307,7 @@ High tide at nine.
                 &format!("notes:./docs:~other/notes:{}", notes.display()),
                 Some(home.as_path())
             ),
-            [notes.clone()]
+            std::slice::from_ref(&notes)
         );
         assert!(parse_roots("~/notes:~", None).is_empty());
 
