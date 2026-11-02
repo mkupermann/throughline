@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Search and ask refuse an unusable question vector
+
+- Search and `ask` check the question vector as `recall` does: the size the model's profile gives, every value finite, a norm above zero. A vector that fails reaches no SQL. Before, pgvector refused it inside the query (a 500 for every semantic search, and a failed transaction for the lexical half that followed), and a zero norm ranked by id.
+- Hybrid search and `ask` fall back to the lexical half and keep the reason (`semantic_skipped` in `ask`). `/api/search?mode=semantic` answers 502 `bad_query_vector` with the model's name. `throughline search --semantic` prints the reason and searches lexically.
+
 ### Sources: Markdown folders, git repositories, web pages, Gemini CLI, Copilot Chat
 
 Setup, limits and caveats are in [docs/USAGE.md](docs/USAGE.md#documents-repositories-and-web-pages), the container side in [docs/INSTALLATION.md](docs/INSTALLATION.md#mounts-for-documents-gemini-cli-and-copilot-chat).

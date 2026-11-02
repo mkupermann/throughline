@@ -776,20 +776,27 @@ fn main() -> Result<()> {
             if semantic {
                 match embedding::resolve() {
                     Ok(backend) => {
-                        let hits = generate_embeddings::semantic_search(
+                        match generate_embeddings::semantic_search(
                             &mut client,
                             &backend,
                             &query,
                             limit,
-                        )?;
-                        if hits.is_empty() {
-                            println!("no matches");
-                            return Ok(());
+                        ) {
+                            Ok(hits) => {
+                                if hits.is_empty() {
+                                    println!("no matches");
+                                    return Ok(());
+                                }
+                                for (id, snippet, score) in hits {
+                                    println!("[{score:.3}] #{id} {}", snippet.replace('\n', " "));
+                                }
+                                return Ok(());
+                            }
+                            Err(e) if e.downcast_ref::<recall::BadQueryVector>().is_some() => {
+                                eprintln!("semantic search unavailable ({e}); using lexical")
+                            }
+                            Err(e) => return Err(e),
                         }
-                        for (id, snippet, score) in hits {
-                            println!("[{score:.3}] #{id} {}", snippet.replace('\n', " "));
-                        }
-                        return Ok(());
                     }
                     Err(e) => eprintln!("semantic search unavailable ({e}); using lexical"),
                 }

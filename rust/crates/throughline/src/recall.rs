@@ -379,6 +379,22 @@ fn check_query_vector(vector: &[f32], dim: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// [`BadQueryVector`] for a question vector of `backend` that the ranking
+/// cannot use. Search and `ask` call this before any vector reaches SQL: a
+/// refused statement fails the caller's transaction, and a zero norm ranks
+/// by id.
+pub(crate) fn refuse_bad_query_vector(
+    backend: &crate::embedding::EmbeddingBackend,
+    vector: &[f32],
+) -> anyhow::Result<()> {
+    check_query_vector(vector, backend.dim).map_err(|reason| {
+        anyhow::Error::new(BadQueryVector {
+            model: backend.model.clone(),
+            reason,
+        })
+    })
+}
+
 /// [`query_embedding`] with resolve and embed passed in, so tests need no Ollama.
 pub fn query_embedding_with(
     resolve: impl FnOnce() -> anyhow::Result<crate::embedding::EmbeddingBackend>,
@@ -399,12 +415,7 @@ pub fn query_embedding_with(
         Err(e) if refused(&e) => return Err(e),
         Err(_) => return Ok(None),
     };
-    if let Err(reason) = check_query_vector(&vector, backend.dim) {
-        return Err(anyhow::Error::new(BadQueryVector {
-            model: backend.model,
-            reason,
-        }));
-    }
+    refuse_bad_query_vector(&backend, &vector)?;
     Ok(Some(QueryEmbedding {
         model: backend.model,
         column: backend.column,
@@ -443,6 +454,66 @@ pub(crate) mod test_ollama {
             }
         });
         at(&format!("http://127.0.0.1:{port}"), f)
+    }
+
+    /// A local Ollama that lists the configured embedding model and answers
+    /// every embed with `vector`. Returns its base URL. The thread outlives
+    /// the test.
+    pub(crate) fn embedding(vector: Vec<f32>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("free local port");
+        let port = listener.local_addr().expect("local addr").port();
+        let tags = serde_json::json!({
+            "models": [{ "name": crate::embedding::configured_model() }]
+        })
+        .to_string();
+        let embed = serde_json::json!({ "embeddings": [vector] }).to_string();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                // Read the head, then as much body as Content-Length says.
+                loop {
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some(head_end) = text.find("\r\n\r\n") {
+                        let length = text[..head_end]
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        if request.len() >= head_end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let text = String::from_utf8_lossy(&request);
+                let body = if text.starts_with("GET /api/tags") {
+                    &tags
+                } else {
+                    &embed
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Runs `f` with `OLLAMA_HOST` on [`embedding`].
+    pub(crate) fn answering<T>(vector: Vec<f32>, f: impl FnOnce() -> T) -> T {
+        at(&embedding(vector), f)
     }
 
     /// Runs `f` with `OLLAMA_HOST` set to `url`. The old value comes back
