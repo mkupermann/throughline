@@ -318,8 +318,9 @@ whether a question about a file finds that file. Web pages were not measured.
   the same files kept in two folders) and the repositories. That misses the
   bar. The consequence is the source filter (`sources`, "Sessions only" in the
   memory view, [USAGE.md](USAGE.md#recall-finding-notes-by-meaning)); its default is every
-  source, so without it the loss stays. The set was not run again with the
-  filter.
+  source, so without it the loss stays. Run again with `--sources sessions`
+  on the same copy: cosine 70, weighted 70, full text 37 of 74, the numbers
+  from before the import.
 - **Finding a file (bar: 70 % hit@5 at file level, no project filter).** 10
   questions on 10 of the drawn files, paraphrased, each answer in exactly one
   file; written by the measuring side and approved by the owner, not written
