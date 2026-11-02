@@ -9,7 +9,7 @@ use throughline::{
     conflicts, context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
     extract_memory, generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
     memory_writeback, merge_from, migrate, ops_jobs, project_instructions, recall, recall_eval,
-    reflect_memory, repair, retention, search, server, stale_digest, temporal, types,
+    reflect_memory, repair, retention, search, server, stale_digest, temporal,
 };
 
 #[derive(Parser)]
@@ -907,36 +907,13 @@ fn main() -> Result<()> {
             let mut client = config::DbConfig::from_env()
                 .connect()
                 .context("connect to PostgreSQL")?;
-            let ids = generate_titles::untitled_conversations(&mut client, limit)?;
-            if let Ok(backend) = llm::resolve_backend() {
-                llm::ensure_local_or_allowed(&backend)?;
+            let backend = llm::resolve_backend().ok();
+            if let Some(b) = &backend {
+                llm::ensure_local_or_allowed(b)?;
             }
-            let mut titled = 0usize;
-            for id in ids {
-                let msgs = client.query(
-                    r#"
-                    SELECT role::text, COALESCE(content,'') FROM messages
-                    WHERE conversation_id = $1 ORDER BY created_at, id
-                    "#,
-                    &[&id],
-                )?;
-                let messages: Vec<types::NormalisedMessage> = msgs
-                    .into_iter()
-                    .map(|r| types::NormalisedMessage {
-                        role: r.get(0),
-                        content: r.get(1),
-                        ..Default::default()
-                    })
-                    .collect();
-                let title = generate_titles::title_messages(&messages)
-                    .unwrap_or_else(|_| generate_titles::fallback_title(&messages));
-                client.execute(
-                    "UPDATE conversations SET summary = $2, updated_at = now() WHERE id = $1",
-                    &[&id, &title],
-                )?;
-                titled += 1;
-            }
-            println!("titled {titled} conversation(s)");
+            let (titled, failed) =
+                generate_titles::run_titling(&mut client, limit, backend.as_ref())?;
+            println!("titled {titled} conversation(s), failed {failed}");
         }
         Command::ExportMarkdown {
             out,
