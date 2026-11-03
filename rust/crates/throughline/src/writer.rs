@@ -207,13 +207,14 @@ pub fn already_ingested<C: GenericClient>(
 }
 
 /// The hash of the version of `path` that was stored last: the newest
-/// ledger row with records ([`record_ingest`] stamps each write). A file
+/// ledger row ([`record_ingest`] stamps each write), also one that stored
+/// no records, so an empty version is not read again on every run. A file
 /// whose hash differs from it is read again, even when the ledger knows the
 /// hash from an earlier version (v1, then v2, then v1 again).
 pub fn current_hash<C: GenericClient>(client: &mut C, path: &Path) -> Result<Option<String>> {
     let rows = client.query(
         "SELECT file_hash FROM ingestion_log \
-         WHERE file_path = $1 AND COALESCE(record_count, 0) <> 0 \
+         WHERE file_path = $1 \
          ORDER BY ingested_at DESC NULLS LAST, id DESC LIMIT 1",
         &[&path.to_string_lossy().to_string()],
     )?;
@@ -382,6 +383,23 @@ mod tests {
             .unwrap()
             .get(0);
         assert_eq!(summary.as_deref(), Some("generated title"));
+    }
+
+    #[test]
+    fn current_hash_counts_a_version_without_records() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping current_hash_counts_a_version_without_records: no PostgreSQL");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        let path = Path::new("/ledger-test/empty-version.md");
+        record_ingest(&mut tx, path, "h-three-records", 3).unwrap();
+        record_ingest(&mut tx, path, "h-no-records", 0).unwrap();
+        assert_eq!(
+            current_hash(&mut tx, path).unwrap().as_deref(),
+            Some("h-no-records"),
+            "the version stored last counts, even one without records"
+        );
     }
 
     #[test]

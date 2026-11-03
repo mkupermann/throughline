@@ -390,7 +390,9 @@ fn ingest_repo<C: GenericClient>(
         return Ok(None);
     };
     let key = PathBuf::from(format!("{NAME}:{}", root.display()));
-    if matches!(w::already_ingested(client, &key, &fingerprint)?, Some(n) if n != 0) {
+    // The version stored last, not any version ever seen: a branch reset to
+    // an earlier commit moves the fingerprint back and is read again.
+    if w::current_hash(client, &key)?.as_deref() == Some(fingerprint.as_str()) {
         return Ok(None);
     }
     let (commits, total) = source.read(root)?;
@@ -920,6 +922,43 @@ mod tests {
         // A merge lists no files.
         assert_eq!(rows[29].2, "Merge branch 'soundings'");
         assert_eq!(rows[29].5["files_changed"], 0);
+    }
+
+    #[test]
+    fn git_branch_reset_to_an_earlier_commit_is_read_again() {
+        let test = "git_branch_reset_to_an_earlier_commit_is_read_again";
+        if git_missing(test) {
+            return;
+        }
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping {test}: no PostgreSQL reachable");
+            return;
+        };
+        let mut repo = Repo::thirty("harbor-ledger-reset");
+        let mut tx = client.transaction().expect("begin test tx");
+        let source = GitSource::new(vec![repo.root.clone()]);
+        let rules = IgnoreRules::default();
+        let first = run(&mut tx, &source, false, &rules).unwrap();
+        assert_eq!(first.messages_written, 30);
+        repo.commit("Close the spring ledger", &["ledger/close.txt"]);
+        let second = run(&mut tx, &source, false, &rules).unwrap();
+        assert_eq!((second.ingested, second.messages_written), (1, 1));
+
+        // Back to the earlier fingerprint: the ledger knows it, but it is
+        // not the version stored last, so the repository is read again.
+        repo.git(&["reset", "-q", "--hard", "HEAD~1"]);
+        let third = run(&mut tx, &source, false, &rules).unwrap();
+        assert_eq!(
+            (third.ingested, third.skipped, third.messages_written),
+            (1, 0, 0),
+            "read again, nothing new to write"
+        );
+        let fourth = run(&mut tx, &source, false, &rules).unwrap();
+        assert_eq!(
+            (fourth.ingested, fourth.skipped),
+            (0, 1),
+            "now it is the stored version"
+        );
     }
 
     #[test]

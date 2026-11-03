@@ -1134,10 +1134,11 @@ fn main() -> Result<()> {
                         if allow.contains(&fp) {
                             continue;
                         }
-                        let at = text.find(&f.value).unwrap_or(0);
-                        let line = text[..at].matches('\n').count() + 1;
-                        println!("secret-check: {file}:{line} {} {fp}", f.kind);
-                        n += 1;
+                        for (at, _) in text.match_indices(&f.value) {
+                            let line = text[..at].matches('\n').count() + 1;
+                            println!("secret-check: {file}:{line} {} {fp}", f.kind);
+                            n += 1;
+                        }
                     }
                 }
                 if n == 0 {

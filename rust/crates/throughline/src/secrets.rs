@@ -169,9 +169,11 @@ pub fn check_staged(diff: &str, allow: &HashSet<String>) -> Vec<(String, usize, 
             if allow.contains(&fingerprint(&f.value)) {
                 continue;
             }
-            let at = joined.find(&f.value).unwrap_or(0);
-            let row = joined[..at].matches('\n').count();
-            out.push((file.to_string(), hunk[row].0, f.kind));
+            // `find` keeps each value once; the hunk may hold it more than once.
+            for (at, _) in joined.match_indices(&f.value) {
+                let row = joined[..at].matches('\n').count();
+                out.push((file.to_string(), hunk[row].0, f.kind));
+            }
         }
         hunk.clear();
     };
@@ -656,6 +658,21 @@ mod tests {
         let found = check_staged(&diff, &HashSet::new());
         assert_eq!(found, vec![("src/app.rs".to_string(), 12, "github_token")]);
         assert!(!format!("{found:?}").contains(&gh));
+    }
+
+    #[test]
+    fn check_staged_reports_every_occurrence_in_a_hunk() {
+        let gh = sample("github_token");
+        let first = format!("a = \"{gh}\"");
+        let second = format!("b = \"{gh}\"");
+        let diff = diff_of("src/app.rs", 5, &[&first, "clean", &second], &[]);
+        assert_eq!(
+            check_staged(&diff, &HashSet::new()),
+            vec![
+                ("src/app.rs".to_string(), 5, "github_token"),
+                ("src/app.rs".to_string(), 7, "github_token"),
+            ]
+        );
     }
 
     #[test]
