@@ -184,6 +184,10 @@ Recall by meaning can cross languages. With the multilingual model `granite-embe
 
 ![Fictional memory notes and category filter](docs/media/rust/memory.png)
 
+**Sessions only** sits next to **By meaning** and keeps the notes from Markdown folders, git repositories and web pages out of a search by meaning. It is the same `sources` filter that `recall`, the context pack, the CLI and MCP take: `sources=sessions`, or a list of tool names. The default is every source. The switch exists because of a measurement: on the owner's corpus the document notes pushed five of 74 session questions out of the top five, and `sessions` brought them back ([USAGE](docs/USAGE.md#recall-finding-notes-by-meaning)).
+
+![By meaning with the Sessions only switch](docs/media/rust/memory-meaning.png)
+
 ### Team mode. One Throughline for a team
 
 With `THROUGHLINE_AUTH_MODE=team` the server asks for an account. Accounts are created on the server's command line, each with one of three roles: a viewer reads, an editor pins and replaces notes and asks the model, an admin runs imports and maintenance. The header shows the account and its role, with password change and sign-out behind it.
@@ -248,7 +252,9 @@ Enter a question and follow the returned sources. A configured generation backen
 
 Run ingestion, AI configuration import, status, embedding, deduplication, backup, audit, stale-memory reporting, instruction-file writeback or answer evaluation. Some actions mutate data or files, and model-dependent actions need configuration first. See the [action reference](docs/FEATURE_GUIDE.md#maintenance-actions).
 
-![All ten maintenance actions and ingestion status](docs/media/rust/operate.png)
+**Not processed yet** lists what the pipeline still owes: notes and messages without a vector, sessions without a title, sessions not yet extracted to memory (`GET /api/backlog`, admin only). **Embed** runs in batches of 200 until nothing is missing, with progress and a stop button.
+
+![Maintenance actions, ingestion status and the backlog of what is not processed yet](docs/media/rust/operate.png)
 
 ![Completed demo Status action](docs/media/rust/operate-status.png)
 
@@ -277,11 +283,11 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Setup and health | `migrate`, `serve`, `status`, `doctor` |
 | Import and retrieve | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Enrich | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Inspect and maintain | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `bench-answer`, `repair-timestamps` |
 | Carry context forward | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
-| Protect and integrate | `backup`, `retention`, `mcp`, `agent-key`, `account` |
+| Protect and integrate | `backup`, `retention`, `merge-from`, `scan-secrets`, `check-staged`, `mcp`, `agent-key`, `account` |
 
-These are all 34 commands. There is no restore command. A dump from `backup` goes back in with `psql`. `retention --apply` deletes conversations and their notes after archiving them, and it is a dry run without `--apply`.
+These are all 38 commands. There is no restore command. A dump from `backup` goes back in with `psql`. `merge-from --source-db NAME` takes a second Throughline database on the same server into this one: insert only, one transaction, a report and a rollback without `--apply` ([USAGE](docs/USAGE.md#taking-in-a-second-throughline)). `retention --apply` deletes conversations and their notes after archiving them, and it is a dry run without `--apply`.
 
 The [function reference](docs/FEATURE_GUIDE.md#cli-functions) lists dependencies and side effects. Availability is not a claim that every command was tested against every schema variant.
 

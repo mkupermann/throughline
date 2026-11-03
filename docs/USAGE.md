@@ -70,7 +70,11 @@ expiring, never accessed, forgotten. Bulk actions with a confirmation before
 anything is forgotten, and an undo after.
 
 **Operate** shows the pipeline and runs the jobs that change it, streaming
-their output live. **Console** is a read-only SQL prompt: every statement runs
+their output live. Its panel **Not processed yet** is the backlog: notes and
+messages without a vector for the configured model, sessions without a title,
+sessions with messages after their extraction watermark (`GET /api/backlog`,
+admin). **Embed** there runs in batches of 200 until the backlog is empty,
+with progress and a stop button. **Console** is a read-only SQL prompt: every statement runs
 in a `READ ONLY` transaction, so writes are refused by PostgreSQL itself rather
 than by a keyword filter.
 
@@ -964,6 +968,30 @@ the whole reason the archive exists — so the counts travel with it and the
 restore checks one against the other. A restore without them is refused rather
 than performed blind, because a half-restored corpus looks exactly like a whole
 one until you go looking.
+
+### Taking in a second Throughline
+
+`merge-from` is for the other direction: a second Throughline database on the
+same PostgreSQL server (a dump of another machine restored next to this one)
+goes *into* the one you keep, and nothing in the target changes.
+
+```bash
+throughline merge-from --source-db throughline_laptop
+throughline merge-from --source-db throughline_laptop --apply --skills harbour,atlas
+```
+
+Without `--apply` the run prints the report and rolls back. With it, the whole
+merge is one transaction. The rules, in the order they run: the target must be
+in local mode and have every Rust migration the source has; column lists come
+from the target's `information_schema`, intersected with the source; projects
+match by name, conversations by `session_id`, and messages come only with new
+conversations; shared notes are taken unless a note with the same trimmed
+content exists, and `superseded_by` and `merged_from` are rewritten to target
+ids in a second pass; reflections, prompts (by name) and the vectors of what
+was taken follow. Skills come only when named with `--skills`, and keep the
+path prefix `mac-merge:` so `import-config` leaves them alone. Private notes,
+accounts, the ingestion ledger and everything else stay where they are. A
+second run over the same source inserts nothing.
 
 ## A standing link between two machines
 
