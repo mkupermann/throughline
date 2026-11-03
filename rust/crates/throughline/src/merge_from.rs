@@ -8,8 +8,8 @@
 //! the same source inserts nothing.
 //!
 //! Rules (order = order in [`merge_in`]):
-//! 1. Precheck: target is in local mode (no `access_users` rows) and the
-//!    highest Rust migration of the source is applied in the target too.
+//! 1. Precheck: target is in local mode (no `access_users` rows) and
+//!    every Rust migration applied in the source is applied in the target too.
 //! 2. Column lists per table: `information_schema` of the target, intersected
 //!    with the source; generated columns and `id` are left out.
 //! 3. `projects` by `name`. 4. `conversations` by `session_id`. 5. `messages`
@@ -141,24 +141,18 @@ fn precheck(target: &mut Client, source: &mut Client) -> Result<()> {
         .map(|r| r.get(0))
         .collect();
     // Names come from the Rust migration list (`migrate::status` iterates it).
+    // Every migration the source has applied must be applied in the target,
+    // not only the highest: a gap in the middle is a broken target too.
     let rust = migrate::status(target)?;
-    let highest = rust
+    let missing = rust
         .iter()
-        .filter(|(name, _)| source_applied.contains(name))
-        .map(|(name, _)| name.clone())
-        .next_back();
-    if let Some(name) = highest {
-        let applied_in_target = rust
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, applied)| *applied)
-            .unwrap_or(false);
-        if !applied_in_target {
-            bail!(
-                "source has migration {name} applied but the target does not; \
-                 run `throughline migrate` on the target first"
-            );
-        }
+        .find(|(name, applied)| source_applied.contains(name) && !*applied)
+        .map(|(name, _)| name.clone());
+    if let Some(name) = missing {
+        bail!(
+            "source has migration {name} applied but the target does not; \
+             run `throughline migrate` on the target first"
+        );
     }
     Ok(())
 }
