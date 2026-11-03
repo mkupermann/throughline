@@ -184,6 +184,10 @@ Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachig
 
 ![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
 
+**Nur Sessions** steht neben **Nach Bedeutung** und hält die Notizen aus Markdown-Ordnern, Git-Repositories und Webseiten aus einer Suche nach Bedeutung heraus. Es ist derselbe Filter `sources`, den `recall`, das Kontextpaket, die CLI und MCP kennen: `sources=sessions` oder eine Liste von Werkzeugnamen. Standard sind alle Quellen. Der Schalter kommt aus einer Messung: auf dem Bestand des Autors verdrängten die Dokumentnotizen fünf von 74 Sitzungsfragen aus den ersten fünf Treffern, mit `sessions` waren sie wieder da ([USAGE](docs/USAGE.md#recall-finding-notes-by-meaning)).
+
+![Nach Bedeutung mit dem Schalter Nur Sessions](docs/media/rust/de/memory-meaning.png)
+
 ### Team-Modus. Ein Throughline für ein Team
 
 Mit `THROUGHLINE_AUTH_MODE=team` verlangt der Server ein Konto. Konten entstehen auf der Befehlszeile des Servers, jedes mit einer von drei Rollen: Ein Betrachter liest, ein Bearbeiter pinnt und ersetzt Notizen und fragt das Modell, ein Verwalter führt Importe und Wartung aus. Die Kopfzeile zeigt Konto und Rolle, dahinter Passwort ändern und Abmelden.
@@ -248,7 +252,9 @@ Stelle eine Frage und folge den gelieferten Quellen. Ein konfiguriertes Generier
 
 Starte Import, KI-Konfiguration importieren, Status, Embedding, Deduplizierung, Backup, Audit, Stale-Memory-Bericht, Instruktionsdatei-Writeback oder Antwort-Evaluierung. Einige Aktionen verändern Daten oder Dateien, und modellabhängige Aktionen brauchen vorher Konfiguration. Siehe die [Aktions-Referenz](docs/FEATURE_GUIDE.md#maintenance-actions).
 
-![Alle zehn Wartungsaktionen mit Importstatus](docs/media/rust/de/operate.png)
+**Noch nicht verarbeitet** zeigt, was die Pipeline noch schuldig ist: Notizen und Nachrichten ohne Vektor, Sessions ohne Titel, Sessions, die noch nicht ins Memory extrahiert sind (`GET /api/backlog`, nur Admin). **Einbetten** läuft in Paketen zu 200, bis nichts mehr fehlt, mit Fortschritt und Stopp-Knopf.
+
+![Wartungsaktionen, Importstatus und der Rückstand des noch nicht Verarbeiteten](docs/media/rust/de/operate.png)
 
 ![Abgeschlossene Status-Aktion der Demo](docs/media/rust/de/operate-status.png)
 
@@ -277,11 +283,11 @@ throughline export-markdown --out ./exports --project Atlas-demo --evidence
 | Einrichtung und Gesundheit | `migrate`, `serve`, `status`, `doctor` |
 | Import und Abruf | `ingest`, `import-config`, `search`, `recall`, `context`, `ask`, `handoff` |
 | Anreicherung | `extract-memory`, `embed`, `generate-titles`, `extract-entities` |
-| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `repair-timestamps` |
+| Prüfen und pflegen | `decisions`, `costs`, `audit`, `conflicts`, `reflect`, `consolidate`, `stale-digest`, `answer-eval`, `recall-eval`, `bench-answer`, `repair-timestamps` |
 | Kontext weitertragen | `scan-instructions`, `writeback`, `export-markdown`, `export-otel` |
-| Schützen und integrieren | `backup`, `retention`, `mcp`, `agent-key`, `account` |
+| Schützen und integrieren | `backup`, `retention`, `merge-from`, `scan-secrets`, `check-staged`, `mcp`, `agent-key`, `account` |
 
-Das sind alle 34 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
+Das sind alle 38 Befehle. Einen Restore-Befehl gibt es nicht. Ein Dump aus `backup` geht mit `psql` zurück. `merge-from --source-db NAME` übernimmt eine zweite Throughline-Datenbank auf demselben Server in diese: nur Einfügen, eine Transaktion, ohne `--apply` nur Bericht und Rollback ([USAGE](docs/USAGE.md#taking-in-a-second-throughline)). `retention --apply` archiviert Konversationen samt Notizen und löscht sie danach. Ohne `--apply` ist es ein Probelauf.
 
 Die [Funktions-Referenz](docs/FEATURE_GUIDE.md#cli-functions) nennt Abhängigkeiten und Nebenwirkungen. Verfügbarkeit heißt nicht, dass jeder Befehl gegen jede Schema-Variante getestet wurde.
 

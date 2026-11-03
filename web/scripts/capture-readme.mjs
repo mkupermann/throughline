@@ -67,6 +67,12 @@ try {
   await page.locator('#view-msg').waitFor({state:'visible'});
   await page.waitForLoadState('networkidle'); await shot('message');
   await view('memory'); await shot('memory');
+  // "By meaning" shows the Sessions only switch; without a model the view says it ranks by words.
+  await page.locator('#memory-meaning').click();
+  await page.locator('#memory-sessions-only').waitFor({state:'visible'});
+  await page.waitForLoadState('networkidle');
+  await shot('memory-meaning');
+  await page.locator('#memory-meaning').click();
   await view('find');
   await page.locator('#find-q').fill('decision');
   await page.locator('#find-mode').selectOption('lexical');

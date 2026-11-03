@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Merge-from, the backlog and the source switch
+
+- `throughline merge-from --source-db NAME [--apply] [--skills a,b]` takes a second Throughline database on the same server into this one, insert only and in one transaction; without `--apply` it prints the report and rolls back. Documented in USAGE ("Taking in a second Throughline"); the command itself landed earlier without a changelog line.
+- Operate shows **Not processed yet**: notes and messages without a vector, sessions without a title, sessions not yet extracted (`GET /api/backlog`, admin). Embed runs in batches of 200 until nothing is missing, with progress and a stop button. Documented in README and USAGE.
+- README: the **Sessions only** switch next to **By meaning**, the four commands missing from the CLI table (`merge-from`, `scan-secrets`, `check-staged`, `bench-answer`), the screenshots recaptured on the fictional demo, one new (`memory-meaning.png`).
+
 ### No secrets into a repository
 
 - `throughline check-staged` checks the staged changes for the ten secret kinds and exits 1 on a finding, printing file, line and kind, never the value. `--all` checks every tracked file and prints each finding's fingerprint. Fingerprints in `.secrets-allowlist` pass: the invented values of the PII tests are listed there.
