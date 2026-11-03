@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/throughline-wordmark-dark.svg">
-    <img src="docs/brand/throughline-wordmark.svg" alt="Throughline" width="420">
+    <img src="https://raw.githubusercontent.com/mkupermann/throughline/main/docs/brand/throughline-wordmark.svg" alt="Throughline" width="420">
   </picture>
 </p>
 
@@ -24,9 +24,9 @@ Jedes KI-Coding-Tool speichert seine eigenen Session-Dateien und vergisst den Re
 
 [Demo starten](#die-demo-mit-fiktiven-daten) · [Installation](#eigene-sessions-nutzen) · [Produkt-Tour](#die-produkt-tour) · [CLI und MCP](#jenseits-des-browsers) · [Architektur](#wie-es-zusammenspielt) · [Grenzen](#aktuelle-grenzen)
 
-[![Animierte Tour durch die Throughline-Oberfläche](docs/media/rust/tour.gif)](docs/media/rust/tour.mp4)
+[![Animierte Tour durch die Throughline-Oberfläche](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.mp4)
 
-*Echte Anwendung, fiktive Daten, keine gefälschten API-Antworten. [Ganze Tour als Video (MP4)](docs/media/rust/tour.mp4) · [Capture-Manifest](docs/media/rust/manifest.json).*
+*Echte Anwendung, fiktive Daten, keine gefälschten API-Antworten. [Ganze Tour als Video (MP4)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.mp4) · [Capture-Manifest](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/manifest.json).*
 
 > **Welche Version ist das?** Das Standard-Docker-Compose baut die Rust-Anwendung mit eingebetteter Browser-Oberfläche. Das Repository enthält zusätzlich eine ältere Python/FastAPI + React-Anwendung. Deren Team-Operations, Template-Bibliothek und Konten-Verwaltung sind keine Funktionen der Rust-Oberfläche. Dieses README beschreibt den Rust-Standardpfad.
 
@@ -154,25 +154,25 @@ Alle zehn Menüs und ihre Nebenansichten sind unten abgebildet, aufgenommen aus 
 
 Klick auf eine Kennzahl und steig in den Datenbestand ein. Die Kennzahl **Favoriten** öffnet die Sitzungen gefiltert auf Ihre Sterne. Prüfe Aktivität, letzte Sitzungen und die Offline-Übergabe. **Leere ausblenden** räumt die Sitzungsliste auf, **Alle durchsuchen** öffnet die Nachrichten. Die modellfreie Demo meldet das fehlende Ollama sichtbar in den Hinweisen. Nichts wird versteckt.
 
-![Übersicht mit Übergabe](docs/media/rust/de/home.png)
+![Übersicht mit Übergabe](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/home.png)
 
 ### Sitzungen. Konversationen im Zusammenhang
 
 Filtere nach Text, Assistent, Projekt und Datum. Sortiere, wechsle zwischen Tabelle und Karten, speichere Filter, blättere oder exportiere CSV. Öffne eine Sitzung und lies ihre Nachrichten mit Rollen.
 
-![Sitzungstabelle mit Filtern](docs/media/rust/de/history.png)
+![Sitzungstabelle mit Filtern](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/history.png)
 
-![Sitzungen als Karten](docs/media/rust/de/history-cards.png)
+![Sitzungen als Karten](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/history-cards.png)
 
-![Aufgeklappte Sitzung](docs/media/rust/de/conversation.png)
+![Aufgeklappte Sitzung](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/conversation.png)
 
 ### Nachrichten. Die Nachrichten darunter prüfen
 
 Filtere nach Text, Rolle, Werkzeugname oder Sitzungs-ID, oder wähle **Nur Werkzeugaufrufe**. Eine Nachricht öffnet den vollen Inhalt, das Tool-Call-JSON und die Content-Blöcke, mit **Copy JSON** und **Open session**.
 
-![Nachrichten-Browser](docs/media/rust/de/browse.png)
+![Nachrichten-Browser](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/browse.png)
 
-![Nachrichten-Detail](docs/media/rust/de/message.png)
+![Nachrichten-Detail](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/message.png)
 
 ### Memory. Dauerhaften Kontext griffbereit halten
 
@@ -182,37 +182,37 @@ Jede Notiz zeigt, ab wann sie gilt und, sobald sie ersetzt ist, bis wann. Das is
 
 Der Abruf nach Bedeutung kann Sprachgrenzen überschreiten. Mit dem mehrsprachigen Modell `granite-embedding:278m`, das Du selbst einschaltest, findet eine deutsche Frage eine englische Notiz und umgekehrt, und zwar im Standard-Abruf, in **Nach Bedeutung**, `--rank weighted`, `as_of`, `grounded`, der semantischen Suche und Ask. Volltext (`--rank fulltext`, und der Rückfall ohne Ollama) findet eine Notiz in einer anderen Sprache nur über Wörter, die beide teilen. Messung und Umschalten des Modells stehen in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
-![Fiktive Memory-Notizen mit Kategorie-Filter](docs/media/rust/de/memory.png)
+![Fiktive Memory-Notizen mit Kategorie-Filter](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/memory.png)
 
 **Nur Sessions** steht neben **Nach Bedeutung** und hält die Notizen aus Markdown-Ordnern, Git-Repositories und Webseiten aus einer Suche nach Bedeutung heraus. Es ist derselbe Filter `sources`, den `recall`, das Kontextpaket, die CLI und MCP kennen: `sources=sessions` oder eine Liste von Werkzeugnamen. Standard sind alle Quellen. Der Schalter kommt aus einer Messung: auf dem Bestand des Autors verdrängten die Dokumentnotizen fünf von 74 Sitzungsfragen aus den ersten fünf Treffern, mit `sessions` waren sie wieder da ([USAGE](docs/USAGE.md#recall-finding-notes-by-meaning)).
 
-![Nach Bedeutung mit dem Schalter Nur Sessions](docs/media/rust/de/memory-meaning.png)
+![Nach Bedeutung mit dem Schalter Nur Sessions](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/memory-meaning.png)
 
 ### Team-Modus. Ein Throughline für ein Team
 
 Mit `THROUGHLINE_AUTH_MODE=team` verlangt der Server ein Konto. Konten entstehen auf der Befehlszeile des Servers, jedes mit einer von drei Rollen: Ein Betrachter liest, ein Bearbeiter pinnt und ersetzt Notizen und fragt das Modell, ein Verwalter führt Importe und Wartung aus. Die Kopfzeile zeigt Konto und Rolle, dahinter Passwort ändern und Abmelden.
 
-![Anmeldeseite einer Team-Installation](docs/media/rust/de/team-signin.png)
+![Anmeldeseite einer Team-Installation](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/team-signin.png)
 
-![Kontomenü mit Rolle und Abmelden](docs/media/rust/de/team-account-menu.png)
+![Kontomenü mit Rolle und Abmelden](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/team-account-menu.png)
 
 Notizen sind gemeinsam, wenn nichts anderes gesagt wird. Beim Pinnen kann eine Notiz privat bleiben: Nur das eigene Konto sieht sie, in jeder Ansicht, im Abruf und über den eigenen Agentenschlüssel. Jede Notizkarte zeigt Eigentümer und Sichtbarkeit. Agenten melden sich mit einem Schlüssel je Konto an statt mit dem globalen Schlüssel. Niemand zeichnet auf, wer sich wann angemeldet hat. Der Entwurf steht in [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md) (englisch).
 
-![Pinnen-Dialog mit der Option privat](docs/media/rust/de/team-pin-private.png)
+![Pinnen-Dialog mit der Option privat](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/team-pin-private.png)
 
-![Eine private Notiz mit Eigentümer und Sichtbarkeit](docs/media/rust/de/team-private-note.png)
+![Eine private Notiz mit Eigentümer und Sichtbarkeit](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/team-private-note.png)
 
 ### Suche. Über alle Assistenten hinweg
 
 Wähle **Lexical**, **Semantic** oder **Hybrid**. Die lexikalische Suche braucht kein Modell. Die semantische Suche braucht gespeicherte Embeddings und einen passenden Embedding-Dienst. Treffer verlinken auf Sitzungen und nennen das Such-Backend. Scores sind Retrieval-Werte, keine Wahrheits-Wahrscheinlichkeiten.
 
-![Lexikalische Suche nach decision](docs/media/rust/de/find.png)
+![Lexikalische Suche nach decision](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/find.png)
 
 ### Projekte. Über das Projekt einsteigen
 
 Karten zeigen die aufgezeichnete Beschreibung, den Status und die Zahl der Sitzungen. Eine Auswahl öffnet die Sitzungen des Projekts. Aufgezeichneter Stand ist Historie, keine Prüfung des heutigen Repositories.
 
-![Projektkarten Atlas, Harbor und Orchard](docs/media/rust/de/projects.png)
+![Projektkarten Atlas, Harbor und Orchard](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/projects.png)
 
 ### KI-Konfiguration. Die Regeln jedes Assistenten sehen
 
@@ -222,7 +222,7 @@ Die Ansicht zeigt standardmäßig den importierten Stand mit der Zeit des letzte
 
 **Bearbeiten ist abschaltbar und standardmäßig aus.** Mit `THROUGHLINE_CONFIG_EDIT=1` (in Docker zusätzlich `docker-compose.edit.yml`, die die Assistenten-Ordner und `~/Documents/GitHub` beschreibbar einhängt) bietet die Live-Ansicht **Bearbeiten** für gelistete Dateien. Eine Datei mit Schlüsseln oder Tokens bleibt schreibgeschützt. Vor jedem Speichern wird die bisherige Fassung nach `config-edits/` im Backup-Ordner kopiert, und eine Datei, die seit dem Öffnen auf der Platte geändert wurde, wird nicht überschrieben.
 
-![KI-Konfiguration mit dem Reiter Anweisungen eines fiktiven Assistenten](docs/media/rust/de/assistants.png)
+![KI-Konfiguration mit dem Reiter Anweisungen eines fiktiven Assistenten](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/assistants.png)
 
 In Docker sieht der Container die Assistenten-Ordner, die `docker-compose.yml` read-only einbindet (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` und die anderen). `THROUGHLINE_ASSISTANT_HOME` lenkt die Suche auf ein anderes Home, `THROUGHLINE_SCAN_ROOTS` auf die Projektordner, und `THROUGHLINE_HOST_HOME` bildet Host-Pfade in Symlink-Zielen auf das Container-Home ab.
 
@@ -232,21 +232,21 @@ In Sitzungen sammeln sich Schlüssel und Tokens. Ein API-Schlüssel wird zum Deb
 
 Die Ansicht zeigt die Werte maskiert, gefiltert nach Art oder Projekt, neu zu alt oder alt zu neu. **Anzeigen** holt einen Wert im Klartext, und jedes Anzeigen wird protokolliert. Im Team-Modus sind die Ansicht und beide Routen nur für Admins. Suche, `ask`, Kontextpaket, MCP, Übergabe und Exporte lesen diese Liste nie. Die Nachrichten behalten ihren Text. Ein Schlüssel in einer Nachricht ist dort also weiter zu sehen.
 
-![Ansicht Secrets mit fiktiven, maskierten Werten](docs/media/rust/de/secrets.png)
+![Ansicht Secrets mit fiktiven, maskierten Werten](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/secrets.png)
 
 ### Zeitachse. Aktivität über die Zeit verfolgen
 
 Prüfe die Sitzungen pro Tag, filtere nach Assistent, wechsle in den Kalender, navigiere durch Monate oder spring zurück auf heute. Chronologie ist keine Kausalität, und die Ansicht hält diesen Unterschied sichtbar.
 
-![Sitzungen nach Tag und Assistent](docs/media/rust/de/timeline.png)
+![Sitzungen nach Tag und Assistent](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/timeline.png)
 
-![Kalenderansicht](docs/media/rust/de/calendar.png)
+![Kalenderansicht](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/calendar.png)
 
 ### Recherche. Die aufgezeichnete Evidenz befragen
 
 Stelle eine Frage und folge den gelieferten Quellen. Ein konfiguriertes Generierungs-Backend ist Voraussetzung. Nach der Backend-Auflösung kann ein Generierungsfehler noch Auszüge liefern. Ein nicht auflösbares Backend liefert stattdessen einen Fehler. Der Screenshot zeigt den Eingabe-Zustand, keine erfundene Antwort.
 
-![Recherche vor dem Absenden der Beispielfrage](docs/media/rust/de/ask.png)
+![Recherche vor dem Absenden der Beispielfrage](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/ask.png)
 
 ### Import und Status. Den Datenbestand pflegen
 
@@ -254,15 +254,15 @@ Starte Import, KI-Konfiguration importieren, Status, Embedding, Deduplizierung, 
 
 **Noch nicht verarbeitet** zeigt, was die Pipeline noch schuldig ist: Notizen und Nachrichten ohne Vektor, Sessions ohne Titel, Sessions, die noch nicht ins Memory extrahiert sind (`GET /api/backlog`, nur Admin). **Einbetten** läuft in Paketen zu 200, bis nichts mehr fehlt, mit Fortschritt und Stopp-Knopf.
 
-![Wartungsaktionen, Importstatus und der Rückstand des noch nicht Verarbeiteten](docs/media/rust/de/operate.png)
+![Wartungsaktionen, Importstatus und der Rückstand des noch nicht Verarbeiteten](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/operate.png)
 
-![Abgeschlossene Status-Aktion der Demo](docs/media/rust/de/operate-status.png)
+![Abgeschlossene Status-Aktion der Demo](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/operate-status.png)
 
 ### Befehls-Palette
 
 Spring zwischen Ansichten, suche Sessions oder wähle eine Aktion, ohne die Tastatur zu verlassen.
 
-![Befehls-Palette](docs/media/rust/de/palette.png)
+![Befehls-Palette](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/de/palette.png)
 
 ## Jenseits des Browsers
 

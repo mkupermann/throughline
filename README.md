@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/throughline-wordmark-dark.svg">
-    <img src="docs/brand/throughline-wordmark.svg" alt="Throughline" width="420">
+    <img src="https://raw.githubusercontent.com/mkupermann/throughline/main/docs/brand/throughline-wordmark.svg" alt="Throughline" width="420">
   </picture>
 </p>
 
@@ -24,9 +24,9 @@ Every AI coding tool keeps its own session files and forgets the rest. Decisions
 
 [Try the demo](#try-it-with-fictional-data) · [Install](#use-your-own-sessions) · [Product tour](#the-product-tour) · [CLI and MCP](#beyond-the-browser) · [Architecture](#how-it-fits-together) · [Limits](#current-boundaries)
 
-[![Animated tour of the Throughline interface](docs/media/rust/tour.gif)](docs/media/rust/tour.mp4)
+[![Animated tour of the Throughline interface](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.gif)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.mp4)
 
-*Actual application, fictional data, no mocked responses. [Watch the full tour (MP4)](docs/media/rust/tour.mp4) · [capture manifest](docs/media/rust/manifest.json).*
+*Actual application, fictional data, no mocked responses. [Watch the full tour (MP4)](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/tour.mp4) · [capture manifest](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/manifest.json).*
 
 > **Which version is this?** Default Docker Compose builds the Rust application with its embedded browser interface. The repository also contains an earlier Python/FastAPI + React application. Its AI team operations, template library and account screens are not features of the Rust UI. This README documents the default Rust path.
 
@@ -154,25 +154,25 @@ Press `Ctrl+K` / `Cmd+K` for the command palette. A chord means press `g`, then 
 
 Click a metric to drill into the corpus. The **Favorites** metric opens Sessions filtered to your stars. Inspect activity, recent sessions and the offline handoff. **Hide empty** cleans the session listing, **Browse all** opens the messages. The model-free demo visibly reports missing Ollama in its notices. Nothing is hidden.
 
-![Overview and handoff](docs/media/rust/home.png)
+![Overview and handoff](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/home.png)
 
 ### Sessions. Conversations in context
 
 Filter by text, assistant, project and date. Sort, switch between table and cards, save filters, page through records or export CSV. Open a session to read its messages with their roles.
 
-![Sessions table and filters](docs/media/rust/history.png)
+![Sessions table and filters](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/history.png)
 
-![Sessions card view](docs/media/rust/history-cards.png)
+![Sessions card view](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/history-cards.png)
 
-![Expanded session](docs/media/rust/conversation.png)
+![Expanded session](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/conversation.png)
 
 ### Messages. Inspect the underlying records
 
 Filter by text, role, tool name or session ID, or select **Tool calls only**. A message opens its full content, tool-call JSON and content blocks, with **Copy JSON** and **Open session** actions.
 
-![Message browser](docs/media/rust/browse.png)
+![Message browser](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/browse.png)
 
-![Message detail](docs/media/rust/message.png)
+![Message detail](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/message.png)
 
 ### Memory. Keep durable context accessible
 
@@ -182,37 +182,37 @@ Each note shows when it became valid and, once replaced, when it stopped, apart 
 
 Recall by meaning can cross languages. With the multilingual model `granite-embedding:278m`, which you switch on yourself, a German question finds an English note and the other way round in the default recall, **By meaning**, `--rank weighted`, `as_of`, `grounded`, semantic search and Ask. Full text (`--rank fulltext`, and the fallback without Ollama) finds a note in another language only through words both share. The measurement and how to switch models are in [docs/USAGE.md](docs/USAGE.md#embedding-model).
 
-![Fictional memory notes and category filter](docs/media/rust/memory.png)
+![Fictional memory notes and category filter](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/memory.png)
 
 **Sessions only** sits next to **By meaning** and keeps the notes from Markdown folders, git repositories and web pages out of a search by meaning. It is the same `sources` filter that `recall`, the context pack, the CLI and MCP take: `sources=sessions`, or a list of tool names. The default is every source. The switch exists because of a measurement: on the owner's corpus the document notes pushed five of 74 session questions out of the top five, and `sessions` brought them back ([USAGE](docs/USAGE.md#recall-finding-notes-by-meaning)).
 
-![By meaning with the Sessions only switch](docs/media/rust/memory-meaning.png)
+![By meaning with the Sessions only switch](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/memory-meaning.png)
 
 ### Team mode. One Throughline for a team
 
 With `THROUGHLINE_AUTH_MODE=team` the server asks for an account. Accounts are created on the server's command line, each with one of three roles: a viewer reads, an editor pins and replaces notes and asks the model, an admin runs imports and maintenance. The header shows the account and its role, with password change and sign-out behind it.
 
-![Sign-in page of a team installation](docs/media/rust/team-signin.png)
+![Sign-in page of a team installation](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/team-signin.png)
 
-![Account menu with the role and sign-out](docs/media/rust/team-account-menu.png)
+![Account menu with the role and sign-out](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/team-account-menu.png)
 
 Notes are shared by default. When you pin one, you can keep it private: only your account sees it, in every view, in recall and through your own agent key. Every note card shows its owner and whether it is shared or private. Agents sign in with a key per account instead of the global key. Nothing records who signed in when; the design is written up in [docs/TEAM_DEPLOYMENT.md](docs/TEAM_DEPLOYMENT.md).
 
-![Pin dialog with the private option](docs/media/rust/team-pin-private.png)
+![Pin dialog with the private option](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/team-pin-private.png)
 
-![A private note with owner and visibility](docs/media/rust/team-private-note.png)
+![A private note with owner and visibility](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/team-private-note.png)
 
 ### Search. Across every assistant
 
 Choose **Lexical**, **Semantic** or **Hybrid**. Lexical search needs no model. Semantic search requires stored embeddings and a compatible embedding service. Results link to sessions and name the search backend. Scores are retrieval values, not truth probabilities.
 
-![Lexical search for decision](docs/media/rust/find.png)
+![Lexical search for decision](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/find.png)
 
 ### Projects. Enter through a project
 
 Cards show a recorded description, status and session count. Select one to open its sessions. Recorded state is history, not an inspection of today's repository.
 
-![Atlas, Harbor and Orchard project cards](docs/media/rust/projects.png)
+![Atlas, Harbor and Orchard project cards](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/projects.png)
 
 ### AI configuration. See the rules each assistant follows
 
@@ -222,7 +222,7 @@ The view reads the imported copy by default, with the time of the last import sh
 
 **Editing is opt-in.** With `THROUGHLINE_CONFIG_EDIT=1` (in Docker: add `docker-compose.edit.yml`, which also mounts the assistant folders and `~/Documents/GitHub` writable), the Live view offers **Edit** for listed files. A file that contains keys or tokens stays read-only. Before each save the previous text is copied to `config-edits/` in the backup folder, and a file that changed on disk since it was opened is not overwritten.
 
-![AI configuration with the instructions tab of a fictional assistant](docs/media/rust/assistants.png)
+![AI configuration with the instructions tab of a fictional assistant](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/assistants.png)
 
 In Docker the container sees the assistant folders that `docker-compose.yml` mounts read-only (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.vibe`, `~/Documents/GitHub` and the others). `THROUGHLINE_ASSISTANT_HOME` points the scan at another home, `THROUGHLINE_SCAN_ROOTS` at the project folders, and `THROUGHLINE_HOST_HOME` maps host paths in symlink targets onto the container home.
 
@@ -232,21 +232,21 @@ Sessions collect keys and tokens: an API key pasted to debug a call, a private k
 
 The view lists them masked, filtered by kind or project, new to old or old to new. **Show** fetches one clear value, and each reveal is logged. In team mode the view and both routes are for admins. Search, `ask`, the context pack, MCP, the handoff and the exports never read this list. The messages keep their text, so a key that sits in a message still shows in that message.
 
-![Secrets view with fictional, masked values](docs/media/rust/secrets.png)
+![Secrets view with fictional, masked values](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/secrets.png)
 
 ### Timeline. Follow activity over time
 
 Inspect sessions per day, filter by assistant, switch to the calendar, navigate months or jump back to today. Chronology is not causality, and the view keeps that distinction visible.
 
-![Activity by day and source tool](docs/media/rust/timeline.png)
+![Activity by day and source tool](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/timeline.png)
 
-![Calendar view](docs/media/rust/calendar.png)
+![Calendar view](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/calendar.png)
 
 ### Research. Question the recorded evidence
 
 Enter a question and follow the returned sources. A configured generation backend is required. After backend resolution, a generation failure can still return excerpts. An unresolved backend returns an error instead. The screenshot shows the input state, not an invented answer.
 
-![Research before submitting the example question](docs/media/rust/ask.png)
+![Research before submitting the example question](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/ask.png)
 
 ### Import and status. Maintain the corpus
 
@@ -254,15 +254,15 @@ Run ingestion, AI configuration import, status, embedding, deduplication, backup
 
 **Not processed yet** lists what the pipeline still owes: notes and messages without a vector, sessions without a title, sessions not yet extracted to memory (`GET /api/backlog`, admin only). **Embed** runs in batches of 200 until nothing is missing, with progress and a stop button.
 
-![Maintenance actions, ingestion status and the backlog of what is not processed yet](docs/media/rust/operate.png)
+![Maintenance actions, ingestion status and the backlog of what is not processed yet](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/operate.png)
 
-![Completed demo Status action](docs/media/rust/operate-status.png)
+![Completed demo Status action](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/operate-status.png)
 
 ### Command palette
 
 Jump between views, search sessions or pick an action without leaving the keyboard.
 
-![Command palette](docs/media/rust/palette.png)
+![Command palette](https://raw.githubusercontent.com/mkupermann/throughline/main/docs/media/rust/palette.png)
 
 ## Beyond the browser
 
