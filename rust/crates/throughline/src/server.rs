@@ -333,11 +333,17 @@ where
 /// A failure of the connection rather than of the SQL: `postgres` carries no
 /// database error (the server never answered). SQL errors are the caller's
 /// business and are never retried.
+/// The connection itself failed: closed by the server, or an I/O error on
+/// the socket. A conversion, column or timeout error is not one; a second
+/// run would only repeat it, and would repeat whatever the closure already
+/// committed.
 fn connection_error(e: &anyhow::Error) -> bool {
     e.chain().any(|cause| {
-        cause
-            .downcast_ref::<postgres::Error>()
-            .is_some_and(|pg| pg.as_db_error().is_none())
+        cause.downcast_ref::<postgres::Error>().is_some_and(|pg| {
+            pg.is_closed()
+                || std::error::Error::source(pg)
+                    .is_some_and(|s| s.downcast_ref::<std::io::Error>().is_some())
+        })
     })
 }
 
@@ -6260,6 +6266,27 @@ mod tests {
             .expect("lock")
             .batch_execute("ROLLBACK")
             .expect("rollback");
+    }
+
+    #[test]
+    fn connection_error_is_only_the_connection() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping connection_error_is_only_the_connection: no PostgreSQL reachable");
+            return;
+        };
+        // A conversion error is a postgres::Error without a DbError, but the
+        // connection is fine: a second run would only repeat it.
+        let row = client.query_one("SELECT 'text'", &[]).expect("query");
+        let conversion: anyhow::Error = row
+            .try_get::<_, i32>(0)
+            .expect_err("text is not an int")
+            .into();
+        assert!(!connection_error(&conversion));
+        let db: anyhow::Error = client
+            .batch_execute("SELECT nonsense_column")
+            .expect_err("unknown column")
+            .into();
+        assert!(!connection_error(&db));
     }
 
     #[test]
