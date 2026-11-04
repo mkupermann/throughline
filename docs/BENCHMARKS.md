@@ -231,8 +231,96 @@ project_context, 99 in one dialogue and 78 in the other. The 2,000-token
 budget is used up after about 47 of them, so no "Relevant" line fits. The
 answer score therefore measures what the production pack shows, not the
 cosine retrieval of the table above (hit@5 87.9 % on the same dialogues).
-Giving "Relevant" its own share of the budget is a product follow-up; this
-release does not change the pack.
+The pack changed after this run: "Relevant to the task" now fills up to 30 %
+of the budget first, admits notes from cosine 0.5 on, and the Decisions follow
+the default rank (see the changelog, "Room for the task in the context pack").
+The same 103 questions, answered again with that pack on 2026-11-01: memory
+58.3 % (60), raw 43.7 % (45); unanimity 84.5 %, kappa 0.784; paired, memory
+only 31 against raw only 16, exact McNemar p = 0.040. Three code states of the
+pack scored 56.3, 59.2 and 58.3 % on these questions, and 15 to 18 answers
+flipped between any two runs, so differences of a few points between runs are
+within the answer variance of the model at its default temperature.
+
+#### Results, 2026-11-03: all 10 dialogues
+
+The full measurement, with the pack described above (main `0aa6ada`). The
+remaining 8 dialogues (234 sessions) were extracted with the `personal`
+profile: 2,484 notes, 0 errors, 36.5 s per session. The 2 probe dialogues
+keep their 422 notes from 2026-11-01. Together 2,906 notes over 10 dialogues
+(179 to 373 per dialogue), each with a granite vector at write time. One run,
+no other load on Ollama. Categories by their number as above.
+
+**Retrieval.** n = 1,535 questions of categories 1 to 4 (5 of the 1,986 have
+no readable evidence id), plus 446 adversarial ones reported apart. No result
+said `degraded`, and no use was counted. Hit in percent:
+
+| Category | n | cosine @5 | cosine @10 | fulltext @5 | fulltext @10 | weighted @5 | weighted @10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 282 | 84.4 | 93.6 | 66.7 | 77.7 | 84.0 | 92.2 |
+| 2 temporal | 320 | 92.8 | 95.3 | 79.7 | 85.9 | 92.5 | 95.0 |
+| 3 open-domain | 92 | 70.7 | 82.6 | 45.7 | 55.4 | 69.6 | 80.4 |
+| 4 single-hop | 841 | 86.7 | 93.3 | 79.7 | 85.5 | 86.7 | 92.5 |
+| **1-4** | **1535** | **86.6** | **93.2** | **75.2** | **82.3** | **86.4** | **92.2** |
+| 5 adversarial (apart) | 446 | 51.8 | 64.8 | 63.5 | 72.2 | 52.7 | 64.3 |
+
+Coverage in percent:
+
+| Category | n | cosine @5 | cosine @10 | fulltext @5 | fulltext @10 | weighted @5 | weighted @10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 282 | 57.8 | 73.1 | 38.9 | 50.5 | 57.3 | 72.7 |
+| 2 temporal | 320 | 91.3 | 94.2 | 78.4 | 84.9 | 91.0 | 94.0 |
+| 3 open-domain | 92 | 56.1 | 70.9 | 35.3 | 43.9 | 54.5 | 70.3 |
+| 4 single-hop | 841 | 86.7 | 93.3 | 79.6 | 85.4 | 86.7 | 92.5 |
+| **1-4** | **1535** | **80.5** | **88.4** | **69.2** | **76.4** | **80.2** | **87.9** |
+| 5 adversarial (apart) | 446 | 51.8 | 64.8 | 63.5 | 72.2 | 52.7 | 64.3 |
+
+- The chance columns were not computed again. On the 2 probe dialogues a
+  random top 5 reached 28.1 % on categories 1 to 4, and the larger dialogues
+  have more notes, so chance is lower there, not higher.
+- On the 2 probe dialogues cosine was 87.9 / 93.5; on all 10 it is
+  86.6 / 93.2. The adversarial category is the only one where full text beats
+  cosine.
+- Session-level hits remain lenient, and the numbers are not comparable with
+  published LoCoMo retrieval numbers.
+
+**Answers.** Stratified sample `--sample 400 --seed 7`: 100 questions per
+category, all 96 of category 3, so n = 396 per path, the same questions on
+both. The memory path answers from the context pack (default rank, 2,000
+tokens, production answer prompt), the raw path through `ask` over the
+dialogue's turns, both on `qwen3.6:27b`. The same model judges three times.
+The 50 hand labels are still pending, so the judge is unconfirmed and the
+scores are provisional. Correct by majority:
+
+| Category | n | memory | raw | memory unanimity | raw unanimity | memory kappa | raw kappa |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 multi-hop | 100 | 62.0 % (62) | 32.0 % (32) | 81 % | 79 % | 0.73 | 0.69 |
+| 2 temporal | 100 | 55.0 % (55) | 6.0 % (6) | 68 % | 92 % | 0.57 | 0.61 |
+| 3 open-domain | 96 | 28.1 % (27) | 22.9 % (22) | 94 % | 95 % | 0.90 | 0.90 |
+| 4 single-hop | 100 | 61.0 % (61) | 62.0 % (62) | 91 % | 92 % | 0.87 | 0.89 |
+| **1-4** | **396** | **51.8 % (205)** | **30.8 % (122)** | **83.3 %** | **89.4 %** | **0.78** | **0.84** |
+
+- The 1-4 row weights the categories evenly, not as the dialogues do.
+- Paired on the same 396 questions: both correct 87, both wrong 156, memory
+  only 118, raw only 35. Two-sided sign test on the 153 discordant pairs:
+  p = 1.0e-11.
+- Memory per dialogue from 29 % (4 of 14) to 61 % (28 of 46).
+- Single-hop is a tie. The lead comes from multi-hop and temporal questions,
+  where the raw path has to find the turns itself and the notes carry the
+  session date. Temporal has the weakest judge agreement on the memory path
+  (68 %): read that row with care.
+- On the 2 probe dialogues alone, 219 questions with the same code the same
+  day: memory 57.1 %, raw 42.5 %. The lead holds on the 8 large dialogues
+  and is larger there, because the raw path falls further.
+- 0 unparseable verdicts, 0 answers with an error.
+
+**Durations.** Extraction 36.5 s per session (142 min for 234 sessions). A
+memory answer 10.9 s, a raw answer 3.9 s, one judgement 3.9 s (three per
+answer). The whole run took 4 h 56 min.
+
+**Limits.** One run, so the answer variance above applies. The same model
+answers and judges, and no human labels exist for this run. Category 3 is
+small (92 and 96 questions). The scores are not comparable with published
+LoCoMo scores, which are judged by a hosted model on turn-level evidence.
 
 ### Limitations
 
