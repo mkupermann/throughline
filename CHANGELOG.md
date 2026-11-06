@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Process everything
+
+- Operate has one button, **Process everything**, that works through the backlog in order: titles, memory extraction, vectors. Small rounds keep the other routes responsive, a stop button ends it after the current round, and a step without progress shows the server's reason before the next step runs.
+- New job `titles` on `POST /api/operate` (local model or the first-user-message fallback). `titles` and `extract-memory` take `limit`.
+
 ### Merge-from, the backlog and the source switch
 
 - `throughline merge-from --source-db NAME [--apply] [--skills a,b]` takes a second Throughline database on the same server into this one, insert only and in one transaction; without `--apply` it prints the report and rolls back. Documented in USAGE ("Taking in a second Throughline"); the command itself landed earlier without a changelog line.

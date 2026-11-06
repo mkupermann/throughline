@@ -74,7 +74,11 @@ their output live. Its panel **Not processed yet** is the backlog: notes and
 messages without a vector for the configured model, sessions without a title,
 sessions with messages after their extraction watermark (`GET /api/backlog`,
 admin). **Embed** there runs in batches of 200 until the backlog is empty,
-with progress and a stop button. **Console** is a read-only SQL prompt: every statement runs
+with progress and a stop button. **Process everything** runs the whole backlog
+in order: `titles` (5 per round), `extract-memory` (one session per round),
+then `embed`, each until its count is 0 or a round makes no progress. The
+jobs take `limit` on `POST /api/operate` (`titles` 1 to 50, default 20,
+`extract-memory` 1 to 20, default 5). **Console** is a read-only SQL prompt: every statement runs
 in a `READ ONLY` transaction, so writes are refused by PostgreSQL itself rather
 than by a keyword filter.
 

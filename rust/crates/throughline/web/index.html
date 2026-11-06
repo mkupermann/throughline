@@ -2509,6 +2509,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           <button class="job" data-job="answer-eval" data-min-role="editor"><strong data-i18n="op.answerEval">Answer eval</strong><span data-i18n="op.answerEval.sub">Citations and hallucination check</span></button>
           <button class="job" data-job="ingest" data-mutating="true" data-min-role="admin"><strong data-i18n="op.ingest">Ingest all assistants</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.ingest.sub">Import sessions from every adapter</span></span></button>
           <button class="job" data-job="import-config" data-mutating="true" data-min-role="admin"><strong data-i18n="op.importConfig">Import AI configuration</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.importConfig.sub">Instructions, skills, agents, configuration</span></span></button>
+          <button class="job" data-job="process-all" data-mutating="true" data-min-role="admin"><strong data-i18n="op.processAll">Process everything</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.processAll.sub">Titles, then memory, then vectors</span></span></button>
           <button class="job" data-job="embed" data-mutating="true" data-min-role="admin"><strong data-i18n="op.embed">Embed</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.embed.sub">Vectorise pending messages</span></span></button>
           <button class="job" data-job="reflect" data-mutating="true" data-min-role="admin"><strong data-i18n="op.reflect">Reflect</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.reflect.sub">Dedup memory chunks</span></span></button>
           <button class="job" data-job="backup" data-mutating="true" data-min-role="admin"><strong data-i18n="op.backup">Backup</strong><span><em class="job-flag" data-i18n="op.changesData">Changes data</em> <span data-i18n="op.backup.sub">pg_dump snapshot</span></span></button>
@@ -3257,6 +3258,18 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.backlog.noModel": "no embedding model",
       "op.backlog.of": "of",
       "op.embedStop": "Stop",
+      "op.processAll": "Process everything",
+      "op.processAll.sub": "Titles, then memory, then vectors",
+      "op.confirm.process-all": "Works through the backlog in order: titles for untitled sessions, memory extraction with the local model, then vectors for everything new. Small rounds, so the rest of the app stays usable. You can stop at any time.",
+      "op.pa.titles": "Titles",
+      "op.pa.extract": "Memory extraction",
+      "op.pa.embed": "Vectors",
+      "op.pa.progress": "{step}: {n} done, {m} still open",
+      "op.pa.waiting": "{step}: waiting",
+      "op.pa.finished": "Processing finished",
+      "op.pa.stopped": "Processing stopped",
+      "op.pa.noProgress": "a round made no progress, step ended",
+      "op.pa.failed": "failed",
       "op.embedProgress": "Embedded {n} so far, {m} still missing",
       "op.embedFinished": "Embedding finished: {n} embedded, {m} still missing",
       "op.embedStopped": "Embedding stopped",
@@ -4016,6 +4029,18 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.backlog.noModel": "kein Einbettungsmodell",
       "op.backlog.of": "von",
       "op.embedStop": "Anhalten",
+      "op.processAll": "Alles verarbeiten",
+      "op.processAll.sub": "Titel, dann Notizen, dann Vektoren",
+      "op.confirm.process-all": "Arbeitet den Rückstand der Reihe nach ab: Titel für Sitzungen ohne Titel, Notizen-Extraktion mit dem lokalen Modell, danach Vektoren für alles Neue. In kleinen Runden, damit der Rest der Oberfläche benutzbar bleibt. Du kannst jederzeit anhalten.",
+      "op.pa.titles": "Titel",
+      "op.pa.extract": "Notizen-Extraktion",
+      "op.pa.embed": "Vektoren",
+      "op.pa.progress": "{step}: {n} erledigt, noch {m} offen",
+      "op.pa.waiting": "{step}: wartet",
+      "op.pa.finished": "Verarbeitung beendet",
+      "op.pa.stopped": "Verarbeitung angehalten",
+      "op.pa.noProgress": "eine Runde ohne Fortschritt, Schritt beendet",
+      "op.pa.failed": "fehlgeschlagen",
       "op.embedProgress": "Bisher {n} eingebettet, noch {m} offen",
       "op.embedFinished": "Einbetten beendet: {n} eingebettet, noch {m} offen",
       "op.embedStopped": "Einbetten angehalten",
@@ -6073,7 +6098,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       el.setAttribute("aria-busy", "false");
     }
   }
-  const MUTATING_JOBS = ["ingest", "import-config", "embed", "reflect", "backup", "writeback"];
+  const MUTATING_JOBS = ["ingest", "import-config", "process-all", "embed", "reflect", "backup", "writeback"];
   async function runJob(job, opts) {
     const el = $("operate-out");
     const btn = document.querySelector('#view-operate [data-job="' + job + '"]');
@@ -6158,6 +6183,61 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         el.innerHTML = html;
         toast(t("op.auditFinished"));
         announce(t("op.auditFinished"));
+        return;
+      }
+      if (job === "process-all") {
+        // Order matters: extraction writes notes, and those need vectors.
+        // Small rounds, because every job holds the one database client.
+        const steps = [
+          { key: "titles", query: "titles&limit=5", made: /titled=(\d+)/, open: (d) => d.untitled || 0 },
+          { key: "extract", query: "extract-memory&limit=1", made: /(\d+) window\(s\)/, open: (d) => d.extraction_pending || 0 },
+          { key: "embed", query: "embed", made: /embedded=(\d+)/, open: (d) => (d.notes_missing || 0) + (d.messages_missing || 0) },
+        ];
+        let stopped = false;
+        const fmtN = (v) => Number(v).toLocaleString(uiLocale());
+        const lines = steps.map((st) => t("op.pa.waiting").replace("{step}", t("op.pa." + st.key)));
+        const render = (live) => {
+          el.innerHTML =
+            '<div class="result-block"' + (live ? ' role="status"' : "") + ">" +
+            "<strong>" + escapeHtml(live ? t("op.processAll") : (stopped ? t("op.pa.stopped") : t("op.pa.finished"))) + "</strong>" +
+            '<ul style="margin:8px 0 0 18px">' + lines.map((l) => "<li>" + escapeHtml(l) + "</li>").join("") + "</ul>" +
+            (live ? '<div style="margin-top:8px"><button type="button" class="btn" data-pa-stop' + (stopped ? " disabled" : "") + ">" + escapeHtml(t("op.embedStop")) + "</button></div>" : "") +
+            "</div>";
+          const stopBtn = el.querySelector("[data-pa-stop]");
+          if (stopBtn) stopBtn.addEventListener("click", () => { stopped = true; stopBtn.disabled = true; });
+        };
+        for (let i = 0; i < steps.length && !stopped; i++) {
+          const st = steps[i];
+          const name = t("op.pa." + st.key);
+          const line = (n, m) => t("op.pa.progress").replace("{step}", name).replace("{n}", fmtN(n)).replace("{m}", fmtN(m));
+          let open = st.open(await fetchJson("/api/backlog"));
+          let done = 0;
+          lines[i] = line(done, open);
+          render(true);
+          try {
+            while (open > 0 && !stopped) {
+              const r = await postJson("/api/operate?job=" + st.query);
+              const m = st.made.exec(r.message || "");
+              const made = m ? parseInt(m[1], 10) : 0;
+              const now = st.open(await fetchJson("/api/backlog"));
+              done += Math.max(0, open - now);
+              const progressed = now < open || made > 0;
+              open = now;
+              lines[i] = line(done, open);
+              render(true);
+              loadBacklog();
+              if (!progressed) { lines[i] += " (" + t("op.pa.noProgress") + ": " + (r.message || "") + ")"; break; }
+            }
+          } catch (e) {
+            lines[i] = line(done, open) + " (" + t("op.pa.failed") + ": " + (e.message || "") + ")";
+          }
+        }
+        render(false);
+        loadBacklog();
+        loadStatus();
+        const doneMsg = stopped ? t("op.pa.stopped") : t("op.pa.finished");
+        toast(doneMsg);
+        announce(doneMsg);
         return;
       }
       if (job === "embed") {
