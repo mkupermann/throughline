@@ -3303,6 +3303,26 @@ async fn ask_handler(
 #[derive(serde::Deserialize)]
 struct JobParams {
     job: Option<String>,
+    /// Batch size for `titles` and `extract-memory`, clamped per job.
+    limit: Option<usize>,
+}
+
+/// Batch size of a job from the `limit` query value: `default` when it is
+/// absent, otherwise clamped to `1..=max`.
+fn job_limit(limit: Option<usize>, default: usize, max: usize) -> usize {
+    limit.map_or(default, |n| n.clamp(1, max))
+}
+
+/// The `titles` job: title up to `limit` untitled conversations. Without a
+/// usable local model the title is the first user message
+/// ([`crate::generate_titles::fallback_title`]).
+fn titles_job<C: postgres::GenericClient>(
+    client: &mut C,
+    backend: Option<&crate::llm::GenerationBackend>,
+    limit: usize,
+) -> anyhow::Result<String> {
+    let (titled, failed) = crate::generate_titles::run_titling(client, limit, backend)?;
+    Ok(format!("titles: titled={titled} failed={failed}"))
 }
 
 /// The `extract-memory` job: run extraction and format the summary line.
@@ -3311,10 +3331,11 @@ struct JobParams {
 fn extract_memory_job<C: postgres::GenericClient>(
     client: &mut C,
     backend: &crate::llm::GenerationBackend,
+    limit: usize,
 ) -> anyhow::Result<String> {
     let profile_env = std::env::var(crate::extract_memory::PROFILE_ENV).ok();
     let configured = crate::extract_memory::Profile::parse(profile_env.as_deref())?;
-    let s = crate::extract_memory::run_pending(client, backend, 5, 24_000, configured)?;
+    let s = crate::extract_memory::run_pending(client, backend, limit, 24_000, configured)?;
     Ok(format!(
         "extract-memory: {} window(s), {} note(s) written, {} error(s)",
         s.windows, s.chunks, s.errors
@@ -3327,6 +3348,7 @@ async fn operate_handler(
 ) -> Response {
     let job = params.job.unwrap_or_default();
     let name = job.clone();
+    let limit = params.limit;
     // backup shells out to pg_dump and does not touch the client; keep it off
     // the DB mutex so long dumps cannot stall every other handler.
     if name == "backup" {
@@ -3402,7 +3424,15 @@ async fn operate_handler(
             "extract-memory" => {
                 let backend = crate::llm::resolve_backend()?;
                 crate::llm::ensure_local_or_allowed(&backend)?;
-                extract_memory_job(client, &backend)?
+                extract_memory_job(client, &backend, job_limit(limit, 5, 20))?
+            }
+            "titles" => {
+                // Titles send message text to the model: only a local (or
+                // explicitly allowed) one, otherwise the fallback title.
+                let backend = crate::llm::resolve_backend()
+                    .ok()
+                    .filter(|b| crate::llm::ensure_local_or_allowed(b).is_ok());
+                titles_job(client, backend.as_ref(), job_limit(limit, 20, 50))?
             }
             "reflect" => {
                 let s = crate::reflect_memory::dedup(client, &Actor::shared_only(), false)?;
@@ -8768,7 +8798,7 @@ mod tests {
         let conv = seed_extraction_conversation(&mut tx, &[(1, "let's use sqlx for the database")]);
         let base = fake_ollama(vec![EXTRACTION_REPLY]);
         let backend = ollama_at(base);
-        let msg = extract_memory_job(&mut tx, &backend).expect("extract-memory job");
+        let msg = extract_memory_job(&mut tx, &backend, 5).expect("extract-memory job");
         // At least one note was written.
         let count: i64 = tx
             .query_one(
@@ -8788,6 +8818,81 @@ mod tests {
             "return text mentions error count: {msg}"
         );
         // Drop tx → rollback.
+    }
+
+    /// `limit` falls back to the default and is clamped to `1..=max`.
+    #[test]
+    fn job_limit_defaults_and_clamps() {
+        assert_eq!(job_limit(None, 5, 20), 5);
+        assert_eq!(job_limit(Some(0), 5, 20), 1);
+        assert_eq!(job_limit(Some(1), 5, 20), 1);
+        assert_eq!(job_limit(Some(500), 5, 20), 20);
+        assert_eq!(job_limit(Some(7), 20, 50), 7);
+    }
+
+    /// The `titles` job without a model titles from the first user message,
+    /// reports the count and leaves no conversation untitled beyond `limit`.
+    #[test]
+    fn titles_job_uses_the_fallback_without_a_model() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping titles_job_uses_the_fallback_without_a_model: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        tx.execute(
+            "UPDATE conversations SET summary = 'kept' WHERE summary IS NULL OR summary = ''",
+            &[],
+        )
+        .expect("title the rest");
+        let a = seed_extraction_conversation(&mut tx, &[(1, "plan the release checklist")]);
+        let b = seed_extraction_conversation(&mut tx, &[(1, "second untitled session")]);
+        tx.execute(
+            "UPDATE conversations SET summary = NULL WHERE id = ANY($1)",
+            &[&vec![a, b]],
+        )
+        .expect("untitle both");
+        let msg = titles_job(&mut tx, None, 1).expect("titles job");
+        assert_eq!(msg, "titles: titled=1 failed=0");
+        let msg = titles_job(&mut tx, None, 5).expect("titles job");
+        assert_eq!(msg, "titles: titled=1 failed=0");
+        let titles: Vec<String> = tx
+            .query(
+                "SELECT summary FROM conversations WHERE id = ANY($1) ORDER BY id",
+                &[&vec![a, b]],
+            )
+            .expect("read titles")
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(
+            titles,
+            ["plan the release checklist", "second untitled session"]
+        );
+    }
+
+    /// `extract-memory` with limit 1 handles one conversation per call.
+    #[test]
+    fn extract_memory_job_honours_the_limit() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping extract_memory_job_honours_the_limit: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        tx.execute(
+            "UPDATE conversations SET generated_by = 'test' WHERE generated_by IS NULL",
+            &[],
+        )
+        .expect("park the rest");
+        seed_extraction_conversation(&mut tx, &[(1, "let's use sqlx for the database")]);
+        seed_extraction_conversation(&mut tx, &[(1, "let's use sqlx for the cache")]);
+        let before = crate::extract_memory::count_pending_conversations(&mut tx).expect("count");
+        assert_eq!(before, 2);
+        let backend = ollama_at(fake_ollama(vec![EXTRACTION_REPLY, EXTRACTION_REPLY]));
+        extract_memory_job(&mut tx, &backend, 1).expect("extract-memory job");
+        let after = crate::extract_memory::count_pending_conversations(&mut tx).expect("count");
+        assert_eq!(after, 1, "one conversation per call");
     }
 
     /// `/api/search?q=x&mode=semantic` without an embedding backend
