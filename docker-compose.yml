@@ -201,7 +201,7 @@ services:
       # Generation limits for Ollama; empty keeps the model's defaults. A
       # thinking model with its full context window can push a single
       # extraction request past the timeout on a laptop.
-      THROUGHLINE_OLLAMA_THINK: "${THROUGHLINE_OLLAMA_THINK:-}"
+      THROUGHLINE_OLLAMA_THINK: "${THROUGHLINE_OLLAMA_THINK:-false}"
       THROUGHLINE_OLLAMA_NUM_CTX: "${THROUGHLINE_OLLAMA_NUM_CTX:-}"
       THROUGHLINE_LLM_TIMEOUT_SECS: "${THROUGHLINE_LLM_TIMEOUT_SECS:-}"
       # Scan roots for the KI-Konfiguration inventory (project cards, skills).

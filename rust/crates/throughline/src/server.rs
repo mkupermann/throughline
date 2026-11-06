@@ -298,6 +298,33 @@ where
         result
     })
     .await;
+    db_task_result(team, joined)
+}
+
+/// Like [`with_db`], but on a connection of its own instead of the shared
+/// client. For jobs that wait on a model for minutes: they must not hold the
+/// lock every other route needs.
+pub(crate) async fn with_own_db<T, F>(state: &AppState, f: F) -> Result<T, Response>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
+{
+    let team = state.auth_mode == crate::access::AuthMode::Team;
+    let joined = tokio::task::spawn_blocking(move || {
+        let mut client = crate::config::DbConfig::from_env().connect()?;
+        f(&mut client)
+    })
+    .await;
+    db_task_result(team, joined)
+}
+
+/// Map the outcome of a blocking database task to the route's answer.
+/// The error is the route's response, as in every handler.
+#[allow(clippy::result_large_err)]
+fn db_task_result<T>(
+    team: bool,
+    joined: Result<anyhow::Result<T>, tokio::task::JoinError>,
+) -> Result<T, Response> {
     match joined {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(e)) => {
@@ -3401,7 +3428,10 @@ async fn operate_handler(
         };
         return Json(serde_json::json!({ "job": job, "message": message })).into_response();
     }
-    match with_db(&state, move |client| {
+    // Titles and extraction wait on the model, often for minutes. They run on
+    // their own connection so the rest of the app stays responsive.
+    let own_connection = matches!(name.as_str(), "titles" | "extract-memory");
+    let run = move |client: &mut postgres::Client| {
         let out = match name.as_str() {
             "ingest" => {
                 let runs = crate::ingest_run::run_all(client, false)?;
@@ -3458,9 +3488,13 @@ async fn operate_handler(
             other => return Err(anyhow::anyhow!("unknown job: {other}")),
         };
         Ok(out)
-    })
-    .await
-    {
+    };
+    let outcome = if own_connection {
+        with_own_db(&state, run).await
+    } else {
+        with_db(&state, run).await
+    };
+    match outcome {
         Ok(message) => Json(serde_json::json!({ "job": job, "message": message })).into_response(),
         Err(resp) => resp,
     }
@@ -8532,6 +8566,30 @@ mod tests {
             .unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("bad_query_vector"), "{text}");
+    }
+
+    /// `with_own_db` runs while the shared client is locked, so a long job
+    /// does not block the other routes.
+    #[test]
+    fn with_own_db_runs_while_the_shared_client_is_held() {
+        let Some(client) = test_db() else {
+            eprintln!("skipping with_own_db_runs_while_the_shared_client_is_held: no PostgreSQL reachable");
+            return;
+        };
+        let state = local_state(client);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let held = state.db.lock().expect("lock shared client");
+        let got = rt.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                with_own_db(&state, |c| {
+                    Ok(c.query_one("SELECT 41 + 1", &[])?.get::<_, i32>(0))
+                }),
+            )
+            .await
+        });
+        drop(held);
+        assert_eq!(got.expect("not blocked by the shared lock").ok(), Some(42));
     }
 
     #[test]
