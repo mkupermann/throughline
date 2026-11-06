@@ -78,7 +78,9 @@ with progress and a stop button. **Process everything** runs the whole backlog
 in order: `titles` (5 per round), `extract-memory` (one session per round),
 then `embed`, each until its count is 0 or a round makes no progress. The
 jobs take `limit` on `POST /api/operate` (`titles` 1 to 50, default 20,
-`extract-memory` 1 to 20, default 5). **Console** is a read-only SQL prompt: every statement runs
+`extract-memory` 1 to 20, default 5) and `skip`, the number of pending
+items to pass over. Process everything raises `skip` when a round makes no
+progress, so one item that keeps failing does not stop the step. **Console** is a read-only SQL prompt: every statement runs
 in a `READ ONLY` transaction, so writes are refused by PostgreSQL itself rather
 than by a keyword filter.
 
