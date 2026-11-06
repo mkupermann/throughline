@@ -3332,6 +3332,9 @@ struct JobParams {
     job: Option<String>,
     /// Batch size for `titles` and `extract-memory`, clamped per job.
     limit: Option<usize>,
+    /// Pending items to skip first, for `titles` and `extract-memory`: a
+    /// caller moves past items that failed in an earlier round.
+    skip: Option<usize>,
 }
 
 /// Batch size of a job from the `limit` query value: `default` when it is
@@ -3347,8 +3350,9 @@ fn titles_job<C: postgres::GenericClient>(
     client: &mut C,
     backend: Option<&crate::llm::GenerationBackend>,
     limit: usize,
+    skip: usize,
 ) -> anyhow::Result<String> {
-    let (titled, failed) = crate::generate_titles::run_titling(client, limit, backend)?;
+    let (titled, failed) = crate::generate_titles::run_titling_from(client, limit, skip, backend)?;
     Ok(format!("titles: titled={titled} failed={failed}"))
 }
 
@@ -3359,10 +3363,12 @@ fn extract_memory_job<C: postgres::GenericClient>(
     client: &mut C,
     backend: &crate::llm::GenerationBackend,
     limit: usize,
+    skip: usize,
 ) -> anyhow::Result<String> {
     let profile_env = std::env::var(crate::extract_memory::PROFILE_ENV).ok();
     let configured = crate::extract_memory::Profile::parse(profile_env.as_deref())?;
-    let s = crate::extract_memory::run_pending(client, backend, limit, 24_000, configured)?;
+    let s =
+        crate::extract_memory::run_pending_from(client, backend, limit, skip, 24_000, configured)?;
     Ok(format!(
         "extract-memory: {} window(s), {} note(s) written, {} error(s)",
         s.windows, s.chunks, s.errors
@@ -3376,6 +3382,7 @@ async fn operate_handler(
     let job = params.job.unwrap_or_default();
     let name = job.clone();
     let limit = params.limit;
+    let skip = params.skip.unwrap_or(0);
     // backup shells out to pg_dump and does not touch the client; keep it off
     // the DB mutex so long dumps cannot stall every other handler.
     if name == "backup" {
@@ -3454,7 +3461,7 @@ async fn operate_handler(
             "extract-memory" => {
                 let backend = crate::llm::resolve_backend()?;
                 crate::llm::ensure_local_or_allowed(&backend)?;
-                extract_memory_job(client, &backend, job_limit(limit, 5, 20))?
+                extract_memory_job(client, &backend, job_limit(limit, 5, 20), skip)?
             }
             "titles" => {
                 // Titles send message text to the model: only a local (or
@@ -3462,7 +3469,7 @@ async fn operate_handler(
                 let backend = crate::llm::resolve_backend()
                     .ok()
                     .filter(|b| crate::llm::ensure_local_or_allowed(b).is_ok());
-                titles_job(client, backend.as_ref(), job_limit(limit, 20, 50))?
+                titles_job(client, backend.as_ref(), job_limit(limit, 20, 50), skip)?
             }
             "reflect" => {
                 let s = crate::reflect_memory::dedup(client, &Actor::shared_only(), false)?;
@@ -8856,7 +8863,7 @@ mod tests {
         let conv = seed_extraction_conversation(&mut tx, &[(1, "let's use sqlx for the database")]);
         let base = fake_ollama(vec![EXTRACTION_REPLY]);
         let backend = ollama_at(base);
-        let msg = extract_memory_job(&mut tx, &backend, 5).expect("extract-memory job");
+        let msg = extract_memory_job(&mut tx, &backend, 5, 0).expect("extract-memory job");
         // At least one note was written.
         let count: i64 = tx
             .query_one(
@@ -8911,9 +8918,9 @@ mod tests {
             &[&vec![a, b]],
         )
         .expect("untitle both");
-        let msg = titles_job(&mut tx, None, 1).expect("titles job");
+        let msg = titles_job(&mut tx, None, 1, 0).expect("titles job");
         assert_eq!(msg, "titles: titled=1 failed=0");
-        let msg = titles_job(&mut tx, None, 5).expect("titles job");
+        let msg = titles_job(&mut tx, None, 5, 0).expect("titles job");
         assert_eq!(msg, "titles: titled=1 failed=0");
         let titles: Vec<String> = tx
             .query(
@@ -8948,9 +8955,77 @@ mod tests {
         let before = crate::extract_memory::count_pending_conversations(&mut tx).expect("count");
         assert_eq!(before, 2);
         let backend = ollama_at(fake_ollama(vec![EXTRACTION_REPLY, EXTRACTION_REPLY]));
-        extract_memory_job(&mut tx, &backend, 1).expect("extract-memory job");
+        extract_memory_job(&mut tx, &backend, 1, 0).expect("extract-memory job");
         let after = crate::extract_memory::count_pending_conversations(&mut tx).expect("count");
         assert_eq!(after, 1, "one conversation per call");
+    }
+
+    /// `skip` moves past pending items that failed: the first untitled
+    /// conversation is left alone and the second one gets its title.
+    #[test]
+    fn titles_job_skips_the_first_pending() {
+        let Some(mut client) = test_db() else {
+            eprintln!("skipping titles_job_skips_the_first_pending: no PostgreSQL reachable");
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        tx.execute(
+            "UPDATE conversations SET summary = 'kept' WHERE summary IS NULL OR summary = ''",
+            &[],
+        )
+        .expect("title the rest");
+        let older = seed_extraction_conversation(&mut tx, &[(1, "older session")]);
+        let newer = seed_extraction_conversation(&mut tx, &[(1, "newer session")]);
+        tx.execute(
+            "UPDATE conversations SET summary = NULL WHERE id = ANY($1)",
+            &[&vec![older, newer]],
+        )
+        .expect("untitle both");
+        tx.execute(
+            "UPDATE conversations SET started_at = started_at + interval '1 hour' WHERE id = $1",
+            &[&newer],
+        )
+        .expect("newer first");
+        let msg = titles_job(&mut tx, None, 1, 1).expect("titles job");
+        assert_eq!(msg, "titles: titled=1 failed=0");
+        let untitled: Vec<i64> = tx
+            .query("SELECT id FROM conversations WHERE summary IS NULL", &[])
+            .expect("untitled")
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(untitled, [newer], "the first pending one is skipped");
+    }
+
+    /// `skip` on extraction: the newest pending conversation stays pending.
+    #[test]
+    fn extract_memory_job_skips_the_first_pending() {
+        let Some(mut client) = test_db() else {
+            eprintln!(
+                "skipping extract_memory_job_skips_the_first_pending: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let mut tx = client.transaction().expect("begin test tx");
+        tx.execute(
+            "UPDATE conversations SET generated_by = 'test' WHERE generated_by IS NULL",
+            &[],
+        )
+        .expect("park the rest");
+        seed_extraction_conversation(&mut tx, &[(1, "let us use sqlx for the database")]);
+        let newer = seed_extraction_conversation(&mut tx, &[(1, "let us use sqlx for the cache")]);
+        tx.execute(
+            "UPDATE conversations SET started_at = started_at + interval '1 hour' WHERE id = $1",
+            &[&newer],
+        )
+        .expect("newer first");
+        let backend = ollama_at(fake_ollama(vec![EXTRACTION_REPLY]));
+        extract_memory_job(&mut tx, &backend, 1, 1).expect("extract-memory job");
+        assert_eq!(
+            crate::extract_memory::pending_conversations(&mut tx, 10).expect("pending"),
+            [newer],
+            "the newest pending one is skipped"
+        );
     }
 
     /// `/api/search?q=x&mode=semantic` without an embedding backend

@@ -450,6 +450,16 @@ impl ExtractSummary {
 
 /// Conversations with messages after their extraction watermark, newest first.
 pub fn pending_conversations<C: GenericClient>(client: &mut C, limit: usize) -> Result<Vec<i64>> {
+    pending_conversations_from(client, limit, 0)
+}
+
+/// [`pending_conversations`] after skipping the first `skip`, in the same
+/// order. A caller that saw the first ones fail can move past them.
+pub fn pending_conversations_from<C: GenericClient>(
+    client: &mut C,
+    limit: usize,
+    skip: usize,
+) -> Result<Vec<i64>> {
     let rows = client.query(
         r#"
         SELECT c.id FROM conversations c
@@ -460,10 +470,10 @@ pub fn pending_conversations<C: GenericClient>(client: &mut C, limit: usize) -> 
               AND COALESCE(m.content, '') <> ''
               AND (c.memory_extracted_until IS NULL OR m.created_at > c.memory_extracted_until)
           )
-        ORDER BY c.started_at DESC
-        LIMIT $1::bigint
+        ORDER BY c.started_at DESC, c.id DESC
+        LIMIT $1::bigint OFFSET $2::bigint
         "#,
-        &[&(limit as i64)],
+        &[&(limit as i64), &(skip as i64)],
     )?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
@@ -499,9 +509,21 @@ pub fn run_pending<C: GenericClient>(
     window_chars: usize,
     configured: Profile,
 ) -> Result<ExtractSummary> {
+    run_pending_from(client, backend, limit, 0, window_chars, configured)
+}
+
+/// [`run_pending`] on the pending conversations after the first `skip`.
+pub fn run_pending_from<C: GenericClient>(
+    client: &mut C,
+    backend: &GenerationBackend,
+    limit: usize,
+    skip: usize,
+    window_chars: usize,
+    configured: Profile,
+) -> Result<ExtractSummary> {
     crate::migrate::require_latest(client)?;
     let mut total = ExtractSummary::default();
-    for conv_id in pending_conversations(client, limit)? {
+    for conv_id in pending_conversations_from(client, limit, skip)? {
         let s = extract_conversation(client, backend, conv_id, window_chars, configured)?;
         total.add(&s);
     }

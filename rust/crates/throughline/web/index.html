@@ -3268,7 +3268,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.pa.waiting": "{step}: waiting",
       "op.pa.finished": "Processing finished",
       "op.pa.stopped": "Processing stopped",
-      "op.pa.noProgress": "a round made no progress, step ended",
+      "op.pa.noProgress": "no progress, step ended",
+      "op.pa.skipped": "{n} skipped after a failure",
       "op.pa.failed": "failed",
       "op.embedProgress": "Embedded {n} so far, {m} still missing",
       "op.embedFinished": "Embedding finished: {n} embedded, {m} still missing",
@@ -4039,7 +4040,8 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.pa.waiting": "{step}: wartet",
       "op.pa.finished": "Verarbeitung beendet",
       "op.pa.stopped": "Verarbeitung angehalten",
-      "op.pa.noProgress": "eine Runde ohne Fortschritt, Schritt beendet",
+      "op.pa.noProgress": "kein Fortschritt, Schritt beendet",
+      "op.pa.skipped": "{n} nach Fehler übersprungen",
       "op.pa.failed": "fehlgeschlagen",
       "op.embedProgress": "Bisher {n} eingebettet, noch {m} offen",
       "op.embedFinished": "Einbetten beendet: {n} eingebettet, noch {m} offen",
@@ -6189,10 +6191,14 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
         // Order matters: extraction writes notes, and those need vectors.
         // Small rounds, because every job holds the one database client.
         const steps = [
-          { key: "titles", query: "titles&limit=5", made: /titled=(\d+)/, open: (d) => d.untitled || 0 },
-          { key: "extract", query: "extract-memory&limit=1", made: /(\d+) window\(s\)/, open: (d) => d.extraction_pending || 0 },
-          { key: "embed", query: "embed", made: /embedded=(\d+)/, open: (d) => (d.notes_missing || 0) + (d.messages_missing || 0) },
+          { key: "titles", query: "titles&limit=5", batch: 5, made: /titled=(\d+)/, open: (d) => d.untitled || 0 },
+          { key: "extract", query: "extract-memory&limit=1", batch: 1, made: /(\d+) note\(s\) written/, open: (d) => d.extraction_pending || 0 },
+          { key: "embed", query: "embed", batch: 0, made: /embedded=(\d+)/, open: (d) => (d.notes_missing || 0) + (d.messages_missing || 0) },
         ];
+        // Items that fail stay pending at the front of the list. A step moves
+        // past them with skip and ends after three rounds in a row without
+        // progress, or when only skipped items are left.
+        const MAX_IDLE = 3;
         let stopped = false;
         const fmtN = (v) => Number(v).toLocaleString(uiLocale());
         const lines = steps.map((st) => t("op.pa.waiting").replace("{step}", t("op.pa." + st.key)));
@@ -6212,22 +6218,34 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           const line = (n, m) => t("op.pa.progress").replace("{step}", name).replace("{n}", fmtN(n)).replace("{m}", fmtN(m));
           let open = st.open(await fetchJson("/api/backlog"));
           let done = 0;
+          let skip = 0;
+          let idle = 0;
+          let lastMsg = "";
           lines[i] = line(done, open);
           render(true);
           try {
-            while (open > 0 && !stopped) {
-              const r = await postJson("/api/operate?job=" + st.query);
-              const m = st.made.exec(r.message || "");
+            while (open > skip && !stopped) {
+              const r = await postJson("/api/operate?job=" + st.query + (skip ? "&skip=" + skip : ""));
+              lastMsg = r.message || "";
+              const m = st.made.exec(lastMsg);
               const made = m ? parseInt(m[1], 10) : 0;
               const now = st.open(await fetchJson("/api/backlog"));
               done += Math.max(0, open - now);
               const progressed = now < open || made > 0;
               open = now;
-              lines[i] = line(done, open);
+              if (progressed) {
+                idle = 0;
+              } else {
+                idle += 1;
+                if (!st.batch || idle >= MAX_IDLE) break;
+                skip += st.batch;
+              }
+              lines[i] = line(done, open) + (skip ? " (" + t("op.pa.skipped").replace("{n}", fmtN(skip)) + ")" : "");
               render(true);
               loadBacklog();
-              if (!progressed) { lines[i] += " (" + t("op.pa.noProgress") + ": " + (r.message || "") + ")"; break; }
             }
+            if (idle > 0 && open > 0) lines[i] = line(done, open) + " (" + t("op.pa.noProgress") + ": " + lastMsg + ")";
+            else if (skip > 0) lines[i] = line(done, open) + " (" + t("op.pa.skipped").replace("{n}", fmtN(skip)) + ")";
           } catch (e) {
             lines[i] = line(done, open) + " (" + t("op.pa.failed") + ": " + (e.message || "") + ")";
           }

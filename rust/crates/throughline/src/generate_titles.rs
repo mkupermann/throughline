@@ -41,13 +41,22 @@ pub fn untitled_conversations<C: postgres::GenericClient>(
     client: &mut C,
     limit: usize,
 ) -> Result<Vec<i64>> {
+    untitled_conversations_from(client, limit, 0)
+}
+
+/// [`untitled_conversations`] after skipping the first `skip`, same order.
+pub fn untitled_conversations_from<C: postgres::GenericClient>(
+    client: &mut C,
+    limit: usize,
+    skip: usize,
+) -> Result<Vec<i64>> {
     Ok(client
         .query(
             "SELECT id FROM conversations
              WHERE summary IS NULL OR summary = ''
-             ORDER BY started_at DESC
-             LIMIT $1::bigint",
-            &[&(limit as i64)],
+             ORDER BY started_at DESC, id DESC
+             LIMIT $1::bigint OFFSET $2::bigint",
+            &[&(limit as i64), &(skip as i64)],
         )?
         .into_iter()
         .map(|r| r.get(0))
@@ -74,7 +83,17 @@ pub fn run_titling<C: postgres::GenericClient>(
     limit: usize,
     backend: Option<&llm::GenerationBackend>,
 ) -> Result<(usize, usize)> {
-    let ids = untitled_conversations(client, limit)?;
+    run_titling_from(client, limit, 0, backend)
+}
+
+/// [`run_titling`] on the untitled conversations after the first `skip`.
+pub fn run_titling_from<C: postgres::GenericClient>(
+    client: &mut C,
+    limit: usize,
+    skip: usize,
+    backend: Option<&llm::GenerationBackend>,
+) -> Result<(usize, usize)> {
+    let ids = untitled_conversations_from(client, limit, skip)?;
     let mut titled = 0usize;
     let mut failed = 0usize;
     for id in ids {

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Process everything
 
+- Failing items no longer stop a step: `titles` and `extract-memory` take `skip`, and the button moves past items that fail, for up to three rounds without progress.
+- Compose defaults `THROUGHLINE_OLLAMA_NUM_CTX` to 16384 and `THROUGHLINE_OLLAMA_THINK` to false. With Ollama's 4096-token default the extraction window lost its instruction and the model answered in prose. Titles and extraction run on their own database connection, so other routes keep answering.
 - Operate has one button, **Process everything**, that works through the backlog in order: titles, memory extraction, vectors. Small rounds keep the other routes responsive, a stop button ends it after the current round, and a step without progress shows the server's reason before the next step runs.
 - New job `titles` on `POST /api/operate` (local model or the first-user-message fallback). `titles` and `extract-memory` take `limit`.
 
