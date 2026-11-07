@@ -113,12 +113,17 @@ pub async fn mcp_post(
         tokio::task::spawn_blocking(move || crate::mcp::prepare_query_vector(&probe, &breaker))
             .await
             .unwrap_or(None);
-    match with_db(&state, move |client| {
+    // `/mcp` finds its actor itself, outside the actor layer: the database
+    // role of the call (migration 018) follows that actor.
+    let request_actor = ctx.actor.clone();
+    let call = with_db(&state, move |client| {
         // Cloned, not moved: `with_db` may run the closure a second time on a
         // rebuilt connection (M26d).
         Ok(dispatch_with(client, &msg, &ctx, prepared.clone()))
-    })
-    .await
+    });
+    match crate::access::REQUEST_ACTOR
+        .scope(request_actor, call)
+        .await
     {
         Ok(Reply {
             status,

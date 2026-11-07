@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Restricted projects
+
+- Team mode: an admin can restrict a project (`throughline project-access restrict|unrestrict|allow|revoke|list`, or **Import and status → Restricted projects**). Accounts without access see nothing of it on any path of the page, the API or MCP. Admins see everything.
+- Migration 018 puts row-level security on the tables with text of a session and adds the role `throughline_reader`. Requests of accounts without the admin role and server jobs run as that role, so no query can leave the condition out. Without a restricted project nothing changes. New routes `GET` and `POST /api/project-access` (admin).
+
 ### Process everything
 
 - Extraction asks Ollama for a reply that follows a JSON schema: an array of notes with one of the eight categories. Transcripts that read like instructions (a status report request, a project's rules) had turned the reply into prose, and the session failed on every round.

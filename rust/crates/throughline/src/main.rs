@@ -8,8 +8,8 @@ use throughline::{
     access, accounts_cli, adapters, agent_key, answer_eval, ask, audit, bench_answer, config,
     conflicts, context_pack, costs, decisions, doctor, embedding, export_markdown, export_otel,
     extract_memory, generate_embeddings, generate_titles, handoff, ingest_run, lifecycle, llm, mcp,
-    memory_writeback, merge_from, migrate, ops_jobs, project_instructions, recall, recall_eval,
-    reflect_memory, repair, retention, search, server, stale_digest, temporal,
+    memory_writeback, merge_from, migrate, ops_jobs, project_access, project_instructions, recall,
+    recall_eval, reflect_memory, repair, retention, search, server, stale_digest, temporal,
 };
 
 #[derive(Parser)]
@@ -156,6 +156,11 @@ enum Command {
     Account {
         #[command(subcommand)]
         command: AccountCommand,
+    },
+    /// Team mode: projects that only some accounts see.
+    ProjectAccess {
+        #[command(subcommand)]
+        command: ProjectAccessCommand,
     },
     /// Print a resume brief for a new agent session.
     Handoff {
@@ -443,6 +448,87 @@ enum AccountCommand {
     },
     /// Revoke an account's agent key by its id (see `account list`).
     AgentKeyRevoke { name: String, id: i64 },
+}
+
+/// A project is the project name sessions show. A restricted project is
+/// hidden from every account except admins and those it is allowed to.
+#[derive(Subcommand)]
+enum ProjectAccessCommand {
+    /// Hide a project from every account without access.
+    Restrict { project: String },
+    /// Show a project to every account again; drops its access list.
+    Unrestrict { project: String },
+    /// Let an account see a restricted project.
+    Allow { project: String, account: String },
+    /// Take a restricted project away from an account.
+    Revoke { project: String, account: String },
+    /// List restricted projects and the accounts that see them.
+    List,
+}
+
+fn run_project_access(command: ProjectAccessCommand) -> Result<()> {
+    let mut client = config::DbConfig::from_env()
+        .connect()
+        .context("connect to PostgreSQL")?;
+    match command {
+        ProjectAccessCommand::Restrict { project } => {
+            let sessions = project_access::sessions(&mut client, &project)?;
+            if project_access::restrict(&mut client, &project)? {
+                println!("Restricted. {sessions} session(s) of this project are now hidden from accounts without access.");
+            } else {
+                println!("Already restricted.");
+            }
+            if sessions == 0 {
+                println!("No session has this project name yet. Check the spelling with `throughline project-access list` or the Projects view.");
+            }
+        }
+        ProjectAccessCommand::Unrestrict { project } => {
+            if project_access::unrestrict(&mut client, &project)? {
+                println!("Every account sees this project again.");
+            } else {
+                println!("The project was not restricted.");
+            }
+        }
+        ProjectAccessCommand::Allow { project, account } => {
+            if project_access::allow(&mut client, &project, &account)? {
+                println!("Access granted.");
+            } else {
+                println!("The account had access already.");
+            }
+        }
+        ProjectAccessCommand::Revoke { project, account } => {
+            if project_access::revoke(&mut client, &project, &account)? {
+                println!("Access revoked.");
+            } else {
+                println!("The account had no access.");
+            }
+        }
+        ProjectAccessCommand::List => {
+            let restricted = project_access::list(&mut client)?;
+            if restricted.is_empty() {
+                println!("No restricted projects. Every account sees every project.");
+                return Ok(());
+            }
+            let mut rows = vec![[
+                "PROJECT".to_string(),
+                "SESSIONS".to_string(),
+                "ACCOUNTS WITH ACCESS".to_string(),
+            ]];
+            rows.extend(restricted.into_iter().map(|r| {
+                [
+                    r.project,
+                    r.sessions.to_string(),
+                    if r.accounts.is_empty() {
+                        "(admins only)".to_string()
+                    } else {
+                        r.accounts.join(", ")
+                    },
+                ]
+            }));
+            print_table(&rows);
+        }
+    }
+    Ok(())
 }
 
 /// Output leaves account names out except in `list` and in errors.
@@ -1423,6 +1509,7 @@ fn main() -> Result<()> {
             );
         }
         Command::Account { command } => run_account(command)?,
+        Command::ProjectAccess { command } => run_project_access(command)?,
         Command::AgentKey => {
             println!("{}", agent_key::generate());
             println!("Put it into .env as THROUGHLINE_AGENT_KEY and restart the server.");

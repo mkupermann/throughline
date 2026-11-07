@@ -2524,6 +2524,32 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
             <div class="row" data-backlog="extraction"><span data-i18n="op.backlog.extraction">Sessions not yet extracted to memory</span> <span class="backlog-val"></span></div>
           </div>
         </div>
+        <div class="panel" id="project-access" data-min-role="admin" style="margin-top:16px">
+          <div class="panel-title"><h2 data-i18n="op.pa.title">Restricted projects</h2><div class="meta" data-i18n="op.pa.meta">team mode</div></div>
+          <p class="meta" data-i18n="op.pa.sub">A restricted project is hidden from every account except admins and the accounts it is allowed to.</p>
+          <div class="toolbar">
+            <label class="field">
+              <span class="field-label" data-i18n="op.pa.project">Project</span>
+              <input id="pa-project" type="text" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label" data-i18n="op.pa.account">Account</span>
+              <input id="pa-account" type="text" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label" data-i18n="op.pa.action">Change</span>
+              <select id="pa-action">
+                <option value="restrict" data-i18n="op.pa.restrict">Restrict project</option>
+                <option value="allow" data-i18n="op.pa.allow">Allow account</option>
+                <option value="revoke" data-i18n="op.pa.revoke">Revoke account</option>
+                <option value="unrestrict" data-i18n="op.pa.unrestrict">Lift restriction</option>
+              </select>
+            </label>
+            <button type="button" class="btn btn-primary" id="pa-apply" data-i18n="op.pa.apply">Apply</button>
+          </div>
+          <div id="pa-msg" class="meta" aria-live="polite"></div>
+          <div id="pa-body" class="history list-anim"></div>
+        </div>
         <div class="panel" id="ingest-status" style="margin-top:16px">
           <div class="panel-title"><h2 data-i18n="op.ingestStatus">Ingestion status</h2><div class="meta" data-i18n="op.perProvider">per assistant</div></div>
           <div id="ingest-status-body" class="history list-anim" data-i18n="op.loading">Loading…</div>
@@ -3250,6 +3276,24 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.confirm.reflect": "Merges notes with the same opening. This changes memory and has no dry run.",
       "op.confirm.backup": "Writes a database dump and deletes dumps beyond the newest 14.",
       "op.confirm.writeback": "Writes distilled notes into AGENTS.md in the server's folder.",
+      "op.pa.title": "Restricted projects",
+      "op.pa.meta": "team mode",
+      "op.pa.sub": "A restricted project is hidden from every account except admins and the accounts it is allowed to.",
+      "op.pa.project": "Project",
+      "op.pa.account": "Account",
+      "op.pa.action": "Change",
+      "op.pa.restrict": "Restrict project",
+      "op.pa.allow": "Allow account",
+      "op.pa.revoke": "Revoke account",
+      "op.pa.unrestrict": "Lift restriction",
+      "op.pa.apply": "Apply",
+      "op.pa.none": "No restricted projects. Every account sees every project.",
+      "op.pa.localNote": "Local mode: restrictions apply only once the server runs in team mode.",
+      "op.pa.adminsOnly": "admins only",
+      "op.pa.sessions": "sessions",
+      "op.pa.done": "Saved.",
+      "op.pa.unchanged": "Nothing to change.",
+      "op.pa.failed": "Not saved:",
       "op.backlog.title": "Not processed yet",
       "op.backlog.notes": "Notes without a vector",
       "op.backlog.messages": "Messages without a vector",
@@ -4022,6 +4066,24 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       "op.confirm.reflect": "Führt Notizen mit gleichem Anfang zusammen. Das verändert das Gedächtnis und hat keinen Probelauf.",
       "op.confirm.backup": "Schreibt einen Datenbank-Dump und löscht Dumps jenseits der neuesten 14.",
       "op.confirm.writeback": "Schreibt verdichtete Notizen in AGENTS.md im Ordner des Servers.",
+      "op.pa.title": "Beschränkte Projekte",
+      "op.pa.meta": "Team-Modus",
+      "op.pa.sub": "Ein beschränktes Projekt sehen nur Admins und die Konten, die es freigegeben bekommen.",
+      "op.pa.project": "Projekt",
+      "op.pa.account": "Konto",
+      "op.pa.action": "Änderung",
+      "op.pa.restrict": "Projekt beschränken",
+      "op.pa.allow": "Konto freigeben",
+      "op.pa.revoke": "Konto entziehen",
+      "op.pa.unrestrict": "Beschränkung aufheben",
+      "op.pa.apply": "Anwenden",
+      "op.pa.none": "Keine beschränkten Projekte. Jedes Konto sieht jedes Projekt.",
+      "op.pa.localNote": "Lokaler Modus: Beschränkungen greifen erst, wenn der Server im Team-Modus läuft.",
+      "op.pa.adminsOnly": "nur Admins",
+      "op.pa.sessions": "Sitzungen",
+      "op.pa.done": "Gespeichert.",
+      "op.pa.unchanged": "Nichts zu ändern.",
+      "op.pa.failed": "Nicht gespeichert:",
       "op.backlog.title": "Noch nicht verarbeitet",
       "op.backlog.notes": "Notizen ohne Vektor",
       "op.backlog.messages": "Nachrichten ohne Vektor",
@@ -4424,7 +4486,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
           else if (current === "find") { /* keep results; labels already updated */ }
           else if (current === "projects") loadProjects();
           else if (current === "timeline") loadTimeline();
-          else if (current === "operate") { loadIngestStatus(); loadBacklog(); }
+          else if (current === "operate") { loadIngestStatus(); loadBacklog(); loadProjectAccess(); }
         } catch {}
       });
     }
@@ -4819,6 +4881,7 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       showView("operate");
       loadIngestStatus();
       loadBacklog();
+      loadProjectAccess();
     }
   });
 
@@ -6342,6 +6405,70 @@ body[data-account-role="editor"] [data-min-role="admin"] { display: none !import
       el.innerHTML = emptyBox(t("op.couldNotLoadStatus"), e.message);
     }
   }
+  /** Restricted projects (admin): the list and one change at a time. */
+  function renderProjectAccess(d) {
+    const body = document.getElementById("pa-body");
+    if (!body) return;
+    const rows = (d && d.restricted) || [];
+    body.innerHTML = "";
+    if (d && d.team_mode === false) {
+      const note = document.createElement("div");
+      note.className = "row";
+      note.textContent = t("op.pa.localNote");
+      body.appendChild(note);
+    }
+    if (!rows.length) {
+      const none = document.createElement("div");
+      none.className = "row";
+      none.textContent = t("op.pa.none");
+      body.appendChild(none);
+      return;
+    }
+    rows.forEach((r) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const name = document.createElement("strong");
+      name.textContent = r.project;
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      const who = r.accounts && r.accounts.length ? r.accounts.join(", ") : t("op.pa.adminsOnly");
+      meta.textContent = " " + Number(r.sessions || 0).toLocaleString(uiLocale()) + " " + t("op.pa.sessions") + " · " + who;
+      row.appendChild(name);
+      row.appendChild(meta);
+      body.appendChild(row);
+    });
+  }
+  async function loadProjectAccess() {
+    if (!roleAtLeast("admin")) return;
+    try {
+      renderProjectAccess(await fetchJson("/api/project-access"));
+    } catch {
+      /* leave previous values */
+    }
+  }
+  (function wireProjectAccess() {
+    const apply = document.getElementById("pa-apply");
+    if (!apply) return;
+    apply.addEventListener("click", async () => {
+      const msg = document.getElementById("pa-msg");
+      const body = {
+        action: document.getElementById("pa-action").value,
+        project: document.getElementById("pa-project").value.trim(),
+        account: document.getElementById("pa-account").value.trim(),
+      };
+      apply.disabled = true;
+      try {
+        const d = await postJson("/api/project-access", body);
+        renderProjectAccess(d);
+        if (msg) msg.textContent = d.changed ? t("op.pa.done") : t("op.pa.unchanged");
+      } catch (e) {
+        if (msg) msg.textContent = t("op.pa.failed") + " " + e.message;
+      } finally {
+        apply.disabled = false;
+      }
+    });
+  })();
+
   async function loadBacklog() {
     const body = document.getElementById("backlog-body");
     if (!body) return;
