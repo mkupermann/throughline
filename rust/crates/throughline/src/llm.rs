@@ -195,6 +195,10 @@ struct OllamaChat {
     /// Unset lets Ollama allocate the model's full context window.
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
+    /// A JSON schema the reply must follow. Ollama constrains the output to
+    /// it, so a model cannot answer in prose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -230,6 +234,17 @@ struct CompatChoice {
 
 /// One chat completion. `system` is optional.
 pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -> Result<String> {
+    complete_with_format(backend, system, user, None)
+}
+
+/// [`complete`] with a JSON schema for the reply. Ollama enforces it. An
+/// OpenAI-compatible endpoint gets the request without it.
+pub fn complete_with_format(
+    backend: &GenerationBackend,
+    system: Option<&str>,
+    user: &str,
+    format: Option<serde_json::Value>,
+) -> Result<String> {
     let mut messages = Vec::new();
     if let Some(sys) = system {
         messages.push(ChatMessage {
@@ -260,7 +275,7 @@ pub fn complete(backend: &GenerationBackend, system: Option<&str>, user: &str) -
 
         match kind {
             BackendKind::Ollama => {
-                let body = ollama_chat(model, messages, think, num_ctx);
+                let body = ollama_chat(model, messages, think, num_ctx, format);
                 let resp: OllamaChatResponse = client
                     .post(format!("{base_url}/api/chat"))
                     .json(&body)
@@ -430,6 +445,7 @@ fn ollama_chat(
     messages: Vec<ChatMessage>,
     think: Option<bool>,
     num_ctx: Option<u32>,
+    format: Option<serde_json::Value>,
 ) -> OllamaChat {
     OllamaChat {
         model,
@@ -437,6 +453,7 @@ fn ollama_chat(
         stream: false,
         think,
         options: num_ctx.map(|num_ctx| OllamaOptions { num_ctx }),
+        format,
     }
 }
 
@@ -647,17 +664,38 @@ mod tests {
 
     #[test]
     fn ollama_body_leaves_think_and_options_out_when_unset() {
-        let body = serde_json::to_value(ollama_chat("m".into(), vec![], None, None)).unwrap();
+        let body = serde_json::to_value(ollama_chat("m".into(), vec![], None, None, None)).unwrap();
         assert!(body.get("think").is_none(), "{body}");
         assert!(body.get("options").is_none(), "{body}");
+        assert!(body.get("format").is_none(), "{body}");
     }
 
     #[test]
     fn ollama_body_carries_think_and_num_ctx_when_set() {
-        let body = serde_json::to_value(ollama_chat("m".into(), vec![], Some(false), Some(16384)))
-            .unwrap();
+        let body = serde_json::to_value(ollama_chat(
+            "m".into(),
+            vec![],
+            Some(false),
+            Some(16384),
+            None,
+        ))
+        .unwrap();
         assert_eq!(body["think"], serde_json::json!(false));
         assert_eq!(body["options"]["num_ctx"], serde_json::json!(16384));
+    }
+
+    #[test]
+    fn ollama_body_carries_the_format_schema() {
+        let schema = serde_json::json!({"type": "array"});
+        let body = serde_json::to_value(ollama_chat(
+            "m".into(),
+            vec![],
+            None,
+            None,
+            Some(schema.clone()),
+        ))
+        .unwrap();
+        assert_eq!(body["format"], schema);
     }
 
     #[test]

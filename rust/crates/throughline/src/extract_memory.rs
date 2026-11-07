@@ -269,8 +269,28 @@ pub fn extract(
         (transcript.to_string(), 0)
     };
     let user = format!("{prompt}\n\n---\n{payload}");
-    let raw = llm::complete(backend, None, &user).context("extraction completion")?;
+    let raw = llm::complete_with_format(backend, None, &user, Some(extraction_schema()))
+        .context("extraction completion")?;
     parse_array(&raw)
+}
+
+/// The JSON schema of an extraction reply: an array of memories with a
+/// category from [`CATEGORIES`]. Ollama holds the reply to it, so a transcript
+/// that reads like an instruction cannot turn the reply into prose.
+pub fn extraction_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "content": { "type": "string" },
+                "category": { "type": "string", "enum": CATEGORIES },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "confidence": { "type": "number" }
+            },
+            "required": ["content", "category", "tags", "confidence"]
+        }
+    })
 }
 
 /// Read every memory object out of a model reply, whatever the framing: an
@@ -726,6 +746,22 @@ pub fn should_skip_as_self_referential(messages: &[NormalisedMessage]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reply schema is an array of memories whose category is one of
+    /// the eight the prompts allow.
+    #[test]
+    fn extraction_schema_is_an_array_of_known_categories() {
+        let schema = extraction_schema();
+        assert_eq!(schema["type"], "array");
+        assert_eq!(
+            schema["items"]["properties"]["category"]["enum"],
+            serde_json::json!(CATEGORIES)
+        );
+        assert_eq!(
+            schema["items"]["required"],
+            serde_json::json!(["content", "category", "tags", "confidence"])
+        );
+    }
 
     #[test]
     fn parses_fenced_json_array() {
