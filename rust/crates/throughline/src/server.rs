@@ -12309,6 +12309,14 @@ mod session_tests {
                 answer.status,
                 answer.body
             );
+            // A path that does not echo the project back must not name it.
+            if !path.contains(p.hidden.as_str()) {
+                assert!(
+                    !answer.body.contains(p.hidden.as_str()),
+                    "{path} names the restricted project to B: {}",
+                    answer.body
+                );
+            }
         }
         for path in [
             format!("/api/conversations/{}", p.conversation),
