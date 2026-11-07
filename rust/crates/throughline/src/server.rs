@@ -270,6 +270,7 @@ where
 {
     let db = state.db.clone();
     let team = state.auth_mode == crate::access::AuthMode::Team;
+    let scope = team.then(|| crate::access::current_db_scope(state.auth_mode));
     let joined = tokio::task::spawn_blocking(move || {
         // A panic in an earlier request poisons the lock but leaves the client
         // usable. End the transaction it may have left open and go on, so one
@@ -290,10 +291,10 @@ where
             *client = crate::config::DbConfig::from_env().connect()?;
             rebuilt = true;
         }
-        let mut result = f(&mut client);
+        let mut result = enter_scope(&mut client, scope).and_then(|()| f(&mut client));
         if !rebuilt && result.as_ref().err().is_some_and(connection_error) {
             *client = crate::config::DbConfig::from_env().connect()?;
-            result = f(&mut client);
+            result = enter_scope(&mut client, scope).and_then(|()| f(&mut client));
         }
         result
     })
@@ -310,12 +311,29 @@ where
     F: FnOnce(&mut postgres::Client) -> anyhow::Result<T> + Send + 'static,
 {
     let team = state.auth_mode == crate::access::AuthMode::Team;
+    let scope = team.then(|| crate::access::current_db_scope(state.auth_mode));
     let joined = tokio::task::spawn_blocking(move || {
         let mut client = crate::config::DbConfig::from_env().connect()?;
+        enter_scope(&mut client, scope)?;
         f(&mut client)
     })
     .await;
     db_task_result(team, joined)
+}
+
+/// Team mode: put the connection into the database role of the request
+/// (migration 018) before its queries run. Local mode passes `None` and
+/// keeps the connection as it is, without a round trip.
+fn enter_scope(
+    client: &mut postgres::Client,
+    scope: Option<crate::access::DbScope>,
+) -> anyhow::Result<()> {
+    if let Some(scope) = scope {
+        client
+            .batch_execute(&crate::access::scope_sql(scope))
+            .context("set the database role of the request")?;
+    }
+    Ok(())
 }
 
 /// Map the outcome of a blocking database task to the route's answer.
@@ -3531,6 +3549,63 @@ async fn handoff_handler(
     }
 }
 
+/// `POST /api/project-access`: one change to the restricted projects.
+#[derive(Deserialize)]
+struct ProjectAccessBody {
+    action: String,
+    #[serde(default)]
+    project: String,
+    #[serde(default)]
+    account: String,
+}
+
+/// `GET /api/project-access` (admin): the restricted projects, their
+/// sessions and the accounts that see them (migration 018).
+async fn project_access_handler(State(state): State<AppState>) -> Response {
+    match with_db(&state, crate::project_access::list).await {
+        Ok(restricted) => Json(serde_json::json!({
+            "team_mode": state.auth_mode == crate::access::AuthMode::Team,
+            "restricted": restricted,
+        }))
+        .into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// `POST /api/project-access` (admin): `restrict`, `unrestrict`, `allow` or
+/// `revoke`. A wrong name or action is a 422 with the reason.
+async fn project_access_change_handler(
+    State(state): State<AppState>,
+    Json(body): Json<ProjectAccessBody>,
+) -> Response {
+    let outcome = with_db(&state, move |client| {
+        use crate::project_access as pa;
+        let changed = match body.action.as_str() {
+            "restrict" => pa::restrict(client, &body.project),
+            "unrestrict" => pa::unrestrict(client, &body.project),
+            "allow" => pa::allow(client, &body.project, &body.account),
+            "revoke" => pa::revoke(client, &body.project, &body.account),
+            _ => Err(anyhow::anyhow!(
+                "action must be restrict, unrestrict, allow or revoke"
+            )),
+        };
+        Ok(match changed {
+            Ok(changed) => Ok((changed, pa::list(client)?)),
+            Err(e) => Err(e.to_string()),
+        })
+    })
+    .await;
+    match outcome {
+        Ok(Ok((changed, restricted))) => Json(serde_json::json!({
+            "changed": changed,
+            "restricted": restricted,
+        }))
+        .into_response(),
+        Ok(Err(reason)) => api_error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_change", reason),
+        Err(resp) => resp,
+    }
+}
+
 async fn ingest_status_handler(State(state): State<AppState>) -> Response {
     match with_db(&state, crate::ingest_run::ingest_status).await {
         Ok(report) => Json(report).into_response(),
@@ -4406,11 +4481,13 @@ async fn actor_layer(
             return api_error(StatusCode::FORBIDDEN, "forbidden_request", reason);
         }
     }
-    req.extensions_mut().insert(actor);
+    req.extensions_mut().insert(actor.clone());
     if let Some(session) = session {
         req.extensions_mut().insert(session);
     }
-    next.run(req).await
+    crate::access::REQUEST_ACTOR
+        .scope(actor, next.run(req))
+        .await
 }
 
 /// 403 for an account whose role is below `needed`, naming that role.
@@ -4912,6 +4989,12 @@ fn routes() -> Vec<Route> {
         route(M::GET, "/api/costs", costs_handler),
         route(M::GET, "/api/ingest-status", ingest_status_handler),
         route(M::GET, "/api/backlog", backlog_handler),
+        route(M::GET, "/api/project-access", project_access_handler),
+        route(
+            M::POST,
+            "/api/project-access",
+            project_access_change_handler,
+        ),
         route(M::GET, "/api/secrets", secrets_handler),
         route(M::GET, "/api/secrets/{id}/reveal", secret_reveal_handler),
         route(M::GET, "/api/audit", audit_handler),
@@ -5350,6 +5433,8 @@ mod tests {
             (Method::GET, "/api/consolidation/proposal", Role::Admin),
             (Method::POST, "/api/operate", Role::Admin),
             (Method::GET, "/api/backlog", Role::Admin),
+            (Method::GET, "/api/project-access", Role::Admin),
+            (Method::POST, "/api/project-access", Role::Admin),
             (Method::GET, "/api/secrets", Role::Admin),
             (Method::GET, "/api/secrets/{id}/reveal", Role::Admin),
             (Method::POST, "/api/consolidate", Role::Admin),
@@ -6149,7 +6234,9 @@ mod tests {
             .iter()
             .filter_map(|h| h["id"].as_i64())
             .collect();
-        assert_eq!(default_ids, ids, "{d}");
+        // Only the two own notes: a test running at the same time may add
+        // notes with the same words behind them.
+        assert_eq!(default_ids[..2], ids[..2], "{d}");
         state
             .db
             .lock()
@@ -9286,6 +9373,7 @@ mod session_tests {
                          CREATE TEMP TABLE access_agent_keys (LIKE public.access_agent_keys INCLUDING ALL); \
                          COMMIT;",
                     )
+                    .map(|()| grant_temp_tables(&mut client))
                     .expect("session-local account tables"),
             }
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -9323,8 +9411,12 @@ mod session_tests {
             Some(Served { rt, state, base })
         }
 
+        /// The shared client as the table owner: a request in team mode
+        /// may have left it as `throughline_reader`.
         fn db(&self) -> std::sync::MutexGuard<'_, postgres::Client> {
-            self.state.db.lock().expect("db lock")
+            let mut client = self.state.db.lock().expect("db lock");
+            client.batch_execute("RESET ROLE").expect("reset role");
+            client
         }
 
         /// An account made the way `throughline account add` makes one.
@@ -10300,7 +10392,22 @@ mod session_tests {
                  CREATE UNIQUE INDEX ON favorites (kind, ref, (COALESCE(user_id, 0)));",
             )
             .expect("session-local notes and favorites");
+        grant_temp_tables(&mut served.db());
         Some(served)
+    }
+
+    /// Team mode reads as `throughline_reader` (migration 018): it needs the
+    /// rights on the session's temp tables that it has on the real ones.
+    fn grant_temp_tables(client: &mut postgres::Client) {
+        client
+            .batch_execute(
+                "DO $$ DECLARE s text := pg_my_temp_schema()::regnamespace::text; BEGIN \
+                 EXECUTE format('GRANT USAGE ON SCHEMA %I TO throughline_reader', s); \
+                 EXECUTE format('GRANT ALL ON ALL TABLES IN SCHEMA %I TO throughline_reader', s); \
+                 EXECUTE format('GRANT ALL ON ALL SEQUENCES IN SCHEMA %I TO throughline_reader', s); \
+                 END $$;",
+            )
+            .expect("grant the temp tables to throughline_reader");
     }
 
     /// Test value, not a secret: the shared agent key of `/mcp`.
@@ -11783,6 +11890,7 @@ mod session_tests {
                 "GET /api/ask".into(),
                 "GET /api/answer-eval".into(),
                 "GET /api/backlog".into(),
+                "GET /api/project-access".into(),
                 "GET /api/consolidation/proposal".into(),
                 "GET /api/secrets".into(),
                 "GET /api/secrets/{id}/reveal".into(),
@@ -11861,12 +11969,14 @@ mod session_tests {
                 "GET /api/assistants/{tool}",
                 "GET /api/backlog",
                 "GET /api/consolidation/proposal",
+                "GET /api/project-access",
                 "GET /api/secrets",
                 "GET /api/secrets/{id}/reveal",
                 "POST /api/agent-memory/ingest",
                 "POST /api/consolidate",
                 "POST /api/mimo-memory/ingest",
                 "POST /api/operate",
+                "POST /api/project-access",
                 "POST /api/writeback",
                 "PUT /api/assistants/file",
             ]
@@ -12019,6 +12129,324 @@ mod session_tests {
 
     /// CSV export over HTTP is an admin's (design: "Export über HTTP"); the
     /// page of the same list stays a viewer's. Local mode exports as before.
+    /// Rows of one restricted-project test, in the real tables: row-level
+    /// security binds them, not temp copies. Dropped even on a panic.
+    struct RestrictedProject {
+        hidden: String,
+        open: String,
+        conversation: i64,
+        message: i64,
+        notes: [i64; 2],
+        secret: String,
+    }
+
+    impl Drop for RestrictedProject {
+        fn drop(&mut self) {
+            let Ok(mut client) = crate::config::DbConfig::from_env().connect() else {
+                return;
+            };
+            let projects = vec![self.hidden.clone(), self.open.clone()];
+            let _ = client.execute(
+                "DELETE FROM memory_chunks WHERE id = ANY($1) OR project_name = ANY($2)",
+                &[&self.notes.to_vec(), &projects],
+            );
+            let _ = client.execute(
+                "DELETE FROM messages WHERE conversation_id IN \
+                 (SELECT id FROM conversations WHERE project_name = ANY($1))",
+                &[&projects],
+            );
+            let _ = client.execute(
+                "DELETE FROM conversations WHERE project_name = ANY($1)",
+                &[&projects],
+            );
+            let _ = client.execute("DELETE FROM projects WHERE name = ANY($1)", &[&projects]);
+            let _ = client.execute(
+                "DELETE FROM restricted_projects WHERE project_name = $1",
+                &[&self.hidden],
+            );
+        }
+    }
+
+    /// A restricted project with one session, one message and two notes
+    /// (one by project name, one only by its source session), and an open
+    /// project beside it. All of it carries the word `secret`.
+    fn restricted_project(s: &Served) -> RestrictedProject {
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let secret = format!("secret{tag}");
+        let (hidden, open) = (format!("b10hidden{tag}"), format!("b10open{tag}"));
+        let seed = |project: &str, word: &str| -> (i64, i64) {
+            let conversation: i64 = s
+                .db()
+                .query_one(
+                    // Marked as extracted: tests running at the same time
+                    // must not take these rows for pending work.
+                    "INSERT INTO conversations (session_id, project_path, started_at, ended_at, \
+                     summary, memory_extracted_until) \
+                     VALUES ($1, $2, now() - interval '1 hour', now(), $3, now()) \
+                     RETURNING id",
+                    &[
+                        &uuid::Uuid::new_v4(),
+                        &format!("/fictional/{project}"),
+                        &format!("{project} {word} session"),
+                    ],
+                )
+                .expect("seed conversation")
+                .get(0);
+            let message: i64 = s
+                .db()
+                .query_one(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) \
+                     VALUES ($1, 'user', $2, now() - interval '30 minutes') RETURNING id",
+                    &[&conversation, &format!("we keep {word} in {project}")],
+                )
+                .expect("seed message")
+                .get(0);
+            (conversation, message)
+        };
+        let (conversation, message) = seed(&hidden, &secret);
+        seed(&open, "openword");
+        for project in [&hidden, &open] {
+            s.db()
+                .execute("INSERT INTO projects (name) VALUES ($1)", &[project])
+                .expect("project row");
+        }
+        let by_name = crate::access::team_test::note(
+            &mut *s.db(),
+            None,
+            "shared",
+            &format!("zq {secret} by project"),
+            "decision",
+            Some(&hidden),
+        );
+        let by_source = crate::access::team_test::note(
+            &mut *s.db(),
+            None,
+            "shared",
+            &format!("zq {secret} by source"),
+            "decision",
+            None,
+        );
+        s.db()
+            .execute(
+                "UPDATE memory_chunks SET source_type = 'conversation', source_id = $2 WHERE id = $1",
+                &[&by_source, &conversation],
+            )
+            .expect("note from the session");
+        crate::project_access::restrict(&mut *s.db(), &hidden).expect("restrict");
+        RestrictedProject {
+            hidden,
+            open,
+            conversation,
+            message,
+            notes: [by_name, by_source],
+            secret,
+        }
+    }
+
+    /// Baustein 10, criteria 2 and 3: an account without access gets
+    /// nothing of a restricted project on any read path. An account with
+    /// access and an admin get all of it.
+    #[test]
+    fn restricted_project_is_hidden_on_every_path() {
+        let key = || crate::agent_key::key_state_from(Some(AGENT_KEY));
+        let Some(s) = Served::start_with_key(AuthMode::Team, None, key()) else {
+            eprintln!(
+                "skipping restricted_project_is_hidden_on_every_path: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let p = restricted_project(&s);
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        let (name_a, name_c) = (format!("a-{tag}"), format!("c-{tag}"));
+        s.add_account(&name_a, Role::Editor);
+        s.add_account(&name_c, Role::Admin);
+        let AccountKey {
+            name: name_b,
+            key: key_b,
+            ..
+        } = account_with_key(&s, Role::Editor);
+        crate::project_access::allow(&mut *s.db(), &p.hidden, &name_a).expect("allow A");
+        let (a, b, c) = (
+            s.sign_in(&name_a, PASSWORD),
+            s.sign_in(&name_b, PASSWORD),
+            s.sign_in(&name_c, PASSWORD),
+        );
+        let secret = p.secret.clone();
+        let reads = [
+            format!("/api/search?q={secret}"),
+            "/api/conversations?limit=500".to_string(),
+            format!("/api/conversations?q={secret}"),
+            format!("/api/messages?q={secret}"),
+            format!("/api/messages?conversation_id={}", p.conversation),
+            "/api/timeline".to_string(),
+            "/api/projects".to_string(),
+            "/api/costs".to_string(),
+            format!("/api/ask?q={secret}"),
+            format!("/api/context?project={}&task={secret}", p.hidden),
+            format!("/api/recall?q={secret}"),
+            format!("/api/handoff?project={}", p.hidden),
+            format!("/api/memory?status=all&q={secret}"),
+            "/api/memory?status=all&limit=500".to_string(),
+        ];
+        // What the project holds, never the question echoed back.
+        let leaks = |body: &str| {
+            [
+                format!("we keep {secret}"),
+                format!("{secret} by project"),
+                format!("{secret} by source"),
+                format!("{} {secret} session", p.hidden),
+                format!("\"conversation_id\":{}", p.conversation),
+                format!("\"id\":{}", p.conversation),
+            ]
+            .iter()
+            .any(|marker| body.contains(marker.as_str()))
+        };
+        for path in &reads {
+            let answer = s.get(path, &b);
+            assert!(
+                !leaks(&answer.body),
+                "{path} shows the restricted project to B ({}): {}",
+                answer.status,
+                answer.body
+            );
+        }
+        for path in [
+            format!("/api/conversations/{}", p.conversation),
+            format!("/api/messages/{}", p.message),
+            format!("/api/memory/{}", p.notes[0]),
+            format!("/api/memory/{}", p.notes[1]),
+        ] {
+            let answer = s.get(&path, &b);
+            assert_eq!(answer.status, 404, "{path}: {}", answer.body);
+        }
+        // The project list: the open project stays in view for B.
+        let projects = s.get("/api/projects", &b);
+        assert!(projects.body.contains(&p.open), "{}", projects.body);
+        assert!(!projects.body.contains(&p.hidden), "{}", projects.body);
+        let sessions = s.get("/api/conversations?limit=500", &b);
+        assert!(sessions.body.contains(&p.open), "{}", sessions.body);
+        // MCP with the agent key of B: tools, resources and prompts.
+        for (method, params) in [
+            ("tools/call", mcp_tool("search", json!({ "query": secret }))),
+            ("tools/call", mcp_tool("recall", json!({ "query": secret }))),
+            (
+                "tools/call",
+                mcp_tool(
+                    "project_context",
+                    json!({ "project": p.hidden, "task": secret }),
+                ),
+            ),
+            (
+                "resources/read",
+                json!({ "uri": format!("throughline://project/{}/context", p.hidden) }),
+            ),
+            (
+                "prompts/get",
+                json!({ "name": "handoff", "arguments": { "project": p.hidden } }),
+            ),
+        ] {
+            let body = mcp_call_with(&s, &key_b, method, params.clone()).to_string();
+            assert!(
+                !leaks(&body),
+                "MCP {method} {params} shows the restricted project to B: {body}"
+            );
+        }
+        // The export is an admin route.
+        assert_eq!(s.get("/api/conversations?csv=1", &b).status, 403);
+        // A with access and the admin C see the session, the message and both notes.
+        for (who, browser) in [("A", &a), ("C", &c)] {
+            for path in [
+                format!("/api/search?q={secret}"),
+                format!("/api/conversations/{}", p.conversation),
+                format!("/api/messages/{}", p.message),
+                format!("/api/memory/{}", p.notes[0]),
+                format!("/api/memory/{}", p.notes[1]),
+                "/api/projects".to_string(),
+            ] {
+                let answer = s.get(&path, browser);
+                assert_eq!(answer.status, 200, "{who} {path}: {}", answer.body);
+                assert!(
+                    answer.body.contains(&secret) || answer.body.contains(&p.hidden),
+                    "{who} misses the restricted project on {path}: {}",
+                    answer.body
+                );
+            }
+        }
+        // Revoked, A loses it like B.
+        crate::project_access::revoke(&mut *s.db(), &p.hidden, &name_a).expect("revoke");
+        let answer = s.get(&format!("/api/conversations/{}", p.conversation), &a);
+        assert_eq!(answer.status, 404, "{}", answer.body);
+    }
+
+    /// Baustein 10, criterion 4: every table with text of a session has the
+    /// policy, and a raw query without any condition of its own, as the
+    /// reader role, returns nothing of the restricted project.
+    #[test]
+    fn every_session_table_has_the_project_policy() {
+        let Some(s) = Served::team() else {
+            eprintln!(
+                "skipping every_session_table_has_the_project_policy: no PostgreSQL reachable"
+            );
+            return;
+        };
+        let p = restricted_project(&s);
+        let mut db = s.db();
+        let unguarded: Vec<String> = db
+            .query(
+                "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = 'public' AND c.relkind = 'r' \
+                   AND c.relname IN ('conversations', 'messages', 'memory_chunks', 'entities', \
+                                     'entity_mentions', 'relationships', 'projects') \
+                   AND NOT (c.relrowsecurity AND EXISTS (SELECT 1 FROM pg_policy pol \
+                            WHERE pol.polrelid = c.oid AND pol.polname = 'project_visible'))",
+                &[],
+            )
+            .expect("policies")
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert!(
+            unguarded.is_empty(),
+            "tables without the policy: {unguarded:?}"
+        );
+        let mut tx = db.transaction().expect("begin");
+        tx.batch_execute(
+            "SET LOCAL ROLE throughline_reader; SELECT set_config('throughline.viewer', '', true)",
+        )
+        .expect("reader");
+        let pattern = format!("%{}%", p.secret);
+        for (table, ids) in [
+            ("conversations", vec![p.conversation]),
+            ("messages", vec![p.message]),
+            ("memory_chunks", p.notes.to_vec()),
+        ] {
+            let (all, by_id): (i64, i64) = tx
+                .query_one(
+                    &format!(
+                        "SELECT count(*) FILTER (WHERE t::text LIKE $1), \
+                                count(*) FILTER (WHERE t.id = ANY($2)) FROM {table} t"
+                    ),
+                    &[&pattern, &ids],
+                )
+                .map(|r| (r.get(0), r.get(1)))
+                .expect("raw count");
+            assert_eq!(
+                (all, by_id),
+                (0, 0),
+                "{table} shows the restricted project to the reader"
+            );
+        }
+        // The open project of the same test stays readable.
+        let open: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM conversations WHERE project_name = $1",
+                &[&p.open],
+            )
+            .expect("open")
+            .get(0);
+        assert_eq!(open, 1);
+    }
+
     #[test]
     fn conversations_csv_needs_admin() {
         let Some(s) = Served::team() else {

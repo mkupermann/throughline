@@ -38,6 +38,7 @@ pub mod merge_from;
 pub mod migrate;
 pub mod ops_jobs;
 pub mod pii;
+pub mod project_access;
 pub mod project_instructions;
 pub mod recall;
 pub mod recall_eval;

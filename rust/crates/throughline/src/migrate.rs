@@ -470,6 +470,84 @@ CREATE TABLE IF NOT EXISTS secret_scan_state (
 CREATE INDEX IF NOT EXISTS secrets_kind_idx ON secrets (kind, first_seen_at DESC);
 "#;
 
+/// Team mode: projects some accounts do not see. PostgreSQL filters the rows
+/// itself (row-level security), so no query can leave the condition out. The
+/// policies bind the role `throughline_reader`, which a request of an account
+/// without the admin role switches to (`SET ROLE`). The owner of the tables,
+/// and so local mode, admins and the CLI, is not bound. Without a restricted
+/// project each policy is a constant the planner evaluates once.
+const PROJECT_VISIBILITY: &str = r#"
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'throughline_reader') THEN
+        CREATE ROLE throughline_reader NOLOGIN;
+    END IF;
+END
+$$;
+GRANT throughline_reader TO CURRENT_USER;
+
+CREATE TABLE IF NOT EXISTS restricted_projects (
+    project_name  TEXT PRIMARY KEY,
+    restricted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- user_id names an access_users row. No foreign key: an account is
+-- disabled, not deleted, and the tests keep their accounts in a temp table.
+CREATE TABLE IF NOT EXISTS project_access (
+    project_name TEXT NOT NULL REFERENCES restricted_projects (project_name) ON DELETE CASCADE,
+    user_id      BIGINT NOT NULL,
+    granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_name, user_id)
+);
+
+GRANT USAGE ON SCHEMA public TO throughline_reader;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO throughline_reader;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO throughline_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO throughline_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO throughline_reader;
+REVOKE INSERT, UPDATE, DELETE ON restricted_projects, project_access FROM throughline_reader;
+
+CREATE OR REPLACE FUNCTION throughline_viewer() RETURNS BIGINT
+LANGUAGE sql STABLE AS $fn$
+    SELECT NULLIF(current_setting('throughline.viewer', true), '')::bigint
+$fn$;
+
+CREATE OR REPLACE FUNCTION throughline_project_visible(p TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $fn$
+    SELECT NOT EXISTS (SELECT 1 FROM restricted_projects r WHERE r.project_name = p)
+        OR EXISTS (SELECT 1 FROM project_access a
+                   WHERE a.project_name = p AND a.user_id = throughline_viewer())
+$fn$;
+
+-- One policy per table that holds text of a conversation. A table of the
+-- Python package that this database lacks is skipped.
+DO $$
+DECLARE
+    t TEXT;
+    cond TEXT;
+BEGIN
+    FOR t, cond IN VALUES
+        ('conversations', 'throughline_project_visible(project_name)'),
+        ('messages', 'EXISTS (SELECT 1 FROM conversations c WHERE c.id = messages.conversation_id)'),
+        ('memory_chunks', 'throughline_project_visible(project_name) AND (source_type IS DISTINCT FROM ''conversation'' OR source_id IS NULL OR EXISTS (SELECT 1 FROM conversations c WHERE c.id = memory_chunks.source_id))'),
+        ('entities', 'throughline_project_visible(project_name)'),
+        ('entity_mentions', 'source_type IS DISTINCT FROM ''conversation'' OR source_id IS NULL OR EXISTS (SELECT 1 FROM conversations c WHERE c.id = entity_mentions.source_id)'),
+        ('relationships', 'source_type IS DISTINCT FROM ''conversation'' OR source_id IS NULL OR EXISTS (SELECT 1 FROM conversations c WHERE c.id = relationships.source_id)'),
+        ('projects', 'throughline_project_visible(name)')
+    LOOP
+        IF to_regclass('public.' || t) IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+            EXECUTE format('DROP POLICY IF EXISTS project_visible ON public.%I', t);
+            EXECUTE format(
+                'CREATE POLICY project_visible ON public.%I USING (NOT EXISTS (SELECT 1 FROM restricted_projects) OR (%s))',
+                t, cond);
+        END IF;
+    END LOOP;
+END
+$$;
+"#;
+
 /// Migrations the Rust CLI owns. The Python package has its own numbered
 /// files; both share `applied_migrations` so a mixed-history database works.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -493,6 +571,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("015_account_stars_untimed.sql", ACCOUNT_STARS_UNTIMED),
     ("016_message_role_document.sql", MESSAGE_ROLE_DOCUMENT),
     ("017_secrets.sql", SECRETS),
+    ("018_project_visibility.sql", PROJECT_VISIBILITY),
 ];
 
 /// The newest migration of [`MIGRATIONS`].
@@ -1213,6 +1292,6 @@ END $$;
             Role::ALL.map(Role::as_str),
             ["user", "assistant", "system", "tool_result", "document"]
         );
-        assert_eq!(LATEST, "017_secrets.sql");
+        assert_eq!(LATEST, "018_project_visibility.sql");
     }
 }

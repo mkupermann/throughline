@@ -107,6 +107,8 @@ pub(crate) const ROUTE_ROLES: &[(&str, &str, Role)] = &[
     ("POST", "/api/consolidate", Role::Admin),
     ("POST", "/api/operate", Role::Admin),
     ("GET", "/api/backlog", Role::Admin),
+    ("GET", "/api/project-access", Role::Admin),
+    ("POST", "/api/project-access", Role::Admin),
     ("GET", "/api/secrets", Role::Admin),
     ("GET", "/api/secrets/{id}/reveal", Role::Admin),
     ("POST", "/api/writeback", Role::Admin),
@@ -175,6 +177,58 @@ impl Actor {
             role,
             via: Via::Session,
         }
+    }
+}
+
+tokio::task_local! {
+    /// The actor of the request a database call runs for. The actor layer
+    /// sets it for every route, `/mcp` for its call. A call outside a
+    /// request (a spawned task) has none and gets the narrowest view.
+    pub static REQUEST_ACTOR: Actor;
+}
+
+/// The database role a call runs under (migration 018).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DbScope {
+    /// The table owner: every project. Local mode, admins.
+    Full,
+    /// `throughline_reader` for this account, or for none (jobs, sign-in,
+    /// anything without an account): restricted projects stay hidden
+    /// unless the account has access.
+    Reader(Option<i64>),
+}
+
+/// The scope of a database call for `actor` in `mode`. Local mode sees
+/// every project, so does an admin. Any other account, and a call without
+/// an actor in team mode, reads as `throughline_reader`.
+pub fn db_scope(mode: AuthMode, actor: Option<&Actor>) -> DbScope {
+    match (mode, actor) {
+        (AuthMode::Local, _) => DbScope::Full,
+        (AuthMode::Team, Some(a)) if a.via != Via::Job && a.role == Role::Admin => DbScope::Full,
+        (AuthMode::Team, Some(a)) if matches!(a.via, Via::Session | Via::AgentKey) => {
+            DbScope::Reader(a.user_id)
+        }
+        (AuthMode::Team, _) => DbScope::Reader(None),
+    }
+}
+
+/// [`db_scope`] for the actor of the running request, if there is one.
+pub fn current_db_scope(mode: AuthMode) -> DbScope {
+    REQUEST_ACTOR
+        .try_with(|actor| db_scope(mode, Some(actor)))
+        .unwrap_or_else(|_| db_scope(mode, None))
+}
+
+/// The statements that put a connection into `scope`. Every call sets both
+/// the role and the viewer, so nothing of an earlier call carries over on
+/// the shared connection. The id is an integer, so formatting is safe.
+pub fn scope_sql(scope: DbScope) -> String {
+    match scope {
+        DbScope::Full => "RESET ROLE; SELECT set_config('throughline.viewer', '', false)".into(),
+        DbScope::Reader(id) => format!(
+            "SET ROLE throughline_reader; SELECT set_config('throughline.viewer', '{}', false)",
+            id.map(|id| id.to_string()).unwrap_or_default()
+        ),
     }
 }
 
@@ -836,6 +890,35 @@ pub(crate) mod team_test {
 mod tests {
     use super::*;
 
+    /// Local mode and admins read as the table owner. Every other account,
+    /// a job and a call without an actor read as `throughline_reader`.
+    #[test]
+    fn db_scope_by_mode_role_and_path() {
+        let local = AuthMode::Local;
+        let team = AuthMode::Team;
+        let editor = Actor::for_user(7, "ana", Role::Editor);
+        let viewer = Actor::for_user(8, "ben", Role::Viewer);
+        let admin = Actor::for_user(9, "cleo", Role::Admin);
+        let mut key = Actor::for_user(10, "dana", Role::Viewer);
+        key.via = Via::AgentKey;
+        assert_eq!(db_scope(local, Some(&editor)), DbScope::Full);
+        assert_eq!(db_scope(local, None), DbScope::Full);
+        assert_eq!(db_scope(team, Some(&admin)), DbScope::Full);
+        assert_eq!(db_scope(team, Some(&editor)), DbScope::Reader(Some(7)));
+        assert_eq!(db_scope(team, Some(&viewer)), DbScope::Reader(Some(8)));
+        assert_eq!(db_scope(team, Some(&key)), DbScope::Reader(Some(10)));
+        assert_eq!(
+            db_scope(team, Some(&Actor::shared_only())),
+            DbScope::Reader(None)
+        );
+        assert_eq!(db_scope(team, None), DbScope::Reader(None));
+        assert_eq!(
+            scope_sql(DbScope::Reader(Some(7))),
+            "SET ROLE throughline_reader; SELECT set_config('throughline.viewer', '7', false)"
+        );
+        assert!(scope_sql(DbScope::Full).starts_with("RESET ROLE;"));
+    }
+
     fn test_db() -> Option<postgres::Client> {
         let host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
         let user = std::env::var("PGUSER")
@@ -1435,7 +1518,7 @@ mod tests {
             return;
         };
         let latest = crate::migrate::LATEST;
-        assert_eq!(latest, "017_secrets.sql");
+        assert_eq!(latest, "018_project_visibility.sql");
         let mut tx = without_accounts(&mut client);
         // A temporary ledger shadows applied_migrations for this session.
         tx.batch_execute(

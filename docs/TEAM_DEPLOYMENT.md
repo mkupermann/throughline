@@ -100,6 +100,26 @@ An admin has no extra right on other people's private notes. Private stays priva
 - Merging never mixes private and shared notes. Merged private notes stay with their owner.
 - Server jobs (`reflect`, entity extraction, `writeback`, merging run as a job) see shared notes only. A private note never ends up in `AGENTS.md` or `CLAUDE.md`, and no job marks it stale or merges it. Embedding covers every note, but vectors are only reached through queries that apply the same filter.
 
+## Restricted projects
+
+An admin can hide a project from the other accounts. A project is the project name a session shows, the last folder of its path. A Markdown folder, a git repository or a code project is one project each.
+
+```bash
+throughline project-access restrict customer-x      # hidden from every account without access
+throughline project-access allow customer-x ana     # ana sees it
+throughline project-access revoke customer-x ana
+throughline project-access unrestrict customer-x    # every account sees it again
+throughline project-access list
+```
+
+Admins see the list and make the same changes under **Import and status → Restricted projects** (`GET` and `POST /api/project-access`).
+
+- A restricted project is visible to admins and to the accounts it is allowed to. Every other account sees none of it: not its sessions, messages, notes, entities or project entry, on any path of the page, the API or MCP. Its notes are hidden by project name and by the session they came from.
+- PostgreSQL enforces it, not each query. Migration 018 adds row-level security to `conversations`, `messages`, `memory_chunks`, `entities`, `entity_mentions`, `relationships` and `projects`, and a role `throughline_reader` without the rights of the table owner. A request of an account without the admin role, and a server job, runs as that role. Admins and local mode run as the table owner.
+- Without a restricted project every account sees every project, as before. In local mode a restriction has no effect: the one person at the machine sees everything.
+- The command line and `throughline mcp` over stdio run as the operator and see every project.
+- Tables of the Python package that the database lacks when migration 018 runs get no policy. Run `throughline migrate` again after adding them.
+
 ## Stars
 
 Stars belong to the account that set them. Two people can star the same session without seeing each other's stars. Setting and removing a star needs `editor`. A star of an account has no time: the database does not record when someone starred something, and the account's stars are listed newest first by their order. Local mode keeps its stars as before, without an account and with their time.
@@ -159,7 +179,7 @@ What the database does keep, and why:
 
 ## What stays shared
 
-Conversations and their messages, projects, costs and the timeline are one shared stock. Every signed-in account sees every ingested session. Documents too: a configured root is visible to every account. Every Markdown folder, git repository and web page the server ingests (`THROUGHLINE_MARKDOWN_ROOTS`, `THROUGHLINE_GIT_ROOTS`, `THROUGHLINE_WEB_URLS`) reaches every account, as sections and as notes; there is no visibility per document. Only notes can be private. The imported AI configuration (the assistant files of the server host) is for admins only: its view, and its hits in search and in MCP `search`. Viewers and editors get none of these hits and no count of them, and `ask` does not draw on these files for them.
+Conversations and their messages, projects, costs and the timeline are one shared stock, except for restricted projects (above). Every signed-in account sees every ingested session of the other projects. Documents too: a configured root is visible to every account. Every Markdown folder, git repository and web page the server ingests (`THROUGHLINE_MARKDOWN_ROOTS`, `THROUGHLINE_GIT_ROOTS`, `THROUGHLINE_WEB_URLS`) reaches every account, as sections and as notes; there is no visibility per document. Only notes can be private. The imported AI configuration (the assistant files of the server host) is for admins only: its view, and its hits in search and in MCP `search`. Viewers and editors get none of these hits and no count of them, and `ask` does not draw on these files for them.
 
 ## Known limits
 
@@ -168,7 +188,8 @@ Conversations and their messages, projects, costs and the timeline are one share
 - One database connection behind a lock serves all requests. A slow request delays the others. That is fine for a small team, not for many people at once.
 - The Operate ingest holds that connection while it reads Markdown roots and git repositories. git runs without a timeout, so the first read of several large repositories, or a root on a slow mount, stalls every other request meanwhile. Run those sources with the command line or the hourly job instead.
 - The session cookie has no `__Host-` prefix.
-- No account page in the browser, no password reset by mail, no SSO or OAuth, no tenants, no rights per project.
+- No account page in the browser, no password reset by mail, no SSO or OAuth, no tenants. Rights per project are read rights only: an account sees a restricted project or does not, there is no separate right to write in it.
+- An account without the admin role reads restricted tables through row-level security. Full-text and vector operators are not leakproof, so with a restricted project PostgreSQL may skip an index for these accounts and search gets slower. Without a restriction the policy is a constant and changes nothing.
 
 ## Compose
 
